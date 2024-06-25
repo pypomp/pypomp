@@ -1,3 +1,8 @@
+
+*~
+
+#### the following is the default Python package gitignore from GitHub ####
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

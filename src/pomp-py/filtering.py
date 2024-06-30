@@ -1,5 +1,4 @@
 
-
 import jax
 import itertools
 import numpy as onp
@@ -65,7 +64,7 @@ def mop_helper(t, inputs):
     particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key = inputs
     J = len(particlesF)
     
-    if len(covars.shape) > 2:
+    if covars is not None and len(covars.shape) > 2:
         key, *keys = jax.random.split(key, num=J*covars.shape[1]+1)
         keys = np.array(keys).reshape(J, covars.shape[1], 2).astype(np.uint32)
     else:    
@@ -144,7 +143,7 @@ def pfilter_helper(t, inputs):
     particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key = inputs
     J = len(particlesF)
     
-    if len(covars.shape) > 2:
+    if covars is not None and len(covars.shape) > 2:
         key, *keys = jax.random.split(key, num=J*covars.shape[1]+1)
         keys = np.array(keys).reshape(J, covars.shape[1], 2).astype(np.uint32)
     else:    

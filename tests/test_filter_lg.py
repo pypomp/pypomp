@@ -1,11 +1,4 @@
 
-# note: copy pomps_ly.py to pomps.py before running this with
-# python3 test_lg.py 
-
-# this file is adapted from pfilterLGTest.ipynb 
-# jupyter nbconvert --to script pfilterLGTest.ipynb 
-# [NbConvertApp] Converting notebook pfilterLGTest.ipynb to script
-
 import jax
 import itertools
 import numpy as onp
@@ -21,7 +14,7 @@ from IPython import display
 from toolz.dicttoolz import valmap, itemmap
 from itertools import chain
 
-from pomps import *
+# from pomps_lg import *
 from resampling import *
 from filtering import *
 from optim import *
@@ -43,8 +36,7 @@ x = np.ones(2)
 
 xs = []
 ys = []
-T = 4
-J = 100
+T = 40
 for i in tqdm(range(T)):
     randint = onp.random.randint(0, 10000)
     x = jax.random.multivariate_normal(key=jax.random.PRNGKey(randint), mean=A@x, cov=Q)
@@ -64,9 +56,9 @@ loss_grad = (jax.vmap(jax.grad(dmeasure, argnums=1), in_axes=(None,0,None)))
 import pykalman
 kf = pykalman.KalmanFilter(transition_matrices=A, observation_matrices=C, 
                       transition_covariance=Q, observation_covariance=R)#.filter(ys)
-print("kf loglik =", kf.loglikelihood(ys))
+kf.loglikelihood(ys)
 
 theta = np.array([A, C, Q, R])
-pfilter_loglik = -pfilter(theta, ys, J, None, 0)
-print("pfilter loglik = ", pfilter_loglik, " (J=", J,")", sep="")
+#-pfilter(theta, ys, 100000, None, 0)
+-pfilter(theta, ys, 100, None, 0)
 

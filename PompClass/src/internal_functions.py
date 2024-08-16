@@ -74,6 +74,7 @@ def resampler_pf(counts, particlesP, norm_weights):
 
 '''internal filtering functions - pt.1'''
 def mop_helper(t, inputs, rprocess, dmeasure):
+
     particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key = inputs
     J = len(particlesF)
     if covars is not None and len(covars.shape) > 2:
@@ -82,13 +83,17 @@ def mop_helper(t, inputs, rprocess, dmeasure):
     else:    
             key, *keys = jax.random.split(key, num=J+1)
             keys = np.array(keys)
-        
+            
     weightsP = alpha*weightsF
         
     if covars is not None:
         particlesP = rprocess(particlesF, theta, keys, covars)
     else:
         particlesP = rprocess(particlesF, theta, keys, None)
+
+    #print(f"check particlesF:{jax.device_get(particlesF)}")
+    #print(f"check keys:{jax.device_get(keys)}")
+    #print(f"check particlesP:{jax.device_get(particlesP)}")
         
     measurements = dmeasure(ys[t], particlesP, theta) 
     if len(measurements.shape) > 1:
@@ -193,7 +198,7 @@ def perfilter_helper(t, inputs, rprocesses, dmeasures):
     particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key = inputs
     J = len(particlesF)
 
-    if len(covars.shape) > 2:
+    if covars is not None and len(covars.shape) > 2:
         key, *keys = jax.random.split(key, num=J*covars.shape[1]+1)
         keys = np.array(keys).reshape(J, covars.shape[1], 2).astype(np.uint32)
     else:    
@@ -202,18 +207,21 @@ def perfilter_helper(t, inputs, rprocesses, dmeasures):
     
     thetas += sigmas*np.array(onp.random.normal(size=thetas.shape))
 
+
+    # Get prediction particles 
+    # r processes: particleF and thetas are both vectorized (J times)
     if covars is not None:
-        particlesP = rprocesses(particlesF, thetas, keys, covars)
+        particlesP = rprocesses(particlesF, thetas, keys, covars)# if t>0 else particlesF
     else:
-        particlesP = rprocesses(particlesF, thetas, keys)
+        particlesP = rprocesses(particlesF, thetas, keys, None)# if t>0 else particlesF
         
-    
-    measurements = np.nan_to_num(dmeasures(ys[t], particlesP, thetas, keys=keys).squeeze(),
-                    nan=np.log(1e-18))
+
+    measurements = np.nan_to_num(dmeasures(ys[t], particlesP, thetas).squeeze(),
+                    nan=np.log(1e-18)) #shape (Np,)
     
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
-     
+    
 
     weights = norm_weights + measurements                         
     norm_weights, loglik_t = normalize_weights(weights)
@@ -228,10 +236,11 @@ def perfilter_helper(t, inputs, rprocesses, dmeasures):
     
     return [particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key]
 
-@partial(jit, static_argnums=(2, 4, 5, 6))
-def perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, covars=None, a = 0.95, thresh=100, key=None):
+@partial(jit, static_argnums=(2, 4, 5, 6, 7))
+def perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, a = 0.95, thresh=100, key=None):
     loglik = 0
-    thetas = theta + sigmas*onp.random.normal(size=(J, theta.shape[-1]))
+    thetas =  theta + sigmas * onp.random.normal(size=(J,) + theta.shape[-ndim:])
+    #thetas = theta + sigmas * onp.random.normal(size=(J,) + theta.shape[1:])
     particlesF = rinits_internal(rinit, thetas, 1, covars=covars)
     weights = np.log(np.ones(J)/J)
     norm_weights = np.log(np.ones(J)/J)
@@ -245,9 +254,9 @@ def perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, covar
     
     return -loglik, thetas
 
-@partial(jit, static_argnums=(2, 4, 5, 6))
-def perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, covars=None, a = 0.95, thresh=100, key=None):
-    value, thetas = perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, covars, thresh, key)
+@partial(jit, static_argnums=(2, 4, 5, 6, 7))
+def perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, a = 0.95, thresh=100, key=None):
+    value, thetas = perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars, a, thresh, key)
     return value/len(ys), thetas
 
 
@@ -255,7 +264,7 @@ def pfilter_helper_pf(t, inputs, rprocess, dmeasure):
     particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key = inputs
     J = len(particlesF)
     
-    if len(covars.shape) > 2:
+    if covars is not None and len(covars.shape) > 2:
         key, *keys = jax.random.split(key, num=J*covars.shape[1]+1)
         keys = np.array(keys).reshape(J, covars.shape[1], 2).astype(np.uint32)
     else:    
@@ -310,7 +319,8 @@ def line_search(obj, curr_obj, pt, grad, direction, k=1, eta=0.9, xi=10, tau = 1
     next_obj = obj(pt + eta*direction)
     # check whether the new point(new_obj)satisfies the stochastic Armijo condition
     # if not, repeat until the condition is met
-    while next_obj > curr_obj + eta*c*grad.T @ direction or np.isnan(next_obj):
+    # previous: grad.T @ direction
+    while next_obj > curr_obj + eta*c* np.sum(grad * direction) or np.isnan(next_obj):
         eta *= frac
         itn += 1
         if itn > tau: 
@@ -362,7 +372,9 @@ def mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, si
     logliks = []
     params = []
     
-    thetas = theta + sigmas_init*onp.random.normal(size=(J, theta.shape[-1]))
+    ndim = theta.ndim
+    thetas =  theta + sigmas_init * onp.random.normal(size=(J,) + theta.shape[-ndim:])
+    #thetas = theta + sigmas_init*onp.random.normal(size=(J, theta.shape[-1]))
     params.append(thetas)
     if monitor:
         loglik = np.mean(np.array([pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh) 
@@ -373,13 +385,14 @@ def mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, si
     for m in tqdm(range(M)):
         sigmas *= a
         thetas += sigmas*onp.random.normal(size=thetas.shape)
-        loglik_ext, thetas = perfilter_internal(thetas, ys, J, sigmas, rinit, rprocesses, dmeasures, covars=covars, a=a, thresh=thresh)
+        loglik_ext, thetas = perfilter_internal(thetas, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim = ndim, covars=covars, thresh=thresh)
         
         params.append(thetas)
         
         if monitor:
             loglik = np.mean(np.array([pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh) 
                                         for i in range(MONITORS)]))
+        
             logliks.append(loglik)
                    
             if verbose:
@@ -393,17 +406,14 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
     grads = []
     hesses = []
     logliks = []
-    hess = np.eye(theta_ests.shape[-1])
+    hess = np.eye(theta_ests.shape[-1])#default one
     
     
     for i in tqdm(range(itns)):
-        print("new iteration")
         key = jax.random.PRNGKey(onp.random.choice(int(1e18)))
         if MONITORS == 1:
-            print("!")
             loglik, grad = jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
-            print("Value type:", type(loglik))
-            print("Grad type:", type(grad))
+            
             loglik *= len(ys) 
         else:
             grad = jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
@@ -413,19 +423,42 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
      
         if method=='Newton':
             hess = jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha = alpha, key=key)
-            direction = -np.linalg.pinv(hess) @ grad
+
+            #flatten
+            theta_flat = theta_ests.flatten()
+            grad_flat = grad.flatten()
+            hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+            hess_flat_pinv = np.linalg.pinv(hess_flat)
+            direction_flat = -hess_flat_pinv @ grad_flat
+            direction = direction_flat.reshape(theta_ests.shape)
+
+            #direction = -np.linalg.pinv(hess) @ grad
         elif method == 'WeightedNewton':
             if i == 0:
                 hess = jhess(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, thresh=thresh, key=key)
-                direction = -np.linalg.pinv(hess) @ grad
+                theta_flat = theta_ests.flatten()
+                grad_flat = grad.flatten()
+                hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+                hess_flat_pinv = np.linalg.pinv(hess_flat)
+                direction_flat = -hess_flat_pinv @ grad_flat
+                direction = direction_flat.reshape(theta_ests.shape)
+                #direction = -np.linalg.pinv(hess) @ grad
             else:
                 hess = jhess(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, thresh=thresh, key=key)
                 wt = (i**onp.log(i))/((i+1)**(onp.log(i+1)))
-                direction = -np.linalg.pinv(wt * hesses[-1] + (1-wt) * hess) @ grad
+                theta_flat = theta_ests.flatten()
+                grad_flat = grad.flatten()
+                weighted_hess = wt * hesses[-1] + (1-wt) * hess
+                weighted_hess_flat = weighted_hess.reshape(theta_flat.size, theta_flat.size)
+                weighted_hess_flat_pinv = np.linalg.pinv(weighted_hess_flat)
+                direction_flat = -weighted_hess_flat_pinv @ grad_flat
+                direction = direction_flat.reshape(theta_ests.shape)
+                #direction = -np.linalg.pinv(wt * hesses[-1] + (1-wt) * hess) @ grad
 
         elif method=='BFGS' and i > 1:
             s_k = et * direction 
-            y_k = grad - grad[-1] 
+            #not grad but grads
+            y_k = grad - grads[-1] 
             rho_k = np.reciprocal(np.dot(y_k, s_k))
             sy_k = s_k[:, np.newaxis] * y_k[np.newaxis, :]
             w = np.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
@@ -433,7 +466,16 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
             hess = (np.einsum('ij,jk,lk', w, hess, w)
                         + rho_k * s_k[:, np.newaxis] * s_k[np.newaxis, :])
             hess = np.where(np.isfinite(rho_k), hess, hess) 
-            direction = -hess @ grad 
+            
+            theta_flat = theta_ests.flatten()
+            grad_flat = grad.flatten()
+            hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+                
+            direction_flat = -hess_flat @ grad_flat
+            direction = direction_flat.reshape(theta_ests.shape)
+            
+            #direction = -hess @ grad 
+
         else:
             direction = -grad
             
@@ -444,7 +486,7 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
             
         if scale:
             direction = direction/np.linalg.norm(direction)
-        
+
         eta = line_search(partial(pfilter_internal, ys=ys, J=J, rinit=rinit, rprocess = rprocess, dmeasure = dmeasure, covars=covars, thresh=thresh, key=key), 
                           loglik, theta_ests, grad, direction, k=i+1, eta=beta, c=c, tau=max_ls_itn) if ls else eta
         try:
@@ -455,143 +497,43 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
             print(theta_ests, et, logliks[i])
 
         theta_ests += et*direction
+       
     logliks.append(np.mean(np.array([pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh) for i in range(MONITORS)])))
     Acopies.append(theta_ests)
     
     return np.array(logliks), np.array(Acopies)
 
-def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, sigmas_init, covars = None, M = 10, a = 0.9, 
+def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses = None, dmeasures = None, sigmas = None, sigmas_init = None, covars = None, M = 10, a = 0.9, 
         J =100, Jh = 1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1, 
-        max_ls_itn=10, thresh_mif = 100, thresh_tr = 100, verbose = False, scale = False, ls = False, alpha = 0.1):
-        
-    mif_logliks_warm, mif_params_warm = mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, 
-                                sigmas_init, covars, M , a , J, thresh_mif,  monitor = True, verbose = verbose) 
-    theta_ests = mif_params_warm[mif_logliks_warm.argmin()].mean(0)
-    gd_logliks, gd_ests = train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
-        
-    return np.array(gd_logliks), np.array(gd_ests)
+        max_ls_itn=10, thresh_mif = 100, thresh_tr = 100, verbose = False, scale = False, ls = False, alpha = 0.1, monitor = True, mode = "IFAD"):
+    
+    if mode == 'IF2':
+        if rprocesses is not None and dmeasures is not None and sigmas is not None and sigmas_init is not None:
+                    # Directly call mif_internal and return the results
+            mif_logliks_warm, mif_params_warm = mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, 
+                                                         sigmas_init, covars, M, a, J, thresh_mif, monitor = monitor, verbose=verbose)
+            return np.array(mif_logliks_warm), np.array(mif_params_warm)
+        else:
+            raise TypeError(f"Unknown parameter")
 
-'''OOP layer - pomp class'''
-class Pomp:
-    MONITORS = 1
-
-    def __init__(self, rinit, rproc, dmeas, ys, theta, covars=None):
-        self.rinit = rinit
-        self.rproc = rproc
-        self.dmeas = dmeas
-        self.ys = ys
-        self.theta = theta
-        self.covars = covars
-        self.rprocess = jax.vmap(self.rproc, (0, None, 0, None))
-        self.rprocesses = jax.vmap(rproc, (0, 0, 0, None))
-        self.dmeasure = jax.vmap(self.dmeas, (None,0,None))
-        self.dmeasures = jax.vmap(self.dmeas, (None,0,0))
     
-    def rinits(self, thetas, J, covars):
-        return rinits_internal(self.rinit, thetas, J, covars)
-
-    def mop(self, J, alpha=0.97, key=None):
-        return mop_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha, key)
-
-    def mop_mean(self, J, alpha=0.97, key=None):
-        return mop_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha, key)
+    elif mode == 'GD':
+        # Directly call train_internal and return the results
+        gd_logliks, gd_ests = train_internal(theta, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta, eta, c, 
+                                             max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
+        return np.array(gd_logliks), np.array(gd_ests)
     
-    def pfilter(self, J, thresh=100, key=None):
-        return pfilter_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh, key)
-        
+    elif mode == 'IFAD':
+        # The original logic combining both mif_internal and train_internal
+        if rprocesses is not None and dmeasures is not None and sigmas is not None and sigmas_init is not None:
+            mif_logliks_warm, mif_params_warm = mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, 
+                                                         sigmas_init, covars, M, a, J, thresh_mif, monitor=True, verbose=verbose)
+            theta_ests = mif_params_warm[mif_logliks_warm.argmin()].mean(0)
+            gd_logliks, gd_ests = train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta, eta, c, 
+                                             max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
+            return np.array(gd_logliks), np.array(gd_ests)
+        else:
+            raise TypeError(f"Unknown parameter")
     
-    def pfilter_mean(self, J, thresh=100, key=None):
-        return pfilter_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh, key)
-    
-    def perfilter(self, J, sigmas, a = 0.9, thresh=100, key=None):
-    
-        return perfilter_internal(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures, self.covars, a, thresh, key)
-    
-    def perfilter_mean(self, J, sigmas, a = 0.9, thresh=100, key=None):
-    
-        return perfilter_internal_mean(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures, self.covars, a, thresh, key)
-    
-
-    def pfilter_pf(self, J, thresh=100, key=None):
-        return pfilter_pf_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh, key)
-    
-    
-    def mif(self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, monitor=False, verbose=False):
-    
-        return mif_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures,
-                            sigmas, sigmas_init, self.covars, M, a, J, thresh, monitor, verbose)
-
-    def train(self, theta_ests, J=5000, Jh=1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1, max_ls_itn=10, thresh=100, verbose=False, scale=False, ls=False, alpha=1): 
-           
-        return train_internal(theta_ests, self.ys, self.rinit, self.rprocess, self.dmeasure, self.covars, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh, verbose, scale, ls, alpha)
-        
-
-    def fit(self, sigmas, sigmas_init, M = 10, a = 0.9, 
-            J =100, Jh = 1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1, 
-            max_ls_itn=10, thresh_mif = 100, thresh_tr = 100, verbose = False, scale = False, ls = False, alpha = 0.1):
-        
-        return fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures, sigmas, sigmas_init, self.covars, M, a, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh_mif, 
-                           thresh_tr, verbose, scale, ls, alpha)
-    
-def pfilter(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, theta = None, ys = None, covars = None, thresh = 100, key = None):
-    if pomp_object is not None:
-        return pomp_object.pfilter(J, thresh, key)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not None and ys is not None:
-        return pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key)
     else:
-        raise ValueError("Invalid Arguments Input")
-    
-def perfilter(pomp_object = None, J = 50, rinit = None, rprocesses = None, dmeasures = None, theta = None, ys = None, sigmas = None, covars = None, thresh = 100, key = None):
-    if pomp_object is not None:
-        return pomp_object.perfilter(J, sigmas, thresh, key)
-    elif rinit is not None and rprocesses is not None and dmeasures is not None and theta is not None and ys is not None:
-        return perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, covars, thresh, key)
-    else:
-        raise ValueError("Invalid Arguments Input")    
-    
-def mop(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, theta = None, ys = None, covars = None,  alpha = 0.97, key = None):
-    if pomp_object is not None:
-        return pomp_object.mop( J, alpha, key)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not None and ys is not None:
-        return mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key)
-    else:
-        raise ValueError("Invalid Arguments Input")    
-    
-def pfilter_pf(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, theta = None, ys = None, covars = None, thresh = 100, key = None):
-    if pomp_object is not None:
-        return pomp_object.pfilter_pf(J, thresh, key)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not None and ys is not None:
-        return pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key)
-    else:
-        raise ValueError("Invalid Arguments Input")   
-
-def mif(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, rprocesses = None, dmeasures = None, theta = None, ys = None, sigmas = None, sigmas_init = None, 
-        covars = None, M = None, a = None, thresh = 100, monitor = False, verbose = False):
-    if pomp_object is not None:
-        return pomp_object.mif(sigmas, sigmas_init, M, a, J, thresh, monitor, verbose)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and rprocesses is not None and dmeasures is not None and theta is not None and ys is not None:
-        return mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, sigmas_init, covars, M, a, J, thresh, monitor, verbose)
-    else:
-        raise ValueError("Invalid Arguments Input")   
-
-def train(pomp_object = None, J = 50, theta_ests = None, rinit = None, rprocess = None, dmeasure = None, ys = None, covars = None, Jh = 1000, method = 'Newton', itns = 20, beta = 0.9, 
-          eta = 0.0025, c = 0.1, max_ls_itn = 10, thresh = 100, verbose = False, scale = False, ls = False, alpha = 1):
-    if pomp_object is not None and theta_ests is not None:
-        return pomp_object.train(theta_ests, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh, verbose, scale, ls, alpha)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and theta_ests is not None and ys is not None:
-        return train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh, verbose, scale, ls, alpha)
-    else:
-        raise ValueError("Invalid Arguments Input")   
-
-def fit(pomp_object = None, J = 100, Jh = 1000, rinit = None, rprocess = None, dmeasure = None, rprocesses = None, dmeasures = None, theta = None, ys = None, sigmas = None , sigmas_init = None, covars = None, M = 10, a = 0.9, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1, 
-        max_ls_itn=10, thresh_mif = 100, thresh_tr = 100, verbose = False, scale = False, ls = False, alpha = 0.1):
-    if pomp_object is not None and sigmas is not None and sigmas_init is not None:
-        return pomp_object.fit(sigmas, sigmas_init, M, a, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh_mif, thresh_tr, verbose, scale, ls, alpha)
-    elif rinit is not None and rprocess is not None and dmeasure is not None and rprocesses is not None and dmeasures is not None and theta is not None and ys is not None and sigmas is not None and sigmas_init is not None:
-        return fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, sigmas_init, covars, M, a, J, Jh, method, itns, beta, eta, c, max_ls_itn, thresh_mif, thresh_tr, verbose, scale, ls, alpha)
-    else:
-        raise ValueError("Invalid Arguments Input")   
-    
-    
-
-
+        raise TypeError(f"Unknown mode: {mode}. Choose from 'IF2', 'GD', or 'IFAD'.")

@@ -374,14 +374,14 @@ class TestPfilterInternal_LG(unittest.TestCase):
         
         self.assertTrue(np.isnan(value).item())
 
-    def test_invalid_alpha1(self):
+    def test_invalid_thresh1(self):
         thresh = np.inf
         value = pfilter_pf_internal(self.theta, self.ys, self.J, rinit = self.rinit, rprocess = self.rprocess, dmeasure = self.dmeasure, covars = self.covars, thresh = thresh, key = self.key)
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
         self.assertTrue(np.isfinite(value.item()))
 
-    def test_invalid_alpha2(self):
+    def test_invalid_thresh2(self):
         thresh = -np.inf
         value = pfilter_pf_internal(self.theta, self.ys, self.J, rinit = self.rinit, rprocess = self.rprocess, dmeasure = self.dmeasure, covars = self.covars, thresh = thresh, key = self.key)
         self.assertEqual(value.dtype, np.float32)

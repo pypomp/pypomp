@@ -21,8 +21,8 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
-from internal_functions import *
-from pomp_class import *
+from src.internal_functions import *
+from src.pomp_class import *
 
 def pfilter(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, theta = None, ys = None, covars = None, thresh = 100, key = None):
     if pomp_object is not None:

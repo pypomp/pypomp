@@ -21,13 +21,13 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
-from internal_functions import *
-from pomp_class import *
+from src.internal_functions import *
+from src.pomp_class import *
 
-def perfilter(pomp_object = None, J = 50, rinit = None, rprocesses = None, dmeasures = None, theta = None, ys = None, sigmas = None, covars = None, thresh = 100, key = None):
+def mop(pomp_object = None, J = 50, rinit = None, rprocess = None, dmeasure = None, theta = None, ys = None, covars = None,  alpha = 0.97, key = None):
     if pomp_object is not None:
-        return pomp_object.perfilter(J, sigmas, thresh, key)
-    elif rinit is not None and rprocesses is not None and dmeasures is not None and theta is not None and ys is not None:
-        return perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, theta.ndim, covars, thresh, key)
+        return pomp_object.mop(J, alpha, key)
+    elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not None and ys is not None:
+        return mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key)
     else:
         raise ValueError("Invalid Arguments Input")    

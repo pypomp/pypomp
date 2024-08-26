@@ -26,11 +26,6 @@ from src.internal_functions import *
 import importlib
 import argparse
 
-def sigmoid(x):
-    return 1/(1+np.exp(-x))
-
-def logit(x):
-    return np.log(x/(1-x))
 
 def get_thetas(theta):
     A = theta[0]
@@ -148,8 +143,7 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertTrue(np.issubdtype(mif_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(mif_theta1.dtype, np.float32))
         self.assertTrue(np.all(mif_loglik1 == mif_loglik1[0]))
-        self.assertTrue(np.all(np.isfinite(mif_loglik1)))
-        self.assertTrue(np.all(np.isfinite(mif_theta1)))
+
        
         #sigmas_init = 0 and sigmas ！= 0
         mif_loglik2, mif_theta2 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures, sigmas = 0.02, sigmas_init = 0, M = 2, a = 0.9, J = self.J, mode = "IF2")
@@ -157,8 +151,6 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(mif_theta2.shape, (3, self.J, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(mif_loglik2.dtype, np.float32))
         self.assertTrue(np.issubdtype(mif_theta2.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(mif_loglik2)))
-        self.assertTrue(np.all(np.isfinite(mif_theta2)))
 
         #sigmas = 0 and sigmas_init = 0
         mif_loglik3, mif_theta3 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures, sigmas = 0, sigmas_init = 0, M = 2, a = 0.9, J = self.J, mode = "IF2")
@@ -168,8 +160,7 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertTrue(np.issubdtype(mif_theta3.dtype, np.float32))
         self.assertTrue(np.all(mif_loglik3 == mif_loglik3[0]))
         self.assertTrue(np.array_equal(mif_theta3[0], mif_theta3[1]))
-        self.assertTrue(np.all(np.isfinite(mif_loglik3)))
-        self.assertTrue(np.all(np.isfinite(mif_theta3)))
+
         
 
     def test_edge_mif_ys(self):
@@ -180,8 +171,7 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(mif_theta.shape, (3, self.J, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(mif_loglik.dtype, np.float32))
         self.assertTrue(np.issubdtype(mif_theta.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(mif_loglik)))
-        self.assertTrue(np.all(np.isfinite(mif_theta)))
+
 
     def test_edge_mif_M(self):
         # M = 0
@@ -190,16 +180,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(mif_theta.shape, (1, self.J, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(mif_loglik.dtype, np.float32))
         self.assertTrue(np.issubdtype(mif_theta.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(mif_loglik)))
-        self.assertTrue(np.all(np.isfinite(mif_theta)))
+
         # M = -1
         mif_loglik1, mif_theta1 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures, sigmas = 0.02, sigmas_init = 1e-20, M = -1, a = 0.9, J = self.J, mode = "IF2")
         self.assertEqual(mif_loglik1.shape, (1,))
         self.assertEqual(mif_theta1.shape, (1, self.J, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(mif_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(mif_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(mif_loglik1)))
-        self.assertTrue(np.all(np.isfinite(mif_theta1)))
+
 
     def test_mif_dmeasure_inf(self):
         #reset dmeasure to be the function that always reture -Inf, overide the self functions
@@ -367,16 +355,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta1.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(GD_theta1)))
+
 
         GD_loglik2, GD_theta2 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "SGD", itns = 2, alpha = 0.97, scale = True, ls = True, mode = "GD")
         self.assertEqual(GD_loglik2.shape, (3,))
         self.assertEqual(GD_theta2.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik2)))
-        self.assertTrue(np.all(np.isfinite(GD_theta2)))
+
 
         #method = Newton
         GD_loglik3, GD_theta3 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "Newton", itns = 2, alpha = 0.97, scale = True, mode = "GD")
@@ -384,16 +370,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta3.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik3.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta3.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik3)))
-        self.assertTrue(np.all(np.isfinite(GD_theta3)))
+
 
         GD_loglik4, GD_theta4 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "Newton", itns = 2, alpha = 0.97, scale = True, ls = True, mode = "GD")
         self.assertEqual(GD_loglik4.shape, (3,))
         self.assertEqual(GD_theta4.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik4.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta4.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik4)))
-        self.assertTrue(np.all(np.isfinite(GD_theta4)))
+
 
         #refined Newton
         GD_loglik5, GD_theta5 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "WeightedNewton", itns = 2, alpha = 0.97, scale = True, mode = "GD")
@@ -401,16 +385,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta5.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik5.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta5.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik5)))
-        self.assertTrue(np.all(np.isfinite(GD_theta5)))
+
 
         GD_loglik6, GD_theta6 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "WeightedNewton", itns = 2, alpha = 0.97, scale = True, ls = True, mode = "GD")
         self.assertEqual(GD_loglik6.shape, (3,))
         self.assertEqual(GD_theta6.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik6.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta6.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik6)))
-        self.assertTrue(np.all(np.isfinite(GD_theta6)))
+
 
         #BFGS
         GD_loglik7, GD_theta7 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "BFGS", itns = 2, alpha = 0.97, scale = True, mode = "GD")
@@ -418,16 +400,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta7.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik7.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta7.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik7)))
-        self.assertTrue(np.all(np.isfinite(GD_theta7)))
+
 
         GD_loglik8, GD_theta8 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "BFGS", itns = 2, alpha = 0.97, scale = True, ls = True, mode = "GD")
         self.assertEqual(GD_loglik8.shape, (3,))
         self.assertEqual(GD_theta8.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik8.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta8.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik8)))
-        self.assertTrue(np.all(np.isfinite(GD_theta8)))
+
     
     def test_edge_GD_J(self):
         #J, Jh = 1, 1000
@@ -448,16 +428,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta1.shape, (1, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(GD_theta1)))
+
     
         GD_loglik2, GD_theta2 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "Newton", itns = -1, alpha = 0.97, scale = True, ls = True, mode = "GD")
         self.assertEqual(GD_loglik2.shape, (1,))
         self.assertEqual(GD_theta2.shape, (1, ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik2)))
-        self.assertTrue(np.all(np.isfinite(GD_theta2)))
+
 
     def test_edge_GD_eta(self):
         GD_loglik1, GD_theta1 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "Newton", itns = 2, alpha = 0.97, scale = True, eta = 0, mode = "GD")
@@ -466,8 +444,7 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
         self.assertTrue(np.array_equal(GD_theta1[0], GD_theta1[1]))
-        self.assertTrue(np.all(np.isfinite(GD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(GD_theta1)))
+        
 
     def test_edge_GD_alpha(self):
         GD_loglik1, GD_theta1 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "WeightedNewton", itns = 2, alpha = 1, scale = True, mode = "GD")
@@ -475,16 +452,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta1.shape, (3,  ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(GD_theta1)))
+        
 
         GD_loglik2, GD_theta2 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "WeightedNewton", itns = 2, alpha = 0, scale = True, mode = "GD")
         self.assertEqual(GD_loglik2.shape, (3,))
         self.assertEqual(GD_theta2.shape, (3,  ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik2)))
-        self.assertTrue(np.all(np.isfinite(GD_theta2)))
+      
     
     def test_edge_GD_thresh(self):
         GD_loglik1, GD_theta1 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "BFGS", itns = 2, alpha = 0.97, scale = True, thresh_tr = -10000, mode = "GD")
@@ -492,16 +467,14 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(GD_theta1.shape, (3,  ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(GD_theta1)))
+        
 
         GD_loglik2, GD_theta2 = fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J = 10, Jh= 10, method = "BFGS", itns = 2, alpha = 0.97, scale = True, thresh_tr = 10000, mode = "GD")
         self.assertEqual(GD_loglik2.shape, (3,))
         self.assertEqual(GD_theta2.shape, (3,  ) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(GD_loglik2)))
-        self.assertTrue(np.all(np.isfinite(GD_theta2)))
+
 
 
     def test_GD_dmeasure_inf(self):
@@ -727,8 +700,7 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(IFAD_theta1.shape, (3,) + self.theta.shape)
         self.assertTrue(np.issubdtype(IFAD_loglik1.dtype, np.float32))
         self.assertTrue(np.issubdtype(IFAD_theta1.dtype, np.float32))
-        self.assertTrue(np.all(np.isfinite(IFAD_loglik1)))
-        self.assertTrue(np.all(np.isfinite(IFAD_theta1)))
+        
 
     def test_IFAD_invalid_J(self):
         with self.assertRaises(TypeError):

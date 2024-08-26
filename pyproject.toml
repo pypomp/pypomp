@@ -2,13 +2,14 @@
 name = "pomp-py"
 version = "0.0.1"
 authors = [
-  { name="Kevin Tan", email="kevtan@wharton.upenn.edu" },
-  { name="Jun Chen", email="chenjunc@umich.edu"},
-  { name="Edward Ionides", email="ionides@umich.edu" },
+    { name = "Kevin Tan", email = "kevtan@wharton.upenn.edu" },
+    { name = "Jun Chen", email = "chenjunc@umich.edu" },
+    { name = "Jesse Wheeler", email = "jeswheel@umich.edu" },
+    { name = "Edward Ionides", email = "ionides@umich.edu" },
 ]
 maintainers = [
-  { name="Edward Ionides", email="ionides@umich.edu" },
-  { name="Kevin Tan", email="kevtan@wharton.upenn.edu" },
+    { name = "Edward Ionides", email = "ionides@umich.edu" },
+    { name = "Kevin Tan", email = "kevtan@wharton.upenn.edu" },
 ]
 description = "Modeling and inference using partially observed Markov process (POMP) models"
 readme = "README.md"

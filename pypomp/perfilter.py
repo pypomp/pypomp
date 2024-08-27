@@ -15,8 +15,8 @@ from itertools import chain
 from functools import partial
 from tqdm import tqdm
 from tensorflow_probability.substrates import jax as tfp
-from src.internal_functions import *
-from src.pomp_class import *
+from pypomp.internal_functions import *
+from pypomp.pomp_class import *
 
 tfd = tfp.distributions
 tfb = tfp.bijectors

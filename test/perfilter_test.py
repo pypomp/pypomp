@@ -20,9 +20,9 @@ from tqdm import tqdm
 from tensorflow_probability.substrates import jax as tfp
 import sys
 import os
-from src.pomp_class import *
-from src.internal_functions import *
-from src.perfilter import *
+from pypomp.pomp_class import *
+from pypomp.internal_functions import *
+from pypomp.perfilter import *
 import importlib
 import argparse
 

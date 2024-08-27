@@ -6,6 +6,7 @@ import jax.numpy as np
 import ipywidgets as widgets
 import ptitprince as pt
 import pandas as pd
+
 from jax.numpy.linalg import inv, pinv
 from scipy.linalg import solve_discrete_are as dare
 from jax import jit, grad
@@ -13,21 +14,22 @@ from IPython import display
 from toolz.dicttoolz import valmap, itemmap
 from itertools import chain
 from functools import partial
+
 from tqdm import tqdm
 from tensorflow_probability.substrates import jax as tfp
-from src.internal_functions import *
-from src.pomp_class import *
+from pypomp.internal_functions import *
+from pypomp.pomp_class import *
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
 
-def mop(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=None, ys=None, covars=None, alpha=0.97,
-        key=None):
+def pfilter_pf(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=None, ys=None, covars=None,
+               thresh=100, key=None):
     if pomp_object is not None:
-        return pomp_object.mop(J, alpha, key)
+        return pomp_object.pfilter_pf(J, thresh, key)
     elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not None and ys is not None:
-        return mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key)
+        return pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key)
     else:
         raise ValueError("Invalid Arguments Input")

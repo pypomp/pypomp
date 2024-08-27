@@ -18,9 +18,9 @@ from functools import partial
 
 from tqdm import tqdm
 from tensorflow_probability.substrates import jax as tfp
-from src.pomp_class import *
-from src.internal_functions import *
-from src.pfilter_pf import *
+from pypomp.pomp_class import *
+from pypomp.internal_functions import *
+from pypomp.pfilter_pf import *
 import importlib
 import argparse
 

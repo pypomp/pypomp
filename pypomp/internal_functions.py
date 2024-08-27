@@ -1,22 +1,11 @@
-import os
-import jax
-import itertools
-import numpy as onp
-import jax.numpy as np
-import ipywidgets as widgets
-import ptitprince as pt
-import pandas as pd
-
-from jax.numpy.linalg import inv, pinv
-from scipy.linalg import solve_discrete_are as dare
-from jax import jit, grad
-from IPython import display
-from toolz.dicttoolz import valmap, itemmap
-from itertools import chain
 from functools import partial
 
-from tqdm import tqdm
+import jax
+import jax.numpy as np
+import numpy as onp
+from jax import jit
 from tensorflow_probability.substrates import jax as tfp
+from tqdm import tqdm
 
 tfd = tfp.distributions
 tfb = tfp.bijectors

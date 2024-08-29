@@ -1,4 +1,4 @@
-from pypomp.pomp_class import *
+from pomp_class import *
 
 tfd = tfp.distributions
 tfb = tfp.bijectors

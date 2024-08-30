@@ -1,8 +1,5 @@
-from pomp_class import *
+from .pomp_class import *
 
-tfd = tfp.distributions
-tfb = tfp.bijectors
-tfpk = tfp.math.psd_kernels
 
 
 def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None, dmeasure=None, rprocesses=None,

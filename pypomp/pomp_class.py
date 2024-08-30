@@ -1,8 +1,5 @@
-from internal_functions import *
+from .internal_functions import *
 
-tfd = tfp.distributions
-tfb = tfp.bijectors
-tfpk = tfp.math.psd_kernels
 
 
 class Pomp:

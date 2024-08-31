@@ -46,15 +46,15 @@ class Pomp:
         return pfilter_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                      thresh, key)
 
-    def perfilter(self, J, sigmas, a=0.9, thresh=100, key=None):
+    def perfilter(self, J, sigmas, thresh=100, key=None):
 
         return perfilter_internal(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                                  ndim=self.theta.ndim, covars=self.covars, a=a, thresh=thresh, key=key)
+                                  ndim=self.theta.ndim, covars=self.covars, thresh=thresh, key=key)
 
-    def perfilter_mean(self, J, sigmas, a=0.9, thresh=100, key=None):
+    def perfilter_mean(self, J, sigmas, thresh=100, key=None):
 
         return perfilter_internal_mean(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                                       ndim=self.theta.ndim, covars=self.covars, a=a, thresh=thresh, key=key)
+                                       ndim=self.theta.ndim, covars=self.covars, thresh=thresh, key=key)
 
     def pfilter_pf(self, J, thresh=100, key=None):
         return pfilter_pf_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,

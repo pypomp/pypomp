@@ -73,8 +73,8 @@ class TestMop_LG(unittest.TestCase):
 
     def test_internal_basic(self):
         val1, theta1 = perfilter(J=self.J, rinit=self.rinit, rprocesses=self.rprocesses, dmeasures=self.dmeasures,
-                                 theta=self.theta, ys=self.ys, sigmas=self.sigmas, covars=self.covars, a=0.95,
-                                 thresh=-1, key=self.key)
+                                 theta=self.theta, ys=self.ys, sigmas=self.sigmas, covars=self.covars, thresh=-1, 
+                                 key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(np.isfinite(val1.item()))
         self.assertEqual(val1.dtype, np.float32)

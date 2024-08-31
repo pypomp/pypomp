@@ -314,7 +314,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_theta(self):
         with self.assertRaises(AttributeError):
             perfilter_internal(None, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(AttributeError):
             perfilter_internal(None, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
                                self.ndim, self.covars)
@@ -322,7 +322,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_ys(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, None, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, None, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
                                self.ndim, self.covars)
@@ -330,7 +330,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_J(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, None, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, None, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
                                self.ndim, self.covars)
@@ -338,7 +338,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_sigmas(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, None, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, None, self.rinit, self.rprocesses, self.dmeasures,
                                self.ndim, self.covars)
@@ -346,7 +346,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_rinit(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, None, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, None, self.rprocesses, self.dmeasures,
                                self.ndim, self.covars)
@@ -354,7 +354,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_rprocesses(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, None, self.dmeasures, self.ndim,
-                               self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, None, self.dmeasures, self.ndim,
                                self.covars)
@@ -362,7 +362,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
     def test_missing_dmeasures(self):
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, None, self.ndim,
-                               self.covars, a=0.95, thresh=-1, key=self.key)
+                               self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, None, self.ndim,
                                self.covars)

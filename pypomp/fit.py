@@ -7,48 +7,63 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
         beta=0.9, eta=0.0025, c=0.1,
         max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, ls=False, alpha=0.1, monitor=True,
         mode="IFAD"):
-    """_summary_
+    """
+    An outside function controlling which fit operation to use for likelihood maximization algorithm of POMP model 
+    by executing on a pomp class object or by calling function 'fit_internal' directly. 
+
 
     Args:
-        pomp_object (_type_, optional): _description_. Defaults to None.
-        J (int, optional): _description_. Defaults to 100.
-        Jh (int, optional): _description_. Defaults to 1000.
-        theta (_type_, optional): _description_. Defaults to None.
-        rinit (_type_, optional): _description_. Defaults to None.
-        rprocess (_type_, optional): _description_. Defaults to None.
-        dmeasure (_type_, optional): _description_. Defaults to None.
-        rprocesses (_type_, optional): _description_. Defaults to None.
-        dmeasures (_type_, optional): _description_. Defaults to None.
-        ys (_type_, optional): _description_. Defaults to None.
-        sigmas (_type_, optional): _description_. Defaults to None.
-        sigmas_init (_type_, optional): _description_. Defaults to None.
-        covars (_type_, optional): _description_. Defaults to None.
-        M (int, optional): _description_. Defaults to 10.
-        a (float, optional): _description_. Defaults to 0.9.
-        method (str, optional): _description_. Defaults to 'Newton'.
-        itns (int, optional): _description_. Defaults to 20.
-        beta (float, optional): _description_. Defaults to 0.9.
-        eta (float, optional): _description_. Defaults to 0.0025.
-        c (float, optional): _description_. Defaults to 0.1.
-        max_ls_itn (int, optional): _description_. Defaults to 10.
-        thresh_mif (int, optional): _description_. Defaults to 100.
-        thresh_tr (int, optional): _description_. Defaults to 100.
-        verbose (bool, optional): _description_. Defaults to False.
-        scale (bool, optional): _description_. Defaults to False.
-        ls (bool, optional): _description_. Defaults to False.
-        alpha (float, optional): _description_. Defaults to 0.1.
-        monitor (bool, optional): _description_. Defaults to True.
-        mode (str, optional): _description_. Defaults to "IFAD".
+        pomp_object (Pomp, optional): An instance of the POMP class. If provided, the function will execute on 
+                                      this object to conduct the fit operation. Defaults to None.
+        J (int, optional):  J (int, optional): The number of particles in iterated filering and the number of 
+                            particles in the MOP objective for obtaining the gradient in gradient optimization. 
+                            Defaults to 100.
+        Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. 
+                            Defaults to 1000.
+        theta (array-like, optional): Initial parameters involved in the POMP model. Defaults to None.
+        rinit (function, optional): Simulator for the initial-state distribution. Defaults to None.
+        rprocess (function, optional): Simulator for the process model. Defaults to None.
+        dmeasure (function, optional): Density evaluation for the measurement model. Defaults to None.
+        rprocesses (function, optional): Simulator for the perturbed process model. Defaults to None.
+        dmeasures (function, optional): Density evaluation for the perturbed measurement model. Defaults to None.
+        ys (array-like, optional): The measurement array. Defaults to None.
+        sigmas (float, optional): Pertubed factor. Defaults to None.
+        sigmas_init (float, optional): Initial perturbed factor. Defaults to None.
+        covars (array-like, optional): Covariates or None if not applicable. Defaults to None.
+        M (int, optional): Maximum algorithm iteration for iterated filtering. Defaults to 10.
+        a (float, optional): Decay factor for sigmas. Defaults to 0.9.
+        method (str, optional): The gradient optimization method to use, including Newton method, weighted Newton 
+                                method BFGS method, gradient descent. Defaults to 'Newton'.
+        itns (int, optional): Maximum iteration for the gradient optimization. Defaults to 20.
+        beta (float, optional): Initial step size. Defaults to 0.9.
+        eta (float, optional): Initial step size. Defaults to 0.0025.
+        c (float, optional): The user-defined Armijo condition constant. Defaults to 0.1.
+        max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
+        thresh_mif (float, optional): Threshold value to determine whether to resample particles in iterated filtering.
+                                      Defaults to 100.
+        thresh_tr (float, optional): Threshold value to determine whether to resample particles in gradient optimization. 
+                                     Defaults to 100.
+        verbose (bool, optional): Boolean flag controlling whether to print out the log-likehood and parameter 
+                                  information. Defaults to False.
+        scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
+        ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.
+        alpha (float, optional): Discount factor. Defaults to 0.1.
+        monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. Defaults to True.
+        mode (str, optional):The optimization algorithm to use, including 'IF2', 'GD', and 'IFAD'. Defaults to "IFAD".
 
     Raises:
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
+        ValueError: Missing the required arguments 'sigmas' or 'sigmas_init' in 'IF2' or 'IFAD' when executing on the 
+                    pomp class object
+        ValueError: Invalid mode input when executing on the pomp class object
+        ValueError: Missing the required arguments, workhorses, 'sigmas' or 'sigmas_init' in 'IF2' or 'IFAD' when
+                    calling the function 'fit_internal' directly.
+        ValueError: Invalid mode input when calling 'fit_internal' function directly.
+        ValueError: Missing the pomp class object and required arguments for calling 'fit_internal' directly
 
     Returns:
-        _type_: _description_
+        tuple: A tuple containing:
+        - An array of negative log-likelihood through the iterations
+        - An array of parameters through the iterations
     """
     if pomp_object is not None:
         if mode == "IF2" or mode == "IFAD":

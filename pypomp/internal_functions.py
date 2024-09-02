@@ -271,9 +271,9 @@ def mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.9
         theta (array-like): Parameters involved in the POMP model
         ys (array-like): The measurement array
         J (int): The number of particles
-        rinit (function): simulator for the initial-state distribution
-        rprocess (function): simulator for the process model
-        dmeasure (function): density evaluation for the measurement model
+        rinit (function): Simulator for the initial-state distribution
+        rprocess (function): Simulator for the process model
+        dmeasure (function): Density evaluation for the measurement model
         covars (array-like, optional): Covariates or None if not applicable. Defaults to None.
         alpha (float, optional): Discount factor. Defaults to 0.97.
         key (jax.random.PRNGKey, optional): The random key. Defaults to None.

@@ -13,6 +13,7 @@ tfpk = tfp.math.psd_kernels
 
 '''resampling functions'''
 
+
 def rinits_internal(rinit, thetas, J, covars):
     """
     Simulator for the initial-state distribution, specifically for the perturbed particle filtering method.
@@ -465,8 +466,8 @@ def perfilter_helper(t, inputs, rprocesses, dmeasures):
             - ys (array-like): The entire measurement array
             - thresh (float): Threshold value to determine whether to resample particles.
             - key (jax.random.PRNGKey): The random key for sampling
-        rprocess (function): Simulator procedure for the process model
-        dmeasure (function): Density evaluation for the measurement model
+        rprocesses (function): Simulator procedure for the process model
+        dmeasures (function): Density evaluation for the measurement model
 
     Returns:
         list: A list containing updated inputs for next iteration
@@ -726,7 +727,7 @@ def line_search(obj, curr_obj, pt, grad, direction, k=1, eta=0.9, xi=10, tau=10,
         float: optimal step size
     """
     itn = 0
-    eta = min([eta, xi / k]) if stoch else eta  # if stoch if false, do not change
+    eta = min([eta, xi / k]) if stoch else eta  # if stoch is false, do not change
     next_obj = obj(pt + eta * direction)
     # check whether the new point(new_obj)satisfies the stochastic Armijo condition
     # if not, repeat until the condition is met
@@ -1036,7 +1037,7 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
         max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
         thresh (int, optional): Threshold value to determine whether to resample particles in pfilter function.
                                 Defaults to 100.
-        verbose (bool, optional): Boolean flag controlling whether to print out the log-likehood and parameter 
+        verbose (bool, optional): Boolean flag controlling whether to print out the log-likelihood and parameter
                                   information. Defaults to False.
         scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
         ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.
@@ -1169,14 +1170,15 @@ def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasure
         dmeasure (function): Density evaluation for the measurement model
         rprocesses (function, optional): Simulator for the perturbed process model Defaults to None.
         dmeasures (function, optional): Density evaluation for the perturbed measurement model. Defaults to None.
-        sigmas (float, optional): Pertubed factor. Defaults to None.
+        sigmas (float, optional): Perturbed factor. Defaults to None.
         sigmas_init (float, optional): Initial perturbed factor. Defaults to None.
         covars (array-like, optional): Covariates or None if not applicable. Defaults to None.
         M (int, optional): Maximum algorithm iteration for iterated filtering. Defaults to 10.
         a (float, optional): Decay factor for sigmas. Defaults to 0.9.
-        J (int, optional): The number of particles in iterated filering and the number of particles in the MOP objective for 
-                           obtaining the gradient in gradient optimization. Defaults to 100.
-        Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. Defaults to 1000.
+        J (int, optional): The number of particles in iterated filtering and the number of particles in the MOP
+         objective for obtaining the gradient in gradient optimization. Defaults to 100.
+        Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. Defaults to
+         1000.
         method (str, optional): The gradient optimization method to use, including Newton method, weighted Newton method
                                 BFGS method, gradient descent. Defaults to 'Newton'.
         itns (int, optional): Maximum iteration for the gradient optimization. Defaults to 20.
@@ -1186,14 +1188,15 @@ def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasure
         max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
         thresh_mif (int, optional): Threshold value to determine whether to resample particles in iterated filtering.
                                     Defaults to 100.
-        thresh_tr (int, optional): Threshold value to determine whether to resample particles in gradient optimization. 
+        thresh_tr (int, optional): Threshold value to determine whether to resample particles in gradient optimization.
                                    Defaults to 100.
-        verbose (bool, optional):  Boolean flag controlling whether to print out the log-likehood and parameter 
+        verbose (bool, optional):  Boolean flag controlling whether to print out the log-likehood and parameter
                                   information. Defaults to False.
         scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
         ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.
         alpha (float, optional): Discount factor. Defaults to 0.1.
-        monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. Defaults to True.
+        monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. Defaults to
+         True.
         mode (str, optional): The optimization algorithm to use, including 'IF2', 'GD', and 'IFAD'. Defaults to "IFAD".
 
     Raises:
@@ -1216,7 +1219,6 @@ def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasure
             return np.array(mif_logliks_warm), np.array(mif_params_warm)
         else:
             raise TypeError(f"Unknown parameter")
-
 
     elif mode == 'GD':
         # Directly call train_internal and return the results

@@ -1,7 +1,6 @@
 from .pomp_class import *
 
 
-
 def perfilter(pomp_object=None, J=50, rinit=None, rprocesses=None, dmeasures=None, theta=None, ys=None, sigmas=None,
               covars=None, thresh=100, key=None):
     """

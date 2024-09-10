@@ -670,7 +670,6 @@ def pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, th
         theta (array-like): Parameters involved in the POMP model
         ys (array-like): The measurement array
         J (int): The number of particles
-        sigmas (float): Perturbed factor
         rinit (function): Simulator for the initial-state distribution
         rprocess (function): Simulator for the process model
         dmeasure (function): Density evaluation for the measurement model
@@ -959,7 +958,7 @@ def mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, si
         dmeasure (function): Density evaluation for the measurement model
         rprocesses (function): Simulator for the perturbed process model
         dmeasures (function): Density evaluation for the perturbed measurement model
-        sigmas (float): Pertubed factor
+        sigmas (float): Perturbed factor
         sigmas_init (float): Initial perturbed factor
         covars (array-like, optional): Covariates or None if not applicable. Defaults to None.
         M (int, optional): Algorithm Iteration. Defaults to 10.
@@ -1190,7 +1189,7 @@ def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasure
                                     Defaults to 100.
         thresh_tr (int, optional): Threshold value to determine whether to resample particles in gradient optimization.
                                    Defaults to 100.
-        verbose (bool, optional):  Boolean flag controlling whether to print out the log-likehood and parameter
+        verbose (bool, optional):  Boolean flag controlling whether to print out the log-likelihood and parameter
                                   information. Defaults to False.
         scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
         ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.

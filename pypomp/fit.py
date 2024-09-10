@@ -1,7 +1,6 @@
 from .pomp_class import *
 
 
-
 def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None, dmeasure=None, rprocesses=None,
         dmeasures=None, ys=None, sigmas=None, sigmas_init=None, covars=None, M=10, a=0.9, method='Newton', itns=20,
         beta=0.9, eta=0.0025, c=0.1,
@@ -15,7 +14,7 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
     Args:
         pomp_object (Pomp, optional): An instance of the POMP class. If provided, the function will execute on 
                                       this object to conduct the fit operation. Defaults to None.
-        J (int, optional):  J (int, optional): The number of particles in iterated filering and the number of 
+        J (int, optional):  J (int, optional): The number of particles in iterated filtering and the number of
                             particles in the MOP objective for obtaining the gradient in gradient optimization. 
                             Defaults to 100.
         Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. 
@@ -27,7 +26,7 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
         rprocesses (function, optional): Simulator for the perturbed process model. Defaults to None.
         dmeasures (function, optional): Density evaluation for the perturbed measurement model. Defaults to None.
         ys (array-like, optional): The measurement array. Defaults to None.
-        sigmas (float, optional): Pertubed factor. Defaults to None.
+        sigmas (float, optional): Perturbed factor. Defaults to None.
         sigmas_init (float, optional): Initial perturbed factor. Defaults to None.
         covars (array-like, optional): Covariates or None if not applicable. Defaults to None.
         M (int, optional): Maximum algorithm iteration for iterated filtering. Defaults to 10.
@@ -41,9 +40,9 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
         max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
         thresh_mif (float, optional): Threshold value to determine whether to resample particles in iterated filtering.
                                       Defaults to 100.
-        thresh_tr (float, optional): Threshold value to determine whether to resample particles in gradient optimization. 
-                                     Defaults to 100.
-        verbose (bool, optional): Boolean flag controlling whether to print out the log-likehood and parameter 
+        thresh_tr (float, optional): Threshold value to determine whether to resample particles in gradient
+                                     optimization. Defaults to 100.
+        verbose (bool, optional): Boolean flag controlling whether to print out the log-likelihood and parameter
                                   information. Defaults to False.
         scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
         ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.

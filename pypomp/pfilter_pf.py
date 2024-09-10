@@ -1,7 +1,6 @@
 from .pomp_class import *
 
 
-
 def pfilter_pf(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=None, ys=None, covars=None,
                thresh=100, key=None):
     """

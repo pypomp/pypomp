@@ -1,7 +1,6 @@
 from .pomp_class import *
 
 
-
 def mop(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=None, ys=None, covars=None, alpha=0.97,
         key=None):
     """

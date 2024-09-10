@@ -1,7 +1,6 @@
 from .pomp_class import *
 
 
-
 def pfilter(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=None, ys=None, covars=None,
             thresh=100, key=None):
     """
@@ -10,7 +9,7 @@ def pfilter(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, th
 
     Args:
         pomp_object (Pomp, optional):An instance of the POMP class. If provided, the function will execute on 
-                                      this object to conduct the particle filering algorithm. Defaults to None.
+                                      this object to conduct the particle filtering algorithm. Defaults to None.
         J (int, optional): The number of particles. Defaults to 50.
         rinit (function, optional): Simulator for the initial-state distribution. Defaults to None.
         rprocess (function, optional): Simulator for the process model. Defaults to None.

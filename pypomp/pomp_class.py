@@ -1,7 +1,6 @@
 from .internal_functions import *
 
 
-
 class Pomp:
     MONITORS = 1
 
@@ -171,11 +170,11 @@ class Pomp:
 
     def mif(self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, monitor=False, verbose=False):
         """
-        Instance method for conducting iterated filtering (IF2) algorith, which uses the the initialized 
+        Instance method for conducting iterated filtering (IF2) algorith, which uses the initialized
         instance parameters and calls 'mif_internal' function.
 
         Args:
-            sigmas (float): Pertubed factor
+            sigmas (float): Perturbed factor
             sigmas_init (float): Initial perturbed factor
             M (int, optional): Algorithm Iteration. Defaults to 10.
             a (float, optional): Decay factor for sigmas. Defaults to 0.95.
@@ -183,7 +182,7 @@ class Pomp:
             thresh (float, optional): Threshold value to determine whether to resample particles. Defaults to 100.
             monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. 
                                       Defaults to False.
-            verbose (bool, optional): Boolean flag controlling whether to print out the log-likehood and parameter 
+            verbose (bool, optional): Boolean flag controlling whether to print out the log-likelihood and parameter
                                       information. Defaults to False.
         Returns:
             tuple: A tuple containing:
@@ -216,7 +215,7 @@ class Pomp:
             max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
             thresh (int, optional): Threshold value to determine whether to resample particles in pfilter function.
                                     Defaults to 100.
-            verbose (bool, optional): Boolean flag controlling whether to print out the log-likehood and parameter 
+            verbose (bool, optional): Boolean flag controlling whether to print out the log-likelihood and parameter
                                       information. Defaults to False.
             scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
             ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.
@@ -236,18 +235,18 @@ class Pomp:
             max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, ls=False, alpha=0.1, monitor=True,
             mode="IFAD"):
         """
-        Instance method for executing the iterated filtering (IF2), MOP gradient-based iterative optimization method (GD), 
-        and iterated filtering with automatic differentiation (IFAD), which uses the initialized instance parameters
-        and calls 'fit_internal' function.
+        Instance method for executing the iterated filtering (IF2), MOP gradient-based iterative optimization method
+        (GD), and iterated filtering with automatic differentiation (IFAD), which uses the initialized instance
+        parameters and calls 'fit_internal' function.
 
         Args:
-            sigmas (float, optional): Pertubed factor. Defaults to None.
+            sigmas (float, optional): Perturbed factor. Defaults to None.
             sigmas_init (float, optional): Initial perturbed factor. Defaults to None.
             M (int, optional): Maximum algorithm iteration for iterated filtering. Defaults to 10.
             a (float, optional): Decay factor for sigmas. Defaults to 0.9.
-            J (int, optional): The number of particles in iterated filering and the number of particles in the MOP objective 
-                               for obtaining the gradient in gradient-based optimization procedure. Defaults to 100.
-            Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. 
+            J (int, optional): The number of particles in iterated filtering and the number of particles in the MOP
+                objective for obtaining the gradient in gradient-based optimization procedure. Defaults to 100.
+            Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix.
                                 Defaults to 1000.
             method (str, optional): The gradient-based iterative optimization method to use, including Newton method,
                                     weighted Newton method, BFGS method and gradient descent. Defaults to 'Newton'.
@@ -256,17 +255,19 @@ class Pomp:
             eta (float, optional): Initial step size. Defaults to 0.0025.
             c (float, optional): The user-defined Armijo condition constant. Defaults to 0.1.
             max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm. Defaults to 10.
-            thresh_mif (int, optional): Threshold value to determine whether to resample particles in iterated filtering.
-                                        Defaults to 100.
-            thresh_tr (int, optional): Threshold value to determine whether to resample particles in gradient optimization. 
-                                       Defaults to 100.
-            verbose (bool, optional):  Boolean flag controlling whether to print out the log-likehood and parameter 
+            thresh_mif (int, optional): Threshold value to determine whether to resample particles in iterated
+                                        filtering. Defaults to 100.
+            thresh_tr (int, optional): Threshold value to determine whether to resample particles in gradient
+                                       optimization. Defaults to 100.
+            verbose (bool, optional):  Boolean flag controlling whether to print out the log-likelihood and parameter
                                   information. Defaults to False.
             scale (bool, optional): Boolean flag controlling normalizing the direction or not. Defaults to False.
             ls (bool, optional): Boolean flag controlling using the line search or not. Defaults to False.
             alpha (float, optional): Discount factor. Defaults to 0.1.
-            monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. Defaults to True.
-            mode (str, optional): The optimization algorithm to use, including 'IF2', 'GD', and 'IFAD'. Defaults to "IFAD".
+            monitor (bool, optional): Boolean flag controlling whether to monitor the log-likelihood value. Defaults to
+                True.
+            mode (str, optional): The optimization algorithm to use, including 'IF2', 'GD', and 'IFAD'. Defaults to
+                "IFAD".
 
         Returns:
             tuple: A tuple containing:

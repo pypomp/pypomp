@@ -14,7 +14,7 @@ tfpk = tfp.math.psd_kernels
 '''resampling functions'''
 
 
-def rinits_internal(rinit, thetas, J, covars):
+def _rinits_internal(rinit, thetas, J, covars):
     """
     Simulator for the initial-state distribution, specifically for the perturbed particle filtering method.
 
@@ -30,7 +30,7 @@ def rinits_internal(rinit, thetas, J, covars):
     return rinit(thetas[0], len(thetas), covars)
 
 
-def resample(norm_weights):
+def _resample(norm_weights):
     """
     Systematic resampling method based on input normalized weights.
 
@@ -52,7 +52,7 @@ def resample(norm_weights):
     return counts
 
 
-def normalize_weights(weights):
+def _normalize_weights(weights):
     """
     Acquires the normalized log-weights and calculates the log-likelihood.
 
@@ -72,7 +72,7 @@ def normalize_weights(weights):
     return norm_weights, loglik_t
 
 
-def resampler(counts, particlesP, norm_weights):
+def _resampler(counts, particlesP, norm_weights):
     """
     Resamples the particles based on the weighted resampling rule determined by norm_weights 
     and the original particles generated from the previous prediction.
@@ -98,7 +98,7 @@ def resampler(counts, particlesP, norm_weights):
     return counts, particlesF, norm_weights
 
 
-def no_resampler(counts, particlesP, norm_weights):
+def _no_resampler(counts, particlesP, norm_weights):
     """
     Obtains the original input arguments without resampling.
 
@@ -118,7 +118,7 @@ def no_resampler(counts, particlesP, norm_weights):
     return counts, particlesP, norm_weights
 
 
-def resampler_thetas(counts, particlesP, norm_weights, thetas):
+def _resampler_thetas(counts, particlesP, norm_weights, thetas):
     """
     Resamples the particles for perturbed particle filtering method, with their corresponding parameters 
     also resampled 
@@ -148,7 +148,7 @@ def resampler_thetas(counts, particlesP, norm_weights, thetas):
     return counts, particlesF, norm_weights, thetasF
 
 
-def no_resampler_thetas(counts, particlesP, norm_weights, thetas):
+def _no_resampler_thetas(counts, particlesP, norm_weights, thetas):
     """
     Obtains the original input arguments without resampling for perturbed filtering method
 
@@ -170,7 +170,7 @@ def no_resampler_thetas(counts, particlesP, norm_weights, thetas):
     return counts, particlesP, norm_weights, thetas
 
 
-def resampler_pf(counts, particlesP, norm_weights):
+def _resampler_pf(counts, particlesP, norm_weights):
     """
     Resamples the particles for function 'pfilter_pf_internal', with weight equalization
 
@@ -199,7 +199,7 @@ def resampler_pf(counts, particlesP, norm_weights):
 '''internal filtering functions - pt.1'''
 
 
-def mop_helper(t, inputs, rprocess, dmeasure):
+def _mop_helper(t, inputs, rprocess, dmeasure):
     """
     Helper functions for MOP algorithm, which conducts a single iteration of filtering and is called
     in function 'mop_internal'.
@@ -264,7 +264,7 @@ def mop_helper(t, inputs, rprocess, dmeasure):
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.97, key=None):
+def _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.97, key=None):
     """
     Internal functions for MOP algorithm, which calls function 'mop_helper' iteratively.
 
@@ -301,7 +301,7 @@ def mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.9
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def mop_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.97, key=None):
+def _mop_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.97, key=None):
     """
     Internal functions for calculating the mean result using MOP algorithm across the measurements.
 
@@ -389,7 +389,7 @@ def pfilter_helper(t, inputs, rprocess, dmeasure):
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
+def _pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
     """
     Internal functions for particle filtering algorithm, which calls function 'pfilter_helper' iteratively.
 
@@ -426,7 +426,7 @@ def pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thres
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def pfilter_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
+def _pfilter_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
     """
     Internal functions for calculating the mean result using particle filtering algorithm across the measurements.
 
@@ -448,7 +448,7 @@ def pfilter_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, 
     return pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key) / len(ys)
 
 
-def perfilter_helper(t, inputs, rprocesses, dmeasures):
+def _perfilter_helper(t, inputs, rprocesses, dmeasures):
     """
     Helper functions for perturbed particle filtering algorithm, which conducts a single iteration of 
     filtering and is called in function 'perfilter_internal'.
@@ -522,7 +522,7 @@ def perfilter_helper(t, inputs, rprocesses, dmeasures):
 
 
 @partial(jit, static_argnums=(2, 4, 5, 6, 7))
-def perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, thresh=100,
+def _perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, thresh=100,
                        key=None):
     """
     Internal functions for perturbed particle filtering algorithm, which calls function 'perfilter_helper'
@@ -565,7 +565,7 @@ def perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim,
 
 
 @partial(jit, static_argnums=(2, 4, 5, 6, 7))
-def perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, thresh=100,
+def _perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars=None, thresh=100,
                             key=None):
     """
     Internal functions for calculating the mean result using perturbed particle filtering algorithm across the 
@@ -594,7 +594,7 @@ def perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, 
     return value / len(ys), thetas
 
 
-def pfilter_helper_pf(t, inputs, rprocess, dmeasure):
+def _pfilter_helper_pf(t, inputs, rprocess, dmeasure):
     """
     Helper functions for particle filtering algorithm with weight equalization in POMP, which conducts a 
     single iteration of filtering and is called in function 'pfilter_pf_internal'.
@@ -661,7 +661,7 @@ def pfilter_helper_pf(t, inputs, rprocess, dmeasure):
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
+def _pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None):
     """
     Internal functions for calculating the mean result using particle filtering algorithm with weight equalization 
     across the measurements, which calls function 'pfilter_pf_helper()' iteratively.
@@ -702,7 +702,7 @@ def pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, th
 '''gradient functions'''
 
 
-def line_search(obj, curr_obj, pt, grad, direction, k=1, eta=0.9, xi=10, tau=10, c=0.1, frac=0.5, stoch=False):
+def _line_search(obj, curr_obj, pt, grad, direction, k=1, eta=0.9, xi=10, tau=10, c=0.1, frac=0.5, stoch=False):
     """
     Conducts line search algorithm to determine the step size under stochastic Quasi-Newton methods. 
     The implentation of the algorithm refers to https://arxiv.org/pdf/1909.01238.pdf
@@ -740,7 +740,7 @@ def line_search(obj, curr_obj, pt, grad, direction, k=1, eta=0.9, xi=10, tau=10,
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jgrad_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jgrad_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
     """
     calculates the gradient of a mean particle filter objective with weight equalization 
     (function 'pfilter_pf_internal') w.r.t. the current estimated parameter value using JAX's automatic 
@@ -766,7 +766,7 @@ def jgrad_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=N
 
 # return the value and gradient at the same time
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jvg_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jvg_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
     """
     calculates the both the value and gradient of a mean particle filter objective with weight equalization 
     (function 'pfilter_pf_internal') w.r.t. the current estimated parameter value using JAX's automatic 
@@ -793,7 +793,7 @@ def jvg_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
     """
     calculates the gradient of a mean particle filter objective (function 'pfilter_internal_mean') w.r.t. 
     the current estimated parameter value using JAX's automatic differentiation.
@@ -817,7 +817,7 @@ def jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
     """
     calculates the both the value and gradient of a mean particle filter objective (function 'pfilter_internal_mean') 
     w.r.t. the current estimated parameter value using JAX's automatic differentiation.
@@ -843,7 +843,7 @@ def jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None):
+def _jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None):
     """
     calculates the gradient of a mean MOP objective (function 'mop_internal_mean') w.r.t. the current estimated
     parameter value using JAX's automatic differentiation.
@@ -867,7 +867,7 @@ def jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, 
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None):
+def _jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None):
     """
     calculates the both the value and gradient of a mean MOP objective (function 'mop_internal_mean') w.r.t. 
     the current estimated parameter value using JAX's automatic differentiation.
@@ -893,7 +893,7 @@ def jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, ke
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
     """
     calculates the Hessian matrix of a mean particle filter objective (function 'pfilter_internal_mean') w.r.t. 
     the current estimated parameter value using JAX's automatic differentiation.
@@ -918,7 +918,7 @@ def jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None
 
 # get the hessian matrix from mop
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=None):
+def _jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=None):
     """
     calculates the Hessian matrix of a mean MOP objective (function 'mop_internal_mean') w.r.t. the current 
     estimated parameter value using JAX's automatic differentiation.
@@ -945,7 +945,7 @@ def jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=N
 MONITORS = 1
 
 
-def mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, sigmas_init, covars=None, M=10,
+def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, sigmas_init, covars=None, M=10,
                  a=0.95, J=100, thresh=100, monitor=False, verbose=False):
     """
     Internal functions for conducting iterated filtering (IF2) algorithm, is called in 'fit_internal' function.
@@ -1010,7 +1010,7 @@ def mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, si
     return np.array(logliks), np.array(params)
 
 
-def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=5000, Jh=1000, method='Newton', itns=20,
+def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=5000, Jh=1000, method='Newton', itns=20,
                    beta=0.9, eta=0.0025, c=0.1, max_ls_itn=10, thresh=100, verbose=False, scale=False, ls=False,
                    alpha=1):
     """
@@ -1152,7 +1152,7 @@ def train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=500
     return np.array(logliks), np.array(Acopies)
 
 
-def fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasures=None, sigmas=None, sigmas_init=None,
+def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasures=None, sigmas=None, sigmas_init=None,
                  covars=None, M=10, a=0.9,
                  J=100, Jh=1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1,
                  max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, ls=False, alpha=0.1,

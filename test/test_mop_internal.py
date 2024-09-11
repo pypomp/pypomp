@@ -3,7 +3,8 @@ import unittest
 import jax.numpy as np
 
 from tqdm import tqdm
-from pypomp.internal_functions import *
+from pypomp.internal_functions import _mop_internal
+from pypomp.internal_functions import _mop_internal_mean
 
 
 def get_thetas(theta):
@@ -70,12 +71,12 @@ class TestMopInternal_LG(unittest.TestCase):
         self.dmeasures = jax.vmap(custom_dmeas, (None, 0, 0))
 
     def test_basic(self):
-        result1 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result1 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=0.97, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        result2 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result2 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=0.97, key=self.key)
 
         self.assertEqual(result2.shape, ())
@@ -83,13 +84,13 @@ class TestMopInternal_LG(unittest.TestCase):
         self.assertEqual(result2.dtype, np.float32)
         self.assertEqual(result1, result2)
 
-        result3 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result3 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=1, key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
 
-        result4 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result4 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=1, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
@@ -97,19 +98,19 @@ class TestMopInternal_LG(unittest.TestCase):
         self.assertEqual(result3, result4)
 
     def test_edge_J(self):
-        result1 = mop_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result1 = _mop_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=0.97, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
 
     def test_edge_alpha(self):
-        result1 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result1 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=0, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        result2 = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result2 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                alpha=1, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
@@ -117,7 +118,7 @@ class TestMopInternal_LG(unittest.TestCase):
 
     def test_small_alpha(self):
         alpha = 1e-10
-        result = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                               alpha=alpha, key=self.key)
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
@@ -126,7 +127,7 @@ class TestMopInternal_LG(unittest.TestCase):
     def test_edge_ys(self):
         # when len(ys) = 1
         ys = self.ys[0, :]
-        result = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                               alpha=0.97, key=self.key)
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
@@ -138,7 +139,7 @@ class TestMopInternal_LG(unittest.TestCase):
             return -float('inf')
 
         dmeasure = jax.vmap(custom_dmeas, (None, 0, None))
-        result = mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars, alpha=0.97,
+        result = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars, alpha=0.97,
                               key=self.key)
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
@@ -148,7 +149,7 @@ class TestMopInternal_LG(unittest.TestCase):
         def zero_dmeasure(ys, particlesP, theta):
             return np.zeros((particlesP.shape[0],))
 
-        result = mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        result = _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                               dmeasure=zero_dmeasure, covars=self.covars, alpha=0.97, key=self.key)
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
@@ -164,106 +165,106 @@ class TestMopInternal_LG(unittest.TestCase):
                                                   mean=A @ state, cov=Q)
 
         rprocess = jax.vmap(custom_rproc, (0, None, 0, None))
-        result = mop_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars, alpha=0.97,
+        result = _mop_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars, alpha=0.97,
                               key=self.key)
         self.assertTrue(np.isnan(result).item())
 
     # error handling - missing paramters - theta, ys, J, rinit, rprocess, dmeasure
     def test_missing(self):
         with self.assertRaises(TypeError):
-            mop_internal()
+            _mop_internal()
         with self.assertRaises(TypeError):
-            mop_internal(self.theta)
+            _mop_internal(self.theta)
         with self.assertRaises(TypeError):
-            mop_internal(self.ys)
+            _mop_internal(self.ys)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys)
+            _mop_internal(self.theta, self.ys)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.rinit)
+            _mop_internal(self.theta, self.ys, self.rinit)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.rinit, self.rprocess)
+            _mop_internal(self.theta, self.ys, self.rinit, self.rprocess)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.rinit, self.dmeasure)
+            _mop_internal(self.theta, self.ys, self.rinit, self.dmeasure)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.rprocess, self.dmeasure)
+            _mop_internal(self.theta, self.ys, self.rprocess, self.dmeasure)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure)
+            _mop_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J)
+            _mop_internal(self.theta, self.ys, self.J)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit)
+            _mop_internal(self.theta, self.ys, self.J, self.rinit)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess)
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure)
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure)
+            _mop_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure)
 
     def test_missing_theta(self):
         with self.assertRaises(TypeError):
-            mop_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
         with self.assertRaises(TypeError):
-            mop_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _mop_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_ys(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _mop_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_J(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _mop_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_rinit(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars)
+            _mop_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_rprocess(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars)
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars)
 
     def test_missing_dmeasure(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars, alpha=0.97,
                          key=self.key)
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars)
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars)
 
     # error handling - wrong paramter type - theta, ys, J, rinit, rprocess, dmeasure
     def test_wrongtype_J(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, J=np.array(10, 20), rinit=self.rinit, rprocess=self.rprocess,
+            _mop_internal(self.theta, self.ys, J=np.array(10, 20), rinit=self.rinit, rprocess=self.rprocess,
                          dmeasure=self.dmeasure, covars=self.covars)
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, J="pop", rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, J="pop", rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars)
 
         def generate_J(n):
             return np.array(10, 20)
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, J=lambda n: generate_J(n), rinit=self.rinit, rprocess=self.rprocess,
+            _mop_internal(self.theta, self.ys, J=lambda n: generate_J(n), rinit=self.rinit, rprocess=self.rprocess,
                          dmeasure=self.dmeasure, covars=self.covars)
 
     def test_wrongtype_theta(self):
         with self.assertRaises(TypeError):
             theta = "theta"
-            mop_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
 
     def test_wrongtype_rinit1(self):
@@ -273,13 +274,13 @@ class TestMopInternal_LG(unittest.TestCase):
         rinit = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            mop_internal(self.theta, self.ys, self.J, rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, rinit, self.rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, rinit="rinit", rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, self.J, rinit="rinit", rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, alpha=0.97, key=self.key)
 
     def test_wrongtype_rprocess(self):
@@ -289,13 +290,13 @@ class TestMopInternal_LG(unittest.TestCase):
         rprocess = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            mop_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars, alpha=0.97,
                          key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess="rprocess", dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess="rprocess", dmeasure=self.dmeasure,
                          covars=self.covars, alpha=0.97, key=self.key)
 
     def test_wrongtype_dmeasure(self):
@@ -305,24 +306,24 @@ class TestMopInternal_LG(unittest.TestCase):
         dmeasure = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars, alpha=0.97,
+            _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars, alpha=0.97,
                          key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure="dmeasure",
+            _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure="dmeasure",
                          covars=self.covars, alpha=0.97, key=self.key)
 
     def test_wrongtype_alpha(self):
         alpha = "-0.0001"
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, alpha=alpha, key=self.key)
 
         with self.assertRaises(TypeError):
             alpha = np.array([0.97, 0.97])
-            mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, alpha=alpha, key=self.key)
 
     # using inappropriate value
@@ -330,17 +331,17 @@ class TestMopInternal_LG(unittest.TestCase):
     def test_invalid_J(self):
         with self.assertRaises(TypeError):
             J = 0
-            mop_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, alpha=0.97, key=self.key)
 
         with self.assertRaises(TypeError):
             J = -1
-            mop_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, alpha=0.97, key=self.key)
 
     def test_invalid_alpha1(self):
         alpha = np.inf
-        value = mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        value = _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                              dmeasure=self.dmeasure, covars=self.covars, alpha=alpha, key=self.key)
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
@@ -348,7 +349,7 @@ class TestMopInternal_LG(unittest.TestCase):
 
     def test_invalid_alpha2(self):
         alpha = -np.inf
-        value = mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        value = _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                              dmeasure=self.dmeasure, covars=self.covars, alpha=alpha, key=self.key)
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
@@ -356,11 +357,11 @@ class TestMopInternal_LG(unittest.TestCase):
 
     def test_new_arg(self):
         with self.assertRaises(TypeError):
-            mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
+            _mop_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          covars=self.covars, a=0.9, alpha=0.97, key=self.key)
 
     def test_mean(self):
-        result = mop_internal_mean(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        result = _mop_internal_mean(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                    dmeasure=self.dmeasure, covars=self.covars, alpha=0.97, key=self.key)
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))

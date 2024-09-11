@@ -92,7 +92,7 @@ def _resampler(counts, particlesP, norm_weights):
             - norm_weights (array-like): The normalized log-weights of the resampled particles
     """
     J = norm_weights.shape[-1]
-    counts = resample(norm_weights)
+    counts = _resample(norm_weights)
     particlesF = particlesP[counts]
     norm_weights = norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - np.log(J)
     return counts, particlesF, norm_weights
@@ -141,7 +141,7 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
                                     particles (particlesF)
     """
     J = norm_weights.shape[-1]
-    counts = resample(norm_weights)
+    counts = _resample(norm_weights)
     particlesF = particlesP[counts]
     norm_weights = norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - np.log(J)
     thetasF = thetas[counts]
@@ -190,7 +190,7 @@ def _resampler_pf(counts, particlesP, norm_weights):
                                          the equal weights.
     """
     J = norm_weights.shape[-1]
-    counts = resample(norm_weights)
+    counts = _resample(norm_weights)
     particlesF = particlesP[counts]
     norm_weights = np.log(np.ones(J)) - np.log(J)
     return counts, particlesF, norm_weights
@@ -254,9 +254,9 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
     loglik += (jax.scipy.special.logsumexp(weightsP + measurements)
                - jax.scipy.special.logsumexp(weightsP))
 
-    norm_weights, loglik_phi_t = normalize_weights(jax.lax.stop_gradient(measurements))
+    norm_weights, loglik_phi_t = _normalize_weights(jax.lax.stop_gradient(measurements))
 
-    counts, particlesF, norm_weightsF = resampler(counts, particlesP, norm_weights)
+    counts, particlesF, norm_weightsF = _resampler(counts, particlesP, norm_weights)
 
     weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[counts]
 
@@ -291,7 +291,7 @@ def _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.
     counts = np.ones(J).astype(int)
     loglik = 0
 
-    mop_helper_2 = partial(mop_helper, rprocess=rprocess, dmeasure=dmeasure)
+    mop_helper_2 = partial(_mop_helper, rprocess=rprocess, dmeasure=dmeasure)
 
     particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key = jax.lax.fori_loop(
         lower=0, upper=len(ys), body_fun=mop_helper_2,
@@ -319,10 +319,10 @@ def _mop_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alp
     Returns:
         float: The mean of negative log-likelihood value across the measurements.
     """
-    return mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key) / len(ys)
+    return _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key) / len(ys)
 
 
-def pfilter_helper(t, inputs, rprocess, dmeasure):
+def _pfilter_helper(t, inputs, rprocess, dmeasure):
     """
     Helper functions for particle filtering algorithm in POMP, which conducts a single iteration 
     of filtering and is called in function 'pfilter_internal'.
@@ -376,13 +376,13 @@ def pfilter_helper(t, inputs, rprocess, dmeasure):
 
     weights = norm_weights + measurements
 
-    norm_weights, loglik_t = normalize_weights(weights)
+    norm_weights, loglik_t = _normalize_weights(weights)
     loglik += loglik_t
 
     oddr = np.exp(np.max(norm_weights)) / np.exp(np.min(norm_weights))
     counts, particlesF, norm_weights = jax.lax.cond(oddr > thresh,
-                                                    resampler,
-                                                    no_resampler,
+                                                    _resampler,
+                                                    _no_resampler,
                                                     counts, particlesP, norm_weights)
 
     return [particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key]
@@ -417,7 +417,7 @@ def _pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thre
     counts = np.ones(J).astype(int)
     loglik = 0
 
-    pfilter_helper_2 = partial(pfilter_helper, rprocess=rprocess, dmeasure=dmeasure)
+    pfilter_helper_2 = partial(_pfilter_helper, rprocess=rprocess, dmeasure=dmeasure)
     particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key = jax.lax.fori_loop(
         lower=0, upper=len(ys), body_fun=pfilter_helper_2,
         init_val=[particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key])
@@ -445,7 +445,7 @@ def _pfilter_internal_mean(theta, ys, J, rinit, rprocess, dmeasure, covars=None,
     Returns:
         float: The mean of negative log-likelihood value across the measurements.
     """
-    return pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key) / len(ys)
+    return _pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key) / len(ys)
 
 
 def _perfilter_helper(t, inputs, rprocesses, dmeasures):
@@ -509,13 +509,13 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
         measurements = measurements.sum(axis=-1)
 
     weights = norm_weights + measurements
-    norm_weights, loglik_t = normalize_weights(weights)
+    norm_weights, loglik_t = _normalize_weights(weights)
 
     loglik += loglik_t
     oddr = np.exp(np.max(norm_weights)) / np.exp(np.min(norm_weights))
     counts, particlesF, norm_weights, thetas = jax.lax.cond(oddr > thresh,
-                                                            resampler_thetas,
-                                                            no_resampler_thetas,
+                                                            _resampler_thetas,
+                                                            _no_resampler_thetas,
                                                             counts, particlesP, norm_weights, thetas)
 
     return [particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key]
@@ -550,13 +550,13 @@ def _perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim
     loglik = 0
     thetas = theta + sigmas * onp.random.normal(size=(J,) + theta.shape[-ndim:])
     # thetas = theta + sigmas * onp.random.normal(size=(J,) + theta.shape[1:])
-    particlesF = rinits_internal(rinit, thetas, 1, covars=covars)
+    particlesF = _rinits_internal(rinit, thetas, 1, covars=covars)
     weights = np.log(np.ones(J) / J)
     norm_weights = np.log(np.ones(J) / J)
     counts = np.ones(J).astype(int)
     if key is None:
         key = jax.random.PRNGKey(onp.random.choice(int(1e18)))
-    perfilter_helper_2 = partial(perfilter_helper, rprocesses=rprocesses, dmeasures=dmeasures)
+    perfilter_helper_2 = partial(_perfilter_helper, rprocesses=rprocesses, dmeasures=dmeasures)
     particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key = jax.lax.fori_loop(
         lower=0, upper=len(ys), body_fun=perfilter_helper_2,
         init_val=[particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key])
@@ -590,7 +590,7 @@ def _perfilter_internal_mean(theta, ys, J, sigmas, rinit, rprocesses, dmeasures,
         - Mean of negative log-likelihood value across the measurements
         - An updated array of parameters.
     """
-    value, thetas = perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars, thresh, key)
+    value, thetas = _perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars, thresh, key)
     return value / len(ys), thetas
 
 
@@ -648,13 +648,13 @@ def _pfilter_helper_pf(t, inputs, rprocess, dmeasure):
 
     weights = norm_weights + measurements
 
-    norm_weights, loglik_t = normalize_weights(weights)
+    norm_weights, loglik_t = _normalize_weights(weights)
     loglik += loglik_t
 
     oddr = np.exp(np.max(norm_weights)) / np.exp(np.min(norm_weights))
     counts, particlesF, norm_weights = jax.lax.cond(oddr > thresh,
-                                                    resampler_pf,
-                                                    no_resampler,
+                                                    _resampler_pf,
+                                                    _no_resampler,
                                                     counts, particlesP, norm_weights)
 
     return [particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key]
@@ -690,7 +690,7 @@ def _pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, t
     counts = np.ones(J).astype(int)
     loglik = 0
 
-    pfilter_pf_helper_2 = partial(pfilter_helper_pf, rprocess=rprocess, dmeasure=dmeasure)
+    pfilter_pf_helper_2 = partial(_pfilter_helper_pf, rprocess=rprocess, dmeasure=dmeasure)
 
     particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key = jax.lax.fori_loop(
         lower=0, upper=len(ys), body_fun=pfilter_pf_helper_2,
@@ -760,7 +760,7 @@ def _jgrad_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=
     Returns:
         array-like: the gradient of the function pfilter_pf_internal() w.r.t. theta_ests
     """
-    return jax.grad(pfilter_pf_internal)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh,
+    return jax.grad(_pfilter_pf_internal)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh,
                                          key=key)
 
 
@@ -788,7 +788,7 @@ def _jvg_pf(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=No
         - The mean of negative log-likelihood value across the measurements using pfilter_pf_internal().
         - The gradient of the function pfilter_pf_internal() w.r.t. theta_ests
     """
-    return jax.value_and_grad(pfilter_pf_internal)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
+    return jax.value_and_grad(_pfilter_pf_internal)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
                                                    thresh=thresh, key=key)
 
 
@@ -812,7 +812,7 @@ def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
     Returns:
         array-like: the gradient of the pfilter_internal_mean function w.r.t. theta_ests
     """
-    return jax.grad(pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh,
+    return jax.grad(_pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh,
                                            key=key)
 
 
@@ -838,7 +838,7 @@ def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None)
         - The mean of negative log-likelihood value across the measurements using pfilter_internal_mean function.
         - The gradient of the function pfilter_internal_mean function w.r.t. theta_ests
     """
-    return jax.value_and_grad(pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
+    return jax.value_and_grad(_pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
                                                      thresh=thresh, key=key)
 
 
@@ -862,7 +862,7 @@ def _jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97,
     Returns:
         array-like: the gradient of the mop_internal_mean function w.r.t. theta_ests
     """
-    return jax.grad(mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha,
+    return jax.grad(_mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha,
                                        key=key)
 
 
@@ -888,7 +888,7 @@ def _jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, k
         - The mean of negative log-likelihood value across the measurements using mop_internal_mean function.
         - The gradient of the function mop_internal_mean function w.r.t. theta_ests
     """
-    return jax.value_and_grad(mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
+    return jax.value_and_grad(_mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
                                                  alpha=alpha, key=key)
 
 
@@ -912,7 +912,7 @@ def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
     Returns:
         array-like: the Hessian matrix of the pfilter_internal_mean function w.r.t. theta_ests
     """
-    return jax.hessian(pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
+    return jax.hessian(_pfilter_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars,
                                               thresh=thresh, key=key)
 
 
@@ -937,7 +937,7 @@ def _jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=
     Returns:
         array-like: the Hessian matrix of the mop_internal_mean function w.r.t. theta_ests
     """
-    return jax.hessian(mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha,
+    return jax.hessian(_mop_internal_mean)(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha,
                                           key=key)
 
 
@@ -984,21 +984,21 @@ def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, s
     params.append(thetas)
     if monitor:
         loglik = np.mean(
-            np.array([pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh)
+            np.array([_pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh)
                       for i in range(MONITORS)]))
         logliks.append(loglik)
 
     for m in tqdm(range(M)):
         sigmas *= a
         thetas += sigmas * onp.random.normal(size=thetas.shape)
-        loglik_ext, thetas = perfilter_internal(thetas, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim=ndim,
+        loglik_ext, thetas = _perfilter_internal(thetas, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim=ndim,
                                                 covars=covars, thresh=thresh)
 
         params.append(thetas)
 
         if monitor:
             loglik = np.mean(np.array(
-                [pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh)
+                [_pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh)
                  for i in range(MONITORS)]))
 
             logliks.append(loglik)
@@ -1056,17 +1056,17 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
     for i in tqdm(range(itns)):
         key = jax.random.PRNGKey(onp.random.choice(int(1e18)))
         if MONITORS == 1:
-            loglik, grad = jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
+            loglik, grad = _jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
 
             loglik *= len(ys)
         else:
-            grad = jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
-            loglik = np.mean(np.array([pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure,
+            grad = _jgrad_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
+            loglik = np.mean(np.array([_pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure,
                                                         covars=covars, thresh=-1, key=key)
                                        for i in range(MONITORS)]))
 
         if method == 'Newton':
-            hess = jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
+            hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
 
             # flatten
             theta_flat = theta_ests.flatten()
@@ -1079,7 +1079,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
             # direction = -np.linalg.pinv(hess) @ grad
         elif method == 'WeightedNewton':
             if i == 0:
-                hess = jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
+                hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
                 theta_flat = theta_ests.flatten()
                 grad_flat = grad.flatten()
                 hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
@@ -1088,7 +1088,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
                 direction = direction_flat.reshape(theta_ests.shape)
                 # direction = -np.linalg.pinv(hess) @ grad
             else:
-                hess = jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
+                hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
                 wt = (i ** onp.log(i)) / ((i + 1) ** (onp.log(i + 1)))
                 theta_flat = theta_ests.flatten()
                 grad_flat = grad.flatten()
@@ -1131,8 +1131,8 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
         if scale:
             direction = direction / np.linalg.norm(direction)
 
-        eta = line_search(
-            partial(pfilter_internal, ys=ys, J=J, rinit=rinit, rprocess=rprocess, dmeasure=dmeasure, covars=covars,
+        eta = _line_search(
+            partial(_pfilter_internal, ys=ys, J=J, rinit=rinit, rprocess=rprocess, dmeasure=dmeasure, covars=covars,
                     thresh=thresh, key=key),
             loglik, theta_ests, grad, direction, k=i + 1, eta=beta, c=c, tau=max_ls_itn) if ls else eta
         try:
@@ -1145,7 +1145,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
         theta_ests += et * direction
 
     logliks.append(np.mean(np.array(
-        [pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh) for i in
+        [_pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, thresh=thresh) for i in
          range(MONITORS)])))
     Acopies.append(theta_ests)
 
@@ -1211,7 +1211,7 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
     if mode == 'IF2':
         if rprocesses is not None and dmeasures is not None and sigmas is not None and sigmas_init is not None:
             # Directly call mif_internal and return the results
-            mif_logliks_warm, mif_params_warm = mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses,
+            mif_logliks_warm, mif_params_warm = _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses,
                                                              dmeasures, sigmas,
                                                              sigmas_init, covars, M, a, J, thresh_mif, monitor=monitor,
                                                              verbose=verbose)
@@ -1221,7 +1221,7 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
 
     elif mode == 'GD':
         # Directly call train_internal and return the results
-        gd_logliks, gd_ests = train_internal(theta, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta,
+        gd_logliks, gd_ests = _train_internal(theta, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns, beta,
                                              eta, c,
                                              max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
         return np.array(gd_logliks), np.array(gd_ests)
@@ -1229,12 +1229,12 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
     elif mode == 'IFAD':
         # The original logic combining both mif_internal and train_internal
         if rprocesses is not None and dmeasures is not None and sigmas is not None and sigmas_init is not None:
-            mif_logliks_warm, mif_params_warm = mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses,
+            mif_logliks_warm, mif_params_warm = _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses,
                                                              dmeasures, sigmas,
                                                              sigmas_init, covars, M, a, J, thresh_mif, monitor=True,
                                                              verbose=verbose)
             theta_ests = mif_params_warm[mif_logliks_warm.argmin()].mean(0)
-            gd_logliks, gd_ests = train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns,
+            gd_logliks, gd_ests = _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars, J, Jh, method, itns,
                                                  beta, eta, c,
                                                  max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
             return np.array(gd_logliks), np.array(gd_ests)

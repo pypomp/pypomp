@@ -3,7 +3,7 @@ import unittest
 import jax.numpy as np
 
 from tqdm import tqdm
-from pypomp.internal_functions import *
+from pypomp.internal_functions import _pfilter_pf_internal
 
 
 def get_thetas(theta):
@@ -70,36 +70,36 @@ class TestPfilterInternal_LG(unittest.TestCase):
         self.dmeasures = jax.vmap(custom_dmeas, (None, 0, 0))
 
     def test_basic(self):
-        result1 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result1 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        result2 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result2 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=100, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
         self.assertEqual(result1, result2)
 
-        result3 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result3 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=10, key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        result4 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result4 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=10, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
         self.assertEqual(result4.dtype, np.float32)
         self.assertEqual(result3, result4)
 
-        result5 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result5 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=-1, key=self.key)
         self.assertEqual(result5.shape, ())
         self.assertTrue(np.isfinite(result5.item()))
         self.assertEqual(result5.dtype, np.float32)
-        result6 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result6 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=-1, key=self.key)
         self.assertEqual(result6.shape, ())
         self.assertTrue(np.isfinite(result6.item()))
@@ -107,48 +107,48 @@ class TestPfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result5, result6)
 
     def test_edge_J(self):
-        result1 = pfilter_pf_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result1 = _pfilter_pf_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                       key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        result2 = pfilter_pf_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result2 = _pfilter_pf_internal(self.theta, self.ys, 1, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                       thresh=-1, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
-        result3 = pfilter_pf_internal(self.theta, self.ys, 100, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result3 = _pfilter_pf_internal(self.theta, self.ys, 100, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                       key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        result4 = pfilter_pf_internal(self.theta, self.ys, 100, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result4 = _pfilter_pf_internal(self.theta, self.ys, 100, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                       thresh=-1, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
         self.assertEqual(result4.dtype, np.float32)
 
     def test_edge_thresh(self):
-        result1 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result1 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=0, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        result2 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result2 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=-10, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
         self.assertEqual(result1, result2)
 
-        result3 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result3 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=10000, key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
         self.assertNotEqual(result1, result3)
 
-        result4 = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
+        result4 = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure,
                                       self.covars, thresh=-1000, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
@@ -158,7 +158,7 @@ class TestPfilterInternal_LG(unittest.TestCase):
     def test_edge_ys(self):
         # when len(ys) = 1
         ys = self.ys[0, :]
-        result = pfilter_pf_internal(self.theta, ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        result = _pfilter_pf_internal(self.theta, ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                      key=self.key)
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
@@ -170,7 +170,7 @@ class TestPfilterInternal_LG(unittest.TestCase):
             return -float('inf')
 
         dmeasure = jax.vmap(custom_dmeas, (None, 0, None))
-        result = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars,
+        result = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars,
                                      key=self.key)
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
@@ -180,7 +180,7 @@ class TestPfilterInternal_LG(unittest.TestCase):
         def zero_dmeasure(ys, particlesP, theta):
             return np.zeros((particlesP.shape[0],))
 
-        result = pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        result = _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                      dmeasure=zero_dmeasure, covars=self.covars, key=self.key)
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
@@ -196,117 +196,117 @@ class TestPfilterInternal_LG(unittest.TestCase):
                                                   mean=A @ state, cov=Q)
 
         rprocess = jax.vmap(custom_rproc, (0, None, 0, None))
-        result = pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars,
+        result = _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars,
                                      key=self.key)
         self.assertTrue(np.isnan(result).item())
 
     def test_missing(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal()
+            _pfilter_pf_internal()
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta)
+            _pfilter_pf_internal(self.theta)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.ys)
+            _pfilter_pf_internal(self.ys)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys)
+            _pfilter_pf_internal(self.theta, self.ys)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rinit)
+            _pfilter_pf_internal(self.theta, self.ys, self.rinit)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rprocess)
+            _pfilter_pf_internal(self.theta, self.ys, self.rprocess)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.dmeasure)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rinit, self.rprocess)
+            _pfilter_pf_internal(self.theta, self.ys, self.rinit, self.rprocess)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rinit, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.rinit, self.dmeasure)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rprocess, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.rprocess, self.dmeasure)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J)
+            _pfilter_pf_internal(self.theta, self.ys, self.J)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure)
 
     def test_missing_theta(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh=-1,
+            _pfilter_pf_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh=-1,
                                 key=self.key)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_pf_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_ys(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                 thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_pf_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_J(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                 thresh=-1, key=self.key)
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_pf_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_rinit(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars, thresh=-1,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars, thresh=-1,
                                 key=self.key)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars)
 
     def test_missing_rprocess(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars, thresh=-1,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars, thresh=-1,
                                 key=self.key)
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, None, self.dmeasure, self.covars)
 
     def test_missing_dmeasure(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars, thresh=-1,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars, thresh=-1,
                                 key=self.key)
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars)
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars)
 
     # error handling - wrong paramter type - theta, ys, J, rinit, rprocess, dmeasure
     def test_wrongtype_J(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, J=np.array(10, 20), rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, J=np.array(10, 20), rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars)
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, J="pop", rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, J="pop", rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars)
 
         def generate_J(n):
             return np.array(10, 20)
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, J=lambda n: generate_J(n), rinit=self.rinit,
+            _pfilter_pf_internal(self.theta, self.ys, J=lambda n: generate_J(n), rinit=self.rinit,
                                 rprocess=self.rprocess, dmeasure=self.dmeasure, covars=self.covars)
 
     def test_wrongtype_theta(self):
         with self.assertRaises(TypeError):
             theta = "theta"
-            pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                 thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             theta = np.array(["theta"])
-            pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                 thresh=-1, key=self.key)
         with self.assertRaises(IndexError):
             theta = np.array(5)
-            pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                 thresh=-1, key=self.key)
 
     def test_wrongtype_rinit(self):
@@ -316,13 +316,13 @@ class TestPfilterInternal_LG(unittest.TestCase):
         rinit = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit, self.rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit, self.rprocess, self.dmeasure, self.covars,
                                 key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit="rinit", rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit="rinit", rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
     def test_wrongtype_rprocess(self):
@@ -332,13 +332,13 @@ class TestPfilterInternal_LG(unittest.TestCase):
         rprocess = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, rprocess, self.dmeasure, self.covars,
                                 key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess="rprocess",
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess="rprocess",
                                 dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
     def test_wrongtype_dmeasure(self):
@@ -348,49 +348,49 @@ class TestPfilterInternal_LG(unittest.TestCase):
         dmeasure = onestep
 
         with self.assertRaises(RuntimeError) as cm:
-            pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, dmeasure, self.covars,
                                 key=self.key)
 
         self.assertEqual(str(cm.exception), "boink")
 
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure="dmeasure", covars=self.covars, key=self.key)
 
     def test_wrongtype_thresh(self):
         thresh = "-0.0001"
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, thresh=thresh, key=self.key)
 
         with self.assertRaises(TypeError):
             thresh = np.array([0.97, 0.97])
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, thresh=thresh, key=self.key)
 
     # using inappropriate value
     def test_invalid_J(self):
         with self.assertRaises(TypeError):
             J = 0
-            pfilter_pf_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
         with self.assertRaises(TypeError):
             J = -1
-            pfilter_pf_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
     def test_invalid_ys(self):
         # ys = self.ys[0,:]
         y = np.full(self.ys.shape, np.inf)
-        value = pfilter_pf_internal(self.theta, y, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        value = _pfilter_pf_internal(self.theta, y, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                     dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
         self.assertTrue(np.isnan(value).item())
 
     def test_invalid_thresh1(self):
         thresh = np.inf
-        value = pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        value = _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                     dmeasure=self.dmeasure, covars=self.covars, thresh=thresh, key=self.key)
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
@@ -398,7 +398,7 @@ class TestPfilterInternal_LG(unittest.TestCase):
 
     def test_invalid_thresh2(self):
         thresh = -np.inf
-        value = pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+        value = _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                     dmeasure=self.dmeasure, covars=self.covars, thresh=thresh, key=self.key)
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
@@ -406,7 +406,7 @@ class TestPfilterInternal_LG(unittest.TestCase):
 
     def test_new_arg(self):
         with self.assertRaises(TypeError):
-            pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
+            _pfilter_pf_internal(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
                                 dmeasure=self.dmeasure, covars=self.covars, alpha=0.9, thresh=10, key=self.key)
 
 

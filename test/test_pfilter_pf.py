@@ -3,7 +3,9 @@ import unittest
 import jax.numpy as np
 
 from tqdm import tqdm
-from pypomp.pfilter_pf import *
+from pypomp.pomp_class import Pomp
+from pypomp.pfilter_pf import pfilter_pf
+from pypomp.internal_functions import _pfilter_pf_internal
 
 
 def get_thetas(theta):

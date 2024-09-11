@@ -1,3 +1,13 @@
+from .internal_functions import _mop_internal
+from .internal_functions import _mop_internal_mean
+from .internal_functions import _pfilter_internal
+from .internal_functions import _pfilter_internal_mean
+from .internal_functions import _perfilter_internal
+from .internal_functions import _perfilter_internal_mean
+from .internal_functions import _pfilter_pf_internal
+from .internal_functions import _mif_internal
+from .internal_functions import _train_internal
+from .internal_functions import _fit_internal
 from .internal_functions import *
 
 
@@ -62,7 +72,7 @@ class Pomp:
             float: Negative log-likelihood value
         """
 
-        return mop_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha, key)
+        return _mop_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha, key)
 
     def mop_mean(self, J, alpha=0.97, key=None):
         """
@@ -78,7 +88,7 @@ class Pomp:
             float: The mean of negative log-likelihood value across the measurements.
         """
 
-        return mop_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha,
+        return _mop_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, alpha,
                                  key)
 
     def pfilter(self, J, thresh=100, key=None):
@@ -95,7 +105,7 @@ class Pomp:
             float: Negative log-likelihood value
         """
 
-        return pfilter_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh,
+        return _pfilter_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh,
                                 key)
 
     def pfilter_mean(self, J, thresh=100, key=None):
@@ -112,7 +122,7 @@ class Pomp:
             float: The mean of negative log-likelihood value across the measurements.
         """
 
-        return pfilter_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        return _pfilter_internal_mean(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                      thresh, key)
 
     def perfilter(self, J, sigmas, thresh=100, key=None):
@@ -130,7 +140,7 @@ class Pomp:
             float: The mean of negative log-likelihood value across the measurements.
         """
 
-        return perfilter_internal(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
+        return _perfilter_internal(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
                                   ndim=self.theta.ndim, covars=self.covars, thresh=thresh, key=key)
 
     def perfilter_mean(self, J, sigmas, thresh=100, key=None):
@@ -148,7 +158,7 @@ class Pomp:
             float: The mean of negative log-likelihood value across the measurements.
         """
 
-        return perfilter_internal_mean(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
+        return _perfilter_internal_mean(self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, self.dmeasures,
                                        ndim=self.theta.ndim, covars=self.covars, thresh=thresh, key=key)
 
     def pfilter_pf(self, J, thresh=100, key=None):
@@ -165,7 +175,7 @@ class Pomp:
         Returns:
             float: The mean of negative log-likelihood value across the measurements.
         """
-        return pfilter_pf_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,
+        return _pfilter_pf_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                    thresh, key)
 
     def mif(self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, monitor=False, verbose=False):
@@ -190,7 +200,7 @@ class Pomp:
             - An array of parameters through the iterations 
         """
 
-        return mif_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses,
+        return _mif_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses,
                             self.dmeasures,
                             sigmas, sigmas_init, self.covars, M, a, J, thresh, monitor, verbose)
 
@@ -227,7 +237,7 @@ class Pomp:
             - An array of parameters through the iterations 
         """
 
-        return train_internal(theta_ests, self.ys, self.rinit, self.rprocess, self.dmeasure, self.covars, J, Jh, method,
+        return _train_internal(theta_ests, self.ys, self.rinit, self.rprocess, self.dmeasure, self.covars, J, Jh, method,
                               itns, beta, eta, c, max_ls_itn, thresh, verbose, scale, ls, alpha)
 
     def fit(self, sigmas=None, sigmas_init=None, M=10, a=0.9,
@@ -275,7 +285,7 @@ class Pomp:
             - An array of parameters through the iterations
         """
 
-        return fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses,
+        return _fit_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses,
                             self.dmeasures, sigmas, sigmas_init, self.covars, M=M, a=a, J=J, Jh=Jh, method=method,
                             itns=itns, beta=beta, eta=eta, c=c, max_ls_itn=max_ls_itn, thresh_mif=thresh_mif,
                             thresh_tr=thresh_tr, verbose=verbose, scale=scale, ls=ls, alpha=alpha, monitor=monitor,

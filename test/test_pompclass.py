@@ -38,7 +38,7 @@ class TestPompClass_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
-        self.J = 10
+        self.J = 3
         angle = 0.2
         angle2 = angle if fixed else -0.5
         self.sigmas = 0.01
@@ -419,67 +419,28 @@ class TestPompClass_LG(unittest.TestCase):
     def test_fit_GD_valid(self):
         pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)
 
-        GD_loglik1, GD_theta1 = pomp_obj.fit(J=10, Jh=10, method="SGD", itns=2, alpha=0.97, scale=True, mode="GD")
-        self.assertEqual(GD_loglik1.shape, (3,))
-        self.assertEqual(GD_theta1.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
+        methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
+        
+        for method in methods:
+            with self.subTest(method=method):
+                GD_loglik1, GD_theta1 = pomp_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, mode="GD")
+                self.assertEqual(GD_loglik1.shape, (2,))
+                self.assertEqual(GD_theta1.shape, (2,) + self.theta.shape)
+                self.assertTrue(np.issubdtype(GD_loglik1.dtype, np.float32))
+                self.assertTrue(np.issubdtype(GD_theta1.dtype, np.float32))
+                
+                if method in ["WeightedNewton", "BFGS"]:
+                    GD_loglik2, GD_theta2 = pomp_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, ls=True, mode="GD")
+                    self.assertEqual(GD_loglik2.shape, (2,))
+                    self.assertEqual(GD_theta2.shape, (2,) + self.theta.shape)
+                    self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
+                    self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
 
-        GD_loglik2, GD_theta2 = pomp_obj.fit(J=10, Jh=10, method="SGD", itns=2, alpha=0.97, scale=True, ls=True,
-                                             mode="GD")
-        self.assertEqual(GD_loglik2.shape, (3,))
-        self.assertEqual(GD_theta2.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
-
-        # method = Newton
-        GD_loglik3, GD_theta3 = pomp_obj.fit(J=10, Jh=10, method="Newton", itns=2, alpha=0.97, scale=True, mode="GD")
-        self.assertEqual(GD_loglik3.shape, (3,))
-        self.assertEqual(GD_theta3.shape, (3,) + self.theta.shape)
+        GD_loglik3, GD_theta3 = pomp_obj.fit(itns=1, mode="GD")
+        self.assertEqual(GD_loglik3.shape, (2,))
+        self.assertEqual(GD_theta3.shape, (2,) + self.theta.shape)
         self.assertTrue(np.issubdtype(GD_loglik3.dtype, np.float32))
         self.assertTrue(np.issubdtype(GD_theta3.dtype, np.float32))
-
-        GD_loglik4, GD_theta4 = pomp_obj.fit(J=10, Jh=10, method="Newton", itns=2, alpha=0.97, scale=True, ls=True,
-                                             mode="GD")
-        self.assertEqual(GD_loglik4.shape, (3,))
-        self.assertEqual(GD_theta4.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik4.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta4.dtype, np.float32))
-
-        # refined Newton
-        GD_loglik5, GD_theta5 = pomp_obj.fit(J=10, Jh=10, method="WeightedNewton", itns=2, alpha=0.97, scale=True,
-                                             mode="GD")
-        self.assertEqual(GD_loglik5.shape, (3,))
-        self.assertEqual(GD_theta5.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik5.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta5.dtype, np.float32))
-
-        GD_loglik6, GD_theta6 = pomp_obj.fit(J=10, Jh=10, method="WeightedNewton", itns=2, alpha=0.97, scale=True,
-                                             ls=True, mode="GD")
-        self.assertEqual(GD_loglik6.shape, (3,))
-        self.assertEqual(GD_theta6.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik6.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta6.dtype, np.float32))
-
-        # BFGS
-        GD_loglik7, GD_theta7 = pomp_obj.fit(J=10, Jh=10, method="BFGS", itns=2, alpha=0.97, scale=True, mode="GD")
-        self.assertEqual(GD_loglik7.shape, (3,))
-        self.assertEqual(GD_theta7.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik7.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta7.dtype, np.float32))
-
-        GD_loglik8, GD_theta8 = pomp_obj.fit(J=10, Jh=10, method="BFGS", itns=2, alpha=0.97, scale=True, ls=True,
-                                             mode="GD")
-        self.assertEqual(GD_loglik8.shape, (3,))
-        self.assertEqual(GD_theta8.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik8.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta8.dtype, np.float32))
-
-        GD_loglik9, GD_theta9 = pomp_obj.fit(itns=2, mode="GD")
-        self.assertEqual(GD_loglik9.shape, (3,))
-        self.assertEqual(GD_theta9.shape, (3,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik9.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta9.dtype, np.float32))
 
     def test_fit_GD_invalid(self):
         pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)

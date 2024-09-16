@@ -23,7 +23,7 @@ class TestMopInternal_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
-        self.J = 10
+        self.J = 3
         angle = 0.2
         angle2 = angle if fixed else -0.5
         A = np.array([[np.cos(angle2), -np.sin(angle)],

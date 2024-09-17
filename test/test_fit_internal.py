@@ -705,7 +705,7 @@ class TestFitInternal_LG(unittest.TestCase):
                          Jh=Jh,mode="IFAD")
 
     def test_IFAD_invalid_ys(self):
-        # ys = self.ys[0,:]
+        ys = self.ys[0,:]
         y = np.full(self.ys.shape, np.inf)
         IFAD_loglik, IFAD_theta = _fit_internal(self.theta, y, self.rinit, rprocess=self.rprocess,
                                                dmeasure=self.dmeasure, rprocesses=self.rprocesses,
@@ -721,7 +721,7 @@ class TestFitInternal_LG(unittest.TestCase):
                                                dmeasures=self.dmeasures, sigmas=sigmas, sigmas_init=sigmas_init, M=2, 
                                                itns=1, J=3, Jh=3, mode="IFAD")
         self.assertTrue(np.all(np.isnan(IFAD_loglik)))
-        
+
 
     def test_IFAD_arg(self):
         with self.assertRaises(TypeError):

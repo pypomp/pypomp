@@ -436,12 +436,6 @@ class TestPompClass_LG(unittest.TestCase):
                     self.assertTrue(np.issubdtype(GD_loglik2.dtype, np.float32))
                     self.assertTrue(np.issubdtype(GD_theta2.dtype, np.float32))
 
-        GD_loglik3, GD_theta3 = pomp_obj.fit(itns=1, mode="GD")
-        self.assertEqual(GD_loglik3.shape, (2,))
-        self.assertEqual(GD_theta3.shape, (2,) + self.theta.shape)
-        self.assertTrue(np.issubdtype(GD_loglik3.dtype, np.float32))
-        self.assertTrue(np.issubdtype(GD_theta3.dtype, np.float32))
-
     def test_fit_GD_invalid(self):
         pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)
 

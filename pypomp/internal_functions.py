@@ -4,12 +4,12 @@ import jax
 import jax.numpy as np
 import numpy as onp
 from jax import jit
-from tensorflow_probability.substrates import jax as tfp
+# from tensorflow_probability.substrates import jax as tfp
 from tqdm import tqdm
 
-tfd = tfp.distributions
-tfb = tfp.bijectors
-tfpk = tfp.math.psd_kernels
+# tfd = tfp.distributions
+# tfb = tfp.bijectors
+# tfpk = tfp.math.psd_kernels
 
 '''resampling functions'''
 

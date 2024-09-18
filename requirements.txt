@@ -2,4 +2,3 @@ jax>=0.4.31
 tqdm>=4.66.4
 pypomp>=0.0.1
 numpy>=1.24
-tensorflow-probability>=0.24.0

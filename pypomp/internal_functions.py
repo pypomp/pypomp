@@ -1027,8 +1027,8 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
         J (int, optional): The number of particles in the MOP objective for obtaining the gradient. Defaults to 5000.
         Jh (int, optional): The number of particles in the MOP objective for obtaining the Hessian matrix. 
                             Defaults to 1000.
-        method (str, optional): The optimization method to use, including Newton method, weighted Newton method
-                                BFGS method, gradient descent. Defaults to 'Newton'.
+        method (str, optional): The optimization method to use, including Newton's method, weighted Newton's method
+                                BFGS method, gradient descent. Defaults to gradient descent.
         itns (int, optional): Maximum iteration for the gradient descent optimization. Defaults to 20.
         beta (float, optional): Initial step size for the line search algorithm. Defaults to 0.9.
         eta (float, optional): Initial step size. Defaults to 0.0025.

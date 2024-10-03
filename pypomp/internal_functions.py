@@ -1010,7 +1010,7 @@ def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, s
     return np.array(logliks), np.array(params)
 
 
-def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=5000, Jh=1000, method='Newton', itns=20,
+def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=5000, Jh=1000, method='GD', itns=20,
                    beta=0.9, eta=0.0025, c=0.1, max_ls_itn=10, thresh=100, verbose=False, scale=False, ls=False,
                    alpha=1):
     """
@@ -1154,7 +1154,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
 
 def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasures=None, sigmas=None, sigmas_init=None,
                  covars=None, M=10, a=0.9,
-                 J=100, Jh=1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1,
+                 J=100, Jh=1000, method='GD', itns=20, beta=0.9, eta=0.0025, c=0.1,
                  max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, ls=False, alpha=0.1,
                  monitor=True, mode="IFAD"):
     """

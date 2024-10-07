@@ -2,6 +2,7 @@ import jax
 import unittest
 import jax.numpy as np
 
+from jax import vmap
 from tqdm import tqdm
 from pypomp.pomp_class import Pomp
 from pypomp.perfilter import perfilter
@@ -9,18 +10,18 @@ from pypomp.internal_functions import _perfilter_internal
 
 
 def get_thetas(theta):
-    A = theta[0]
-    C = theta[1]
-    Q = theta[2]
-    R = theta[3]
-    return A, C, Q, R
-
-
-def transform_thetas(theta):
+    A = theta[0:4].reshape(2, 2)
+    C = theta[4:8].reshape(2, 2)
+    Q = theta[8:12].reshape(2, 2)
+    R = theta[12:16].reshape(2, 2)
     return np.array([A, C, Q, R])
 
+get_perthetas = vmap(get_thetas, in_axes = 0)
 
-class TestMop_LG(unittest.TestCase):
+def transform_thetas(A, C, Q, R):
+    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+
+class TestFitInternal_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
@@ -34,7 +35,7 @@ class TestMop_LG(unittest.TestCase):
                       [1e-4, 1]]) / 100
         R = np.array([[1, .1],
                       [.1, 1]]) / 10
-        self.theta = np.array([A, C, Q, R])
+        self.theta = transform_thetas(A, C, Q, R)
         x = np.ones(2)
         xs = []
         ys = []
@@ -79,14 +80,19 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val1.shape, ())
         self.assertTrue(np.isfinite(val1.item()))
         self.assertEqual(val1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
+        theta1_new = get_perthetas(theta1)
+        self.assertEqual(theta1_new.shape, (self.J, 4, 2, 2))
 
         val2, theta2 = perfilter(rinit=self.rinit, rprocesses=self.rprocesses, dmeasures=self.dmeasures,
                                  theta=self.theta, ys=self.ys, sigmas=self.sigmas)
         self.assertEqual(val2.shape, ())
         self.assertTrue(np.isfinite(val2.item()))
         self.assertEqual(val2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (50, 4, 2, 2))
+        self.assertEqual(theta2.shape, (50, 16))
+        theta2_new = get_perthetas(theta2)
+        self.assertEqual(theta2_new.shape, (50, 4, 2, 2))
+
 
     def test_class_basic(self):
         pomp_obj = Pomp(self.rinit, self.rproc, self.dmeas, self.ys, self.theta, self.covars)
@@ -95,20 +101,29 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val1.shape, ())
         self.assertTrue(np.isfinite(val1.item()))
         self.assertEqual(val1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
+        theta1_new = get_perthetas(theta1)
+        self.assertEqual(theta1_new.shape, (self.J, 4, 2, 2))
+
 
         val2, theta2 = perfilter(pomp_obj, sigmas=self.sigmas)
         self.assertEqual(val2.shape, ())
         self.assertTrue(np.isfinite(val2.item()))
         self.assertEqual(val2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (50, 4, 2, 2))
+        self.assertEqual(theta2.shape, (50, 16))
+        theta2_new = get_perthetas(theta2)
+        self.assertEqual(theta2_new.shape, (50, 4, 2, 2))
+
 
         val3, theta3 = perfilter(pomp_obj, J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
                                  dmeasures=self.dmeasures, theta=[], ys=[])
         self.assertEqual(val3.shape, ())
         self.assertTrue(np.isfinite(val3.item()))
         self.assertEqual(val3.dtype, np.float32)
-        self.assertEqual(theta3.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta3.shape, (self.J, 16))
+        theta3_new = get_perthetas(theta3)
+        self.assertEqual(theta3_new.shape, (self.J, 4, 2, 2))
+
 
     def test_invalid_input(self):
         with self.assertRaises(ValueError) as text:

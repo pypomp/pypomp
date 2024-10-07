@@ -9,18 +9,18 @@ from pypomp.internal_functions import _mop_internal
 
 
 def get_thetas(theta):
-    A = theta[0]
-    C = theta[1]
-    Q = theta[2]
-    R = theta[3]
+    A = theta[0:4].reshape(2, 2)
+    C = theta[4:8].reshape(2, 2)
+    Q = theta[8:12].reshape(2, 2)
+    R = theta[12:16].reshape(2, 2)
     return A, C, Q, R
 
 
-def transform_thetas(theta):
-    return np.array([A, C, Q, R])
+def transform_thetas(A, C, Q, R):
+    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
-class TestMop_LG(unittest.TestCase):
+class TestFitInternal_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
@@ -34,7 +34,7 @@ class TestMop_LG(unittest.TestCase):
                       [1e-4, 1]]) / 100
         R = np.array([[1, .1],
                       [.1, 1]]) / 10
-        self.theta = np.array([A, C, Q, R])
+        self.theta =  transform_thetas(A, C, Q, R)
         x = np.ones(2)
         xs = []
         ys = []

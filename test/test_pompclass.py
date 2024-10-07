@@ -7,15 +7,15 @@ from pypomp.pomp_class import *
 
 
 def get_thetas(theta):
-    A = theta[0]
-    C = theta[1]
-    Q = theta[2]
-    R = theta[3]
+    A = theta[0:4].reshape(2, 2)
+    C = theta[4:8].reshape(2, 2)
+    Q = theta[8:12].reshape(2, 2)
+    R = theta[12:16].reshape(2, 2)
     return A, C, Q, R
 
 
-def transform_thetas(theta):
-    return np.array([A, C, Q, R])
+def transform_thetas(A, C, Q, R):
+    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
 def custom_rinit(theta, J, covars=None):
@@ -38,10 +38,9 @@ class TestPompClass_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
-        self.J = 3
+        self.J = 10
         angle = 0.2
         angle2 = angle if fixed else -0.5
-        self.sigmas = 0.01
         A = np.array([[np.cos(angle2), -np.sin(angle)],
                       [np.sin(angle), np.cos(angle2)]])
         C = np.eye(2)
@@ -49,7 +48,7 @@ class TestPompClass_LG(unittest.TestCase):
                       [1e-4, 1]]) / 100
         R = np.array([[1, .1],
                       [.1, 1]]) / 10
-        self.theta = np.array([A, C, Q, R])
+        self.theta =  transform_thetas(A, C, Q, R)
         x = np.ones(2)
         xs = []
         ys = []
@@ -64,6 +63,7 @@ class TestPompClass_LG(unittest.TestCase):
         self.xs = np.array(xs)
         self.ys = np.array(ys)
         self.covars = None
+        self.sigmas = 0.02
 
         self.rinit = custom_rinit
         self.rproc = custom_rproc
@@ -258,25 +258,25 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(val1.shape, ())
         self.assertTrue(np.isfinite(val1.item()))
         self.assertEqual(val1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
 
         val2, theta2 = pomp_obj.perfilter(1, 0, thresh=10, key=self.key)
         self.assertEqual(val2.shape, ())
         self.assertTrue(np.isfinite(val2.item()))
         self.assertEqual(val2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (1, 4, 2, 2))
+        self.assertEqual(theta2.shape, (1, 16))
 
         val3, theta3 = pomp_obj.perfilter_mean(self.J, self.sigmas, key=self.key)
         self.assertEqual(val3.shape, ())
         self.assertTrue(np.isfinite(val3.item()))
         self.assertEqual(val3.dtype, np.float32)
-        self.assertEqual(theta3.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta3.shape, (self.J, 16))
 
         val4, theta4 = pomp_obj.perfilter_mean(1, 0, thresh=10, key=self.key)
         self.assertEqual(val4.shape, ())
         self.assertTrue(np.isfinite(val4.item()))
         self.assertEqual(val4.dtype, np.float32)
-        self.assertEqual(theta4.shape, (1, 4, 2, 2))
+        self.assertEqual(theta4.shape, (1, 16))
 
     def test_perfilter_invalid(self):
         pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta, self.covars)

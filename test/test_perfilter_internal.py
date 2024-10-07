@@ -2,29 +2,30 @@ import jax
 import unittest
 import jax.numpy as np
 
+from jax import vmap
 from tqdm import tqdm
 from pypomp.internal_functions import _pfilter_internal
 from pypomp.internal_functions import _perfilter_internal
 from pypomp.internal_functions import _perfilter_internal_mean
 
+
 def get_thetas(theta):
-    A = theta[0]
-    C = theta[1]
-    Q = theta[2]
-    R = theta[3]
-    return A, C, Q, R
-
-
-def transform_thetas(theta):
+    A = theta[0:4].reshape(2, 2)
+    C = theta[4:8].reshape(2, 2)
+    Q = theta[8:12].reshape(2, 2)
+    R = theta[12:16].reshape(2, 2)
     return np.array([A, C, Q, R])
 
+get_perthetas = vmap(get_thetas, in_axes = 0)
 
-class TestPerfilterInternal_LG(unittest.TestCase):
+def transform_thetas(A, C, Q, R):
+    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+
+class TestFitInternal_LG(unittest.TestCase):
     def setUp(self):
         fixed = False
         self.key = jax.random.PRNGKey(111)
         self.J = 10
-        self.sigmas = 0.01
         angle = 0.2
         angle2 = angle if fixed else -0.5
         A = np.array([[np.cos(angle2), -np.sin(angle)],
@@ -34,7 +35,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                       [1e-4, 1]]) / 100
         R = np.array([[1, .1],
                       [.1, 1]]) / 10
-        self.theta = np.array([A, C, Q, R])
+        self.theta = transform_thetas(A, C, Q, R)
         x = np.ones(2)
         xs = []
         ys = []
@@ -48,19 +49,28 @@ class TestPerfilterInternal_LG(unittest.TestCase):
             ys.append(y)
         self.xs = np.array(xs)
         self.ys = np.array(ys)
+        self.sigmas = 0.02
         self.covars = None
 
         def custom_rinit(theta, J, covars=None):
             return np.ones((J, 2))
 
         def custom_rproc(state, theta, key, covars=None):
-            A, C, Q, R = get_thetas(theta)
+            theta_new = get_thetas(theta)
+            A = theta_new[0]
+            C = theta_new[1]
+            Q = theta_new[2]
+            R = theta_new[3]
             key, subkey = jax.random.split(key)
             return jax.random.multivariate_normal(key=subkey,
                                                   mean=A @ state, cov=Q)
 
         def custom_dmeas(y, preds, theta):
-            A, C, Q, R = get_thetas(theta)
+            theta_new = get_thetas(theta)
+            A = theta_new[0]
+            C = theta_new[1]
+            Q = theta_new[2]
+            R = theta_new[3]
             return jax.scipy.stats.multivariate_normal.logpdf(y, preds, R)
 
         self.rinit = custom_rinit
@@ -79,45 +89,64 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
+        theta1_new = get_perthetas(theta1)
+        self.assertEqual(theta1_new.shape, (self.J, 4, 2, 2))
+        
         result2, theta2 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta2.shape, (self.J, 16))
         self.assertEqual(result1, result2)
         self.assertTrue(np.array_equal(theta1, theta2))
+        theta2_new = get_perthetas(theta2)
+        self.assertEqual(theta2_new.shape, (self.J, 4, 2, 2))
 
         result3, theta3 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=10, key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        self.assertEqual(theta3.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta3.shape, (self.J, 16))
+        theta3_new = get_perthetas(theta3)
+        self.assertEqual(theta3_new.shape, (self.J, 4, 2, 2))
+
         result4, theta4 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=10, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
         self.assertEqual(result4.dtype, np.float32)
-        self.assertEqual(theta4.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta4.shape, (self.J, 16))
+        theta4_new = get_perthetas(theta4)
+        self.assertEqual(theta4_new.shape, (self.J, 4, 2, 2))
+
         self.assertEqual(result3, result4)
         self.assertTrue(np.array_equal(theta3, theta4))
+        self.assertTrue(np.array_equal(theta3_new, theta4_new))
 
         result5, theta5 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-1, key=self.key)
         self.assertEqual(result5.shape, ())
         self.assertTrue(np.isfinite(result5.item()))
         self.assertEqual(result5.dtype, np.float32)
-        self.assertEqual(theta5.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta5.shape, (self.J, 16))
+        theta5_new = get_perthetas(theta5)
+        self.assertEqual(theta5_new.shape, (self.J, 4, 2, 2))
+
         result6, theta6 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-1, key=self.key)
         self.assertEqual(result6.shape, ())
         self.assertTrue(np.isfinite(result6.item()))
         self.assertEqual(result6.dtype, np.float32)
-        self.assertEqual(theta6.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta6.shape, (self.J, 16))
+        theta6_new = get_perthetas(theta6)
+        self.assertEqual(theta6_new.shape, (self.J, 4, 2, 2))
+
         self.assertEqual(result5, result6)
         self.assertTrue(np.array_equal(theta5, theta6))
+        self.assertTrue(np.array_equal(theta5_new, theta6_new))
 
     def test_edge_J(self):
         result1, theta1 = _perfilter_internal(self.theta, self.ys, 1, self.sigmas, self.rinit, self.rprocesses,
@@ -125,25 +154,33 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (1, 4, 2, 2))
+        self.assertEqual(theta1.shape, (1, 16))
+        theta1_new = get_perthetas(theta1)
+        self.assertEqual(theta1_new.shape, (1, 4, 2, 2))
         result2, theta2 = _perfilter_internal(self.theta, self.ys, 1, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-1, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (1, 4, 2, 2))
+        self.assertEqual(theta2.shape, (1, 16))
+        theta2_new = get_perthetas(theta2)
+        self.assertEqual(theta2_new.shape, (1, 4, 2, 2))
         result3, theta3 = _perfilter_internal(self.theta, self.ys, 100, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, key=self.key)
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        self.assertEqual(theta3.shape, (100, 4, 2, 2))
+        self.assertEqual(theta3.shape, (100, 16))
+        theta3_new = get_perthetas(theta3)
+        self.assertEqual(theta3_new.shape, (100, 4, 2, 2))
         result4, theta4 = _perfilter_internal(self.theta, self.ys, 100, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-1, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
         self.assertEqual(result4.dtype, np.float32)
-        self.assertEqual(theta4.shape, (100, 4, 2, 2))
+        self.assertEqual(theta4.shape, (100, 16))
+        theta4_new = get_perthetas(theta4)
+        self.assertEqual(theta4_new.shape, (100, 4, 2, 2))
 
     def test_edge_thresh(self):
         result1, theta1 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
@@ -151,13 +188,13 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
         result2, theta2 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-10, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))
         self.assertEqual(result2.dtype, np.float32)
-        self.assertEqual(theta2.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta2.shape, (self.J, 16))
         self.assertEqual(result1, result2)
 
         result3, theta3 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
@@ -165,14 +202,14 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        self.assertEqual(theta3.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta3.shape, (self.J, 16))
 
         result4, theta4 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses,
                                              self.dmeasures, self.ndim, self.covars, thresh=-1000, key=self.key)
         self.assertEqual(result4.shape, ())
         self.assertTrue(np.isfinite(result4.item()))
         self.assertEqual(result4.dtype, np.float32)
-        self.assertEqual(theta4.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta4.shape, (self.J, 16))
         self.assertEqual(result1, result4)
 
     def test_edge_ys(self):
@@ -183,7 +220,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
         self.assertEqual(result.dtype, np.float32)
-        self.assertTrue(theta.shape, (self.J, 4, 2, 2))
+        self.assertTrue(theta.shape, (self.J, 16))
 
     def test_edge_sigmas(self):
         # when len(ys) = 1
@@ -195,7 +232,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
         self.assertEqual(result.dtype, np.float32)
-        self.assertTrue(theta.shape, (self.J, 4, 2, 2))
+        self.assertTrue(theta.shape, (self.J, 16))
         self.assertEqual(result, result2)
 
         sigmas = -0.001
@@ -204,7 +241,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result3.shape, ())
         self.assertTrue(np.isfinite(result3.item()))
         self.assertEqual(result3.dtype, np.float32)
-        self.assertTrue(theta.shape, (self.J, 4, 2, 2))
+        self.assertTrue(theta.shape, (self.J, 16))
         self.assertNotEqual(result3, result2)
 
     def test_dmeasures_inf(self):
@@ -218,7 +255,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
         self.assertFalse(np.isfinite(result.item()))
-        self.assertEqual(theta.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta.shape, (self.J, 16))
 
     def test_zero_dmeasures(self):
         def zero_dmeasures(y, particlesP, thetas):
@@ -229,7 +266,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
         self.assertEqual(result.item(), 0.0)
-        self.assertEqual(theta.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta.shape, (self.J, 16))
 
     def test_rprocess_inf(self):
         def custom_rproc(state, theta, key, covars=None):
@@ -246,7 +283,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertFalse(np.isnan(result).item())
         self.assertEqual(result.dtype, np.float32)
         self.assertEqual(result.shape, ())
-        self.assertEqual(theta.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta.shape, (self.J, 16))
 
     def test_invalid_ys(self):
         y = np.full(self.ys.shape, np.inf)
@@ -256,7 +293,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertFalse(np.isnan(value).item())
         self.assertEqual(value.dtype, np.float32)
         self.assertEqual(value.shape, ())
-        self.assertEqual(theta.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta.shape, (self.J, 16))
 
     def test_missing(self):
         with self.assertRaises(TypeError):
@@ -498,7 +535,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(value1.dtype, np.float32)
         self.assertEqual(value1.shape, ())
         self.assertTrue(np.isfinite(value1.item()))
-        self.assertEqual(theta1.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta1.shape, (self.J, 16))
 
         thresh = -np.inf
         value2, theta2 = _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, rinit=self.rinit,
@@ -507,7 +544,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(value2.dtype, np.float32)
         self.assertEqual(value2.shape, ())
         self.assertTrue(np.isfinite(value2.item()))
-        self.assertEqual(theta2.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta2.shape, (self.J, 16))
 
     def test_new_arg(self):
         with self.assertRaises(TypeError):
@@ -521,7 +558,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
         self.assertEqual(result.shape, ())
         self.assertTrue(np.isfinite(result.item()))
         self.assertEqual(result.dtype, np.float32)
-        self.assertEqual(theta.shape, (self.J, 4, 2, 2))
+        self.assertEqual(theta.shape, (self.J, 16))
 
 
 if __name__ == "__main__":

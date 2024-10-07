@@ -7,15 +7,15 @@ from pypomp.internal_functions import _fit_internal
 
 
 def get_thetas(theta):
-    A = theta[0]
-    C = theta[1]
-    Q = theta[2]
-    R = theta[3]
+    A = theta[0:4].reshape(2, 2)
+    C = theta[4:8].reshape(2, 2)
+    Q = theta[8:12].reshape(2, 2)
+    R = theta[12:16].reshape(2, 2)
     return A, C, Q, R
 
 
-def transform_thetas(theta):
-    return np.array([A, C, Q, R])
+def transform_thetas(A, C, Q, R):
+    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
 class TestFitInternal_LG(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestFitInternal_LG(unittest.TestCase):
                       [1e-4, 1]]) / 100
         R = np.array([[1, .1],
                       [.1, 1]]) / 10
-        self.theta = np.array([A, C, Q, R])
+        self.theta =  transform_thetas(A, C, Q, R)
         x = np.ones(2)
         xs = []
         ys = []
@@ -52,6 +52,7 @@ class TestFitInternal_LG(unittest.TestCase):
             return np.ones((J, 2))
 
         def custom_rproc(state, theta, key, covars=None):
+            # theta here is a flattend array
             A, C, Q, R = get_thetas(theta)
             key, subkey = jax.random.split(key)
             return jax.random.multivariate_normal(key=subkey,
@@ -696,13 +697,13 @@ class TestFitInternal_LG(unittest.TestCase):
             Jh = 0
             _fit_internal(self.theta, self.ys, self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          rprocesses=self.rprocesses, dmeasures=self.dmeasures, sigmas=0.02, sigmas_init=1e-20, J=3,
-                         Jh=Jh, mode="IFAD")
+                         Jh=Jh, method="Newton", mode="IFAD")
 
         with self.assertRaises(TypeError):
             Jh = -1
             _fit_internal(self.theta, self.ys, self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
                          rprocesses=self.rprocesses, dmeasures=self.dmeasures, sigmas=0.02, sigmas_init=1e-20, J=3,
-                         Jh=Jh,mode="IFAD")
+                         Jh=Jh, method="WeightedNewton", mode="IFAD")
 
     def test_IFAD_invalid_ys(self):
         ys = self.ys[0,:]

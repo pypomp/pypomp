@@ -1069,35 +1069,36 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
             hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
 
             # flatten
-            theta_flat = theta_ests.flatten()
-            grad_flat = grad.flatten()
-            hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
-            hess_flat_pinv = np.linalg.pinv(hess_flat)
-            direction_flat = -hess_flat_pinv @ grad_flat
-            direction = direction_flat.reshape(theta_ests.shape)
+            # theta_flat = theta_ests.flatten()
+            # grad_flat = grad.flatten()
+            # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+            # hess_flat_pinv = np.linalg.pinv(hess_flat)
+            # direction_flat = -hess_flat_pinv @ grad_flat
+            # direction = direction_flat.reshape(theta_ests.shape)
 
-            # direction = -np.linalg.pinv(hess) @ grad
+            direction = -np.linalg.pinv(hess) @ grad
         elif method == 'WeightedNewton':
             if i == 0:
                 hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
-                theta_flat = theta_ests.flatten()
-                grad_flat = grad.flatten()
-                hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
-                hess_flat_pinv = np.linalg.pinv(hess_flat)
-                direction_flat = -hess_flat_pinv @ grad_flat
-                direction = direction_flat.reshape(theta_ests.shape)
-                # direction = -np.linalg.pinv(hess) @ grad
+                # theta_flat = theta_ests.flatten()
+                # grad_flat = grad.flatten()
+                # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+                # hess_flat_pinv = np.linalg.pinv(hess_flat)
+                # direction_flat = -hess_flat_pinv @ grad_flat
+                # direction = direction_flat.reshape(theta_ests.shape)
+                direction = -np.linalg.pinv(hess) @ grad
+
             else:
                 hess = _jhess_mop(theta_ests, ys, Jh, rinit, rprocess, dmeasure, covars=covars, alpha=alpha, key=key)
                 wt = (i ** onp.log(i)) / ((i + 1) ** (onp.log(i + 1)))
-                theta_flat = theta_ests.flatten()
-                grad_flat = grad.flatten()
+                # theta_flat = theta_ests.flatten()
+                # grad_flat = grad.flatten()
                 weighted_hess = wt * hesses[-1] + (1 - wt) * hess
-                weighted_hess_flat = weighted_hess.reshape(theta_flat.size, theta_flat.size)
-                weighted_hess_flat_pinv = np.linalg.pinv(weighted_hess_flat)
-                direction_flat = -weighted_hess_flat_pinv @ grad_flat
-                direction = direction_flat.reshape(theta_ests.shape)
-                # direction = -np.linalg.pinv(wt * hesses[-1] + (1-wt) * hess) @ grad
+                # weighted_hess_flat = weighted_hess.reshape(theta_flat.size, theta_flat.size)
+                # weighted_hess_flat_pinv = np.linalg.pinv(weighted_hess_flat)
+                # direction_flat = -weighted_hess_flat_pinv @ grad_flat
+                # direction = direction_flat.reshape(theta_ests.shape)
+                direction = -np.linalg.pinv(weighted_hess) @ grad
 
         elif method == 'BFGS' and i > 1:
             s_k = et * direction
@@ -1111,14 +1112,14 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
                     + rho_k * s_k[:, np.newaxis] * s_k[np.newaxis, :])
             hess = np.where(np.isfinite(rho_k), hess, hess)
 
-            theta_flat = theta_ests.flatten()
-            grad_flat = grad.flatten()
-            hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+            # theta_flat = theta_ests.flatten()
+            # grad_flat = grad.flatten()
+            # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
 
-            direction_flat = -hess_flat @ grad_flat
-            direction = direction_flat.reshape(theta_ests.shape)
+            # direction_flat = -hess_flat @ grad_flat
+            # direction = direction_flat.reshape(theta_ests.shape)
 
-            # direction = -hess @ grad
+            direction = -hess @ grad
 
         else:
             direction = -grad

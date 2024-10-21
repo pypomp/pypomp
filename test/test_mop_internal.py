@@ -72,12 +72,12 @@ class TestFitInternal_LG(unittest.TestCase):
 
     def test_basic(self):
         result1 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
-                               alpha=0.97, key=self.key)
+                                alpha=0.97, key=self.key)
         self.assertEqual(result1.shape, ())
         self.assertTrue(np.isfinite(result1.item()))
         self.assertEqual(result1.dtype, np.float32)
         result2 = _mop_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
-                               alpha=0.97, key=self.key)
+                                alpha=0.97, key=self.key)
 
         self.assertEqual(result2.shape, ())
         self.assertTrue(np.isfinite(result2.item()))

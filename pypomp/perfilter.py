@@ -38,6 +38,6 @@ def perfilter(pomp_object=None, J=50, rinit=None, rprocesses=None, dmeasures=Non
     elif rinit is not None and rprocesses is not None and dmeasures is not None and theta is not None and ys is not \
             None and sigmas is not None:
         return _perfilter_internal(theta=theta, ys=ys, J=J, sigmas=sigmas, rinit=rinit, rprocesses=rprocesses,
-                                  dmeasures=dmeasures, ndim=theta.ndim, covars=covars, thresh=thresh, key=key)
+                                   dmeasures=dmeasures, ndim=theta.ndim, covars=covars, thresh=thresh, key=key)
     else:
         raise ValueError("Invalid Arguments Input")

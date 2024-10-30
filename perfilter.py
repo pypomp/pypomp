@@ -1,8 +1,7 @@
 """
 This module implements perturbed particle filtering methods for POMP models.
 """
-#from pomp_class import *
-import pomp_class
+from pomp_class import *
 from internal_functions import _perfilter_internal
 
 

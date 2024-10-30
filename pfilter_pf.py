@@ -1,8 +1,7 @@
 """
 This module implements particle filtering methods with weight equalization for POMP models.
 """
-# from pomp_class import *
-import pomp_class
+from pomp_class import *
 from internal_functions import _pfilter_pf_internal
 
 

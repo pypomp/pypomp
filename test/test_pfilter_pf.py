@@ -1,6 +1,6 @@
 import jax
 import unittest
-import jax.numpy as np
+import jax.numpy as jnp
 
 from tqdm import tqdm
 from pypomp.pomp_class import Pomp
@@ -17,7 +17,7 @@ def get_thetas(theta):
 
 
 def transform_thetas(A, C, Q, R):
-    return np.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+    return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
 class TestFitInternal_LG(unittest.TestCase):
@@ -27,15 +27,15 @@ class TestFitInternal_LG(unittest.TestCase):
         self.J = 10
         angle = 0.2
         angle2 = angle if fixed else -0.5
-        A = np.array([[np.cos(angle2), -np.sin(angle)],
-                      [np.sin(angle), np.cos(angle2)]])
-        C = np.eye(2)
-        Q = np.array([[1, 1e-4],
-                      [1e-4, 1]]) / 100
-        R = np.array([[1, .1],
-                      [.1, 1]]) / 10
+        A = jnp.array([[jnp.cos(angle2), -jnp.sin(angle)],
+                       [jnp.sin(angle), jnp.cos(angle2)]])
+        C = jnp.eye(2)
+        Q = jnp.array([[1, 1e-4],
+                       [1e-4, 1]]) / 100
+        R = jnp.array([[1, .1],
+                       [.1, 1]]) / 10
         self.theta =  transform_thetas(A, C, Q, R)
-        x = np.ones(2)
+        x = jnp.ones(2)
         xs = []
         ys = []
         T = 4
@@ -46,12 +46,12 @@ class TestFitInternal_LG(unittest.TestCase):
             y = jax.random.multivariate_normal(key=subkey, mean=C @ x, cov=R)
             xs.append(x)
             ys.append(y)
-        self.xs = np.array(xs)
-        self.ys = np.array(ys)
+        self.xs = jnp.array(xs)
+        self.ys = jnp.array(ys)
         self.covars = None
 
         def custom_rinit(theta, J, covars=None):
-            return np.ones((J, 2))
+            return jnp.ones((J, 2))
 
         def custom_rproc(state, theta, key, covars=None):
             A, C, Q, R = get_thetas(theta)
@@ -77,11 +77,11 @@ class TestFitInternal_LG(unittest.TestCase):
         val2 = pfilter_pf(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta,
                           ys=self.ys)
         self.assertEqual(val1.shape, ())
-        self.assertTrue(np.isfinite(val1.item()))
-        self.assertEqual(val1.dtype, np.float32)
+        self.assertTrue(jnp.isfinite(val1.item()))
+        self.assertEqual(val1.dtype, jnp.float32)
         self.assertEqual(val2.shape, ())
-        self.assertTrue(np.isfinite(val2.item()))
-        self.assertEqual(val2.dtype, np.float32)
+        self.assertTrue(jnp.isfinite(val2.item()))
+        self.assertEqual(val2.dtype, jnp.float32)
 
     def test_class_basic(self):
         pomp_obj = Pomp(self.rinit, self.rproc, self.dmeas, self.ys, self.theta, self.covars)
@@ -89,14 +89,14 @@ class TestFitInternal_LG(unittest.TestCase):
         val2 = pfilter_pf(pomp_obj)
         val3 = pfilter_pf(pomp_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], ys=[])
         self.assertEqual(val1.shape, ())
-        self.assertTrue(np.isfinite(val1.item()))
-        self.assertEqual(val1.dtype, np.float32)
+        self.assertTrue(jnp.isfinite(val1.item()))
+        self.assertEqual(val1.dtype, jnp.float32)
         self.assertEqual(val2.shape, ())
-        self.assertTrue(np.isfinite(val2.item()))
-        self.assertEqual(val2.dtype, np.float32)
+        self.assertTrue(jnp.isfinite(val2.item()))
+        self.assertEqual(val2.dtype, jnp.float32)
         self.assertEqual(val3.shape, ())
-        self.assertTrue(np.isfinite(val3.item()))
-        self.assertEqual(val3.dtype, np.float32)
+        self.assertTrue(jnp.isfinite(val3.item()))
+        self.assertEqual(val3.dtype, jnp.float32)
 
     def test_invalid_input(self):
         with self.assertRaises(ValueError) as text:

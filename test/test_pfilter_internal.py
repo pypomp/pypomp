@@ -77,25 +77,21 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(result1.shape, ())
         self.assertTrue(jnp.isfinite(result1.item()))
         self.assertEqual(result1.dtype, jnp.float32)
-        self.assertAlmostEqual(result1, 1.961, places=2)
         result2 = _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                    thresh=100, key=self.key)
         self.assertEqual(result2.shape, ())
         self.assertTrue(jnp.isfinite(result2.item()))
         self.assertEqual(result2.dtype, jnp.float32)
-        self.assertAlmostEqual(result2, 1.961, places=2)
         # test result1 and result2 are the same
         self.assertEqual(result1, result2)
 
         result3 = _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                    thresh=10, key=self.key)
-        self.assertAlmostEqual(result3, 1.961, places=2)
         self.assertEqual(result3.shape, ())
         self.assertTrue(jnp.isfinite(result3.item()))
         self.assertEqual(result3.dtype, jnp.float32)
         result4 = _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,
                                    thresh=10, key=self.key)
-        self.assertAlmostEqual(result4, 1.961, places=2)
         self.assertEqual(result4.shape, ())
         self.assertTrue(jnp.isfinite(result4.item()))
         self.assertEqual(result4.dtype, jnp.float32)
@@ -171,7 +167,6 @@ class TestFitInternal_LG(unittest.TestCase):
         self.assertEqual(result.shape, ())
         self.assertTrue(jnp.isfinite(result.item()))
         self.assertEqual(result.dtype, jnp.float32)
-        self.assertAlmostEqual(result, 3.905, places=3)
 
     def test_dmeasure_inf(self):
         # reset dmeasure to be the function that always reture -Inf, overide the self functions

@@ -252,7 +252,7 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
         key, *keys = jax.random.split(key, num=J + 1)
         keys = jnp.array(keys)
 
-    weightsP = alpha * weightsF
+    weightsP = alpha * weightsF 
 
     if covars is not None:
         particlesP = rprocess(particlesF, theta, keys, covars)
@@ -264,7 +264,9 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
         measurements = measurements.sum(axis=-1)
 
     loglik += (jax.scipy.special.logsumexp(weightsP + measurements)
-               - jax.scipy.special.logsumexp(weightsP))
+               - jax.scipy.special.logsumexp(weightsP)) 
+    # test different, logsumexp - source code (floating point arithmetic issue) # make a little note in the code, discuss it in the quant test about the small difference
+    # logsumexp source code
 
     norm_weights, loglik_phi_t = _normalize_weights(jax.lax.stop_gradient(measurements))
 

@@ -1,6 +1,7 @@
 """
 This module implements internal functions for POMP models.
 """
+# TODO check if np.random functions work correctly, otherwise change them
 from functools import partial
 import jax
 import jax.numpy as jnp
@@ -149,7 +150,6 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
     """
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights)
-    print(f"counts dtype: {counts.dtype}, counts shape: {counts.shape}")
     particlesF = particlesP[counts]
     norm_weights = norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) \
                    - jnp.log(J)
@@ -514,7 +514,7 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
         key, *keys = jax.random.split(key, num=J + 1)
         keys = jnp.array(keys)
 
-    thetas += sigmas * jnp.array(np.random.normal(size=thetas.shape))
+    thetas += sigmas * jnp.array(jax.random.normal(shape=thetas.shape, key=key))
 
     # Get prediction particles
     # r processes: particleF and thetas are both vectorized (J times)
@@ -534,11 +534,13 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
 
     loglik += loglik_t
     oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-    counts, particlesF, norm_weights, thetas = jax.lax.cond(oddr > thresh,
-                                                            _resampler_thetas,
-                                                            _no_resampler_thetas,
-                                                            counts, particlesP, norm_weights, 
-                                                            thetas)
+    counts, particlesF, norm_weights, thetas = jax.lax.cond(
+        oddr > thresh,
+        _resampler_thetas,
+        _no_resampler_thetas,
+        counts, particlesP, norm_weights, 
+        thetas
+    )
 
     return [particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key]
 
@@ -570,8 +572,9 @@ def _perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim
         - An updated perturbed array of parameters.
     """
     loglik = 0
-    thetas = theta + sigmas * np.random.normal(size=(J,) + theta.shape[-ndim:])
-    # thetas = theta + sigmas * onp.random.normal(size=(J,) + theta.shape[1:])
+    thetas = theta + sigmas * jax.random.normal(
+        shape = (J,) + theta.shape[-ndim:], key = key
+    )
     particlesF = _rinits_internal(rinit, thetas, 1, covars=covars)
     weights = jnp.log(jnp.ones(J) / J)
     norm_weights = jnp.log(jnp.ones(J) / J)
@@ -1014,12 +1017,12 @@ def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, s
         - An array of negative log-likelihood through the iterations
         - An array of parameters through the iterations 
     """
+    # TODO add key
     logliks = []
     params = []
 
     ndim = theta.ndim
     thetas = theta + sigmas_init * np.random.normal(size=(J,) + theta.shape[-ndim:])
-    # thetas = theta + sigmas_init*onp.random.normal(size=(J, theta.shape[-1]))
     params.append(thetas)
     if monitor:
         loglik = jnp.mean(

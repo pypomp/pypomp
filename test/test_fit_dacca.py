@@ -11,8 +11,9 @@ from pypomp.pomp_class import Pomp
 from pypomp.fit import fit
 from pypomp.internal_functions import _fit_internal
 
-current_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+#current_dir = os.getcwd()
+#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+sys.path.insert(0, 'pypomp')
 from dacca import dacca
 
 dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = dacca()

@@ -9,8 +9,10 @@ from pypomp.pomp_class import Pomp
 from pypomp.pfilter import pfilter
 from pypomp.internal_functions import _pfilter_internal
 
-current_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+#current_dir = os.getcwd()
+#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+#from LG import LG
+sys.path.insert(0, 'pypomp')
 from LG import LG
 
 LG_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = LG()

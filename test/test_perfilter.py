@@ -10,23 +10,13 @@ from pypomp.pomp_class import Pomp
 from pypomp.perfilter import perfilter
 from pypomp.internal_functions import _perfilter_internal
 
-current_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+#current_dir = os.getcwd()
+#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
+#from LG import LG
+
+sys.path.insert(0, 'pypomp')
 from LG import LG
 
-'''
-def get_thetas(theta):
-    A = theta[0:4].reshape(2, 2)
-    C = theta[4:8].reshape(2, 2)
-    Q = theta[8:12].reshape(2, 2)
-    R = theta[12:16].reshape(2, 2)
-    return jnp.array([A, C, Q, R])
-
-get_perthetas = vmap(get_thetas, in_axes = 0)
-
-def transform_thetas(A, C, Q, R):
-    return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
-'''
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)
     C = theta[4:8].reshape(2, 2)

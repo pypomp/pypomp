@@ -7,10 +7,12 @@ import jax.numpy as jnp
 from tqdm import tqdm
 from pypomp.internal_functions import _pfilter_pf_internal
 
-curr_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
-from LG import LG_internal
+#curr_dir = os.getcwd()
+#sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
+#from LG import LG_internal
 
+sys.path.insert(0, 'pypomp')
+from LG import LG
 
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)

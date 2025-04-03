@@ -10,8 +10,9 @@ from pypomp.internal_functions import _pfilter_internal
 from pypomp.internal_functions import _perfilter_internal
 from pypomp.internal_functions import _perfilter_internal_mean
 
-curr_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
+#curr_dir = os.getcwd()
+#sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
+sys.path.insert(0, 'pypomp')
 from LG import LG_internal
 
 def get_thetas(theta):

@@ -5,13 +5,8 @@ import unittest
 import jax.numpy as jnp
 
 from tqdm import tqdm
-from pypomp.pomp_class import *
-
-#current_dir = os.getcwd()
-#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-#from LG import LG_internal
-sys.path.insert(0, 'pypomp')
-from LG import LG
+import pypomp
+from pypomp.LG import *
 
 LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures = LG_internal()
 

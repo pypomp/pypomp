@@ -1,19 +1,10 @@
-import os
 import jax
-import sys
 import unittest
 import jax.numpy as jnp
 
-from tqdm import tqdm
+from pypomp.LG import LG_internal
 from pypomp.internal_functions import _pfilter_internal
 from pypomp.internal_functions import _pfilter_internal_mean
-
-#curr_dir = os.getcwd()
-#sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
-#from LG import LG_internal
-
-sys.path.insert(0, 'pypomp')
-from LG import LG
 
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)
@@ -174,51 +165,51 @@ class TestPfilterInternal_LG(unittest.TestCase):
 
     def test_missing(self):
         with self.assertRaises(TypeError):
-            _pfilter_internal()
+            _pfilter_internal(key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta)
+            _pfilter_internal(self.theta,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.ys)
+            _pfilter_internal(self.ys,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys)
+            _pfilter_internal(self.theta, self.ys,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rinit)
+            _pfilter_internal(self.theta, self.ys, self.rinit,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rprocess)
+            _pfilter_internal(self.theta, self.ys, self.rprocess,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.dmeasure,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rinit, self.rprocess)
+            _pfilter_internal(self.theta, self.ys, self.rinit, self.rprocess,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rinit, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.rinit, self.dmeasure,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rprocess, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.rprocess, self.dmeasure,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J)
+            _pfilter_internal(self.theta, self.ys, self.J,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, self.rinit)
+            _pfilter_internal(self.theta, self.ys, self.J, self.rinit,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess)
+            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasure,key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure)
+            _pfilter_internal(self.theta, self.ys, self.J, self.rprocess, self.dmeasure,key=self.key)
 
     def test_missing_theta(self):
         with self.assertRaises(TypeError):
             _pfilter_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh=-1,
                              key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_internal(None, self.ys, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, key=self.key)
 
     def test_missing_ys(self):
         with self.assertRaises(TypeError):
             _pfilter_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars, thresh=-1,
                              key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_internal(self.theta, None, self.J, self.rinit, self.rprocess, self.dmeasure, self.covars,key=self.key)
 
     def test_missing_J(self):
         with self.assertRaises(TypeError):
@@ -226,14 +217,14 @@ class TestPfilterInternal_LG(unittest.TestCase):
                              thresh=-1, key=self.key)
 
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_internal(self.theta, self.ys, None, self.rinit, self.rprocess, self.dmeasure, self.covars,key=self.key)
 
     def test_missing_rinit(self):
         with self.assertRaises(TypeError):
             _pfilter_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars, thresh=-1,
                              key=self.key)
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars)
+            _pfilter_internal(self.theta, self.ys, self.J, None, self.rprocess, self.dmeasure, self.covars,key=self.key)
 
     def test_missing_rprocess(self):
         with self.assertRaises(TypeError):
@@ -248,24 +239,24 @@ class TestPfilterInternal_LG(unittest.TestCase):
                              key=self.key)
 
         with self.assertRaises(TypeError):
-            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars)
+            _pfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocess, None, self.covars, key=self.key)
 
     # error handling - wrong paramter type - theta, ys, J, rinit, rprocess, dmeasure, (alpha is optional, key is optional)
     def test_wrongtype_J(self):
         with self.assertRaises(TypeError):
             _pfilter_internal(self.theta, self.ys, J=jnp.array(10, 20), rinit=self.rinit, rprocess=self.rprocess,
-                              dmeasure=self.dmeasure, covars=self.covars)
+                              dmeasure=self.dmeasure, covars=self.covars,key=self.key)
 
         with self.assertRaises(TypeError):
             _pfilter_internal(self.theta, self.ys, J="pop", rinit=self.rinit, rprocess=self.rprocess,
-                             dmeasure=self.dmeasure, covars=self.covars)
+                             dmeasure=self.dmeasure, covars=self.covars, key=self.key)
 
         def generate_J(n):
             return jnp.array(10, 20)
 
         with self.assertRaises(TypeError):
             _pfilter_internal(self.theta, self.ys, J=lambda n: generate_J(n), rinit=self.rinit, rprocess=self.rprocess,
-                             dmeasure=self.dmeasure, covars=self.covars)
+                             dmeasure=self.dmeasure, covars=self.covars,key=self.key)
 
     def test_wrongtype_theta(self):
         with self.assertRaises(TypeError):

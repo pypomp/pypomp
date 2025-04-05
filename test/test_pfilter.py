@@ -5,15 +5,8 @@ import unittest
 import jax.numpy as jnp
 
 from tqdm import tqdm
-from pypomp.pomp_class import Pomp
+from pypomp.LG import *
 from pypomp.pfilter import pfilter
-from pypomp.internal_functions import _pfilter_internal
-
-#current_dir = os.getcwd()
-#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-#from LG import LG
-sys.path.insert(0, 'pypomp')
-from LG import LG
 
 LG_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = LG()
 
@@ -34,7 +27,7 @@ class TestPfilter_LG(unittest.TestCase):
     def test_internal_basic(self):
         val1 = pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta,
                        ys=self.ys, covars=self.covars, thresh=10, key=self.key)
-        val2 = pfilter(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, ys=self.ys)
+        val2 = pfilter(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, ys=self.ys, key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
@@ -44,8 +37,8 @@ class TestPfilter_LG(unittest.TestCase):
 
     def test_class_basic(self):
         val1 = pfilter(LG_obj, self.J, thresh=10, key=self.key)
-        val2 = pfilter(LG_obj)
-        val3 = pfilter(LG_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], ys=[])
+        val2 = pfilter(LG_obj, key=self.key)
+        val3 = pfilter(LG_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], ys=[], key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
@@ -58,12 +51,12 @@ class TestPfilter_LG(unittest.TestCase):
 
     def test_invalid_input(self):
         with self.assertRaises(ValueError) as text:
-            pfilter()
+            pfilter(key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J)
+            pfilter(J=self.J, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
@@ -73,22 +66,22 @@ class TestPfilter_LG(unittest.TestCase):
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J, theta=self.theta, ys=self.ys)
+            pfilter(J=self.J, theta=self.theta, ys=self.ys, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure)
+            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, ys=self.ys)
+            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, ys=self.ys, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta)
+            pfilter(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 

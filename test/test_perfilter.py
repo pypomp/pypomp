@@ -1,21 +1,10 @@
-import os
 import jax
-import sys
 import unittest
 import jax.numpy as jnp
 
 from jax import vmap
-from tqdm import tqdm
-from pypomp.pomp_class import Pomp
+from pypomp.LG import *
 from pypomp.perfilter import perfilter
-from pypomp.internal_functions import _perfilter_internal
-
-#current_dir = os.getcwd()
-#sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-#from LG import LG
-
-sys.path.insert(0, 'pypomp')
-from LG import LG
 
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)
@@ -55,7 +44,7 @@ class TestPerfilter_LG(unittest.TestCase):
         self.assertEqual(theta1_new.shape, (self.J, 4, 2, 2))
 
         val2, theta2 = perfilter(rinit=self.rinit, rprocesses=self.rprocesses, dmeasures=self.dmeasures,
-                                 theta=self.theta, ys=self.ys, sigmas=self.sigmas)
+                                 theta=self.theta, ys=self.ys, sigmas=self.sigmas, key=self.key)
         self.assertEqual(val2.shape, ())
         self.assertTrue(jnp.isfinite(val2.item()))
         self.assertEqual(val2.dtype, jnp.float32)
@@ -66,7 +55,7 @@ class TestPerfilter_LG(unittest.TestCase):
 
     def test_class_basic(self):
         
-        val1, theta1 = perfilter(LG_obj, J=self.J, sigmas=self.sigmas, thresh=100)
+        val1, theta1 = perfilter(LG_obj, J=self.J, sigmas=self.sigmas, thresh=100, key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
@@ -75,7 +64,7 @@ class TestPerfilter_LG(unittest.TestCase):
         self.assertEqual(theta1_new.shape, (self.J, 4, 2, 2))
 
 
-        val2, theta2 = perfilter(LG_obj, sigmas=self.sigmas)
+        val2, theta2 = perfilter(LG_obj, sigmas=self.sigmas, key=self.key)
         self.assertEqual(val2.shape, ())
         self.assertTrue(jnp.isfinite(val2.item()))
         self.assertEqual(val2.dtype, jnp.float32)
@@ -85,7 +74,7 @@ class TestPerfilter_LG(unittest.TestCase):
 
 
         val3, theta3 = perfilter(LG_obj, J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
-                                 dmeasures=self.dmeasures, theta=[], ys=[])
+                                 dmeasures=self.dmeasures, theta=[], ys=[],key=self.key)
         self.assertEqual(val3.shape, ())
         self.assertTrue(jnp.isfinite(val3.item()))
         self.assertEqual(val3.dtype, jnp.float32)
@@ -96,17 +85,17 @@ class TestPerfilter_LG(unittest.TestCase):
 
     def test_invalid_input(self):
         with self.assertRaises(ValueError) as text:
-            perfilter()
+            perfilter(key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            perfilter(J=self.J)
+            perfilter(J=self.J,key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            perfilter(J=self.J, sigmas=self.sigmas)
+            perfilter(J=self.J, sigmas=self.sigmas,key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
@@ -116,31 +105,31 @@ class TestPerfilter_LG(unittest.TestCase):
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            perfilter(J=self.J, sigmas=self.sigmas, theta=self.theta, ys=self.ys)
+            perfilter(J=self.J, sigmas=self.sigmas, theta=self.theta, ys=self.ys,key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
             perfilter(J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
-                      dmeasures=self.dmeasures)
+                      dmeasures=self.dmeasures, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
             perfilter(J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
-                      dmeasures=self.dmeasures, ys=self.ys)
+                      dmeasures=self.dmeasures, ys=self.ys,key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
             perfilter(J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
-                      dmeasures=self.dmeasures, theta=self.theta)
+                      dmeasures=self.dmeasures, theta=self.theta, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(TypeError) as text:
             perfilter(J=self.J, sigmas=self.sigmas, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure,
-                      theta=self.theta, ys=self.ys)
+                      theta=self.theta, ys=self.ys, key=self.key)
 
         self.assertEqual(str(text.exception), "perfilter() got an unexpected keyword argument 'rprocess'")
 

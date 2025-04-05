@@ -30,6 +30,7 @@ class TestPompClass_LG(unittest.TestCase):
         self.covars = covars
         self.sigmas = 0.02
         self.key = jax.random.PRNGKey(111)
+        # self.key = jax.random.key(111)
 
         self.rinit = rinit
         self.rproc = rproc
@@ -244,7 +245,7 @@ class TestPompClass_LG(unittest.TestCase):
 
         with self.assertRaises(IndexError):
             LG_obj.perfilter(0, self.sigmas, thresh=100, key=self.key)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             LG_obj.perfilter(-1, self.sigmas, thresh=100, key=self.key)
 
         # undefined arg
@@ -266,7 +267,7 @@ class TestPompClass_LG(unittest.TestCase):
 
         with self.assertRaises(IndexError):
             LG_obj.perfilter_mean(0, self.sigmas, thresh=100, key=self.key)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             LG_obj.perfilter_mean(-1, self.sigmas, thresh=100, key=self.key)
 
         with self.assertRaises(TypeError):
@@ -317,34 +318,34 @@ class TestPompClass_LG(unittest.TestCase):
 
     def test_fit_mif_valid(self):
        
-        mif_loglik1, mif_theta1 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, a=0.9, J=self.J, mode="IF2")
+        mif_loglik1, mif_theta1 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, a=0.9, J=self.J, mode="IF2", key=self.key)
         self.assertEqual(mif_loglik1.shape, (3,))
         self.assertEqual(mif_theta1.shape, (3, self.J,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik1.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta1.dtype, jnp.float32))
 
         mif_loglik2, mif_theta2 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, a=0.9, J=self.J, mode="IF2",
-                                            monitor=False)
+                                            monitor=False, key=self.key)
         self.assertEqual(mif_loglik2.shape, (0,))
         self.assertEqual(mif_theta2.shape, (3, self.J,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik2.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta2.dtype, jnp.float32))
 
         # M = 0
-        mif_loglik3, mif_theta3 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=0, a=0.9, J=self.J, mode="IF2")
+        mif_loglik3, mif_theta3 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=0, a=0.9, J=self.J, mode="IF2", key=self.key)
         self.assertEqual(mif_loglik3.shape, (1,))
         self.assertEqual(mif_theta3.shape, (1, self.J,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik3.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta3.dtype, jnp.float32))
 
         # M = -1
-        mif_loglik4, mif_theta4 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=-1, a=0.9, J=self.J, mode="IF2")
+        mif_loglik4, mif_theta4 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=-1, a=0.9, J=self.J, mode="IF2", key=self.key)
         self.assertEqual(mif_loglik4.shape, (1,))
         self.assertEqual(mif_theta4.shape, (1, self.J,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik4.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta4.dtype, jnp.float32))
 
-        mif_loglik5, mif_theta5 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, mode="IF2")
+        mif_loglik5, mif_theta5 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, mode="IF2", key=self.key)
         self.assertEqual(mif_loglik5.shape, (11,))
         self.assertEqual(mif_theta5.shape, (11, 100,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik5.dtype, jnp.float32))
@@ -353,18 +354,18 @@ class TestPompClass_LG(unittest.TestCase):
     def test_fit_mif_invalid(self):
         # missing args
         with self.assertRaises(TypeError):
-            LG_obj.fit(mode="IF2")
+            LG_obj.fit(mode="IF2", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(mode="IF")
+            LG_obj.fit(mode="IF", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(sigmas=0.02, M=1, mode="IF2")
+            LG_obj.fit(sigmas=0.02, M=1, mode="IF2", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(sigmas_init=1e-20, a=0.9, mode="IF2")
+            LG_obj.fit(sigmas_init=1e-20, a=0.9, mode="IF2", key=self.key)
 
         # useless input
         with self.assertRaises(TypeError):
             LG_obj.fit(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, rprocesses=self.rprocesses,
-                       dmeasures=self.dmeasures, sigmas=0.02, sigmas_init=1e-20, mode="IF2")
+                       dmeasures=self.dmeasures, sigmas=0.02, sigmas_init=1e-20, mode="IF2", key=self.key)
 
     def test_fit_GD_valid(self):
 
@@ -372,14 +373,14 @@ class TestPompClass_LG(unittest.TestCase):
         
         for method in methods:
             with self.subTest(method=method):
-                GD_loglik1, GD_theta1 = LG_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, mode="GD")
+                GD_loglik1, GD_theta1 = LG_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, mode="GD", key=self.key)
                 self.assertEqual(GD_loglik1.shape, (2,))
                 self.assertEqual(GD_theta1.shape, (2,) + self.theta.shape)
                 self.assertTrue(jnp.issubdtype(GD_loglik1.dtype, jnp.float32))
                 self.assertTrue(jnp.issubdtype(GD_theta1.dtype, jnp.float32))
                 
                 if method in ["WeightedNewton", "BFGS"]:
-                    GD_loglik2, GD_theta2 = LG_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, ls=True, mode="GD")
+                    GD_loglik2, GD_theta2 = LG_obj.fit(J=3, Jh=3, method=method, itns=1, alpha=0.97, scale=True, ls=True, mode="GD", key=self.key)
                     self.assertEqual(GD_loglik2.shape, (2,))
                     self.assertEqual(GD_theta2.shape, (2,) + self.theta.shape)
                     self.assertTrue(jnp.issubdtype(GD_loglik2.dtype, jnp.float32))
@@ -388,46 +389,46 @@ class TestPompClass_LG(unittest.TestCase):
     def test_fit_GD_invalid(self):
     
         with self.assertRaises(TypeError):
-            LG_obj.fit(mode="SGD")
+            LG_obj.fit(mode="SGD", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(J=0, mode="GD")
+            LG_obj.fit(J=0, mode="GD", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(J=-1, mode="GD")
+            LG_obj.fit(J=-1, mode="GD", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(Jh=0, mode="GD")
+            LG_obj.fit(Jh=0, mode="GD", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(Jh=-1, mode="GD")
+            LG_obj.fit(Jh=-1, mode="GD", key=self.key)
 
         # useless input
         with self.assertRaises(TypeError):
             LG_obj.fit(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, J=10, Jh=10, method="BFGS",
-                       itns=2, alpha=0.97, scale=True, mode="GD")
+                       itns=2, alpha=0.97, scale=True, mode="GD", key=self.key)
 
     def test_fit_IFAD_valid(self):
         #pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)
         IFAD_loglik1, IFAD_theta1 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, J=10, Jh=10, method="SGD", itns=2,
-                                               alpha=0.97, scale=True, mode="IFAD")
+                                               alpha=0.97, scale=True, mode="IFAD", key=self.key)
         self.assertEqual(IFAD_loglik1.shape, (3,))
         self.assertEqual(IFAD_theta1.shape, (3,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(IFAD_loglik1.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(IFAD_theta1.dtype, jnp.float32))
 
         IFAD_loglik2, IFAD_theta2 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, J=10, Jh=10, method="Newton",
-                                               itns=2, alpha=0.97, scale=True, ls=True, mode="IFAD")
+                                               itns=2, alpha=0.97, scale=True, ls=True, mode="IFAD", key=self.key)
         self.assertEqual(IFAD_loglik2.shape, (3,))
         self.assertEqual(IFAD_theta2.shape, (3,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(IFAD_loglik2.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(IFAD_theta2.dtype, jnp.float32))
 
         IFAD_loglik3, IFAD_theta3 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, J=10, Jh=10,
-                                               method="WeightedNewton", itns=2, alpha=0.97, scale=True, mode="IFAD")
+                                               method="WeightedNewton", itns=2, alpha=0.97, scale=True, mode="IFAD", key=self.key)
         self.assertEqual(IFAD_loglik3.shape, (3,))
         self.assertEqual(IFAD_theta3.shape, (3,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(IFAD_loglik3.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(IFAD_theta3.dtype, jnp.float32))
 
         IFAD_loglik4, IFAD_theta4 = LG_obj.fit(sigmas=0.02, sigmas_init=1e-20, M=2, J=10, Jh=10, method="BFGS",
-                                               itns=2, alpha=0.97, scale=True, mode="IFAD")
+                                               itns=2, alpha=0.97, scale=True, mode="IFAD", key=self.key)
         self.assertEqual(IFAD_loglik4.shape, (3,))
         self.assertEqual(IFAD_theta4.shape, (3,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(IFAD_loglik4.dtype, jnp.float32))
@@ -437,19 +438,19 @@ class TestPompClass_LG(unittest.TestCase):
         # pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)
         # missing
         with self.assertRaises(TypeError):
-            LG_obj.fit()
+            LG_obj.fit(key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(mode="ADIF")
+            LG_obj.fit(mode="ADIF", key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(mode="IFAD")
+            LG_obj.fit(mode="IFAD",key=self.key)
         with self.assertRaises(TypeError):
-            LG_obj.fit(sigmas=self.sigmas, mode="IFAD")
+            LG_obj.fit(sigmas=self.sigmas, mode="IFAD", key=self.key)
 
         # useless input
         with self.assertRaises(TypeError):
             LG_obj.fit(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure, self.rprocesses, self.dmeasures,
                        sigmas=0.02, sigmas_init=1e-20, M=2, J=10, Jh=10, method="SGD", itns=2, alpha=0.97, scale=True,
-                       mode="IFAD")
+                       mode="IFAD", key=self.key)
 
 if __name__ == "__main__":
     unittest.main(argv=[''], verbosity=2, exit=False)

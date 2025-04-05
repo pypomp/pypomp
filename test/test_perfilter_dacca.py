@@ -1,19 +1,18 @@
-import os
-import csv
 import jax
 import sys
 import unittest
-import numpy as np
+#import numpy as np
 import jax.numpy as jnp
 
-from tqdm import tqdm
-from pypomp.pomp_class import Pomp
+#from tqdm import tqdm
+#from pypomp.pomp_class import Pomp
+from pypomp.dacca import *
 from pypomp.perfilter import perfilter
 
 #current_dir = os.getcwd()
 #sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-sys.path.insert(0, 'pypomp')
-from dacca import dacca
+#sys.path.insert(0, 'pypomp')
+#from dacca import dacca
 
 dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = dacca()
 
@@ -49,12 +48,12 @@ class TestPerfilter_Dacca(unittest.TestCase):
     def test_invalid_input(self):
         
         with self.assertRaises(ValueError) as text:
-            perfilter()
+            perfilter(key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            perfilter(J=self.J)
+            perfilter(J=self.J, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
         

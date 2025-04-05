@@ -6,7 +6,7 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
         rprocesses=None, dmeasures=None, ys=None, sigmas=None, sigmas_init=None, covars=None,
         M=10, a=0.9, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1,
         max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, ls=False, 
-        alpha=0.1, monitor=True, mode="IFAD"):
+        alpha=0.1, monitor=True, mode="IFAD", key=None):
     """
     An outside function controlling which fit operation to use for likelihood maximization 
     algorithm of POMP model by executing on a pomp class object or by calling function 'fit_internal'
@@ -85,12 +85,12 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
             if sigmas is not None and sigmas_init is not None:
                 return pomp_object.fit(sigmas, sigmas_init, M, a, J, Jh, method, itns, beta, eta,
                                        c, max_ls_itn, thresh_mif, thresh_tr, verbose, scale, ls,
-                                       alpha, monitor, mode)
+                                       alpha, monitor, mode, key)
             raise ValueError("Invalid Argument Input with Missing sigmas or sigmas_init")
         elif mode == "GD":
             return pomp_object.fit(sigmas, sigmas_init, M, a, J, Jh, method, itns, beta, eta, c, 
                                    max_ls_itn, thresh_mif,
-                                   thresh_tr, verbose, scale, ls, alpha, monitor, mode)
+                                   thresh_tr, verbose, scale, ls, alpha, monitor, mode, key)
         raise ValueError("Invalid Mode Input")
     elif rinit is not None and rprocess is not None and dmeasure is not None and theta is not\
           None and ys is not None:
@@ -100,13 +100,13 @@ def fit(pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None,
                 return _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, 
                                      dmeasures, sigmas, sigmas_init, covars, M, a, J, Jh,
                                      method, itns, beta, eta, c, max_ls_itn, thresh_mif, 
-                                     thresh_tr, verbose, scale, ls, alpha, monitor, mode)
+                                     thresh_tr, verbose, scale, ls, alpha, monitor, mode, key)
             raise ValueError("Invalid Argument Input with Missing workhorse or sigmas")
         elif mode == "GD":
             return _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures,
                                  sigmas, sigmas_init, covars, M, a, J, Jh, method, itns, beta,
                                  eta, c, max_ls_itn, thresh_mif, thresh_tr,
-                                 verbose, scale, ls, alpha, monitor, mode)
+                                 verbose, scale, ls, alpha, monitor, mode, key)
         raise ValueError("Invalid Mode Input")
     else:
         raise ValueError("Invalid Argument Input with Missing Required Argument")

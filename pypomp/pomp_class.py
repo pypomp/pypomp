@@ -79,7 +79,7 @@ class Pomp:
         """
 
         return _mop_internal(self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure,
-                              self.covars, alpha, key)
+                              self.covars, alpha, key=key)
 
     def mop_mean(self, J, alpha=0.97, key=None):
         """
@@ -196,7 +196,7 @@ class Pomp:
                                     self.dmeasure, self.covars, thresh, key)
 
     def mif(self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, monitor=False,
-            verbose=False):
+            verbose=False, key=None):
         """
         Instance method for conducting iterated filtering (IF2) algorith, which 
         uses the initialized instance parameters and calls 'mif_internal' function.
@@ -222,11 +222,11 @@ class Pomp:
 
         return _mif_internal(self.theta, self.ys, self.rinit, self.rprocess, self.dmeasure,
                             self.rprocesses, self.dmeasures, sigmas, sigmas_init, 
-                            self.covars, M, a, J, thresh, monitor, verbose)
+                            self.covars, M, a, J, thresh, monitor, verbose, key)
 
     def train(self, theta_ests, J=5000, Jh=1000, method='Newton', itns=20, beta=0.9, 
               eta=0.0025, c=0.1, max_ls_itn=10, thresh=100, verbose=False, scale=False, 
-              ls=False, alpha=1):
+              ls=False, alpha=1, key=None):
         """
         Instance method for conducting the MOP gradient-based iterative optimization method,
         which uses the initialized instance parameters and calls 'train_internal' function.
@@ -267,12 +267,12 @@ class Pomp:
 
         return _train_internal(theta_ests, self.ys, self.rinit, self.rprocess, self.dmeasure, 
                                self.covars, J, Jh, method, itns, beta, eta, c, max_ls_itn, 
-                               thresh, verbose, scale, ls, alpha)
+                               thresh, verbose, scale, ls, alpha, key)
 
     def fit(self, sigmas=None, sigmas_init=None, M=10, a=0.9,
             J=100, Jh=1000, method='Newton', itns=20, beta=0.9, eta=0.0025, c=0.1,
             max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, 
-            ls=False, alpha=0.1, monitor=True, mode="IFAD"):
+            ls=False, alpha=0.1, monitor=True, mode="IFAD", key=None):
         """
         Instance method for executing the iterated filtering (IF2), MOP gradient-based 
         iterative optimization method (GD), and iterated filtering with automatic 
@@ -328,4 +328,4 @@ class Pomp:
                              M=M, a=a, J=J, Jh=Jh, method=method, itns=itns, beta=beta, 
                              eta=eta, c=c, max_ls_itn=max_ls_itn, thresh_mif=thresh_mif,
                              thresh_tr=thresh_tr, verbose=verbose, scale=scale, ls=ls, 
-                             alpha=alpha, monitor=monitor, mode=mode)
+                             alpha=alpha, monitor=monitor, mode=mode, key=key)

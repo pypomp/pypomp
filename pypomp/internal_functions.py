@@ -296,8 +296,8 @@ def _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, alpha=0.
     Returns:
         float: Negative log-likelihood value
     """
-    if key is None:
-        key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+    #if key is None:
+        #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
     weights = jnp.log(jnp.ones(J) / J)
@@ -426,8 +426,8 @@ def _pfilter_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, thre
     Returns:
         float: Negative log-likelihood value
     """
-    if key is None:
-        key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+    #if key is None:
+        #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
     weights = jnp.log(jnp.ones(J) / J)
@@ -579,8 +579,8 @@ def _perfilter_internal(theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim
     weights = jnp.log(jnp.ones(J) / J)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
-    if key is None:
-        key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+    #if key is None:
+        #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
     perfilter_helper_2 = partial(_perfilter_helper, rprocesses=rprocesses, dmeasures=dmeasures)
     particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, thresh, key = \
     jax.lax.fori_loop(lower=0, upper=len(ys), body_fun=perfilter_helper_2,
@@ -710,8 +710,8 @@ def _pfilter_pf_internal(theta, ys, J, rinit, rprocess, dmeasure, covars=None, t
     Returns:
         float: The mean of negative log-likelihood value across the measurements
     """
-    if key is None:
-        key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+    #if key is None:
+        #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
     weights = jnp.log(jnp.ones(J) / J)
@@ -986,7 +986,7 @@ MONITORS = 1
 
 def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, sigmas, 
                   sigmas_init, covars=None, M=10, a=0.95, J=100, thresh=100, monitor=False,
-                  verbose=False):
+                  verbose=False, key=None):
     """
     Internal functions for conducting iterated filtering (IF2) algorithm, is called in 
     'fit_internal' function.
@@ -1022,28 +1022,30 @@ def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, s
     params = []
 
     ndim = theta.ndim
+    # jax random?
     thetas = theta + sigmas_init * np.random.normal(size=(J,) + theta.shape[-ndim:])
     params.append(thetas)
     if monitor:
         loglik = jnp.mean(
             jnp.array([_pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure,
-                                         covars=covars, thresh=thresh)
+                                         covars=covars, thresh=thresh, key=key)
                        for i in range(MONITORS)]))
         logliks.append(loglik)
 
     for m in tqdm(range(M)):
         sigmas *= a
         thetas += sigmas * np.random.normal(size=thetas.shape)
+        # TODO add key, otherwise the perfilter 
         loglik_ext, thetas = _perfilter_internal(thetas, ys, J, sigmas, rinit, rprocesses,
                                                  dmeasures, ndim=ndim, covars=covars, 
-                                                 thresh=thresh)
+                                                 thresh=thresh, key=key)
 
         params.append(thetas)
 
         if monitor:
             loglik = jnp.mean(jnp.array(
                 [_pfilter_internal(thetas.mean(0), ys, J, rinit, rprocess, dmeasure, 
-                                   covars=covars, thresh=thresh)
+                                   covars=covars, thresh=thresh, key=key)
                  for i in range(MONITORS)]))
 
             logliks.append(loglik)
@@ -1057,7 +1059,7 @@ def _mif_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses, dmeasures, s
 
 def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=5000, Jh=1000, 
                     method='GD', itns=20, beta=0.9, eta=0.0025, c=0.1, max_ls_itn=10, 
-                    thresh=100, verbose=False, scale=False, ls=False, alpha=1):
+                    thresh=100, verbose=False, scale=False, ls=False, alpha=1, key=None):
     """
     Internal function for conducting the MOP gradient estimate method, is called in 
     'fit_internal' function.
@@ -1107,7 +1109,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
     hess = jnp.eye(theta_ests.shape[-1])  # default one
 
     for i in tqdm(range(itns)):
-        key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+        #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
         if MONITORS == 1:
             loglik, grad = _jvg_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, 
                                     covars=covars, alpha=alpha, key=key)
@@ -1207,7 +1209,7 @@ def _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, covars=None, J=50
 
     logliks.append(jnp.mean(jnp.array(
         [_pfilter_internal(theta_ests, ys, J, rinit, rprocess, dmeasure, covars=covars, \
-                           thresh=thresh) for i in
+                           thresh=thresh, key=key) for i in
          range(MONITORS)])))
     Acopies.append(theta_ests)
 
@@ -1219,7 +1221,7 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
                   covars=None, M=10, a=0.9,
                   J=100, Jh=1000, method='GD', itns=20, beta=0.9, eta=0.0025, c=0.1,
                   max_ls_itn=10, thresh_mif=100, thresh_tr=100, verbose=False, scale=False, 
-                  ls=False, alpha=0.1, monitor=True, mode="IFAD"):
+                  ls=False, alpha=0.1, monitor=True, mode="IFAD", key=None):
     """
     Internal function for executing the iterated filtering (IF2), MOP gradient-based iterative
     optimization method (GD), and iterated filtering with automatic differentiation (IFAD) for
@@ -1290,7 +1292,8 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
                                                               sigmas_init, covars, M, a, J, 
                                                               thresh_mif, 
                                                               monitor=monitor,
-                                                              verbose=verbose)
+                                                              verbose=verbose,
+                                                              key=key)
             return jnp.array(mif_logliks_warm), jnp.array(mif_params_warm)
         else:
             raise TypeError(f"Unknown parameter")
@@ -1299,7 +1302,7 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
         # Directly call train_internal and return the results
         gd_logliks, gd_ests = _train_internal(theta, ys, rinit, rprocess, dmeasure, covars,
                                                J, Jh, method, itns, beta, eta, c,
-                                              max_ls_itn, thresh_tr, verbose, scale, ls, alpha)
+                                              max_ls_itn, thresh_tr, verbose, scale, ls, alpha, key)
         return jnp.array(gd_logliks), jnp.array(gd_ests)
 
     elif mode == 'IFAD':
@@ -1311,12 +1314,13 @@ def _fit_internal(theta, ys, rinit, rprocess, dmeasure, rprocesses=None, dmeasur
                                                               dmeasures, sigmas,
                                                               sigmas_init, covars, M, a, J, 
                                                               thresh_mif, monitor=True,
-                                                              verbose=verbose)
+                                                              verbose=verbose,
+                                                              key=key)
             theta_ests = mif_params_warm[mif_logliks_warm.argmin()].mean(0)
             gd_logliks, gd_ests = _train_internal(theta_ests, ys, rinit, rprocess, dmeasure, 
                                                   covars, J, Jh, method, itns,
                                                   beta, eta, c, max_ls_itn,
-                                                  thresh_tr, verbose, scale, ls, alpha)
+                                                  thresh_tr, verbose, scale, ls, alpha, key)
             return jnp.array(gd_logliks), jnp.array(gd_ests)
         else:
             raise TypeError(f"Unknown parameter")

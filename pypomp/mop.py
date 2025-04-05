@@ -36,9 +36,9 @@ def mop(pomp_object=None, J=50, rinit=None, rprocess=None, dmeasure=None, theta=
         float: Negative log-likelihood value
     """
     if pomp_object is not None:
-        return pomp_object.mop(J, alpha, key)
+        return pomp_object.mop(J, alpha, key=key)
     elif rinit is not None and rprocess is not None and dmeasure is not None and theta\
           is not None and ys is not None: 
-        return _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key)
+        return _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=key)
     else:
         raise ValueError("Invalid Arguments Input")

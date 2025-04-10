@@ -83,7 +83,6 @@ def simulate_internal(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=N
     
     plt.tight_layout()
     plt.show()
-
     
     state_array_reshaped = state_array.reshape(-1, latent_states)  
     day_vec = np.repeat(time, J)  

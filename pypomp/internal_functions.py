@@ -55,8 +55,7 @@ def _resample(norm_weights):
         jnp.arange(J),
         jnp.histogram(
             unifs,
-            bins=jnp.pad(csum / csum[-1], 
-            pad_width=(1, 0)),
+            bins=jnp.pad(csum / csum[-1], pad_width=(1, 0)),
             density=False
         )[0].astype(int),
         total_repeat_length=J
@@ -110,9 +109,9 @@ def _resampler(counts, particlesP, norm_weights):
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights)
     particlesF = particlesP[counts]
-    norm_weights = norm_weights[counts] \
-                    - jax.lax.stop_gradient(norm_weights[counts]) \
-                    - jnp.log(J)
+    norm_weights = (norm_weights[counts]
+                    - jax.lax.stop_gradient(norm_weights[counts])
+                    - jnp.log(J))
     return counts, particlesF, norm_weights
 
 
@@ -163,9 +162,9 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights)
     particlesF = particlesP[counts]
-    norm_weights = norm_weights[counts] \
-                    - jax.lax.stop_gradient(norm_weights[counts]) \
-                    - jnp.log(J)
+    norm_weights = (norm_weights[counts]
+                    - jax.lax.stop_gradient(norm_weights[counts])
+                    - jnp.log(J))
     thetasF = thetas[counts]
     return counts, particlesF, norm_weights, thetasF
 

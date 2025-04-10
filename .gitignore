@@ -1,5 +1,5 @@
 **.DS_Store
-
+.vscode
 *~
 
 #### the following is the default Python package gitignore from GitHub ####

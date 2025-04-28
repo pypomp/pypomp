@@ -38,9 +38,12 @@ def fit(
         dmeasures (function, optional): Density evaluation for the perturbed 
             measurement model. Defaults to None.
         ys (array-like, optional): The measurement array. Defaults to None.
-        sigmas (float, optional): Perturbed factor. Defaults to None.
-        sigmas_init (float, optional): Initial perturbed factor. Defaults to 
-            None.
+        sigmas (float, optional): Random walk standard deviation (RWSD) for 
+            t > 0. Defaults to None. You can  instead supply an array-like to 
+            specify the RWSD for individual parameters.
+        sigmas_init (float, optional): RWSD for t = 0. Defaults to None. 
+            You can instead supply an array-like to specify the RWSD for 
+            individual parameters.
         covars (array-like, optional): Covariates or None if not applicable. 
             Defaults to None.
         M (int, optional): Maximum algorithm iteration for iterated filtering. 
@@ -72,6 +75,7 @@ def fit(
             the log-likelihood value. Defaults to True.
         mode (str, optional): The optimization algorithm to use, including 
             'IF2', 'GD', and 'IFAD'. Defaults to "IFAD".
+        key (jax.random.PRNGKey): The random key for sampling.
 
     Raises:
         ValueError: Missing the required arguments 'sigmas' or 'sigmas_init' in 

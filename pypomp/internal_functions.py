@@ -36,20 +36,21 @@ def _rinits_internal(rinit, thetas, J, covars):
     return rinit(thetas[0], len(thetas), covars)
 
 
-def _resample(norm_weights):
+def _resample(norm_weights, subkey):
     """
     Systematic resampling method based on input normalized weights.
 
     Args:
         norm_weights (array-like): The array containing the logarithm of 
             normalized weights.
+        subkey (jax.random.PRNGKey): The random key for sampling.
 
     Returns:
         array-like: An array containing the resampled indices from the 
             systematic resampling given the input normalized weights.
     """
     J = norm_weights.shape[-1]
-    unifs = (np.random.uniform() + jnp.arange(J)) / J
+    unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J
     csum = jnp.cumsum(jnp.exp(norm_weights))
     counts = jnp.repeat(
         jnp.arange(J),
@@ -84,7 +85,7 @@ def _normalize_weights(weights):
     return norm_weights, loglik_t
 
 
-def _resampler(counts, particlesP, norm_weights):
+def _resampler(counts, particlesP, norm_weights, subkey):
     """
     Resamples the particles based on the weighted resampling rule determined by 
     norm_weights and the original particles generated from the previous 
@@ -96,6 +97,7 @@ def _resampler(counts, particlesP, norm_weights):
         particlesP (array-like): The original particles before resampling 
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
+        subkey (jax.random.PRNGKey): The random key for sampling.
 
     Returns:
         tuple: A tuple containing:
@@ -107,7 +109,7 @@ def _resampler(counts, particlesP, norm_weights):
                 resampled particles.
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights)
+    counts = _resample(norm_weights, subkey=subkey)
     particlesF = particlesP[counts]
     norm_weights = (norm_weights[counts]
                     - jax.lax.stop_gradient(norm_weights[counts])
@@ -115,7 +117,7 @@ def _resampler(counts, particlesP, norm_weights):
     return counts, particlesF, norm_weights
 
 
-def _no_resampler(counts, particlesP, norm_weights):
+def _no_resampler(counts, particlesP, norm_weights, subkey):
     """
     Obtains the original input arguments without resampling.
 
@@ -125,6 +127,9 @@ def _no_resampler(counts, particlesP, norm_weights):
         particlesP (array-like): The original particles before resampling 
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
+        subkey (jax.random.PRNGKey): The random key for sampling. This is not
+            used in this function, but is included to maintain the same
+            arguments as _resampler().
 
     Returns:
         tuple: A tuple containing:
@@ -135,7 +140,7 @@ def _no_resampler(counts, particlesP, norm_weights):
     return counts, particlesP, norm_weights
 
 
-def _resampler_thetas(counts, particlesP, norm_weights, thetas):
+def _resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     """
     Resamples the particles for perturbed particle filtering method, with their 
     corresponding parameters also resampled 
@@ -147,6 +152,7 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
         thetas (array-like): Perturbed parameters associated with the particles.
+        subkey (jax.random.PRNGKey): The random key for sampling.
 
     Returns:
         tuple: A tuple containing:
@@ -160,7 +166,7 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
                 the latest perturbed particles (particlesF).
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights)
+    counts = _resample(norm_weights, subkey=subkey)
     particlesF = particlesP[counts]
     norm_weights = (norm_weights[counts]
                     - jax.lax.stop_gradient(norm_weights[counts])
@@ -169,7 +175,7 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas):
     return counts, particlesF, norm_weights, thetasF
 
 
-def _no_resampler_thetas(counts, particlesP, norm_weights, thetas):
+def _no_resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     """
     Obtains the original input arguments without resampling for perturbed 
     filtering method.
@@ -181,6 +187,9 @@ def _no_resampler_thetas(counts, particlesP, norm_weights, thetas):
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
         thetas (array-like): Perturbed parameters associated with the particles.
+        subkey (jax.random.PRNGKey): The random key for sampling. This is not
+            used in this function, but is included to maintain the same
+            arguments as _resampler_thetas().
 
     Returns:
         tuple: A tuple containing:
@@ -192,7 +201,7 @@ def _no_resampler_thetas(counts, particlesP, norm_weights, thetas):
     return counts, particlesP, norm_weights, thetas
 
 
-def _resampler_pf(counts, particlesP, norm_weights):
+def _resampler_pf(counts, particlesP, norm_weights, subkey):
     """
     Resamples the particles for function 'pfilter_pf_internal', with weight 
     equalization.
@@ -203,6 +212,7 @@ def _resampler_pf(counts, particlesP, norm_weights):
         particlesP (array-like): The original particles before resampling 
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
+        subkey (jax.random.PRNGKey): The random key for sampling.
 
     Returns:
         tuple: A tuple containing:
@@ -214,7 +224,7 @@ def _resampler_pf(counts, particlesP, norm_weights):
                 resampled particles. Set to the equal weights.
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights)
+    counts = _resample(norm_weights, subkey=subkey)
     particlesF = particlesP[counts]
     norm_weights = jnp.log(jnp.ones(J)) - jnp.log(J)
     return counts, particlesF, norm_weights
@@ -288,8 +298,9 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
     norm_weights, loglik_phi_t \
         = _normalize_weights(jax.lax.stop_gradient(measurements))
 
+    key, subkey = jax.random.split(key)
     counts, particlesF, norm_weightsF \
-        = _resampler(counts, particlesP, norm_weights)
+        = _resampler(counts, particlesP, norm_weights, subkey=subkey)
 
     weightsF = (
         weightsP + measurements - jax.lax.stop_gradient(measurements)
@@ -434,11 +445,12 @@ def _pfilter_helper(t, inputs, rprocess, dmeasure):
     loglik += loglik_t
 
     oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights = jax.lax.cond(
         oddr > thresh,
         _resampler,
         _no_resampler,
-        counts, particlesP, norm_weights
+        counts, particlesP, norm_weights, subkey
     )
 
     return [particlesF, theta, covars, loglik, 
@@ -575,8 +587,11 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
     else:
         key, *keys = jax.random.split(key, num=J + 1)
         keys = jnp.array(keys)
-
-    thetas += sigmas * jnp.array(jax.random.normal(shape=thetas.shape, key=key))
+    
+    key, subkey = jax.random.split(key)
+    thetas += sigmas * jnp.array(jax.random.normal(
+        shape=thetas.shape, key=subkey
+    ))
 
     # Get prediction particles
     # r processes: particleF and thetas are both vectorized (J times)
@@ -598,11 +613,12 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
 
     loglik += loglik_t
     oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights, thetas = jax.lax.cond(
         oddr > thresh,
         _resampler_thetas,
         _no_resampler_thetas,
-        counts, particlesP, norm_weights, thetas
+        counts, particlesP, norm_weights, thetas, subkey
     )
 
     return [particlesF, thetas, sigmas, covars, loglik, 
@@ -639,8 +655,9 @@ def _perfilter_internal(
         - An updated perturbed array of parameters.
     """
     loglik = 0
+    key, subkey = jax.random.split(key)
     thetas = theta + sigmas * jax.random.normal(
-        shape = (J,) + theta.shape[-ndim:], key = key
+        shape = (J,) + theta.shape[-ndim:], key = subkey
     )
     particlesF = _rinits_internal(rinit, thetas, 1, covars=covars)
     weights = jnp.log(jnp.ones(J) / J)
@@ -763,11 +780,12 @@ def _pfilter_helper_pf(t, inputs, rprocess, dmeasure):
     loglik += loglik_t
 
     oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights = jax.lax.cond(
         oddr > thresh,
         _resampler_pf,
         _no_resampler,
-        counts, particlesP, norm_weights
+        counts, particlesP, norm_weights, subkey
     )
 
     return [particlesF, theta, covars, loglik, 

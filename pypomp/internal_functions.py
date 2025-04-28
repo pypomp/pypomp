@@ -563,8 +563,10 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
                 particles.
             - key (jax.random.PRNGKey): The updated random key for sampling.
     """
-    particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, \
-        thresh, key = inputs
+    (
+        particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys,
+        thresh, key
+    ) = inputs
     J = len(particlesF)
 
     if covars is not None and len(covars.shape) > 2:
@@ -649,9 +651,10 @@ def _perfilter_internal(
     perfilter_helper_2 = partial(
         _perfilter_helper, rprocesses=rprocesses, dmeasures=dmeasures
     )
-    particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys, \
-    thresh, key \
-    = jax.lax.fori_loop(lower=0, upper=len(ys), body_fun=perfilter_helper_2,
+    (
+        particlesF, thetas, sigmas, covars, loglik, norm_weights, counts, ys,
+        thresh, key 
+    ) = jax.lax.fori_loop(lower=0, upper=len(ys), body_fun=perfilter_helper_2,
         init_val=[particlesF, thetas, sigmas, covars, loglik, norm_weights, 
                   counts, ys, thresh, key]
     )
@@ -1165,40 +1168,44 @@ def _mif_internal(
         - An array of negative log-likelihood through the iterations.
         - An array of parameters through the iterations.
     """
-    # TODO add key
     logliks = []
     params = []
 
     ndim = theta.ndim
-    # jax random?
-    thetas = theta \
-            + sigmas_init * np.random.normal(size=(J,) + theta.shape[-ndim:])
+    thetas = jnp.tile(theta, (J,) + (1,) * ndim)
     params.append(thetas)
+
     if monitor:
+        key, subkey = jax.random.split(key = key)
         loglik = jnp.mean(jnp.array(
             [_pfilter_internal(
                 thetas.mean(0), ys, J, rinit, rprocess, dmeasure,
-                covars=covars, thresh=thresh, key=key
+                covars=covars, thresh=thresh, key=subkey
             ) for i in range(MONITORS)]
         ))
         logliks.append(loglik)
 
     for m in tqdm(range(M)):
-        sigmas *= a
-        thetas += sigmas * np.random.normal(size=thetas.shape)
-        # TODO add key, otherwise the perfilter 
+        # TODO: Cool sigmas between time-iterations.
+        key, *subkeys = jax.random.split(key = key, num = 3)
+        sigmas *= a 
+        sigmas_init *= a
+        thetas += sigmas_init * jax.random.normal(
+            shape=thetas.shape, key = subkeys[0]
+        )
         loglik_ext, thetas = _perfilter_internal(
             thetas, ys, J, sigmas, rinit, rprocesses, dmeasures, 
-            ndim=ndim, covars=covars, thresh=thresh, key=key
+            ndim=ndim, covars=covars, thresh=thresh, key=subkeys[1]
         )
 
         params.append(thetas)
 
         if monitor:
+            key, subkey = jax.random.split(key = key)
             loglik = jnp.mean(jnp.array(
                 [_pfilter_internal(
                     thetas.mean(0), ys, J, rinit, rprocess, dmeasure, 
-                    covars=covars, thresh=thresh, key=key
+                    covars=covars, thresh=thresh, key=subkey
                 ) for i in range(MONITORS)]
             ))
 

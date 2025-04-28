@@ -1,6 +1,7 @@
 **.DS_Store
 .vscode
 *~
+scratch.py
 
 #### the following is the default Python package gitignore from GitHub ####
 

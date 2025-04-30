@@ -15,12 +15,13 @@ from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
 from .internal_functions import *
+from .simulate import simulate_internal
 
 
 class Pomp:
     MONITORS = 1
 
-    def __init__(self, rinit, rproc, dmeas, ys, theta, covars=None):
+    def __init__(self, rinit, rproc, dmeas, ys, theta, rmeas=None, covars=None):
         """
         Initializes the necessary components for a specific POMP model.
 
@@ -56,6 +57,7 @@ class Pomp:
         self.rinit = rinit
         self.rproc = rproc
         self.dmeas = dmeas
+        self.rmeas = rmeas
         self.ys = ys
         self.theta = theta
         self.covars = covars
@@ -107,6 +109,46 @@ class Pomp:
         return _mop_internal_mean(
             self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
             self.covars, alpha, key
+        )
+
+    
+    def simulate(
+        self, Nsim=100, time_vec=None, state_names=None, 
+        key=jax.random.PRNGKey(123), format = "array", plot=False
+    ):
+        """
+        Instance method to simulate from the model using the initialized 
+        instance parameters and calls 'simulate_internal' function.
+
+        Args:
+        Args:
+            time_vec (array-like, optional): Time vector for the simulation. 
+                Defaults to None.
+            Nsim (int, optional): The number of simulations. Defaults to 100.
+            state_names (list, optional): State names if applicable. Defaults to 
+                None.
+            key (jax.random.PRNGKey, optional): The random key. Defaults to 
+                jax.random.PRNGKey(123).
+            format (str, optional): The format of the output, either "array" or 
+                "dataframe". Defaults to "array".
+            plot (bool, optional): Whether to plot the results or not. Defaults 
+                to False.
+
+        Returns:
+            array-like: The simulated measurement array
+        """
+        return simulate_internal(
+            self, 
+            rinit = self.rinit, 
+            rprocess = self.rprocess, 
+            ys = self.ys, 
+            theta = self.theta, 
+            time_vec = time_vec, 
+            covars = self.covars, 
+            Nsim = Nsim, 
+            state_names = state_names, 
+            key = key,
+            format = format
         )
 
     def pfilter(self, J, thresh=100, key=None):

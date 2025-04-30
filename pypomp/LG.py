@@ -1,4 +1,4 @@
-"""This module implements a linear Gaussian model for POMP."""
+"""This module implements a linear Gaussian POMP model."""
 import os
 import csv
 import jax
@@ -59,7 +59,7 @@ def Generate_data(
     return ys
 
 # TODO: Add custom starting position.
-def rinit(theta, J, covars=None):
+def rinit(J, theta, covars=None, key):
     """Initial state process simulator for linear Gaussian model"""
     return jnp.ones((J, 2))
 

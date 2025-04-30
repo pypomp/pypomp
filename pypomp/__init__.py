@@ -1,6 +1,7 @@
 from .pomp_class import Pomp
 from .LG import LG
 from . import dacca
+from .simulate import simulate
 from .pfilter import pfilter
 from .pfilter_pf import pfilter_pf
 from .perfilter import perfilter

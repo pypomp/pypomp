@@ -15,3 +15,7 @@ The goal is to find exercises which help to develop pomp-py while giving us prac
 5. How does the time scale with the number of particle, J? Is this what you expect?
 
 6. Write a tutorial document on things you have tested out with pomp-py, to help others follow along.
+
+## Pressing tasks
+
+- We should standardize how rproc, dmeas, etc. should be written (e.g., what are the arguments, what do they return) and enforce these rules. 

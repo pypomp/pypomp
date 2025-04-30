@@ -1,7 +1,6 @@
 """
 This module implements internal functions for POMP models.
 """
-# TODO check if np.random functions work correctly, otherwise change them
 from functools import partial
 import jax
 import jax.numpy as jnp
@@ -1188,6 +1187,13 @@ def _mif_internal(
     """
     logliks = []
     params = []
+    # TODO: Use a more rigorous method of determining when to copy. 
+    if not isinstance(sigmas, (float, int)):
+        sigmas = sigmas.copy()
+    if not isinstance(sigmas_init, (float, int)):
+        sigmas_init = sigmas_init.copy()
+    # TODO: check for other instances where we need to make a copy of an object
+    # to avoid issues with modify-in-place.
 
     ndim = theta.ndim
     thetas = jnp.tile(theta, (J,) + (1,) * ndim)

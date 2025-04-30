@@ -1,3 +1,4 @@
+"""This module implements a linear Gaussian model for POMP."""
 import os
 import csv
 import jax
@@ -24,24 +25,27 @@ def transform_thetas(A, C, Q, R):
     """
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
-
-fixed = False
-key = jax.random.PRNGKey(111)
-angle = 0.2
-angle2 = angle if fixed else -0.5
-A = jnp.array([[jnp.cos(angle2), -jnp.sin(angle)],
-                [jnp.sin(angle), jnp.cos(angle2)]])
-C = jnp.eye(2)
-Q = jnp.array([[1, 1e-4],
-               [1e-4, 1]]) / 100
-R = jnp.array([[1, .1],
-               [.1, 1]]) / 10
-theta =  transform_thetas(A, C, Q, R)
-covars = None
-
-def Generate_data(T = 4, key = key):
+# TODO: Replace this with a simulate function. 
+def Generate_data(
+    T = 4, 
+        A = jnp.array([
+        [jnp.cos(0.2), -jnp.sin(0.2)],
+        [jnp.sin(0.2), jnp.cos(0.2)]
+    ]),
+    C = jnp.eye(2),
+    Q = jnp.array([
+        [1, 1e-4],
+        [1e-4, 1]
+    ]) / 100,
+    R = jnp.array([
+        [1, .1],
+        [.1, 1]
+    ]) / 10,
+    key = jax.random.PRNGKey(111)
+):
     xs = []
     ys = []
+    theta =  transform_thetas(A, C, Q, R)
     for i in tqdm(range(T)):
         x = jnp.ones(2)
         key, subkey = jax.random.split(key)
@@ -54,10 +58,13 @@ def Generate_data(T = 4, key = key):
     ys = jnp.array(ys)
     return ys
 
+# TODO: Add custom starting position.
 def rinit(theta, J, covars=None):
+    """Initial state process simulator for linear Gaussian model"""
     return jnp.ones((J, 2))
 
 def rproc(state, theta, key, covars=None):
+    """Process simulator for linear Gaussian model"""
     A, C, Q, R = get_thetas(theta)
     key, subkey = jax.random.split(key)
     return jax.random.multivariate_normal(
@@ -66,6 +73,7 @@ def rproc(state, theta, key, covars=None):
     )
     
 def dmeas(y, preds, theta):
+    """Measurement model distribution for linear Gaussian model"""
     A, C, Q, R = get_thetas(theta)
     return jax.scipy.stats.multivariate_normal.logpdf(y, preds, R)
 
@@ -74,12 +82,46 @@ dmeasure = jax.vmap(dmeas, (None, 0, None))
 rprocesses = jax.vmap(rproc, (0, 0, 0, None))
 dmeasures = jax.vmap(dmeas, (None, 0, 0))
 
-def LG_internal(T=4):
+def LG_internal(
+    T=4,
+        A = jnp.array([
+        [jnp.cos(0.2), -jnp.sin(0.2)],
+        [jnp.sin(0.2),  jnp.cos(0.2)]
+    ]),
+    C = jnp.eye(2),
+    Q = jnp.array([
+        [1, 1e-4],
+        [1e-4, 1]
+    ]) / 100,
+    R = jnp.array([
+        [1, .1],
+        [.1, 1]
+    ]) / 10,
+    key = jax.random.PRNGKey(111)
+):
+    theta =  transform_thetas(A, C, Q, R)
+    covars = None
     ys = Generate_data(T=T, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
     return LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures
 
-def LG(T=4):
+def LG(
+    T=4, 
+    A = jnp.array([
+        [jnp.cos(0.2), -jnp.sin(0.2)],
+        [jnp.sin(0.2),  jnp.cos(0.2)]
+    ]),
+    C = jnp.eye(2),
+    Q = jnp.array([
+        [1, 1e-4],
+        [1e-4, 1]
+    ]) / 100,
+    R = jnp.array([
+        [1, .1],
+        [.1, 1]
+    ]) / 10,
+    key = jax.random.PRNGKey(111)
+):
     """
     Initialize a Pomp object with the linear Gaussian model.
 
@@ -87,6 +129,16 @@ def LG(T=4):
     ----------
     T : int, optional
         The number of time steps to generate data for. Defaults to 4.
+    A : array-like, optional
+        The transition matrix. Defaults to the identity matrix.
+    C : array-like, optional
+        The measurement matrix. Defaults to the identity matrix.
+    Q : array-like, optional
+        The covariance matrix of the state noise. Defaults to the identity matrix.
+    R : array-like, optional
+        The covariance matrix of the measurement noise. Defaults to the identity matrix.
+    key : PRNGKey, optional
+        The random key used to generate the data. Defaults to jax.random.PRNGKey(111).
 
     Returns
     -------
@@ -94,6 +146,8 @@ def LG(T=4):
         A Pomp object initialized with the linear Gaussian model parameters and
         the generated data.
     """
-    ys = Generate_data(T=T, key=key)
+    theta =  transform_thetas(A, C, Q, R)
+    covars = None
+    ys = Generate_data(T=T, A=A, C=C, Q=Q, R=R, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
     return LG_obj

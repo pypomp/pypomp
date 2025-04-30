@@ -8,6 +8,9 @@ from tqdm import tqdm
 from pypomp.pomp_class import Pomp
 
 def get_thetas(theta):
+    """
+    Cast a theta vector into A, C, Q, and R matrices as if casting iron.
+    """
     A = theta[0:4].reshape(2, 2)
     C = theta[4:8].reshape(2, 2)
     Q = theta[8:12].reshape(2, 2)
@@ -16,6 +19,9 @@ def get_thetas(theta):
 
 
 def transform_thetas(A, C, Q, R):
+    """
+    Take A, C, Q, and R matrices and melt them into a single 1D array.
+    """
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
@@ -54,8 +60,10 @@ def rinit(theta, J, covars=None):
 def rproc(state, theta, key, covars=None):
     A, C, Q, R = get_thetas(theta)
     key, subkey = jax.random.split(key)
-    return jax.random.multivariate_normal(key=subkey,
-                                         mean=A @ state, cov=Q)
+    return jax.random.multivariate_normal(
+        key=subkey,
+        mean=A @ state, cov=Q
+    )
     
 def dmeas(y, preds, theta):
     A, C, Q, R = get_thetas(theta)
@@ -72,9 +80,20 @@ def LG_internal(T=4):
     return LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures
 
 def LG(T=4):
+    """
+    Initialize a Pomp object with the linear Gaussian model.
+
+    Parameters
+    ----------
+    T : int, optional
+        The number of time steps to generate data for. Defaults to 4.
+
+    Returns
+    -------
+    LG_obj : Pomp
+        A Pomp object initialized with the linear Gaussian model parameters and
+        the generated data.
+    """
     ys = Generate_data(T=T, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
-    return LG_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures
-
-
-
+    return LG_obj

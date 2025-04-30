@@ -5,9 +5,15 @@ import jax.numpy as jnp
 from pypomp.LG import *
 from pypomp.fit import fit
 
-(
-    LG_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures
-) = LG()
+LG_obj = LG()
+ys = LG_obj.ys
+theta = LG_obj.theta
+covars = LG_obj.covars
+rinit = LG_obj.rinit
+rprocess = LG_obj.rprocess
+dmeasure = LG_obj.dmeasure
+rprocesses = LG_obj.rprocesses
+dmeasures = LG_obj.dmeasures
 
 class TestFit_LG(unittest.TestCase):
     def setUp(self):

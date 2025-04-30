@@ -1,5 +1,5 @@
 from .pomp_class import Pomp
-from . import LG
+from .LG import LG
 from . import dacca
 from .pfilter import pfilter
 from .pfilter_pf import pfilter_pf

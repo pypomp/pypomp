@@ -8,14 +8,21 @@ from scipy import stats
 
 import matplotlib.pyplot as plt
 
-def simulate_internal(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=None, time_vec=None, covars=None, Nsim=100, state_names=None, key=jax.random.PRNGKey(123), format = "array"):
+def simulate_internal(
+    pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=None, 
+    time_vec=None, covars=None, Nsim=100, state_names=None, 
+    key=jax.random.PRNGKey(123), format = "array"
+):
     if state_names is None:
-        print("Error: Please provide a list type containing 10 string elements, each of which is a hidden state, in the same order as in the rprocess.")
+        print(
+            "Error: Please provide a list type containing 10 string elements, " 
+            "each of which is a hidden state, in the same order as in the "
+            "rprocess."
+        )
     # get elements
     if pomp_obj is not None:
         rinit = pomp_obj.rinit
         rproc = pomp_obj.rproc
-        dmeas = pomp_obj.dmeas
         ys = pomp_obj.ys
         theta = pomp_obj.theta
         covars = pomp_obj.covars
@@ -45,7 +52,10 @@ def simulate_internal(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=N
     elif time_vec is not None and len(time_vec) == ylen:
         time = np.insert(time_vec, 0, 0)
     else:
-        print("Error in time vector: 'time_vec' should have the same length as 'ys'.")
+        print(
+            "Error in time vector: 'time_vec' should have the same length as "
+            "'ys'."
+        )
     
     latent_states = state_list[0].shape[1]
 
@@ -71,8 +81,14 @@ def simulate_internal(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=N
             ax.plot(time, particle_values, alpha=0.7) 
         
         ax.plot(time, mean[:, state], color='black', linewidth=2, label='Mean')
-        ax.plot(time, upper_CI[:, state], color='black', linestyle='--', linewidth=1, label='Upper')
-        ax.plot(time, lower_CI[:, state], color='black', linestyle='--', linewidth=1, label='Lower')
+        ax.plot(
+            time, upper_CI[:, state], color='black', linestyle='--', 
+            linewidth=1, label='Upper'
+        )
+        ax.plot(
+            time, lower_CI[:, state], color='black', linestyle='--', 
+            linewidth=1, label='Lower'
+        )
         ax.set_title(state_names[state], fontsize=14)
         ax.set_xlabel("Time", fontsize=12)
         ax.set_ylabel(f"State Value: {state_names[state]}", fontsize=12)
@@ -114,15 +130,62 @@ def simulate_internal(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=N
 
         return state_df, lower_CI_df, upper_CI_df
     else:
-        print("Error: in simulate: 'format' should be one of “arrays”, “data.frame”")
+        print(
+            "Error: in simulate: 'format' should be one of “arrays”, "
+            "“data.frame”"
+        )
 
-# pomp object OR rinit, rprocess, ys, theta
-# time_vec: Input the real time information as a vector
-# Nsim: number of simulations
-# state_names: a list of string containing the latent state names with the same order as in rprocess
-# format: the returning variable format: an array or data frame
-def simulate(pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=None, time_vec=None, covars=None, Nsim=100, state_names=None, key=jax.random.PRNGKey(123), format = "array"):
-    return simulate_internal(pomp_obj, rinit, rprocess, ys, theta, time_vec, covars, Nsim, state_names, key, format)
+def simulate(
+    pomp_obj=None, rinit=None, rprocess=None, ys=None, theta=None, 
+    time_vec=None, covars=None, Nsim=100, state_names=None, 
+    key=jax.random.PRNGKey(123), format = "array"
+):
+    """
+    Simulates the evolution of a system over time using a Partially Observed 
+    Markov Process (POMP) model. This function can either execute on a POMP 
+    object or utilize the specified parameters directly to perform the 
+    simulation.
+
+    Args:
+        pomp_obj (Pomp, optional): An instance of the POMP class. If provided, 
+            the function will execute on this object to perform the simulation. 
+            If not provided, the necessary model components must be provided 
+            separately. Defaults to None.
+        rinit (function, optional): Simulator for the initial-state 
+            distribution. Defaults to None.
+        rprocess (function, optional): Simulator for the process model. 
+            Defaults to None.
+        ys (array-like, optional): The measurement array. Defaults to None.
+        theta (array-like, optional): Parameters involved in the POMP model. 
+            Defaults to None.
+        time_vec (array-like, optional): Observation times as a vector. Defaults
+            to None.
+        covars (array-like, optional): Covariates for the process, or None if 
+            not applicable. Defaults to None.
+        Nsim (int, optional): The number of simulations to perform. Defaults to 
+            100.
+        state_names (list of str, optional): A list containing the latent state 
+            names in the same order as in rprocess. Defaults to None.
+        key (jax.random.PRNGKey, optional): The random key for random number 
+            generation. Defaults to jax.random.PRNGKey(123).
+        format (str, optional): The format of the return value, either "array" 
+            or "data.frame". Defaults to "array".
+
+    Returns:
+        tuple: Depending on the 'format' argument, returns either:
+            - A tuple containing arrays of the simulated states, lower 
+              confidence intervals, and upper confidence intervals.
+            - DataFrames of the simulated states, lower confidence intervals, 
+              and upper confidence intervals.
+
+    Raises:
+        ValueError: If 'format' is not one of "array" or "data.frame".
+    """
+
+    return simulate_internal(
+        pomp_obj, rinit, rprocess, ys, theta, time_vec, covars, Nsim, 
+        state_names, key, format
+    )
 
 
     

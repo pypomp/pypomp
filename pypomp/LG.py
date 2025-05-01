@@ -83,6 +83,7 @@ def dmeas(y, state, params):
     A, C, Q, R = get_thetas(params)
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
 
+# These are used for internal tests.
 rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
 dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
 rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
@@ -90,7 +91,7 @@ dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
 
 def LG_internal(
     T=4,
-        A = jnp.array([
+    A = jnp.array([
         [jnp.cos(0.2), -jnp.sin(0.2)],
         [jnp.sin(0.2),  jnp.cos(0.2)]
     ]),
@@ -105,6 +106,7 @@ def LG_internal(
     ]) / 10,
     key = jax.random.PRNGKey(111)
 ):
+    """This function is used for internal tests."""
     theta =  transform_thetas(A, C, Q, R)
     covars = None
     ys = Generate_data(T=T, key=key)
@@ -143,11 +145,14 @@ def LG(
     C : array-like, optional
         The measurement matrix. Defaults to the identity matrix.
     Q : array-like, optional
-        The covariance matrix of the state noise. Defaults to the identity matrix.
+        The covariance matrix of the state noise. Defaults to the identity 
+        matrix.
     R : array-like, optional
-        The covariance matrix of the measurement noise. Defaults to the identity matrix.
+        The covariance matrix of the measurement noise. Defaults to the identity
+        matrix.
     key : PRNGKey, optional
-        The random key used to generate the data. Defaults to jax.random.PRNGKey(111).
+        The random key used to generate the data. Defaults to 
+        jax.random.PRNGKey(111).
 
     Returns
     -------

@@ -1,4 +1,6 @@
-
+"""
+This file contains the classes for components that define the model structure.
+"""
 class RInit:
     def __init__(self, struct):
         """

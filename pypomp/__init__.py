@@ -6,3 +6,4 @@ from .pfilter_pf import pfilter_pf
 from .perfilter import perfilter
 from .mop import mop
 from .fit import fit
+from .model_struct import *

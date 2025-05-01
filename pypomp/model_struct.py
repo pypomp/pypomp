@@ -1,8 +1,8 @@
 
-class rinit:
+class RInit:
     def __init__(self, struct):
         """
-        Initializes the rinit class with the required function structure.
+        Initializes the RInit class with the required function structure.
         While this function can check that the arguments of struct are in the 
         correct order, it cannot check that the output is correct. In this case,
         the user must make sure that struct returns a shape (J, dim(X)) JAX 
@@ -32,10 +32,10 @@ class rinit:
             )
         self.struct = struct
 
-class rproc:
+class RProc:
     def __init__(self, struct):
         """
-        Initializes the rproc class with the required function structure.
+        Initializes the RProc class with the required function structure.
         While this function can check that the arguments of struct are in the 
         correct order, it cannot check that the output is correct. In this case,
         the user must make sure that struct returns a shape (dim(X),) JAX array.
@@ -70,10 +70,10 @@ class rproc:
             )
         self.struct = struct
 
-class dmeas:
+class DMeas:
     def __init__(self, struct):
         """
-        Initializes the dmeas class with the required function structure.
+        Initializes the DMeas class with the required function structure.
         While this function can check that the arguments of struct are in the 
         correct order, it cannot check that the output is correct. In this case,
         the user must make sure that struct returns a shape () JAX array.

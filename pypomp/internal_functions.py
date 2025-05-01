@@ -1154,8 +1154,8 @@ def _mif_internal(
     verbose=False, key=None
 ):
     """
-    Internal functions for conducting iterated filtering (IF2) algorithm, is 
-    called in 'fit_internal' function.
+    Internal function for conducting the iterated filtering (IF2) algorithm.
+    This is called in the '_fit_internal' function.
 
     Args:
         theta (array-like): Parameters involved in the POMP model.

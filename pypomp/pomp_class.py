@@ -15,6 +15,9 @@ from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
 from .internal_functions import *
+from .model_struct import RInit
+from .model_struct import RProc
+from .model_struct import DMeas
 
 
 class Pomp:
@@ -25,10 +28,10 @@ class Pomp:
         Initializes the necessary components for a specific POMP model.
 
         Args:
-            rinit (function): Simulator for the process model.
-            rproc (function): Basic component of the simulator for the process 
+            rinit (RInit): Simulator for the process model.
+            rproc (RProc): Basic component of the simulator for the process 
                 model.
-            dmeas (function): Basic component of the density evaluation for the 
+            dmeas (DMeas): Basic component of the density evaluation for the 
                 measurement model.
             ys (array-like): The measurement array.
             theta (array-like): Parameters involved in the POMP model.
@@ -36,31 +39,31 @@ class Pomp:
                  Defaults to None.
 
         Raises:
-            TypeError: The required argument 'rinit' is None.
-            TypeError: The required argument 'rproc' is None.
-            TypeError: The required argument 'dmeas' is None.
+            TypeError: The required argument 'rinit' is not an RInit.
+            TypeError: The required argument 'rproc' is not an RProc.
+            TypeError: The required argument 'dmeas' is not a DMeas.
             TypeError: The required argument 'ys' is None.
             TypeError: The required argument 'theta' is None.
         """
-        if rinit is None:
-            raise TypeError("rinit cannot be None")
-        if rproc is None:
-            raise TypeError("rproc cannot be None")
-        if dmeas is None:
-            raise TypeError("dmeas cannot be None")
+        if not isinstance(rinit, RInit):
+            raise TypeError("rinit must be an instance of the class RInit")
+        if not isinstance(rproc, RProc):
+            raise TypeError("rproc must be an instance of the class RProc")
+        if not isinstance(dmeas, DMeas):
+            raise TypeError("dmeas must be an instance of the class DMeas")
         if ys is None:
             raise TypeError("ys cannot be None")
         if theta is None:
             raise TypeError("theta cannot be None")
 
-        self.rinit = rinit
-        self.rproc = rproc
-        self.dmeas = dmeas
+        self.rinit = rinit.struct
+        self.rproc = rproc.struct
+        self.dmeas = dmeas.struct
         self.ys = ys
         self.theta = theta
         self.covars = covars
         self.rprocess = jax.vmap(self.rproc, (0, None, 0, None))
-        self.rprocesses = jax.vmap(rproc, (0, 0, 0, None))
+        self.rprocesses = jax.vmap(self.rproc, (0, 0, 0, None))
         self.dmeasure = jax.vmap(self.dmeas, (None, 0, None))
         self.dmeasures = jax.vmap(self.dmeas, (None, 0, 0))
 

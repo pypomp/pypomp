@@ -7,6 +7,9 @@ import jax.numpy as jnp
 
 from tqdm import tqdm
 from pypomp.pomp_class import Pomp
+from pypomp.model_struct import RInit
+from pypomp.model_struct import RProc
+from pypomp.model_struct import DMeas
 
 def get_thetas(theta):
     """
@@ -59,28 +62,31 @@ def Generate_data(
     return ys
 
 # TODO: Add custom starting position.
-def rinit(theta, J, covars=None):
-    """Initial state process simulator for linear Gaussian model"""
+@RInit
+def rinit(params, J, covars=None):
+    """Initial state process simulator for the linear Gaussian model"""
     return jnp.ones((J, 2))
 
-def rproc(state, theta, key, covars=None):
-    """Process simulator for linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta)
+@RProc
+def rproc(state, params, key, covars=None):
+    """Process simulator for the linear Gaussian model"""
+    A, C, Q, R = get_thetas(params)
     key, subkey = jax.random.split(key)
     return jax.random.multivariate_normal(
         key=subkey,
         mean=A @ state, cov=Q
     )
-    
-def dmeas(y, preds, theta):
-    """Measurement model distribution for linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta)
-    return jax.scipy.stats.multivariate_normal.logpdf(y, preds, R)
 
-rprocess = jax.vmap(rproc, (0, None, 0, None))
-dmeasure = jax.vmap(dmeas, (None, 0, None))
-rprocesses = jax.vmap(rproc, (0, 0, 0, None))
-dmeasures = jax.vmap(dmeas, (None, 0, 0))
+@DMeas
+def dmeas(y, state, params):
+    """Measurement model distribution for the linear Gaussian model"""
+    A, C, Q, R = get_thetas(params)
+    return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
+
+rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
+dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
+rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
+dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
 
 def LG_internal(
     T=4,
@@ -103,7 +109,10 @@ def LG_internal(
     covars = None
     ys = Generate_data(T=T, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
-    return LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures
+    return (
+        LG_obj, ys, theta, covars, rinit.struct, rproc.struct, dmeas.struct, 
+        rprocess, dmeasure, rprocesses, dmeasures
+    )
 
 def LG(
     T=4, 

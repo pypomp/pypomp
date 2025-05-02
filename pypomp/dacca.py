@@ -4,6 +4,7 @@ import jax
 import numpy as np
 import jax.numpy as jnp
 from pypomp.pomp_class import Pomp
+from pypomp.model_struct import *
 
 def sigmoid(x):
     return 1/(1+jnp.exp(-x))
@@ -25,11 +26,22 @@ def get_thetas(theta):
     omegas = theta[15:]
     k = 3 
     delta = 0.02 
-    return gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta
+    return (
+        gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k,
+        delta
+    )
 
-def transform_thetas(gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas):
-    return jnp.concatenate([jnp.array([jnp.log(gamma), jnp.log(m), jnp.log(rho), jnp.log(epsilon), jnp.log(omega),
-                    logit(c), beta_trend * 100, jnp.log(sigma), jnp.log(tau)]), bs, omegas])
+def transform_thetas(
+    gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
+):
+    return jnp.concatenate([
+        jnp.array([
+            jnp.log(gamma), jnp.log(m), jnp.log(rho), jnp.log(epsilon), 
+            jnp.log(omega), logit(c), beta_trend * 100, jnp.log(sigma), 
+            jnp.log(tau)
+        ]), 
+        bs, omegas
+    ])
 
 gamma = 20.8 # recovery rate
 epsilon = 19.1 # rate of waning of immunity for severe infections
@@ -72,17 +84,27 @@ with open(covart_path, 'r') as f:
 target_index = jnp.array([1891 + i * (1 / 240) for i in range(12037)]) 
 interpolated_covars = []
 for col in range(covars_data.shape[1]): 
-    interpolated_column = jnp.interp(target_index, covart_index, covars_data[:, col])
+    interpolated_column = jnp.interp(
+        target_index, covart_index, covars_data[:, col]
+    )
     interpolated_covars.append(interpolated_column)
     covars = jnp.array(interpolated_covars).T  
         
 key = jax.random.PRNGKey(111)
-theta = transform_thetas(gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas)
+theta = transform_thetas(
+    gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
+)
 ys = ys
 covars = covars
 
-def rinit(theta, J, covars=None):
-    S_0, I_0, Y_0, R1_0, R2_0, R3_0 = 0.621, 0.378, 0, 0.000843, 0.000972, 1.16e-07
+@RInit
+def rinit(params, J, covars=None):
+    S_0 = 0.621
+    I_0 = 0.378
+    Y_0 = 0
+    R1_0 = 0.000843
+    R2_0 = 0.000972
+    R3_0 = 1.16e-07
     pop = covars[0,2]
     S = pop*S_0
     I = pop*I_0
@@ -95,11 +117,24 @@ def rinit(theta, J, covars=None):
     count = 0
     return jnp.tile(jnp.array([S,I,Y,Mn,R1,R2,R3,t, count]), (J,1)) 
         
-def rproc(state, theta, key, covars):
-    S, I, Y, deaths, pts, t, count = state[0], state[1], state[2], state[3], state[4:-2], state[-2], state[-1]
+@RProc
+def rproc(state, params, key, covars):
+    S = state[0]
+    I = state[1]
+    Y = state[2]
+    deaths = state[3]
+    pts = state[4:-2]
+    t = state[-2]
+    count = state[-1]
     t = t.astype(int)
-    trends, dpopdts, pops, seass = covars[:,0], covars[:,1], covars[:,2], covars[:,3:]
-    gamma, deltaI, rho, eps, omega, clin, beta_trend, sd_beta, tau, bs, omegas, nrstage, delta = get_thetas(theta)
+    trends = covars[:,0]
+    dpopdts = covars[:,1]
+    pops = covars[:,2]
+    seass = covars[:,3:]
+    (
+        gamma, deltaI, rho, eps, omega, clin, beta_trend, sd_beta, tau, bs, 
+        omegas, nrstage, delta 
+    ) = get_thetas(params)
     dt = 1/240
     deaths = 0
     nrstage = 3
@@ -149,38 +184,51 @@ def rproc(state, theta, key, covars):
         
         t += 1
 
-    return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([t]), jnp.array([count])])
+    return jnp.hstack([
+        jnp.array([S, I, Y, deaths]), pts, jnp.array([t]), jnp.array([count])
+    ])
 
 def dmeas_helper(y, deaths, v, tol, ltol):
-    return jnp.logaddexp(jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v+tol),ltol)
+    return jnp.logaddexp(
+        jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v+tol), ltol
+    )
         
 def dmeas_helper_tol(y, deaths, v, tol, ltol):
     return ltol
-        
-def dmeas(y, preds, theta, keys=None):
-    deaths = preds[3]; count = preds[-1]; tol = 1.0e-18
+
+@DMeas  
+def dmeas(y, state, params, keys=None):
+    deaths = state[3]; count = state[-1]; tol = 1.0e-18
     ltol = jnp.log(tol)
-    gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta = get_thetas(theta)
+    (
+        gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k,
+        delta
+    ) = get_thetas(params)
     v = tau*deaths
     #return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
-    return jax.lax.cond(jnp.logical_or((1-jnp.isfinite(v)).astype(bool), count>0), #if Y < 0 then count violation
-                        dmeas_helper_tol, 
-                        dmeas_helper,
-                        y, deaths, v, tol, ltol)
+    return jax.lax.cond(
+        jnp.logical_or((1-jnp.isfinite(v)).astype(bool), count>0), #if Y < 0 then count violation
+        dmeas_helper_tol, 
+        dmeas_helper,
+        y, deaths, v, tol, ltol
+    )
         
        
-rprocess = jax.vmap(rproc, (0, None, 0, None))
-dmeasure = jax.vmap(dmeas, (None, 0, None))
-rprocesses = jax.vmap(rproc, (0, 0, 0, None))
-dmeasures = jax.vmap(dmeas, (None, 0, 0))
+rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
+dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
+rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
+dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
 
 def dacca_internal():
     dacca_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
-    return dacca_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures
+    return (
+        dacca_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, 
+        rprocesses, dmeasures
+    )
 
 def dacca():
     dacca_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
-    return dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures
+    return dacca_obj
 
     
 

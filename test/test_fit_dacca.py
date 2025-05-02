@@ -5,7 +5,15 @@ import jax.numpy as jnp
 from pypomp.dacca import *
 from pypomp.fit import fit
 
-dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = dacca()
+dacca_obj = dacca()
+ys = dacca_obj.ys
+theta = dacca_obj.theta
+covars = dacca_obj.covars
+rinit = dacca_obj.rinit
+rprocess = dacca_obj.rprocess
+dmeasure = dacca_obj.dmeasure
+rprocesses = dacca_obj.rprocesses
+dmeasures = dacca_obj.dmeasures
 
 class TestFit_Dacca(unittest.TestCase):
     def setUp(self):

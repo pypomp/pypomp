@@ -14,7 +14,15 @@ from pypomp.perfilter import perfilter
 #sys.path.insert(0, 'pypomp')
 #from dacca import dacca
 
-dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = dacca()
+dacca_obj = dacca()
+ys = dacca_obj.ys
+theta = dacca_obj.theta
+covars = dacca_obj.covars
+rinit = dacca_obj.rinit
+rprocess = dacca_obj.rprocess
+dmeasure = dacca_obj.dmeasure
+rprocesses = dacca_obj.rprocesses
+dmeasures = dacca_obj.dmeasures
 
 class TestPerfilter_Dacca(unittest.TestCase):
     def setUp(self):
@@ -31,15 +39,20 @@ class TestPerfilter_Dacca(unittest.TestCase):
         self.dmeasures = dmeasures
 
     def test_internal_basic(self):
-        val1, theta1 = perfilter(J=self.J, rinit=self.rinit, rprocesses=self.rprocesses, dmeasures=self.dmeasures,
-                                 theta=self.theta, ys=self.ys, sigmas=0.02, covars=self.covars, thresh=-1, key=self.key)
+        val1, theta1 = perfilter(
+            J=self.J, rinit=self.rinit, rprocesses=self.rprocesses, 
+            dmeasures=self.dmeasures, theta=self.theta, ys=self.ys, sigmas=0.02,
+            covars=self.covars, thresh=-1, key=self.key
+        )
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
         self.assertEqual(theta1.shape, (self.J, 21))
 
     def test_class_basic(self):
-        val, theta_new = perfilter(self.dacca_obj, self.J, sigmas=0.02, thresh=-1, key=self.key)
+        val, theta_new = perfilter(
+            self.dacca_obj, self.J, sigmas=0.02, thresh=-1, key=self.key
+        )
         self.assertEqual(val.shape, ())
         self.assertTrue(jnp.isfinite(val.item()))
         self.assertEqual(val.dtype, jnp.float32)
@@ -59,10 +72,15 @@ class TestPerfilter_Dacca(unittest.TestCase):
         
         # without inputting 'covars'
         with self.assertRaises(TypeError) as text:
-            perfilter(J=self.J, rinit=self.rinit, rprocesses=self.rprocesses, dmeasures=self.dmeasures,
-                      theta=self.theta, ys=self.ys, sigmas=0.02, thresh=-1, key=self.key)
+            perfilter(
+                J=self.J, rinit=self.rinit, rprocesses=self.rprocesses, 
+                dmeasures=self.dmeasures, theta=self.theta, ys=self.ys, 
+                sigmas=0.02, thresh=-1, key=self.key
+            )
 
-        self.assertEqual(str(text.exception), "'NoneType' object is not subscriptable") 
+        self.assertEqual(str(text.exception), 
+            "'NoneType' object is not subscriptable"
+        ) 
 
 
 if __name__ == "__main__":

@@ -15,6 +15,18 @@ from tqdm import tqdm
 
 '''resampling functions'''
 
+def _keys_helper(key, J, covars):
+    """
+    This function is a helper for generating random keys for resampling in the
+    particle filtering algorithms. 
+    """
+    if covars is not None and len(covars.shape) > 2:
+        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
+        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
+    else:
+        key, *keys = jax.random.split(key, num=J + 1)
+        keys = jnp.array(keys)
+    return key, keys
 
 def _rinits_internal(rinit, thetas, J, covars):
     """
@@ -270,12 +282,8 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
     """
     particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key = inputs
     J = len(particlesF)
-    if covars is not None and len(covars.shape) > 2:
-        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
-    else:
-        key, *keys = jax.random.split(key, num=J + 1)
-        keys = jnp.array(keys)
+    
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
 
     weightsP = alpha * weightsF 
 
@@ -422,12 +430,7 @@ def _pfilter_helper(t, inputs, rprocess, dmeasure):
         = inputs
     J = len(particlesF)
 
-    if covars is not None and len(covars.shape) > 2:
-        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
-    else:
-        key, *keys = jax.random.split(key, num=J + 1)
-        keys = jnp.array(keys)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
 
     if covars is not None:
         particlesP = rprocess(particlesF, theta, keys, covars)  # if t>0 else particlesF
@@ -580,12 +583,7 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
     ) = inputs
     J = len(particlesF)
 
-    if covars is not None and len(covars.shape) > 2:
-        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
-    else:
-        key, *keys = jax.random.split(key, num=J + 1)
-        keys = jnp.array(keys)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
     
     key, subkey = jax.random.split(key)
     thetas += sigmas * jnp.array(jax.random.normal(
@@ -757,12 +755,7 @@ def _pfilter_helper_pf(t, inputs, rprocess, dmeasure):
         = inputs
     J = len(particlesF)
 
-    if covars is not None and len(covars.shape) > 2:
-        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
-    else:
-        key, *keys = jax.random.split(key, num=J + 1)
-        keys = jnp.array(keys)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
 
     if covars is not None:
         particlesP = rprocess(particlesF, theta, keys, covars)  # if t>0 else particlesF

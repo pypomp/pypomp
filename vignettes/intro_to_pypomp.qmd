@@ -18,7 +18,7 @@ import pypomp as po
 from pypomp.LG import Generate_data
 ```
 
-Next, we define the components of the model and a set of parameters.
+Because the model parameters will all be passed in one JAX array, it can be helpful to define functions that pack the values into the array or unpack them into a more natural form. 
 
 ```{python Define the linear Gaussian model}
 def get_thetas(theta):
@@ -37,7 +37,11 @@ def transform_thetas(A, C, Q, R):
     Take A, C, Q, and R matrices and melt them into a single 1D array.
     """
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+```
 
+Next, we define the components of the model. The decorators are used to ensure that the arguments are in the order required for `jax.vmap()` to work internally. 
+
+```{python}
 @po.RInit
 def rinit(params, J, covars=None):
     """Initial state process simulator for the linear Gaussian model"""
@@ -58,7 +62,11 @@ def dmeas(y, state, params):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(params)
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
+```
 
+Now we define the parameter values as JAX arrays.
+
+```{python}
 # Transition matrix
 A = jnp.array([
     [jnp.cos(0.2), -jnp.sin(0.2)],
@@ -78,7 +86,7 @@ R = jnp.array([
 ]) / 10
 ```
 
-We generate data.
+We do not have real-world data, so we generate our own data. 
 
 ```{python Generate data}
 Y = Generate_data(T = 100)

@@ -1,4 +1,5 @@
 """This module implements a linear Gaussian model for POMP."""
+
 import os
 import csv
 import jax
@@ -10,6 +11,7 @@ from pypomp.pomp_class import Pomp
 from pypomp.model_struct import RInit
 from pypomp.model_struct import RProc
 from pypomp.model_struct import DMeas
+
 
 def get_thetas(theta):
     """
@@ -28,27 +30,19 @@ def transform_thetas(A, C, Q, R):
     """
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
-# TODO: Replace this with a simulate function. 
+
+# TODO: Replace this with a simulate function.
 def Generate_data(
-    T = 4, 
-        A = jnp.array([
-        [jnp.cos(0.2), -jnp.sin(0.2)],
-        [jnp.sin(0.2), jnp.cos(0.2)]
-    ]),
-    C = jnp.eye(2),
-    Q = jnp.array([
-        [1, 1e-4],
-        [1e-4, 1]
-    ]) / 100,
-    R = jnp.array([
-        [1, .1],
-        [.1, 1]
-    ]) / 10,
-    key = jax.random.PRNGKey(111)
+    T=4,
+    A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
+    C=jnp.eye(2),
+    Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
+    R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
+    key=jax.random.PRNGKey(111),
 ):
     xs = []
     ys = []
-    theta =  transform_thetas(A, C, Q, R)
+    theta = transform_thetas(A, C, Q, R)
     for i in tqdm(range(T)):
         x = jnp.ones(2)
         key, subkey = jax.random.split(key)
@@ -61,21 +55,21 @@ def Generate_data(
     ys = jnp.array(ys)
     return ys
 
+
 # TODO: Add custom starting position.
 @RInit
 def rinit(params, J, covars=None):
     """Initial state process simulator for the linear Gaussian model"""
     return jnp.ones((J, 2))
 
+
 @RProc
 def rproc(state, params, key, covars=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(params)
     key, subkey = jax.random.split(key)
-    return jax.random.multivariate_normal(
-        key=subkey,
-        mean=A @ state, cov=Q
-    )
+    return jax.random.multivariate_normal(key=subkey, mean=A @ state, cov=Q)
+
 
 @DMeas
 def dmeas(y, state, params):
@@ -83,55 +77,49 @@ def dmeas(y, state, params):
     A, C, Q, R = get_thetas(params)
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
 
+
 # These are used for internal tests.
 rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
 dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
 rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
 dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
 
+
 def LG_internal(
     T=4,
-    A = jnp.array([
-        [jnp.cos(0.2), -jnp.sin(0.2)],
-        [jnp.sin(0.2),  jnp.cos(0.2)]
-    ]),
-    C = jnp.eye(2),
-    Q = jnp.array([
-        [1, 1e-4],
-        [1e-4, 1]
-    ]) / 100,
-    R = jnp.array([
-        [1, .1],
-        [.1, 1]
-    ]) / 10,
-    key = jax.random.PRNGKey(111)
+    A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
+    C=jnp.eye(2),
+    Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
+    R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
+    key=jax.random.PRNGKey(111),
 ):
     """This function is used for internal tests."""
-    theta =  transform_thetas(A, C, Q, R)
+    theta = transform_thetas(A, C, Q, R)
     covars = None
     ys = Generate_data(T=T, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
     return (
-        LG_obj, ys, theta, covars, rinit.struct, rproc.struct, dmeas.struct, 
-        rprocess, dmeasure, rprocesses, dmeasures
+        LG_obj,
+        ys,
+        theta,
+        covars,
+        rinit.struct,
+        rproc.struct,
+        dmeas.struct,
+        rprocess,
+        dmeasure,
+        rprocesses,
+        dmeasures,
     )
 
+
 def LG(
-    T=4, 
-    A = jnp.array([
-        [jnp.cos(0.2), -jnp.sin(0.2)],
-        [jnp.sin(0.2),  jnp.cos(0.2)]
-    ]),
-    C = jnp.eye(2),
-    Q = jnp.array([
-        [1, 1e-4],
-        [1e-4, 1]
-    ]) / 100,
-    R = jnp.array([
-        [1, .1],
-        [.1, 1]
-    ]) / 10,
-    key = jax.random.PRNGKey(111)
+    T=4,
+    A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
+    C=jnp.eye(2),
+    Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
+    R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
+    key=jax.random.PRNGKey(111),
 ):
     """
     Initialize a Pomp object with the linear Gaussian model.
@@ -145,13 +133,13 @@ def LG(
     C : array-like, optional
         The measurement matrix. Defaults to the identity matrix.
     Q : array-like, optional
-        The covariance matrix of the state noise. Defaults to the identity 
+        The covariance matrix of the state noise. Defaults to the identity
         matrix.
     R : array-like, optional
         The covariance matrix of the measurement noise. Defaults to the identity
         matrix.
     key : PRNGKey, optional
-        The random key used to generate the data. Defaults to 
+        The random key used to generate the data. Defaults to
         jax.random.PRNGKey(111).
 
     Returns
@@ -160,7 +148,7 @@ def LG(
         A Pomp object initialized with the linear Gaussian model parameters and
         the generated data.
     """
-    theta =  transform_thetas(A, C, Q, R)
+    theta = transform_thetas(A, C, Q, R)
     covars = None
     ys = Generate_data(T=T, A=A, C=C, Q=Q, R=R, key=key)
     LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)

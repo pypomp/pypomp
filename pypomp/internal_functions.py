@@ -122,9 +122,11 @@ def _resampler(counts, particlesP, norm_weights, subkey):
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights, subkey=subkey)
     particlesF = particlesP[counts]
-    norm_weights = (norm_weights[counts]
-                    - jax.lax.stop_gradient(norm_weights[counts])
-                    - jnp.log(J))
+    norm_weights = (
+        norm_weights[counts]
+        - jax.lax.stop_gradient(norm_weights[counts])
+        - jnp.log(J)
+    )
     return counts, particlesF, norm_weights
 
 
@@ -179,9 +181,11 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights, subkey=subkey)
     particlesF = particlesP[counts]
-    norm_weights = (norm_weights[counts]
-                    - jax.lax.stop_gradient(norm_weights[counts])
-                    - jnp.log(J))
+    norm_weights = (
+        norm_weights[counts]
+        - jax.lax.stop_gradient(norm_weights[counts])
+        - jnp.log(J)
+    )
     thetasF = thetas[counts]
     return counts, particlesF, norm_weights, thetasF
 
@@ -302,12 +306,14 @@ def _mop_helper(t, inputs, rprocess, dmeasure):
     # make a little note in the code, discuss it in the quant test about the small difference
     # logsumexp source code
 
-    norm_weights, loglik_phi_t \
-        = _normalize_weights(jax.lax.stop_gradient(measurements))
+    (
+        norm_weights, loglik_phi_t
+    ) = _normalize_weights(jax.lax.stop_gradient(measurements))
 
     key, subkey = jax.random.split(key)
-    counts, particlesF, norm_weightsF \
-        = _resampler(counts, particlesP, norm_weights, subkey=subkey)
+    (
+        counts, particlesF, norm_weightsF
+    ) = _resampler(counts, particlesP, norm_weights, subkey=subkey)
 
     weightsF = (
         weightsP + measurements - jax.lax.stop_gradient(measurements)
@@ -350,10 +356,12 @@ def _mop_internal(
 
     mop_helper_2 = partial(_mop_helper, rprocess=rprocess, dmeasure=dmeasure)
 
-    particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key \
-    = jax.lax.fori_loop(lower=0, upper=len(ys), body_fun=mop_helper_2,
-        init_val=[particlesF, theta, covars, loglik, weightsF, counts, ys, 
-                  alpha, key]
+    (
+        particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key
+    ) = jax.lax.fori_loop(lower=0, upper=len(ys), body_fun=mop_helper_2,
+        init_val=[
+            particlesF, theta, covars, loglik, weightsF, counts, ys, alpha, key
+        ]
     )
 
     return -loglik
@@ -426,8 +434,9 @@ def _pfilter_helper(t, inputs, rprocess, dmeasure):
                 particles.
             - key (jax.random.PRNGKey): The updated random key for sampling.
     """
-    particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key \
-        = inputs
+    (
+        particlesF, theta, covars, loglik, norm_weights, counts, ys, thresh, key
+    ) = inputs
     J = len(particlesF)
 
     key, keys = _keys_helper(key=key, J=J, covars=covars)
@@ -1194,12 +1203,12 @@ def _mif_internal(
 
     if monitor:
         key, subkey = jax.random.split(key = key)
-        loglik = jnp.mean(jnp.array(
-            [_pfilter_internal(
+        loglik = jnp.mean(jnp.array([
+            _pfilter_internal(
                 thetas.mean(0), ys, J, rinit, rprocess, dmeasure,
                 covars=covars, thresh=thresh, key=subkey
-            ) for i in range(MONITORS)]
-        ))
+            ) for i in range(MONITORS)
+        ]))
         logliks.append(loglik)
 
     for m in tqdm(range(M)):
@@ -1219,12 +1228,12 @@ def _mif_internal(
 
         if monitor:
             key, subkey = jax.random.split(key = key)
-            loglik = jnp.mean(jnp.array(
-                [_pfilter_internal(
+            loglik = jnp.mean(jnp.array([
+                _pfilter_internal(
                     thetas.mean(0), ys, J, rinit, rprocess, dmeasure, 
                     covars=covars, thresh=thresh, key=subkey
-                ) for i in range(MONITORS)]
-            ))
+                ) for i in range(MONITORS)
+            ]))
 
             logliks.append(loglik)
 

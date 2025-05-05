@@ -1,20 +1,19 @@
-import os
 import jax
-import sys
 import unittest
 import jax.numpy as jnp
 
-from tqdm import tqdm
-from pypomp.pomp_class import Pomp
+from pypomp.LG import *
 from pypomp.mop import mop
-from pypomp.internal_functions import _mop_internal
 
-current_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-from LG import LG
-
-
-LG_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = LG()
+LG_obj = LG()
+ys = LG_obj.ys
+theta = LG_obj.theta
+covars = LG_obj.covars
+rinit = LG_obj.rinit
+rprocess = LG_obj.rprocess
+dmeasure = LG_obj.dmeasure
+rprocesses = LG_obj.rprocesses
+dmeasures = LG_obj.dmeasures
 
 class TestMop_LG(unittest.TestCase):
     def setUp(self):
@@ -34,7 +33,7 @@ class TestMop_LG(unittest.TestCase):
     def test_internal_basic(self):
         val1 = mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta,
                    ys=self.ys, alpha=0.97, key=self.key)
-        val2 = mop(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, ys=self.ys)
+        val2 = mop(rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, ys=self.ys, key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
@@ -44,8 +43,8 @@ class TestMop_LG(unittest.TestCase):
 
     def test_class_basic(self):
         val1 = mop(LG_obj, self.J, alpha=0.97, key=self.key)
-        val2 = mop(LG_obj)
-        val3 = mop(LG_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], ys=[])
+        val2 = mop(LG_obj, key=self.key)
+        val3 = mop(LG_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], ys=[], key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
@@ -58,12 +57,12 @@ class TestMop_LG(unittest.TestCase):
 
     def test_invalid_input(self):
         with self.assertRaises(ValueError) as text:
-            mop()
+            mop(key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            mop(J=self.J)
+            mop(J=self.J, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
@@ -73,22 +72,22 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            mop(J=self.J, theta=self.theta, ys=self.ys)
+            mop(J=self.J, theta=self.theta, ys=self.ys, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure)
+            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, ys=self.ys)
+            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, ys=self.ys, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta)
+            mop(J=self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, theta=self.theta, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 

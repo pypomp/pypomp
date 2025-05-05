@@ -1,20 +1,19 @@
-import os
-import csv
 import jax
-import sys
 import unittest
-import numpy as np
 import jax.numpy as jnp
 
-from tqdm import tqdm
-from pypomp.pomp_class import Pomp
+from pypomp.dacca import dacca
 from pypomp.pfilter import pfilter
 
-current_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(current_dir, "..", "pypomp")))
-from dacca import dacca
-
-dacca_obj, ys, theta, covars, rinit, rprocess, dmeasure, rprocesses, dmeasures = dacca()
+dacca_obj = dacca()
+ys = dacca_obj.ys
+theta = dacca_obj.theta
+covars = dacca_obj.covars
+rinit = dacca_obj.rinit
+rprocess = dacca_obj.rprocess
+dmeasure = dacca_obj.dmeasure
+rprocesses = dacca_obj.rprocesses
+dmeasures = dacca_obj.dmeasures
 
 class TestPfilterInternal_Dacca(unittest.TestCase):
     def setUp(self):
@@ -55,12 +54,12 @@ class TestPfilterInternal_Dacca(unittest.TestCase):
     def test_invalid_input(self):
         
         with self.assertRaises(ValueError) as text:
-            pfilter()
+            pfilter(key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
         with self.assertRaises(ValueError) as text:
-            pfilter(J=self.J)
+            pfilter(J=self.J, key=self.key)
 
         self.assertEqual(str(text.exception), "Invalid Arguments Input")
         

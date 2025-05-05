@@ -5,14 +5,9 @@ import unittest
 import jax.numpy as jnp
 
 from jax import vmap
-from tqdm import tqdm
-from pypomp.internal_functions import _pfilter_internal
+from pypomp.LG import *
 from pypomp.internal_functions import _perfilter_internal
 from pypomp.internal_functions import _perfilter_internal_mean
-
-curr_dir = os.getcwd()
-sys.path.append(os.path.abspath(os.path.join(curr_dir, "..", "pypomp")))
-from LG import LG_internal
 
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)
@@ -256,57 +251,57 @@ class TestPerfilterInternal_LG(unittest.TestCase):
 
     def test_missing(self):
         with self.assertRaises(TypeError):
-            _perfilter_internal()
+            _perfilter_internal(key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta)
+            _perfilter_internal(self.theta,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.ys)
+            _perfilter_internal(self.ys,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys)
+            _perfilter_internal(self.theta, self.ys, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rinit)
+            _perfilter_internal(self.theta, self.ys, self.rinit, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rprocesses)
+            _perfilter_internal(self.theta, self.ys, self.rprocesses,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rinit, self.rprocesses)
+            _perfilter_internal(self.theta, self.ys, self.rinit, self.rprocesses,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rinit, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.rinit, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rprocesses, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.rprocesses, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.rinit, self.rprocesses, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.rinit, self.rprocesses, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J)
+            _perfilter_internal(self.theta, self.ys, self.J, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.rinit)
+            _perfilter_internal(self.theta, self.ys, self.J, self.rinit, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocesses)
+            _perfilter_internal(self.theta, self.ys, self.J, self.rinit, self.rprocesses, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.J, self.rinit, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.rprocesses, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.J, self.rprocesses, self.dmeasures, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.dmeasures, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rprocesses, self.dmeasures)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rprocesses, self.dmeasures,key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.ndim)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.ndim, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.ndim)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.ndim, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, self.ndim)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, self.ndim, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.dmeasures, self.ndim)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.dmeasures, self.ndim, key=self.key)
         with self.assertRaises(TypeError):
-            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rprocesses, self.dmeasures, self.ndim)
+            _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rprocesses, self.dmeasures, self.ndim, key=self.key)
 
     def test_missing_theta(self):
         with self.assertRaises(AttributeError):
@@ -314,7 +309,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(AttributeError):
             _perfilter_internal(None, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars)
+                               self.ndim, self.covars, key=self.key)
 
     def test_missing_ys(self):
         with self.assertRaises(TypeError):
@@ -322,7 +317,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, None, self.J, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars)
+                               self.ndim, self.covars, key=self.key)
 
     def test_missing_J(self):
         with self.assertRaises(TypeError):
@@ -330,7 +325,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, None, self.sigmas, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars)
+                               self.ndim, self.covars, key=self.key)
 
     def test_missing_sigmas(self):
         with self.assertRaises(TypeError):
@@ -338,7 +333,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, self.J, None, self.rinit, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars)
+                               self.ndim, self.covars, key=self.key)
 
     def test_missing_rinit(self):
         with self.assertRaises(TypeError):
@@ -346,7 +341,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.ndim, self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, None, self.rprocesses, self.dmeasures,
-                               self.ndim, self.covars)
+                               self.ndim, self.covars, key=self.key)
 
     def test_missing_rprocesses(self):
         with self.assertRaises(TypeError):
@@ -354,7 +349,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, None, self.dmeasures, self.ndim,
-                               self.covars)
+                               self.covars, key=self.key)
 
     def test_missing_dmeasures(self):
         with self.assertRaises(TypeError):
@@ -362,24 +357,24 @@ class TestPerfilterInternal_LG(unittest.TestCase):
                                self.covars, thresh=-1, key=self.key)
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, self.J, self.sigmas, self.rinit, self.rprocesses, None, self.ndim,
-                               self.covars)
+                               self.covars, key=self.key)
 
     # wrong type parameters
     def test_wrongtype_J(self):
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, J=jnp.array(10, 20), sigmas=self.sigmas, rinit=self.rinit,
-                                rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars)
+                                rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars,key=self.key)
 
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, J="pop", sigmas=self.sigmas, rinit=self.rinit,
-                               rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars)
+                               rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars, key=self.key)
 
         def generate_J(n):
             return jnp.array(10, 20)
 
         with self.assertRaises(TypeError):
             _perfilter_internal(self.theta, self.ys, J=lambda n: generate_J(n), sigmas=self.sigmas, rinit=self.rinit,
-                               rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars)
+                               rprocesses=self.rprocesses, dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars, key=self.key)
 
     def test_wrongtype_theta(self):
         with self.assertRaises(TypeError):
@@ -481,7 +476,7 @@ class TestPerfilterInternal_LG(unittest.TestCase):
             _perfilter_internal(self.theta, self.ys, J, self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
                                dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars, key=self.key)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             J = -1
             _perfilter_internal(self.theta, self.ys, J, self.sigmas, rinit=self.rinit, rprocesses=self.rprocesses,
                                dmeasures=self.dmeasures, ndim=self.ndim, covars=self.covars, key=self.key)

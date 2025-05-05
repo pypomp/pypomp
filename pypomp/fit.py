@@ -50,7 +50,7 @@ def fit(
             Defaults to 10.
         a (float, optional): Decay factor for sigmas. Defaults to 0.9.
         method (str, optional): The gradient optimization method to use, 
-            including Newton method, weighted Newton method BFGS method, 
+            including Newton method, weighted Newton method, BFGS method, 
             gradient descent. Defaults to 'Newton'.
         itns (int, optional): Maximum iteration for the gradient optimization. 
             Defaults to 20.

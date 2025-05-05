@@ -172,8 +172,9 @@ class Pomp:
                 None.
 
         Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
+            tuple: A tuple containing:
+            - Negative log-likelihood value.
+            - An updated perturbed array of parameters.
         """
 
         return _perfilter_internal(
@@ -196,9 +197,9 @@ class Pomp:
             key (jax.random.PRNGKey, optional): The random key. Defaults to 
                 None.
 
-        Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
+        tuple: A tuple containing:
+            - Mean of negative log-likelihood value across the measurements
+            - An updated array of parameters.
         """
 
         return _perfilter_internal_mean(

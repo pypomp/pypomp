@@ -1,7 +1,6 @@
 """
 This module implements the OOP structure for POMP models.
 """
-import jax
 from .internal_functions import _mop_internal
 from .internal_functions import _mop_internal_mean
 from .internal_functions import _pfilter_internal
@@ -59,10 +58,10 @@ class Pomp:
         self.ys = ys
         self.theta = theta
         self.covars = covars
-        self.rprocess = jax.vmap(self.rproc, (0, None, 0, None))
-        self.rprocesses = jax.vmap(self.rproc, (0, 0, 0, None))
-        self.dmeasure = jax.vmap(self.dmeas, (None, 0, None))
-        self.dmeasures = jax.vmap(self.dmeas, (None, 0, 0))
+        self.rprocess = rproc.struct_pf
+        self.rprocesses = rproc.struct_per
+        self.dmeasure = dmeas.struct_pf
+        self.dmeasures = dmeas.struct_per
 
     # def rinits(self, thetas, J, covars):
     #     return rinits_internal(self.rinit, thetas, J, covars)

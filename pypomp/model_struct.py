@@ -1,6 +1,8 @@
 """
 This file contains the classes for components that define the model structure.
 """
+import jax
+
 class RInit:
     def __init__(self, struct):
         """
@@ -57,6 +59,8 @@ class RProc:
         if struct.__code__.co_varnames[3] != "covars":
             raise ValueError("The fourth argument of struct must be 'covars'")
         self.struct = struct
+        self.struct_pf = jax.vmap(struct, (0, None, 0, None))
+        self.struct_per = jax.vmap(struct, (0, 0, 0, None))
 
 class DMeas:
     def __init__(self, struct):
@@ -83,3 +87,5 @@ class DMeas:
         if struct.__code__.co_varnames[2] != "params":
             raise ValueError("The third argument of struct must be 'params'")
         self.struct = struct
+        self.struct_pf = jax.vmap(struct, (None, 0, None))
+        self.struct_per = jax.vmap(struct, (None, 0, 0))

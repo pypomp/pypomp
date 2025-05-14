@@ -4,6 +4,7 @@
 # pypomp
 
 Python code for modeling and inference using partially observed Markov process (POMP) models.
+See the [tutorials](https://pypomp.github.io/tutorials) for user-friendly guides, and the [quantitative tests](https://pypomp.github.io/quant) for additional technical examples.
 
 ### Expected package users
 

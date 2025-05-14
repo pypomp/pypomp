@@ -20,6 +20,7 @@ class TestFit_LG(unittest.TestCase):
         self.ys = ys
         self.covars = None
         self.sigmas = 0.02
+        self.sigmas_long = jnp.array([0.02] * (len(theta) - 1) + [0])
         self.J = 5
         self.theta = theta
         self.key = jax.random.PRNGKey(111)
@@ -46,8 +47,8 @@ class TestFit_LG(unittest.TestCase):
     def test_class_mif_basic(self):
 
         mif_loglik1, mif_theta1 = fit(
-            LG_obj, J=self.J, Jh=10, sigmas=0.02, sigmas_init=1e-20, M=2, a=0.9,
-            thresh_mif=-1, mode="IF2", key=self.key
+            LG_obj, J=self.J, Jh=10, sigmas=self.sigmas, sigmas_init=1e-20, M=2,
+            a=0.9, thresh_mif=-1, mode="IF2", key=self.key
         )
         self.assertEqual(mif_loglik1.shape, (3,))
         self.assertEqual(mif_theta1.shape, (3, self.J,) + self.theta.shape)
@@ -55,12 +56,32 @@ class TestFit_LG(unittest.TestCase):
         self.assertTrue(jnp.issubdtype(mif_theta1.dtype, jnp.float32))
 
         mif_loglik2, mif_theta2 = fit(
-            LG_obj, sigmas=0.02, sigmas_init=1e-20, mode="IF2", key=self.key
+            LG_obj, sigmas=self.sigmas, sigmas_init=1e-20, mode="IF2", 
+            key=self.key
         )
         self.assertEqual(mif_loglik2.shape, (11,))
         self.assertEqual(mif_theta2.shape, (11, 100,) + self.theta.shape)
         self.assertTrue(jnp.issubdtype(mif_loglik2.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta2.dtype, jnp.float32))
+        
+        # check that sigmas isn't modified by mif
+        self.assertEqual(self.sigmas, 0.02) 
+
+        # check that sigmas array input works
+        mif_loglik3, mif_theta3 = fit(
+            LG_obj, sigmas=self.sigmas_long, sigmas_init=1e-20, mode="IF2", 
+            key=self.key
+        )
+        # check that sigmas isn't modified by mif when passed as an array
+        self.assertTrue(
+            (
+                self.sigmas_long == jnp.array([0.02] * (len(theta) - 1) + [0])
+            ).all()
+        )
+        # check that the last parameter is never perturbed
+        self.assertTrue((mif_theta3[:, :, 15] == mif_theta3[0, 0, 15]).all())
+        # check that some other parameter is perturbed
+        self.assertTrue((mif_theta3[:, 0, 0] != mif_theta3[0, 0, 0]).any())
 
     def test_invalid_mif_input(self):
 

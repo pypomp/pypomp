@@ -1189,13 +1189,6 @@ def _mif_internal(
     """
     logliks = []
     params = []
-    # TODO: Use a more rigorous method of determining when to copy. 
-    if not isinstance(sigmas, (float, int)):
-        sigmas = sigmas.copy()
-    if not isinstance(sigmas_init, (float, int)):
-        sigmas_init = sigmas_init.copy()
-    # TODO: check for other instances where we need to make a copy of an object
-    # to avoid issues with modify-in-place.
 
     ndim = theta.ndim
     thetas = jnp.tile(theta, (J,) + (1,) * ndim)
@@ -1214,8 +1207,8 @@ def _mif_internal(
     for m in tqdm(range(M)):
         # TODO: Cool sigmas between time-iterations.
         key, *subkeys = jax.random.split(key = key, num = 3)
-        sigmas *= a 
-        sigmas_init *= a
+        sigmas = a * sigmas
+        sigmas_init = a * sigmas_init
         thetas += sigmas_init * jax.random.normal(
             shape=thetas.shape, key = subkeys[0]
         )
@@ -1270,8 +1263,8 @@ def _train_internal(
             Defaults to gradient descent.
         itns (int, optional): Maximum iteration for the gradient descent 
             optimization. Defaults to 20.
-        beta (float, optional): Initial step size for the line search algorithm. 
-            Defaults to 0.9.
+        beta (float, optional): Initial step size for the line search
+            algorithm. Defaults to 0.9.
         eta (float, optional): Initial step size. Defaults to 0.0025.
         c (float, optional): The user-defined Armijo condition constant. 
             Defaults to 0.1.
@@ -1283,8 +1276,8 @@ def _train_internal(
             the log-likelihood and parameter information. Defaults to False.
         scale (bool, optional): Boolean flag controlling normalizing the 
             direction or not. Defaults to False.
-        ls (bool, optional): Boolean flag controlling using the line search or 
-            not. Defaults to False.
+        ls (bool, optional): Boolean flag controlling whether to use the line
+            search or not. Defaults to False.
         alpha (int, optional): Discount factor. Defaults to 1.
 
     Returns:
@@ -1364,7 +1357,7 @@ def _train_internal(
                 direction = -jnp.linalg.pinv(weighted_hess) @ grad
 
         elif method == 'BFGS' and i > 1:
-            s_k = et * direction
+            s_k = eta * direction
             # not grad but grads
             y_k = grad - grads[-1]
             rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
@@ -1395,29 +1388,32 @@ def _train_internal(
         if scale:
             direction = direction/jnp.linalg.norm(direction)
 
-        eta = _line_search(
-            partial(_pfilter_internal, 
-                ys=ys, J=J, rinit=rinit, rprocess=rprocess, 
-                dmeasure=dmeasure, covars=covars, thresh=thresh, key=key
-            ),
-            loglik, theta_ests, grad, direction, 
-            k=i + 1, eta=beta, c=c, tau=max_ls_itn
-        ) if ls else eta
-        try:
-            et = eta if len(eta) == 1 else eta[i]
-        except:
-            et = eta
-        if i % 1 == 0 and verbose:
-            print(theta_ests, et, logliks[i])
+        if ls:
+            eta = _line_search(
+                partial(_pfilter_internal, 
+                    ys=ys, J=J, rinit=rinit, rprocess=rprocess, 
+                    dmeasure=dmeasure, covars=covars, thresh=thresh, key=key
+                ),
+                loglik, theta_ests, grad, direction, 
+                k=i + 1, eta=beta, c=c, tau=max_ls_itn
+            )
 
-        theta_ests += et * direction
+        # try:
+        #     et = eta if len(eta) == 1 else eta[i] # Not entirely sure why this is needed. 
+        # except Exception:
+        #     et = eta
+        # if i % 1 == 0 and verbose: # Does the lefthand side not always evaluate to True?
+        if verbose: 
+            print(theta_ests, eta, logliks[i])
+
+        theta_ests += eta * direction
 
     logliks.append(jnp.mean(jnp.array(
         [_pfilter_internal(
             theta_ests, ys, J, rinit, rprocess, dmeasure, 
             covars=covars, thresh=thresh, key=key
         ) for i in range(MONITORS)]
-        )))
+    )))
     Acopies.append(theta_ests)
 
     return jnp.array(logliks), jnp.array(Acopies)

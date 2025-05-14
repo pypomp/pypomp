@@ -349,7 +349,6 @@ def _mop_internal(
         #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
-    weights = jnp.log(jnp.ones(J) / J)
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0
@@ -496,7 +495,6 @@ def _pfilter_internal(
         #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
-    weights = jnp.log(jnp.ones(J) / J)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0
@@ -666,7 +664,6 @@ def _perfilter_internal(
         shape = (J,) + theta.shape[-ndim:], key = subkey
     )
     particlesF = _rinits_internal(rinit, thetas, 1, covars=covars)
-    weights = jnp.log(jnp.ones(J) / J)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     #if key is None:
@@ -823,7 +820,6 @@ def _pfilter_pf_internal(
         #key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
     particlesF = rinit(theta, J, covars=covars)
-    weights = jnp.log(jnp.ones(J) / J)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0
@@ -1510,7 +1506,7 @@ def _fit_internal(
             )
             return jnp.array(mif_logliks_warm), jnp.array(mif_params_warm)
         else:
-            raise TypeError(f"Unknown parameter")
+            raise TypeError("Unknown parameter")
 
     elif mode == 'GD':
         # Directly call train_internal and return the results
@@ -1543,7 +1539,7 @@ def _fit_internal(
             )
             return jnp.array(gd_logliks), jnp.array(gd_ests)
         else:
-            raise TypeError(f"Unknown parameter")
+            raise TypeError("Unknown parameter")
 
     else:
         raise TypeError(

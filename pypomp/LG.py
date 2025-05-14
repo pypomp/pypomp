@@ -39,7 +39,6 @@ def Generate_data(
 ):
     xs = []
     ys = []
-    theta = transform_thetas(A, C, Q, R)
     for i in tqdm(range(T)):
         x = jnp.ones(2)
         key, subkey = jax.random.split(key)

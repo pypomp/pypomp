@@ -1,6 +1,4 @@
-from .pomp_class import *
 from .internal_functions import _fit_internal
-
 
 def fit(
     pomp_object=None, J=100, Jh=1000, theta=None, rinit=None, rprocess=None, 

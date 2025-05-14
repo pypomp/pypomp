@@ -2,7 +2,6 @@ from .pomp_class import Pomp
 from .LG import LG
 from . import dacca
 from .pfilter import pfilter
-from .pfilter_pf import pfilter_pf
 from .perfilter import perfilter
 from .mop import mop
 from .fit import fit

@@ -7,7 +7,6 @@ from .internal_functions import _pfilter_internal
 from .internal_functions import _pfilter_internal_mean
 from .internal_functions import _perfilter_internal
 from .internal_functions import _perfilter_internal_mean
-from .internal_functions import _pfilter_pf_internal
 from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
@@ -203,28 +202,6 @@ class Pomp:
             thresh=thresh, key=key
         )
 
-    def pfilter_pf(self, J, thresh=100, key=None):
-        """
-        Instance method for calculating the mean result using particle filtering
-        algorithm with weight equalization across the measurements, which uses 
-        the initialized instance parameters and calls 'pfilter_pf_internal' 
-        function.
-
-        Args:
-            J (int): The number of particles
-            thresh (float, optional): Threshold value to determine whether to 
-                resample particles. Defaults to 100.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to 
-                None.
-
-        Returns:
-            float: The mean of negative log-likelihood value across the
-                measurements.
-        """
-        return _pfilter_pf_internal(
-            self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
-            self.covars, thresh, key
-        )
 
     def mif(
         self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, 

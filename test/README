@@ -1,9 +1,17 @@
 
-Testing procedure
+## Testing procedure
+
+# start in the pypomp project directory, which confusingly contains
+# a subdirectory also called pypomp.
 
 cd pypomp
 python3 -m build
 pip install --force-reinstall dist/pypomp-0.0.3-py3-none-any.whl
+
+# or, equivalently,
+cd pypomp
+pip install .
+
 
 cd test
 pytest .

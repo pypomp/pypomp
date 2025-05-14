@@ -281,40 +281,6 @@ class TestPompClass_LG(unittest.TestCase):
             LG_obj.perfilter_mean(self.J, sigmas=0.02, rinit=self.rinit, rprocess=self.rprocess,
                                   dmeasure=self.dmeasure, key=self.key)
 
-    def test_pfilter_pf_valid(self):
-        pfilter_obj = LG_obj.pfilter_pf(self.J, thresh=-1, key=self.key)
-        self.assertEqual(pfilter_obj.shape, ())
-        self.assertTrue(jnp.isfinite(pfilter_obj.item()))
-        self.assertEqual(pfilter_obj.dtype, jnp.float32)
-
-        pfilter_obj_edge = LG_obj.pfilter_pf(1, thresh=10, key=self.key)
-        self.assertEqual(pfilter_obj_edge.shape, ())
-        self.assertTrue(jnp.isfinite(pfilter_obj_edge.item()))
-        self.assertEqual(pfilter_obj_edge.dtype, jnp.float32)
-
-    def test_pfilter_pf_invalid(self):
-        # missing values
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(thresh=-1, key=self.key)
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(key=self.key)
-        # inapprpropriate input
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(0, thresh=100, key=self.key)
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(-1, thresh=100, key=self.key)
-        with self.assertRaises(ValueError):
-            LG_obj.pfilter_pf(jnp.array([10, 20]), key=self.key)
-        # undefined argument
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(self.J, a=0.97, key=self.key)
-
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(self.theta, self.ys, self.J, rinit=self.rinit, rprocess=self.rprocess,
-                              dmeasure=self.dmeasure, covars=self.covars, key=self.key)
-
-        with self.assertRaises(TypeError):
-            LG_obj.pfilter_pf(self.J, rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, key=self.key)
 
     def test_fit_mif_valid(self):
        

@@ -5,8 +5,6 @@ from .internal_functions import _mop_internal
 from .internal_functions import _mop_internal_mean
 from .internal_functions import _pfilter_internal
 from .internal_functions import _pfilter_internal_mean
-from .internal_functions import _perfilter_internal
-from .internal_functions import _perfilter_internal_mean
 from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
@@ -151,57 +149,6 @@ class Pomp:
             self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
             self.covars, thresh, key
         )
-
-    def perfilter(self, J, sigmas, thresh=100, key=None):
-        """
-        Instance method for perturbed particle filtering algorithm, which uses 
-        the initialized instance parameters and calls "perfilter_internal" 
-        function.
-
-        Args:
-            J (int): The number of particles.
-            sigmas (float): Perturbed factor.
-            thresh (float, optional): Threshold value to determine whether to 
-                resample particles. Defaults to 100.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to 
-                None.
-
-        Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
-        """
-
-        return _perfilter_internal(
-            self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses,
-            self.dmeasures, ndim=self.theta.ndim, covars=self.covars,
-            thresh=thresh, key=key
-        )
-
-    def perfilter_mean(self, J, sigmas, thresh=100, key=None):
-        """
-        Instance method for calculating the mean result using perturbed particle
-        filtering algorithm across the measurements, which uses the initialized 
-        instance parameters and calls 'perfilter_internal_mean' function.
-
-        Args:
-            J (int): The number of particles.
-            sigmas (float): Perturbed factor.
-            thresh (float, optional): Threshold value to determine whether to 
-                resample particles. Defaults to 100.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to 
-                None.
-
-        Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
-        """
-
-        return _perfilter_internal_mean(
-            self.theta, self.ys, J, sigmas, self.rinit, self.rprocesses, 
-            self.dmeasures, ndim=self.theta.ndim, covars=self.covars, 
-            thresh=thresh, key=key
-        )
-
 
     def mif(
         self, sigmas, sigmas_init, M=10, a=0.9, J=100, thresh=100, 

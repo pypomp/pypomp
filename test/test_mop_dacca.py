@@ -2,7 +2,7 @@ import jax
 import unittest
 import jax.numpy as jnp
 
-from pypomp.dacca import *
+from pypomp.dacca import dacca
 from pypomp.mop import mop
 
 dacca_obj = dacca()

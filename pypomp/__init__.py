@@ -2,7 +2,8 @@ from .pomp_class import Pomp
 from .LG import LG
 from . import dacca
 from .pfilter import pfilter
-from .perfilter import perfilter
 from .mop import mop
 from .fit import fit
-from .model_struct import *
+from .model_struct import RInit
+from .model_struct import RProc
+from .model_struct import DMeas

@@ -2,7 +2,7 @@ import jax
 import unittest
 import jax.numpy as jnp
 
-from pypomp.LG import *
+from pypomp.LG import LG
 from pypomp.fit import fit
 
 LG_obj = LG()

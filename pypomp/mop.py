@@ -2,7 +2,6 @@
 This module implements the MOP algorithm for POMP models.
 """
 
-from .pomp_class import *
 from .internal_functions import _mop_internal
 
 

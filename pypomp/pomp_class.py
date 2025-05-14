@@ -1,9 +1,7 @@
 """
 This module implements the OOP structure for POMP models.
 """
-import importlib
-from . import internal_functions
-importlib.reload(internal_functions)
+import jax
 from .internal_functions import _mop_internal
 from .internal_functions import _mop_internal_mean
 from .internal_functions import _pfilter_internal
@@ -13,7 +11,6 @@ from .internal_functions import _perfilter_internal_mean
 from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
-from .internal_functions import *
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas

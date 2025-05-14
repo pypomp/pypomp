@@ -21,17 +21,11 @@ class RInit:
         """
 
         if struct.__code__.co_varnames[0] != "params":
-            raise ValueError(
-                "The first argument of struct must be 'params'"
-            )
+            raise ValueError("The first argument of struct must be 'params'")
         if struct.__code__.co_varnames[1] != "J":
-            raise ValueError(
-                "The first argument of struct must be 'J'"
-            )
+            raise ValueError("The second argument of struct must be 'J'")
         if struct.__code__.co_varnames[2] != "covars":
-            raise ValueError(
-                "The first argument of struct must be 'covars'"
-            )
+            raise ValueError("The first argument of struct must be 'covars'")
         self.struct = struct
 
 class RProc:
@@ -55,21 +49,13 @@ class RProc:
         """
 
         if struct.__code__.co_varnames[0] != "state":
-            raise ValueError(
-                "The first argument of struct must be 'state'"
-            )
+            raise ValueError("The first argument of struct must be 'state'")
         if struct.__code__.co_varnames[1] != "params":
-            raise ValueError(
-                "The second argument of struct must be 'params'"
-            )
+            raise ValueError("The second argument of struct must be 'params'")
         if struct.__code__.co_varnames[2] != "key":
-            raise ValueError(
-                "The third argument of struct must be 'key'"
-            )
+            raise ValueError("The third argument of struct must be 'key'")
         if struct.__code__.co_varnames[3] != "covars":
-            raise ValueError(
-                "The fourth argument of struct must be 'covars'"
-            )
+            raise ValueError("The fourth argument of struct must be 'covars'")
         self.struct = struct
 
 class DMeas:
@@ -91,15 +77,9 @@ class DMeas:
         """
 
         if struct.__code__.co_varnames[0] != "y":
-            raise ValueError(
-                "The first argument of struct must be 'y'"
-            )
+            raise ValueError("The first argument of struct must be 'y'")
         if struct.__code__.co_varnames[1] != "state":
-            raise ValueError(
-                "The second argument of struct must be 'state'"
-            )
+            raise ValueError("The second argument of struct must be 'state'")
         if struct.__code__.co_varnames[2] != "params":
-            raise ValueError(
-                "The third argument of struct must be 'params'"
-            )
+            raise ValueError("The third argument of struct must be 'params'")
         self.struct = struct

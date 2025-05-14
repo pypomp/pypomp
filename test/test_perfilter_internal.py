@@ -1,11 +1,9 @@
-import os
 import jax
-import sys
 import unittest
 import jax.numpy as jnp
 
 from jax import vmap
-from pypomp.LG import *
+from pypomp.LG import LG
 from pypomp.internal_functions import _perfilter_internal
 from pypomp.internal_functions import _perfilter_internal_mean
 
@@ -21,7 +19,17 @@ get_perthetas = vmap(get_thetas, in_axes = 0)
 def transform_thetas(A, C, Q, R):
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
-LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures = LG_internal()
+LG_obj = LG()
+ys = LG_obj.ys
+theta = LG_obj.theta
+covars = LG_obj.covars
+rinit = LG_obj.rinit
+rproc = LG_obj.rproc
+dmeas = LG_obj.dmeas
+rprocess = LG_obj.rprocess
+dmeasure = LG_obj.dmeasure
+rprocesses = LG_obj.rprocesses
+dmeasures = LG_obj.dmeasures
 
 class TestPerfilterInternal_LG(unittest.TestCase):
     def setUp(self):

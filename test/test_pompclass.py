@@ -1,14 +1,21 @@
-import os
 import jax
-import sys
 import unittest
 import jax.numpy as jnp
 
-from tqdm import tqdm
-import pypomp
-from pypomp.LG import *
+from pypomp.pomp_class import Pomp
+from pypomp.LG import LG
 
-LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures = LG_internal()
+LG_obj = LG()
+ys = LG_obj.ys
+theta = LG_obj.theta
+covars = LG_obj.covars
+rinit = LG_obj.rinit
+rproc = LG_obj.rproc
+dmeas = LG_obj.dmeas
+rprocess = LG_obj.rprocess
+dmeasure = LG_obj.dmeasure
+rprocesses = LG_obj.rprocesses
+dmeasures = LG_obj.dmeasures
 
 def get_thetas(theta):
     A = theta[0:4].reshape(2, 2)

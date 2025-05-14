@@ -1,10 +1,11 @@
 import os
 import csv
 import jax
-import numpy as np
 import jax.numpy as jnp
 from pypomp.pomp_class import Pomp
-from pypomp.model_struct import *
+from pypomp.model_struct import RInit
+from pypomp.model_struct import RProc
+from pypomp.model_struct import DMeas
 
 def sigmoid(x):
     return 1/(1+jnp.exp(-x))
@@ -147,7 +148,10 @@ def rproc(state, params, key, covars):
     passages = jnp.zeros(nrstage+1)
     
     for i in range(20):
-        trend = trends[t]; dpopdt = dpopdts[t]; pop = pops[t]; seas = seass[t]
+        trend = trends[t]
+        dpopdt = dpopdts[t]
+        pop = pops[t]
+        seas = seass[t]
         beta = jnp.exp(beta_trend*trend + jnp.dot(bs, seas))
         omega = jnp.exp(jnp.dot(omegas, seas))
         
@@ -179,8 +183,11 @@ def rproc(state, params, key, covars):
                         
         count += jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
         
-        S = jnp.clip(S, min=0); I = jnp.clip(I, min=0); Y = jnp.clip(Y, min=0)
-        pts = jnp.clip(pts, min=0); deaths = jnp.clip(deaths, min=0)
+        S = jnp.clip(S, min=0)
+        I = jnp.clip(I, min=0)
+        Y = jnp.clip(Y, min=0)
+        pts = jnp.clip(pts, min=0)
+        deaths = jnp.clip(deaths, min=0)
         
         t += 1
 
@@ -198,7 +205,9 @@ def dmeas_helper_tol(y, deaths, v, tol, ltol):
 
 @DMeas  
 def dmeas(y, state, params, keys=None):
-    deaths = state[3]; count = state[-1]; tol = 1.0e-18
+    deaths = state[3]
+    count = state[-1]
+    tol = 1.0e-18
     ltol = jnp.log(tol)
     (
         gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k,

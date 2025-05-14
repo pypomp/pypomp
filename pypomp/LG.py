@@ -1,9 +1,6 @@
 """This module implements a linear Gaussian model for POMP."""
 
-import os
-import csv
 import jax
-import numpy as np
 import jax.numpy as jnp
 
 from tqdm import tqdm
@@ -42,7 +39,6 @@ def Generate_data(
 ):
     xs = []
     ys = []
-    theta = transform_thetas(A, C, Q, R)
     for i in tqdm(range(T)):
         x = jnp.ones(2)
         key, subkey = jax.random.split(key)
@@ -75,42 +71,6 @@ def dmeas(y, state, params):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(params)
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
-
-
-# These are used for internal tests.
-rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
-dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
-rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
-dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
-
-
-def LG_internal(
-    T=4,
-    A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
-    C=jnp.eye(2),
-    Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
-    R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
-    key=jax.random.PRNGKey(111),
-):
-    """This function is used for internal tests."""
-    theta = transform_thetas(A, C, Q, R)
-    covars = None
-    ys = Generate_data(T=T, key=key)
-    LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
-    return (
-        LG_obj,
-        ys,
-        theta,
-        covars,
-        rinit.struct,
-        rproc.struct,
-        dmeas.struct,
-        rprocess,
-        dmeasure,
-        rprocesses,
-        dmeasures,
-    )
-
 
 def LG(
     T=4,

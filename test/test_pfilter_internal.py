@@ -2,7 +2,7 @@ import jax
 import unittest
 import jax.numpy as jnp
 
-from pypomp.LG import LG_internal
+from pypomp.LG import LG
 from pypomp.internal_functions import _pfilter_internal
 from pypomp.internal_functions import _pfilter_internal_mean
 
@@ -13,7 +13,17 @@ def get_thetas(theta):
     R = theta[12:16].reshape(2, 2)
     return A, C, Q, R
 
-LG_obj, ys, theta, covars, rinit, rproc, dmeas, rprocess, dmeasure, rprocesses, dmeasures = LG_internal()
+LG_obj = LG()
+ys = LG_obj.ys
+theta = LG_obj.theta
+covars = LG_obj.covars
+rinit = LG_obj.rinit
+rproc = LG_obj.rproc
+dmeas = LG_obj.dmeas
+rprocess = LG_obj.rprocess
+dmeasure = LG_obj.dmeasure
+rprocesses = LG_obj.rprocesses
+dmeasures = LG_obj.dmeasures
 
 class TestPfilterInternal_LG(unittest.TestCase):
     def setUp(self):

@@ -2,9 +2,7 @@
 This module implements the OOP structure for POMP models.
 """
 from .internal_functions import _mop_internal
-from .internal_functions import _mop_internal_mean
 from .internal_functions import _pfilter_internal
-from .internal_functions import _pfilter_internal_mean
 from .internal_functions import _mif_internal
 from .internal_functions import _train_internal
 from .internal_functions import _fit_internal
@@ -83,28 +81,6 @@ class Pomp:
             self.covars, alpha, key=key
         )
 
-    def mop_mean(self, J, alpha=0.97, key=None):
-        """
-        Instance method for calculating the mean result using MOP algorithm 
-        across the measurements, which uses the initialized instance parameters 
-        and calls 'mop_internal_mean' function.
-
-        Args:
-            J (int): The number of particles
-            alpha (float, optional): Discount factor. Defaults to 0.97.
-            key ((jax.random.PRNGKey, optional): The random key. Defaults to 
-                None.
-
-        Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
-        """
-
-        return _mop_internal_mean(
-            self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
-            self.covars, alpha, key
-        )
-
     def pfilter(self, J, thresh=100, key=None):
         """
         Instance method for particle filtering algorithm, which uses the 
@@ -122,30 +98,6 @@ class Pomp:
         """
 
         return _pfilter_internal(
-            self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
-            self.covars, thresh, key
-        )
-
-    def pfilter_mean(self, J, thresh=100, key=None):
-        """
-        Instance method for calculating the mean result using particle filtering
-        algorithm across the measurements, which uses the initialized instance 
-        parameters and calls 'pfilter_internal_mean' function.
-
-        Args:
-            J (int): The number of particles
-            thresh (float, optional): Threshold value to determine whether to 
-                resample.
-            particles. Defaults to 100.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to 
-                None.
-
-        Returns:
-            float: The mean of negative log-likelihood value across the 
-                measurements.
-        """
-
-        return _pfilter_internal_mean(
             self.theta, self.ys, J, self.rinit, self.rprocess, self.dmeasure, 
             self.covars, thresh, key
         )

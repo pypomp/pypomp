@@ -2,43 +2,44 @@ import jax
 import unittest
 import jax.numpy as jnp
 
-from pypomp.LG import *
+from pypomp.LG import LG
 from pypomp.mop import mop
 
-LG_obj = LG()
-ys = LG_obj.ys
-theta = LG_obj.theta
-covars = LG_obj.covars
-rinit = LG_obj.rinit
-rprocess = LG_obj.rprocess
-dmeasure = LG_obj.dmeasure
-rprocesses = LG_obj.rprocesses
-dmeasures = LG_obj.dmeasures
 
 class TestMop_LG(unittest.TestCase):
     def setUp(self):
+        self.LG = LG()
         self.J = 5
-        self.ys = ys
-        self.theta = theta
-        self.covars = covars
+        self.ys = self.LG.ys
+        self.theta = self.LG.theta
+        self.covars = self.LG.covars
         self.sigmas = 0.02
-        self.key = jax.random.PRNGKey(111)
+        self.key = jax.random.key(111)
 
-        self.rinit = rinit
-        self.rprocess = rprocess
-        self.dmeasure = dmeasure
-        self.rprocesses = rprocesses
-        self.dmeasures = dmeasures
+        self.rinit = self.LG.rinit
+        self.rprocess = self.LG.rprocess
+        self.dmeasure = self.LG.dmeasure
+        self.rprocesses = self.LG.rprocesses
+        self.dmeasures = self.LG.dmeasures
 
     def test_internal_basic(self):
         val1 = mop(
-            J=self.J, rinit=self.rinit, rprocess=self.rprocess, 
-            dmeasure=self.dmeasure, theta=self.theta, ys=self.ys, alpha=0.97, 
-            key=self.key
+            J=self.J,
+            rinit=self.rinit,
+            rprocess=self.rprocess,
+            dmeasure=self.dmeasure,
+            theta=self.theta,
+            ys=self.ys,
+            alpha=0.97,
+            key=self.key,
         )
         val2 = mop(
-            rinit=self.rinit, rprocess=self.rprocess, dmeasure=self.dmeasure, 
-            theta=self.theta, ys=self.ys, key=self.key
+            rinit=self.rinit,
+            rprocess=self.rprocess,
+            dmeasure=self.dmeasure,
+            theta=self.theta,
+            ys=self.ys,
+            key=self.key,
         )
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
@@ -48,11 +49,17 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val2.dtype, jnp.float32)
 
     def test_class_basic(self):
-        val1 = mop(LG_obj, self.J, alpha=0.97, key=self.key)
-        val2 = mop(LG_obj, key=self.key)
+        val1 = mop(self.LG, J=self.J, alpha=0.97, key=self.key)
+        val2 = mop(self.LG, key=self.key)
         val3 = mop(
-            LG_obj, self.J, self.rinit, self.rprocess, self.dmeasure, theta=[], 
-            ys=[], key=self.key
+            self.LG,
+            J=self.J,
+            rinit=self.rinit,
+            rprocess=self.rprocess,
+            dmeasure=self.dmeasure,
+            theta=[],
+            ys=[],
+            key=self.key,
         )
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
@@ -65,50 +72,40 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val3.dtype, jnp.float32)
 
     def test_invalid_input(self):
-        with self.assertRaises(ValueError) as text:
-            mop(key=self.key)
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(J=self.J, key=self.key)
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(J=self.J, alpha=0.97, key=self.key)
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(J=self.J, theta=self.theta, ys=self.ys, key=self.key)
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(
-                J=self.J, rinit=self.rinit, rprocess=self.rprocess, 
-                dmeasure=self.dmeasure, key=self.key
-            )
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(
-                J=self.J, rinit=self.rinit, rprocess=self.rprocess, 
-                dmeasure=self.dmeasure, ys=self.ys, key=self.key
-            )
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
-
-        with self.assertRaises(ValueError) as text:
-            mop(
-                J=self.J, rinit=self.rinit, rprocess=self.rprocess, 
-                dmeasure=self.dmeasure, theta=self.theta, key=self.key
-            )
-
-        self.assertEqual(str(text.exception), "Invalid Arguments Input")
+        arguments = [
+            {"key": self.key},
+            {"J": self.J, "key": self.key},
+            {"J": self.J, "alpha": 0.97, "key": self.key},
+            {"J": self.J, "theta": self.theta, "ys": self.ys, "key": self.key},
+            {
+                "J": self.J,
+                "rinit": self.rinit,
+                "rprocess": self.rprocess,
+                "dmeasure": self.dmeasure,
+                "key": self.key,
+            },
+            {
+                "J": self.J,
+                "rinit": self.rinit,
+                "rprocess": self.rprocess,
+                "ys": self.ys,
+                "dmeasure": self.dmeasure,
+                "key": self.key,
+            },
+            {
+                "J": self.J,
+                "rinit": self.rinit,
+                "rprocess": self.rprocess,
+                "dmeasure": self.dmeasure,
+                "theta": self.theta,
+                "key": self.key,
+            },
+        ]
+        for arg in arguments:
+            with self.assertRaises(ValueError) as text:
+                mop(**arg)
+            self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
 
 if __name__ == "__main__":
-    unittest.main(argv=[''], verbosity=2, exit=False)
+    unittest.main(argv=[""], verbosity=2, exit=False)

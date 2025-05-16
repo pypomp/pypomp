@@ -118,7 +118,7 @@ for col in range(covars_data.shape[1]):
     interpolated_covars.append(interpolated_column)
     covars = jnp.array(interpolated_covars).T
 
-key = jax.random.PRNGKey(111)
+key = jax.random.key(111)
 theta = transform_thetas(
     gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
 )
@@ -271,13 +271,6 @@ def dmeas(y, state, params, keys=None):
         tol,
         ltol,
     )
-
-
-rprocess = jax.vmap(rproc.struct, (0, None, 0, None))
-dmeasure = jax.vmap(dmeas.struct, (None, 0, None))
-rprocesses = jax.vmap(rproc.struct, (0, 0, 0, None))
-dmeasures = jax.vmap(dmeas.struct, (None, 0, 0))
-
 
 def dacca():
     dacca_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)

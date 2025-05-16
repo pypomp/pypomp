@@ -9,8 +9,8 @@ def mop(
     pomp_object=None,
     J=50,
     rinit=None,
-    rprocess=None,
-    dmeasure=None,
+    rproc=None,
+    dmeas=None,
     theta=None,
     ys=None,
     covars=None,
@@ -27,12 +27,12 @@ def mop(
             provided, the function will execute on this object to conduct
             the MOP algorithm. Defaults to None.
         J (int, optional): The number of particles. Defaults to 50.
-        rinit (function, optional): Simulator for the initial-state
+        rinit (RInit, optional): Simulator for the initial-state
             distribution. Defaults to None.
-        rprocess (function, optional): Simulator for the process model.
+        rproc (RProc, optional): Simulator for the process model.
             Defaults to None.
-        dmeasure (function, optional): Density evaluation for the
-            measurement model. Defaults to None.
+        dmeas (DMeas, optional): Density evaluation for the measurement
+            model. Defaults to None.
         theta (array-like, optional): Parameters involved in the POMP
             model. Defaults to None.
         ys (array-like, optional): The measurement array. Defaults to
@@ -54,8 +54,8 @@ def mop(
         return pomp_object.mop(J, alpha, key=key)
     elif (
         rinit is not None
-        and rprocess is not None
-        and dmeasure is not None
+        and rproc is not None
+        and dmeas is not None
         and theta is not None
         and ys is not None
     ):
@@ -63,9 +63,9 @@ def mop(
             theta=theta,
             ys=ys,
             J=J,
-            rinit=rinit,
-            rprocess=rprocess,
-            dmeasure=dmeasure,
+            rinit=rinit.struct,
+            rprocess=rproc.struct_pf,
+            dmeasure=dmeas.struct_pf,
             covars=covars,
             alpha=alpha,
             key=key,

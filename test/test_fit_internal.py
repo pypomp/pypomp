@@ -1760,7 +1760,6 @@ class TestFitInternal_LG(unittest.TestCase):
             )
 
     def test_IFAD_invalid_ys(self):
-        ys = self.ys[0, :]
         y = jnp.full(self.ys.shape, jnp.inf)
         IFAD_loglik, IFAD_theta = _fit_internal(
             self.theta,

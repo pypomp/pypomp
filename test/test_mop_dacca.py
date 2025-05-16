@@ -15,18 +15,16 @@ class TestMop_Dacca(unittest.TestCase):
         self.theta = self.dacca.theta
         self.covars = self.dacca.covars
 
-        self.rinit = self.dacca.rinit.struct
-        self.rprocess = self.dacca.rproc.struct_pf
-        self.dmeasure = self.dacca.dmeas.struct_pf
-        self.rprocesses = self.dacca.rproc.struct_per
-        self.dmeasures = self.dacca.dmeas.struct_per
+        self.rinit = self.dacca.rinit
+        self.rproc = self.dacca.rproc
+        self.dmeas = self.dacca.dmeas
 
     def test_internal_basic(self):
         val1 = mop(
             J=self.J,
             rinit=self.rinit,
-            rprocess=self.rprocess,
-            dmeasure=self.dmeasure,
+            rproc=self.rproc,
+            dmeas=self.dmeas,
             theta=self.theta,
             ys=self.ys,
             covars=self.covars,
@@ -59,8 +57,8 @@ class TestMop_Dacca(unittest.TestCase):
             mop(
                 J=self.J,
                 rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
+                rproc=self.rproc,
+                dmeas=self.dmeas,
                 theta=self.theta,
                 ys=self.ys,
                 alpha=0.95,

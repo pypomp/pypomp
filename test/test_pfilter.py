@@ -4,7 +4,9 @@ import jax.numpy as jnp
 
 from pypomp.LG import LG
 from pypomp.pfilter import pfilter
-
+from pypomp.model_struct import RInit
+from pypomp.model_struct import RProc
+from pypomp.model_struct import DMeas
 
 
 class TestPfilter_LG(unittest.TestCase):
@@ -16,18 +18,16 @@ class TestPfilter_LG(unittest.TestCase):
         self.theta = self.LG.theta
         self.covars = self.LG.covars
 
-        self.rinit = self.LG.rinit
-        self.rprocess = self.LG.rprocess
-        self.dmeasure = self.LG.dmeasure
-        self.rprocesses = self.LG.rprocesses
-        self.dmeasures = self.LG.dmeasures
+        self.rinit = RInit(self.LG.rinit)
+        self.rproc = RProc(self.LG.rproc)
+        self.dmeas = DMeas(self.LG.dmeas)
 
     def test_internal_basic(self):
         val1 = pfilter(
             J=self.J,
             rinit=self.rinit,
-            rprocess=self.rprocess,
-            dmeasure=self.dmeasure,
+            rproc=self.rproc,
+            dmeas=self.dmeas,
             theta=self.theta,
             ys=self.ys,
             covars=self.covars,
@@ -36,8 +36,8 @@ class TestPfilter_LG(unittest.TestCase):
         )
         val2 = pfilter(
             rinit=self.rinit,
-            rprocess=self.rprocess,
-            dmeasure=self.dmeasure,
+            rproc=self.rproc,
+            dmeas=self.dmeas,
             theta=self.theta,
             ys=self.ys,
             key=self.key,
@@ -54,10 +54,10 @@ class TestPfilter_LG(unittest.TestCase):
         val2 = pfilter(self.LG, key=self.key)
         val3 = pfilter(
             self.LG,
-            self.J,
-            self.rinit,
-            self.rprocess,
-            self.dmeasure,
+            J=self.J,
+            rinit=self.rinit,
+            rproc=self.rproc,
+            dmeas=self.dmeas,
             theta=[],
             ys=[],
             key=self.key,
@@ -81,23 +81,23 @@ class TestPfilter_LG(unittest.TestCase):
             {
                 "J": self.J,
                 "rinit": self.rinit,
-                "rprocess": self.rprocess,
-                "dmeasure": self.dmeasure,
+                "rproc": self.rproc,
+                "dmeas": self.dmeas,
                 "key": self.key,
             },
             {
                 "J": self.J,
                 "rinit": self.rinit,
-                "rprocess": self.rprocess,
-                "dmeasure": self.dmeasure,
+                "rproc": self.rproc,
+                "dmeas": self.dmeas,
                 "ys": self.ys,
                 "key": self.key,
             },
             {
                 "J": self.J,
                 "rinit": self.rinit,
-                "rprocess": self.rprocess,
-                "dmeasure": self.dmeasure,
+                "rproc": self.rproc,
+                "dmeas": self.dmeas,
                 "theta": self.theta,
                 "key": self.key,
             },

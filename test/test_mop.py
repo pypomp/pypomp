@@ -16,11 +16,11 @@ class TestMop_LG(unittest.TestCase):
         self.sigmas = 0.02
         self.key = jax.random.key(111)
 
-        self.rinit = self.LG.rinit
-        self.rprocess = self.LG.rprocess
-        self.dmeasure = self.LG.dmeasure
-        self.rprocesses = self.LG.rprocesses
-        self.dmeasures = self.LG.dmeasures
+        self.rinit = self.LG.rinit.struct
+        self.rprocess = self.LG.rproc.struct_pf
+        self.dmeasure = self.LG.dmeas.struct_pf
+        self.rprocesses = self.LG.rproc.struct_per
+        self.dmeasures = self.LG.dmeas.struct_per
 
     def test_internal_basic(self):
         val1 = mop(

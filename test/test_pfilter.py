@@ -4,9 +4,6 @@ import jax.numpy as jnp
 
 from pypomp.LG import LG
 from pypomp.pfilter import pfilter
-from pypomp.model_struct import RInit
-from pypomp.model_struct import RProc
-from pypomp.model_struct import DMeas
 
 
 class TestPfilter_LG(unittest.TestCase):
@@ -18,9 +15,9 @@ class TestPfilter_LG(unittest.TestCase):
         self.theta = self.LG.theta
         self.covars = self.LG.covars
 
-        self.rinit = RInit(self.LG.rinit)
-        self.rproc = RProc(self.LG.rproc)
-        self.dmeas = DMeas(self.LG.dmeas)
+        self.rinit = self.LG.rinit
+        self.rproc = self.LG.rproc
+        self.dmeas = self.LG.dmeas
 
     def test_internal_basic(self):
         val1 = pfilter(

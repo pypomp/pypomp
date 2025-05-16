@@ -4,9 +4,6 @@ import jax.numpy as jnp
 
 from pypomp.dacca import dacca
 from pypomp.pfilter import pfilter
-from pypomp.model_struct import RInit
-from pypomp.model_struct import RProc
-from pypomp.model_struct import DMeas
 
 
 class TestPfilterInternal_Dacca(unittest.TestCase):
@@ -18,9 +15,9 @@ class TestPfilterInternal_Dacca(unittest.TestCase):
         self.theta = self.dacca.theta
         self.covars = self.dacca.covars
 
-        self.rinit = RInit(self.dacca.rinit)
-        self.rproc = RProc(self.dacca.rproc)
-        self.dmeas = DMeas(self.dacca.dmeas)
+        self.rinit = self.dacca.rinit
+        self.rproc = self.dacca.rproc
+        self.dmeas = self.dacca.dmeas
 
     def test_internal_basic(self):
         val1 = pfilter(

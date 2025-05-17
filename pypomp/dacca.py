@@ -254,9 +254,9 @@ def dmeas(y, state, params, keys=None):
     count = state[-1]
     tol = 1.0e-18
     ltol = jnp.log(tol)
-    (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
-        get_thetas(params)
-    )
+    (
+        gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta
+    ) = get_thetas(params)
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
     return jax.lax.cond(

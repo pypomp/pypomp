@@ -1,6 +1,6 @@
 from .pomp_class import Pomp
 from .LG import LG
-from . import dacca
+from .dacca import dacca
 from .pfilter import pfilter
 from .mop import mop
 from .fit import fit
@@ -9,4 +9,3 @@ from .model_struct import RProc
 from .model_struct import DMeas
 from .util import logmeanexp
 from .util import logmeanexp_se
-

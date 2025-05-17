@@ -7,3 +7,6 @@ from .fit import fit
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas
+from .util import logmeanexp
+from .util import logmeanexp_se
+

@@ -2,26 +2,12 @@ import jax
 import unittest
 import jax.numpy as jnp
 
-from pypomp.pomp_class import Pomp
-from pypomp.LG import LG
-
-
-
-def get_thetas(theta):
-    A = theta[0:4].reshape(2, 2)
-    C = theta[4:8].reshape(2, 2)
-    Q = theta[8:12].reshape(2, 2)
-    R = theta[12:16].reshape(2, 2)
-    return A, C, Q, R
-
-
-def transform_thetas(A, C, Q, R):
-    return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+import pypomp as pp
 
 
 class TestPompClass_LG(unittest.TestCase):
     def setUp(self):
-        self.LG = LG()
+        self.LG = pp.LG()
         self.J = 5
         self.ys = self.LG.ys
         self.theta = self.LG.theta
@@ -46,21 +32,21 @@ class TestPompClass_LG(unittest.TestCase):
     def test_invalid_initialization(self):
         # missing parameters
         with self.assertRaises(TypeError):
-            Pomp(None, self.rproc, self.dmeas, self.ys, self.theta)
+            pp.Pomp(None, self.rproc, self.dmeas, self.ys, self.theta)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, None, self.dmeas, self.ys, self.theta)
+            pp.Pomp(self.rinit, None, self.dmeas, self.ys, self.theta)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, None, self.ys, self.theta)
+            pp.Pomp(self.rinit, self.rproc, None, self.ys, self.theta)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, self.dmeas, None, self.theta)
+            pp.Pomp(self.rinit, self.rproc, self.dmeas, None, self.theta)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, self.dmeas, self.ys, None)
+            pp.Pomp(self.rinit, self.rproc, self.dmeas, self.ys, None)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, self.dmeas, None, self.theta)
+            pp.Pomp(self.rinit, self.rproc, self.dmeas, None, self.theta)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, self.dmeas, self.ys, None)
+            pp.Pomp(self.rinit, self.rproc, self.dmeas, self.ys, None)
         with self.assertRaises(TypeError):
-            Pomp(self.rinit, self.rproc, self.dmeas, self.theta, self.covars)
+            pp.Pomp(self.rinit, self.rproc, self.dmeas, self.theta, self.covars)
 
     def test_mop_valid(self):
         mop_obj = self.LG.mop(self.J, alpha=0.97, key=self.key)
@@ -168,107 +154,33 @@ class TestPompClass_LG(unittest.TestCase):
             )
 
     def test_fit_mif_valid(self):
-        mif_loglik1, mif_theta1 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            a=0.9,
-            J=self.J,
-            mode="IF2",
-            key=self.key,
-        )
-        self.assertEqual(mif_loglik1.shape, (3,))
-        self.assertEqual(
-            mif_theta1.shape,
-            (
-                3,
-                self.J,
-            )
-            + self.theta.shape,
-        )
-        self.assertTrue(jnp.issubdtype(mif_loglik1.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_theta1.dtype, jnp.float32))
+        configurations = [
+            {"M": 2, "loglik_shape": (3,), "monitor": True, "theta_shape": 3},
+            {"M": 2, "loglik_shape": (0,), "monitor": False, "theta_shape": 3},
+            {"M": 0, "loglik_shape": (1,), "monitor": True, "theta_shape": 1},
+            {"M": -1, "loglik_shape": (1,), "monitor": True, "theta_shape": 1},
+            {"M": 10, "loglik_shape": (11,), "monitor": True, "theta_shape": 11},
+        ]
 
-        mif_loglik2, mif_theta2 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            a=0.9,
-            J=self.J,
-            mode="IF2",
-            monitor=False,
-            key=self.key,
-        )
-        self.assertEqual(mif_loglik2.shape, (0,))
-        self.assertEqual(
-            mif_theta2.shape,
-            (
-                3,
-                self.J,
-            )
-            + self.theta.shape,
-        )
-        self.assertTrue(jnp.issubdtype(mif_loglik2.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_theta2.dtype, jnp.float32))
-
-        # M = 0
-        mif_loglik3, mif_theta3 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=0,
-            a=0.9,
-            J=self.J,
-            mode="IF2",
-            key=self.key,
-        )
-        self.assertEqual(mif_loglik3.shape, (1,))
-        self.assertEqual(
-            mif_theta3.shape,
-            (
-                1,
-                self.J,
-            )
-            + self.theta.shape,
-        )
-        self.assertTrue(jnp.issubdtype(mif_loglik3.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_theta3.dtype, jnp.float32))
-
-        # M = -1
-        mif_loglik4, mif_theta4 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=-1,
-            a=0.9,
-            J=self.J,
-            mode="IF2",
-            key=self.key,
-        )
-        self.assertEqual(mif_loglik4.shape, (1,))
-        self.assertEqual(
-            mif_theta4.shape,
-            (
-                1,
-                self.J,
-            )
-            + self.theta.shape,
-        )
-        self.assertTrue(jnp.issubdtype(mif_loglik4.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_theta4.dtype, jnp.float32))
-
-        mif_loglik5, mif_theta5 = self.LG.fit(
-            sigmas=0.02, sigmas_init=1e-20, mode="IF2", key=self.key
-        )
-        self.assertEqual(mif_loglik5.shape, (11,))
-        self.assertEqual(
-            mif_theta5.shape,
-            (
-                11,
-                100,
-            )
-            + self.theta.shape,
-        )
-        self.assertTrue(jnp.issubdtype(mif_loglik5.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_theta5.dtype, jnp.float32))
+        for config in configurations:
+            with self.subTest(config=config):
+                mif_loglik, mif_theta = self.LG.fit(
+                    sigmas=0.02,
+                    sigmas_init=1e-20,
+                    M=config["M"],
+                    a=0.9,
+                    J=self.J,
+                    mode="IF2",
+                    monitor=config["monitor"],
+                    key=self.key,
+                )
+                self.assertEqual(mif_loglik.shape, config["loglik_shape"])
+                self.assertEqual(
+                    mif_theta.shape,
+                    (config["theta_shape"], self.J) + self.theta.shape,
+                )
+                self.assertTrue(jnp.issubdtype(mif_loglik.dtype, jnp.float32))
+                self.assertTrue(jnp.issubdtype(mif_theta.dtype, jnp.float32))
 
     def test_fit_mif_invalid(self):
         # missing args
@@ -363,79 +275,25 @@ class TestPompClass_LG(unittest.TestCase):
             )
 
     def test_fit_IFAD_valid(self):
-        # pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)
-        IFAD_loglik1, IFAD_theta1 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            J=10,
-            Jh=10,
-            method="SGD",
-            itns=2,
-            alpha=0.97,
-            scale=True,
-            mode="IFAD",
-            key=self.key,
-        )
-        self.assertEqual(IFAD_loglik1.shape, (3,))
-        self.assertEqual(IFAD_theta1.shape, (3,) + self.theta.shape)
-        self.assertTrue(jnp.issubdtype(IFAD_loglik1.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(IFAD_theta1.dtype, jnp.float32))
-
-        IFAD_loglik2, IFAD_theta2 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            J=10,
-            Jh=10,
-            method="Newton",
-            itns=2,
-            alpha=0.97,
-            scale=True,
-            ls=True,
-            mode="IFAD",
-            key=self.key,
-        )
-        self.assertEqual(IFAD_loglik2.shape, (3,))
-        self.assertEqual(IFAD_theta2.shape, (3,) + self.theta.shape)
-        self.assertTrue(jnp.issubdtype(IFAD_loglik2.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(IFAD_theta2.dtype, jnp.float32))
-
-        IFAD_loglik3, IFAD_theta3 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            J=10,
-            Jh=10,
-            method="WeightedNewton",
-            itns=2,
-            alpha=0.97,
-            scale=True,
-            mode="IFAD",
-            key=self.key,
-        )
-        self.assertEqual(IFAD_loglik3.shape, (3,))
-        self.assertEqual(IFAD_theta3.shape, (3,) + self.theta.shape)
-        self.assertTrue(jnp.issubdtype(IFAD_loglik3.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(IFAD_theta3.dtype, jnp.float32))
-
-        IFAD_loglik4, IFAD_theta4 = self.LG.fit(
-            sigmas=0.02,
-            sigmas_init=1e-20,
-            M=2,
-            J=10,
-            Jh=10,
-            method="BFGS",
-            itns=2,
-            alpha=0.97,
-            scale=True,
-            mode="IFAD",
-            key=self.key,
-        )
-        self.assertEqual(IFAD_loglik4.shape, (3,))
-        self.assertEqual(IFAD_theta4.shape, (3,) + self.theta.shape)
-        self.assertTrue(jnp.issubdtype(IFAD_loglik4.dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(IFAD_theta4.dtype, jnp.float32))
+        methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
+        for method in methods:
+            IFAD_loglik, IFAD_theta = self.LG.fit(
+                sigmas=0.02,
+                sigmas_init=1e-20,
+                M=2,
+                J=10,
+                Jh=10,
+                method=method,
+                itns=2,
+                alpha=0.97,
+                scale=True,
+                mode="IFAD",
+                key=self.key,
+            )
+            self.assertEqual(IFAD_loglik.shape, (3,))
+            self.assertEqual(IFAD_theta.shape, (3,) + self.theta.shape)
+            self.assertTrue(jnp.issubdtype(IFAD_loglik.dtype, jnp.float32))
+            self.assertTrue(jnp.issubdtype(IFAD_theta.dtype, jnp.float32))
 
     def test_fit_IFAD_invalid(self):
         # pomp_obj = Pomp(custom_rinit, custom_rproc, custom_dmeas, self.ys, self.theta)

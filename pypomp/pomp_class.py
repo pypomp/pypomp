@@ -5,8 +5,8 @@ This module implements the OOP structure for POMP models.
 from .internal_functions import _mop_internal
 from .internal_functions import _pfilter_internal
 from .internal_functions import _mif_internal
-from .internal_functions import _train_internal
-from .internal_functions import _fit_internal
+from .train import _train_internal
+from .fit import _fit_internal
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas
@@ -74,14 +74,14 @@ class Pomp:
         """
 
         return _mop_internal(
-            theta = self.theta,
-            ys = self.ys,
-            J = J,
-            rinit = self.rinit.struct,
-            rprocess = self.rproc.struct_pf,
-            dmeasure = self.dmeas.struct_pf,
-            covars = self.covars,
-            alpha = alpha,
+            theta=self.theta,
+            ys=self.ys,
+            J=J,
+            rinit=self.rinit.struct,
+            rprocess=self.rproc.struct_pf,
+            dmeasure=self.dmeas.struct_pf,
+            covars=self.covars,
+            alpha=alpha,
             key=key,
         )
 
@@ -102,15 +102,15 @@ class Pomp:
         """
 
         return _pfilter_internal(
-            theta = self.theta,
-            ys = self.ys,
-            J = J,
-            rinit = self.rinit.struct,
-            rprocess = self.rproc.struct_pf,
-            dmeasure = self.dmeas.struct_pf,
-            covars = self.covars,
-            thresh = thresh,
-            key = key,
+            theta=self.theta,
+            ys=self.ys,
+            J=J,
+            rinit=self.rinit.struct,
+            rprocess=self.rproc.struct_pf,
+            dmeasure=self.dmeas.struct_pf,
+            covars=self.covars,
+            thresh=thresh,
+            key=key,
         )
 
     def mif(
@@ -199,8 +199,8 @@ class Pomp:
                 obtaining the gradient. Defaults to 5000.
             Jh (int, optional): The number of particles in the MOP objective for
                 obtaining the Hessian matrix. Defaults to 1000.
-            method (str, optional): The gradient-based iterative optimization 
-                method to use, including Newton method, weighted Newton method 
+            method (str, optional): The gradient-based iterative optimization
+                method to use, including Newton method, weighted Newton method
                 BFGS method, gradient descent. Defaults to 'Newton'.
             itns (int, optional): Maximum iteration for the gradient descent
                 optimization. Defaults to 20.

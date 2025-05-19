@@ -1,4 +1,6 @@
-from .internal_functions import _fit_internal
+import jax.numpy as jnp
+from .internal_functions import _mif_internal
+from .train import _train_internal
 
 
 def fit(
@@ -200,3 +202,155 @@ def fit(
         )
     else:
         raise ValueError("Invalid Argument Input with Missing Required Argument")
+
+
+def _fit_internal(
+    theta,
+    ys,
+    rinit,
+    rprocess,
+    dmeasure,
+    rprocesses,
+    dmeasures,
+    sigmas,
+    sigmas_init,
+    covars,
+    M,
+    a,
+    J,
+    Jh,
+    method,
+    itns,
+    beta,
+    eta,
+    c,
+    max_ls_itn,
+    thresh_mif,
+    thresh_tr,
+    verbose,
+    scale,
+    ls,
+    alpha,
+    monitor,
+    mode,
+    key,
+):
+    """
+    Internal function for executing either iterated filtering 2 (IF2), MOP
+    gradient-based iterative optimization method (GD), or iterated filtering
+    with automatic differentiation (IFAD) for to maximize the likelihood of a
+    POMP model.
+    """
+    if mode == "IF2":
+        if (
+            rprocesses is not None
+            and dmeasures is not None
+            and sigmas is not None
+            and sigmas_init is not None
+        ):
+            # Directly call mif_internal and return the results
+            mif_logliks_warm, mif_params_warm = _mif_internal(
+                theta=theta,
+                ys=ys,
+                rinit=rinit,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                rprocesses=rprocesses,
+                dmeasures=dmeasures,
+                sigmas=sigmas,
+                sigmas_init=sigmas_init,
+                covars=covars,
+                M=M,
+                a=a,
+                J=J,
+                thresh=thresh_mif,
+                monitor=monitor,
+                verbose=verbose,
+                key=key,
+            )
+            return jnp.array(mif_logliks_warm), jnp.array(mif_params_warm)
+        else:
+            raise TypeError("Unknown parameter")
+
+    elif mode == "GD":
+        # Directly call train_internal and return the results
+        gd_logliks, gd_ests = _train_internal(
+            theta_ests=theta,
+            ys=ys,
+            rinit=rinit,
+            rprocess=rprocess,
+            dmeasure=dmeasure,
+            covars=covars,
+            J=J,
+            Jh=Jh,
+            method=method,
+            itns=itns,
+            beta=beta,
+            eta=eta,
+            c=c,
+            max_ls_itn=max_ls_itn,
+            thresh=thresh_tr,
+            verbose=verbose,
+            scale=scale,
+            ls=ls,
+            alpha=alpha,
+            key=key,
+        )
+        return jnp.array(gd_logliks), jnp.array(gd_ests)
+
+    elif mode == "IFAD":
+        # The original logic combining both mif_internal and train_internal
+        if (
+            rprocesses is not None
+            and dmeasures is not None
+            and sigmas is not None
+            and sigmas_init is not None
+        ):
+            mif_logliks_warm, mif_params_warm = _mif_internal(
+                theta=theta,
+                ys=ys,
+                rinit=rinit,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                rprocesses=rprocesses,
+                dmeasures=dmeasures,
+                sigmas=sigmas,
+                sigmas_init=sigmas_init,
+                covars=covars,
+                M=M,
+                a=a,
+                J=J,
+                thresh=thresh_mif,
+                monitor=True,
+                verbose=verbose,
+                key=key,
+            )
+            theta_ests = mif_params_warm[mif_logliks_warm.argmin()].mean(0)
+            gd_logliks, gd_ests = _train_internal(
+                theta_ests=theta_ests,
+                ys=ys,
+                rinit=rinit,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                covars=covars,
+                J=J,
+                Jh=Jh,
+                method=method,
+                itns=itns,
+                beta=beta,
+                eta=eta,
+                c=c,
+                max_ls_itn=max_ls_itn,
+                thresh=thresh_tr,
+                verbose=verbose,
+                scale=scale,
+                ls=ls,
+                alpha=alpha,
+                key=key,
+            )
+            return jnp.array(gd_logliks), jnp.array(gd_ests)
+        else:
+            raise TypeError("Unknown parameter")
+
+    else:
+        raise TypeError(f"Unknown mode: {mode}. Choose from 'IF2', 'GD', or 'IFAD'.")

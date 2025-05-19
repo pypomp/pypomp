@@ -1,12 +1,12 @@
 from functools import partial
+import jax
+from jax import jit
 import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
-from .internal_functions import _jgrad_mop
-from .internal_functions import _jhess_mop
-from .internal_functions import _pfilter_internal
-from .internal_functions import _line_search
-from .internal_functions import _jvg_mop
+from .pfilter import _pfilter_internal
+from .pfilter import _pfilter_internal_mean
+from .mop import _mop_internal_mean
 
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
@@ -286,3 +286,283 @@ def _train_internal(
     Acopies.append(theta_ests)
 
     return jnp.array(logliks), jnp.array(Acopies)
+
+
+def _line_search(
+    obj,
+    curr_obj,
+    pt,
+    grad,
+    direction,
+    k=1,
+    eta=0.9,
+    xi=10,
+    tau=10,
+    c=0.1,
+    frac=0.5,
+    stoch=False,
+):
+    """
+    Conducts line search algorithm to determine the step size under stochastic
+    Quasi-Newton methods. The implentation of the algorithm refers to
+    https://arxiv.org/pdf/1909.01238.pdf.
+
+    Args:
+        obj (function): The objective function aiming to minimize
+        curr_obj (float): The value of the objective function at the current
+            point.
+        pt (array-like): The array containing current parameter values.
+        grad (array-like): The gradient of the objective function at the current
+            point.
+        direction (array-like): The direction to update the parameters.
+        k (int, optional): Iteration index. Defaults to 1.
+        eta (float, optional): Initial step size. Defaults to 0.9.
+        xi (int, optional): Reduction limit. Defaults to 10.
+        tau (int, optional): The maximum number of iterations. Defaults to 10.
+        c (float, optional): The user-defined Armijo condition constant.
+            Defaults to 0.1.
+        frac (float, optional): The fact. Defaults to 0.5.
+        stoch (bool, optional): Boolean argument controlling whether to adjust
+            the initial step size. Defaults to False.
+
+    Returns:
+        float: optimal step size
+    """
+    itn = 0
+    eta = min([eta, xi / k]) if stoch else eta  # if stoch is false, do not change
+    next_obj = obj(pt + eta * direction)
+    # check whether the new point(new_obj)satisfies the stochastic Armijo condition
+    # if not, repeat until the condition is met
+    # previous: grad.T @ direction
+    while next_obj > curr_obj + eta * c * jnp.sum(grad * direction) or jnp.isnan(
+        next_obj
+    ):
+        eta *= frac
+        itn += 1
+        if itn > tau:
+            break
+    return eta
+
+
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+    """
+    calculates the gradient of a mean particle filter objective (function
+    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
+    JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter
+        ys (array-like): The measurements
+        J (int): Number of particles
+        rinit (function): Simulator for the initial-state distribution
+        rprocess (function): Simulator for the process model
+        dmeasure (function): Density evaluation for the measurement model
+        covars (array-like): Covariates or None if not applicable
+        thresh (float): Threshold value to determine whether to resample
+            particles.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        array-like: the gradient of the pfilter_internal_mean function w.r.t.
+            theta_ests.
+    """
+    return jax.grad(_pfilter_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        thresh=thresh,
+        key=key,
+    )
+
+
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+    """
+    Calculates the both the value and gradient of a mean particle filter
+    objective (function 'pfilter_internal_mean') w.r.t. the current estimated
+    parameter value using JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter.
+        ys (array-like): The measurements.
+        J (int): Number of particles.
+        rinit (function): Simulator for the initial-state distribution.
+        rprocess (function): Simulator for the process model.
+        dmeasure (function): Density evaluation for the measurement model.
+        covars (array-like): Covariates or None if not applicable.
+        thresh (float): Threshold value to determine whether to resample
+            particles.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        tuple: A tuple containing:
+        - The mean of negative log-likelihood value across the measurements
+            using pfilter_internal_mean function.
+        - The gradient of the function pfilter_internal_mean function w.r.t.
+            theta_ests.
+    """
+    return jax.value_and_grad(_pfilter_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        thresh=thresh,
+        key=key,
+    )
+
+
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jgrad_mop(
+    theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None
+):
+    """
+    Calculates the gradient of a mean MOP objective (function
+    'mop_internal_mean') w.r.t. the current estimated parameter value using
+    JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter.
+        ys (array-like): The measurements.
+        J (int): Number of particles.
+        rinit (function): Simulator for the initial-state distribution.
+        rprocess (function): Simulator for the process model.
+        dmeasure (function): Density evaluation for the measurement model.
+        covars (array-like): Covariates or None if not applicable.
+        alpha (float, optional): Discount factor. Defaults to 0.97.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        array-like: the gradient of the mop_internal_mean function w.r.t.
+            theta_ests.
+    """
+    return jax.grad(_mop_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        alpha=alpha,
+        key=key,
+    )
+
+
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jvg_mop(
+    theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None
+):
+    """
+    calculates the both the value and gradient of a mean MOP objective (function
+    'mop_internal_mean') w.r.t. the current estimated parameter value using
+    JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter.
+        ys (array-like): The measurements.
+        J (int): Number of particles.
+        rinit (function): Simulator for the initial-state distribution.
+        rprocess (function): Simulator for the process model.
+        dmeasure (function): Density evaluation for the measurement model.
+        covars (array-like): Covariates or None if not applicable.
+        alpha (float, optional): Discount factor. Defaults to 0.97.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        tuple: A tuple containing:
+        - The mean of negative log-likelihood value across the measurements
+            using mop_internal_mean function.
+        - The gradient of the function mop_internal_mean function w.r.t.
+            theta_ests.
+    """
+    return jax.value_and_grad(_mop_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        alpha=alpha,
+        key=key,
+    )
+
+
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+    """
+    calculates the Hessian matrix of a mean particle filter objective (function
+    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
+    JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter.
+        ys (array-like): The measurements.
+        J (int): Number of particles.
+        rinit (function): Simulator for the initial-state distribution.
+        rprocess (function): Simulator for the process model.
+        dmeasure (function): Density evaluation for the measurement model.
+        covars (array-like): Covariates or None if not applicable.
+        thresh (float): Threshold value to determine whether to resample
+            particles.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        array-like: the Hessian matrix of the pfilter_internal_mean function
+            w.r.t. theta_ests.
+    """
+    return jax.hessian(_pfilter_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        thresh=thresh,
+        key=key,
+    )
+
+
+# get the hessian matrix from mop
+@partial(jit, static_argnums=(2, 3, 4, 5))
+def _jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=None):
+    """
+    calculates the Hessian matrix of a mean MOP objective (function
+    'mop_internal_mean') w.r.t. the current estimated parameter value using
+    JAX's automatic differentiation.
+
+    Args:
+        theta_ests (array-like): Estimated parameter.
+        ys (array-like): The measurements.
+        J (int): Number of particles.
+        rinit (function): Simulator for the initial-state distribution.
+        rprocess (function): Simulator for the process model.
+        dmeasure (function): Density evaluation for the measurement model.
+        covars (array-like): Covariates or None if not applicable.
+        alpha (float): Discount factor.
+        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+
+    Returns:
+        array-like: the Hessian matrix of the mop_internal_mean function w.r.t.
+            theta_ests.
+    """
+    return jax.hessian(_mop_internal_mean)(
+        theta_ests,
+        ys,
+        J,
+        rinit,
+        rprocess,
+        dmeasure,
+        covars=covars,
+        alpha=alpha,
+        key=key,
+    )

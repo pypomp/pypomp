@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from .internal_functions import _mif_internal
+from .mif import _mif_internal
 from .train import _train_internal
 
 

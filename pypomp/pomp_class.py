@@ -2,9 +2,9 @@
 This module implements the OOP structure for POMP models.
 """
 
-from .internal_functions import _mop_internal
-from .internal_functions import _pfilter_internal
-from .internal_functions import _mif_internal
+from .mop import _mop_internal
+from .pfilter import _pfilter_internal
+from .mif import _mif_internal
 from .train import _train_internal
 from .fit import _fit_internal
 from .model_struct import RInit

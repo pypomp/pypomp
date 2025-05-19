@@ -208,9 +208,7 @@ class TestPompClass_LG(unittest.TestCase):
             )
 
     def test_fit_GD_valid(self):
-        methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
-
-        for method in methods:
+        for method in ["SGD", "Newton", "WeightedNewton", "BFGS"]:
             with self.subTest(method=method):
                 GD_loglik1, GD_theta1 = self.LG.fit(
                     J=3,

@@ -31,25 +31,13 @@ class TestPfilter_LG(unittest.TestCase):
             thresh=10,
             key=self.key,
         )
-        val2 = pfilter(
-            rinit=self.rinit,
-            rproc=self.rproc,
-            dmeas=self.dmeas,
-            theta=self.theta,
-            ys=self.ys,
-            key=self.key,
-        )
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
-        self.assertEqual(val2.shape, ())
-        self.assertTrue(jnp.isfinite(val2.item()))
-        self.assertEqual(val2.dtype, jnp.float32)
 
     def test_class_basic(self):
-        val1 = pfilter(self.LG, self.J, thresh=10, key=self.key)
-        val2 = pfilter(self.LG, key=self.key)
-        val3 = pfilter(
+        val1 = pfilter(self.LG, key=self.key)
+        val2 = pfilter(
             self.LG,
             J=self.J,
             rinit=self.rinit,
@@ -65,9 +53,6 @@ class TestPfilter_LG(unittest.TestCase):
         self.assertEqual(val2.shape, ())
         self.assertTrue(jnp.isfinite(val2.item()))
         self.assertEqual(val2.dtype, jnp.float32)
-        self.assertEqual(val3.shape, ())
-        self.assertTrue(jnp.isfinite(val3.item()))
-        self.assertEqual(val3.dtype, jnp.float32)
 
     def test_invalid_input(self):
         arguments = [

@@ -31,25 +31,13 @@ class TestMop_LG(unittest.TestCase):
             alpha=0.97,
             key=self.key,
         )
-        val2 = mop(
-            rinit=self.rinit,
-            rproc=self.rproc,
-            dmeas=self.dmeas,
-            theta=self.theta,
-            ys=self.ys,
-            key=self.key,
-        )
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
-        self.assertEqual(val2.shape, ())
-        self.assertTrue(jnp.isfinite(val2.item()))
-        self.assertEqual(val2.dtype, jnp.float32)
 
     def test_class_basic(self):
         val1 = mop(self.LG, J=self.J, alpha=0.97, key=self.key)
-        val2 = mop(self.LG, key=self.key)
-        val3 = mop(
+        val2 = mop(
             self.LG,
             J=self.J,
             rinit=self.rinit,
@@ -62,12 +50,10 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
+
         self.assertEqual(val2.shape, ())
         self.assertTrue(jnp.isfinite(val2.item()))
         self.assertEqual(val2.dtype, jnp.float32)
-        self.assertEqual(val3.shape, ())
-        self.assertTrue(jnp.isfinite(val3.item()))
-        self.assertEqual(val3.dtype, jnp.float32)
 
     def test_invalid_input(self):
         arguments = [

@@ -198,6 +198,5 @@ def fit(
             mode=mode,
             key=key,
         )
-
     else:
         raise ValueError("Invalid Argument Input with Missing Required Argument")

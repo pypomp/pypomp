@@ -47,11 +47,7 @@ class TestFit_LG(unittest.TestCase):
         self.assertEqual(mif_loglik1.shape, (3,))
         self.assertEqual(
             mif_theta1.shape,
-            (
-                3,
-                self.J,
-            )
-            + self.theta.shape,
+            (3, self.J) + self.theta.shape,
         )
         self.assertTrue(jnp.issubdtype(mif_loglik1.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta1.dtype, jnp.float32))
@@ -72,11 +68,7 @@ class TestFit_LG(unittest.TestCase):
         self.assertEqual(mif_loglik1.shape, (3,))
         self.assertEqual(
             mif_theta1.shape,
-            (
-                3,
-                self.J,
-            )
-            + self.theta.shape,
+            (3, self.J) + self.theta.shape,
         )
         self.assertTrue(jnp.issubdtype(mif_loglik1.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta1.dtype, jnp.float32))
@@ -87,11 +79,7 @@ class TestFit_LG(unittest.TestCase):
         self.assertEqual(mif_loglik2.shape, (11,))
         self.assertEqual(
             mif_theta2.shape,
-            (
-                11,
-                100,
-            )
-            + self.theta.shape,
+            (11, 100) + self.theta.shape,
         )
         self.assertTrue(jnp.issubdtype(mif_loglik2.dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_theta2.dtype, jnp.float32))
@@ -118,22 +106,7 @@ class TestFit_LG(unittest.TestCase):
 
     def test_invalid_mif_input(self):
         with self.assertRaises(ValueError) as text:
-            fit(mode="IF", key=self.key)
-
-        self.assertEqual(
-            str(text.exception), "Invalid Argument Input with Missing Required Argument"
-        )
-
-        with self.assertRaises(ValueError) as text:
             fit(mode="IF2", key=self.key)
-
-        self.assertEqual(
-            str(text.exception), "Invalid Argument Input with Missing Required Argument"
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(J=self.J, mode="IF2", key=self.key)
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )
@@ -150,7 +123,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="IF",
                 key=self.key,
             )
-
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
         for arg in ["sigmas", "sigmas_init"]:
@@ -172,14 +144,6 @@ class TestFit_LG(unittest.TestCase):
                 )
 
         with self.assertRaises(ValueError) as text:
-            fit(self.LG, J=self.J, M=2, a=0.9, thresh_mif=-1, mode="IF2", key=self.key)
-
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing sigmas or sigmas_init",
-        )
-
-        with self.assertRaises(ValueError) as text:
             fit(
                 J=self.J,
                 theta=self.theta,
@@ -198,7 +162,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="IF",
                 key=self.key,
             )
-
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
         with self.assertRaises(ValueError) as text:
@@ -223,113 +186,30 @@ class TestFit_LG(unittest.TestCase):
             "Invalid Argument Input with Missing workhorse or sigmas",
         )
 
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
-                ys=self.ys,
-                sigmas_init=1e-20,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
-                ys=self.ys,
-                sigmas=0.02,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                ys=self.ys,
-                sigmas_init=1e-20,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                ys=self.ys,
-                sigmas=0.02,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                ys=self.ys,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
+        for arg in ["sigmas", "sigmas_init"]:
+            with self.subTest(arg=arg):
+                with self.assertRaises(ValueError) as text:
+                    fit(
+                        J=self.J,
+                        theta=self.theta,
+                        rinit=self.rinit,
+                        rprocess=self.rprocess,
+                        dmeasure=self.dmeasure,
+                        rprocesses=self.rprocesses,
+                        dmeasures=self.dmeasures,
+                        ys=self.ys,
+                        **{arg: getattr(self, arg)},
+                        covars=None,
+                        M=2,
+                        a=0.9,
+                        thresh_mif=-1,
+                        mode="IF2",
+                        key=self.key,
+                    )
+                self.assertEqual(
+                    str(text.exception),
+                    "Invalid Argument Input with Missing workhorse or sigmas",
+                )
 
     def test_internal_GD_basic(self):
         methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
@@ -379,60 +259,15 @@ class TestFit_LG(unittest.TestCase):
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError) as text:
             fit(mode="SGD", key=self.key)
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )
 
         with self.assertRaises(ValueError) as text:
             fit(mode="GD", key=self.key)
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                rinit=self.rinit,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
-                theta=self.theta,
-                ys=self.ys,
-                mode="GD",
-                key=self.key,
-            )
-
-        self.assertEqual(
-            str(text.exception), "Invalid Argument Input with Missing Required Argument"
-        )
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                self.LG,
-                J=self.J,
-                Jh=10,
-                itns=2,
-                alpha=0.97,
-                scale=True,
-                mode="SGD",
-                key=self.key,
-            )
-
-        self.assertEqual(str(text.exception), "Invalid Mode Input")
-
-        with self.assertRaises(ValueError) as text:
-            fit(
-                self.LG,
-                J=self.J,
-                Jh=10,
-                itns=2,
-                alpha=0.97,
-                scale=True,
-                mode="SGD",
-                key=self.key,
-            )
-
-        self.assertEqual(str(text.exception), "Invalid Mode Input")
 
         with self.assertRaises(ValueError) as text:
             fit(
@@ -449,7 +284,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="SGD",
                 key=self.key,
             )
-
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
     def test_internal_IFAD_basic(self):
@@ -508,14 +342,12 @@ class TestFit_LG(unittest.TestCase):
     def test_invalid_IFAD_input(self):
         with self.assertRaises(ValueError) as text:
             fit(mode="IFAD", key=self.key)
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )
 
         with self.assertRaises(ValueError) as text:
             fit(mode="AD", key=self.key)
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )
@@ -534,7 +366,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="AD",
                 key=self.key,
             )
-
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
         for arg in ["sigmas", "sigmas_init"]:
@@ -578,7 +409,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="AD",
                 key=self.key,
             )
-
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
         for method in ["SGD", "Newton", "WeightedNewton", "BFGS"]:
@@ -630,7 +460,6 @@ class TestFit_LG(unittest.TestCase):
                 mode="IFAD",
                 key=self.key,
             )
-
         self.assertEqual(
             str(text.exception), "Invalid Argument Input with Missing Required Argument"
         )

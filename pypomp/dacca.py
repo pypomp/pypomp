@@ -7,14 +7,7 @@ from pypomp.model_struct import RInit
 from pypomp.model_struct import RProc
 from pypomp.model_struct import DMeas
 
-
-def sigmoid(x):
-    return 1 / (1 + jnp.exp(-x))
-
-
-def logit(x):
-    return jnp.log(x / (1 - x))
-
+import jax.scipy.special as jspecial
 
 def get_thetas(theta):
     gamma = jnp.exp(theta[0])
@@ -22,7 +15,7 @@ def get_thetas(theta):
     rho = jnp.exp(theta[2])
     epsilon = jnp.exp(theta[3])
     omega = jnp.exp(theta[4])
-    c = sigmoid(theta[5])
+    c = jspecial.expit(theta[5])
     beta_trend = theta[6] / 100
     sigma = jnp.exp(theta[7])
     tau = jnp.exp(theta[8])
@@ -59,7 +52,7 @@ def transform_thetas(
                     jnp.log(rho),
                     jnp.log(epsilon),
                     jnp.log(omega),
-                    logit(c),
+                    jspecial.logit(c),
                     beta_trend * 100,
                     jnp.log(sigma),
                     jnp.log(tau),

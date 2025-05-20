@@ -403,7 +403,8 @@ class Pomp:
             key (jax.random.PRNGKey, optional): The random key for random number generation.
 
         Returns:
-            list: A list of simulated states.
+            dict: A dictionary of simulated values. 'X' contains the unobserved values
+                whereas 'Y' contains the observed values.
         """
         if self.rmeas is None:
             raise ValueError("rmeas cannot be None")

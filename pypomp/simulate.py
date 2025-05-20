@@ -34,17 +34,13 @@ def simulate(
             Defaults to None.
         covars (array-like, optional): Covariates for the process, or None if
             not applicable. Defaults to None.
-        Nsim (int, optional): The number of simulations to perform. Defaults to
-            100.
+        Nsim (int, optional): The number of simulations to perform. Defaults to 1.
         key (jax.random.PRNGKey, optional): The random key for random number
             generation.
 
     Returns:
-        tuple: Depending on the 'format' argument, returns either:
-            - A tuple containing arrays of the simulated states, lower
-              confidence intervals, and upper confidence intervals.
-            - DataFrames of the simulated states, lower confidence intervals,
-              and upper confidence intervals.
+        dict: A dictionary of simulated values. 'X' contains the unobserved values
+            whereas 'Y' contains the observed values.
     """
     if pomp_obj is not None:
         X, Y = pomp_obj.simulate(Nsim=Nsim, key=key)

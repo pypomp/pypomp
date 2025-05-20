@@ -55,7 +55,7 @@ def pfilter(
     if J < 1:
         raise ValueError("J should be greater than 0")
     if pomp_object is not None:
-        return pomp_object.pfilter(J, thresh, key)
+        return pomp_object.pfilter(J=J, thresh=thresh, key=key)
     elif (
         rinit is not None
         and rproc is not None

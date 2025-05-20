@@ -41,6 +41,19 @@ class TestModelStruct(unittest.TestCase):
         # Test that correct arguments run without error
         pp.DMeas(lambda y, state, params, covars: jnp.array([0]))
 
+    def test_RMeas_value_error(self):
+        # Test that an error is thrown with incorrect arguments
+        with self.assertRaises(ValueError):
+            pp.RMeas(lambda foo, params, key, covars: jnp.array([0]))
+        with self.assertRaises(ValueError):
+            pp.RMeas(lambda foo, params, key, covars: jnp.array([0]))
+        with self.assertRaises(ValueError):
+            pp.RMeas(lambda state, params, foo, covars: jnp.array([0]))
+        with self.assertRaises(ValueError):
+            pp.RMeas(lambda state, params, key, foo: jnp.array([0]))
+        # Test that correct arguments run without error
+        pp.RMeas(lambda state, params, key, covars: jnp.array([0]))
+
 
 if __name__ == "__main__":
     unittest.main(argv=[""], verbosity=2, exit=False)

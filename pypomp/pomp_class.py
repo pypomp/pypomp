@@ -2,6 +2,7 @@
 This module implements the OOP structure for POMP models.
 """
 
+from .simulate import _simulate_internal
 from .mop import _mop_internal
 from .pfilter import _pfilter_internal
 from .mif import _mif_internal
@@ -10,12 +11,13 @@ from .fit import _fit_internal
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas
+from .model_struct import RMeas
 
 
 class Pomp:
     MONITORS = 1
 
-    def __init__(self, rinit, rproc, dmeas, ys, theta, covars=None):
+    def __init__(self, ys, theta, rinit, rproc, dmeas=None, rmeas=None, covars=None):
         """
         Initializes the necessary components for a specific POMP model.
 
@@ -25,6 +27,7 @@ class Pomp:
                 model.
             dmeas (DMeas): Basic component of the density evaluation for the
                 measurement model.
+            rmeas (RMeas): Measurement simulator.
             ys (array-like): The measurement array.
             theta (array-like): Parameters involved in the POMP model.
             covars (array-like, optional): Covariates or None if not applicable.
@@ -33,7 +36,9 @@ class Pomp:
         Raises:
             TypeError: The required argument 'rinit' is not an RInit.
             TypeError: The required argument 'rproc' is not an RProc.
+            ValueError: 'dmeas' and 'rmeas' are both None.
             TypeError: The required argument 'dmeas' is not a DMeas.
+            TypeError: The required argument 'rmeas' is not an RMeas.
             TypeError: The required argument 'ys' is None.
             TypeError: The required argument 'theta' is None.
         """
@@ -41,8 +46,14 @@ class Pomp:
             raise TypeError("rinit must be an instance of the class RInit")
         if not isinstance(rproc, RProc):
             raise TypeError("rproc must be an instance of the class RProc")
-        if not isinstance(dmeas, DMeas):
-            raise TypeError("dmeas must be an instance of the class DMeas")
+        if dmeas is None and rmeas is None:
+            raise ValueError("You must supply at least one of dmeas or rmeas")
+        else:
+            if dmeas is not None and not isinstance(dmeas, DMeas):
+                raise TypeError("dmeas must be an instance of the class DMeas")
+            if rmeas is not None and not isinstance(rmeas, RMeas):
+                raise TypeError("rmeas must be an instance of the class RMeas")
+
         if ys is None:
             raise TypeError("ys cannot be None")
         if theta is None:
@@ -51,6 +62,7 @@ class Pomp:
         self.rinit = rinit
         self.rproc = rproc
         self.dmeas = dmeas
+        self.rmeas = rmeas
         self.ys = ys
         self.theta = theta
         self.covars = covars
@@ -74,6 +86,8 @@ class Pomp:
         """
         if J < 1:
             raise ValueError("J should be greater than 0")
+        if self.dmeas is None:
+            raise ValueError("dmeas cannot be None")
         return _mop_internal(
             theta=self.theta,
             ys=self.ys,
@@ -103,6 +117,8 @@ class Pomp:
         """
         if J < 1:
             raise ValueError("J should be greater than 0")
+        if self.dmeas is None:
+            raise ValueError("dmeas cannot be None")
         return _pfilter_internal(
             theta=self.theta,
             ys=self.ys,
@@ -150,7 +166,10 @@ class Pomp:
             - An array of negative log-likelihood through the iterations
             - An array of parameters through the iterations
         """
-
+        if J < 1:
+            raise ValueError("J should be greater than 0")
+        if self.dmeas is None:
+            raise ValueError("dmeas cannot be None")
         return _mif_internal(
             theta=self.theta,
             ys=self.ys,
@@ -234,6 +253,8 @@ class Pomp:
             raise ValueError("J should be greater than 0")
         if Jh < 1:
             raise ValueError("Jh should be greater than 0")
+        if self.dmeas is None:
+            raise ValueError("dmeas cannot be None")
         return _train_internal(
             theta_ests=theta_ests,
             ys=self.ys,
@@ -337,6 +358,8 @@ class Pomp:
             raise ValueError("J should be greater than 0")
         if Jh < 1:
             raise ValueError("Jh should be greater than 0")
+        if self.dmeas is None:
+            raise ValueError("dmeas cannot be None")
         return _fit_internal(
             theta=self.theta,
             ys=self.ys,
@@ -369,3 +392,29 @@ class Pomp:
             mode=mode,
             key=key,
         )
+
+    def simulate(self, Nsim=1, key=None):
+        """
+        Instance method for simulating the evolution of a system over time using
+        the initialized instance parameters and '_simulate_internal' function.
+
+        Args:
+            Nsim (int, optional): The number of simulations to perform. Defaults to 1.
+            key (jax.random.PRNGKey, optional): The random key for random number generation.
+
+        Returns:
+            list: A list of simulated states.
+        """
+        if self.rmeas is None:
+            raise ValueError("rmeas cannot be None")
+        X, Y = _simulate_internal(
+            rinitializer=self.rinit.struct_pf,
+            rprocess=self.rproc.struct_pf,
+            rmeasure=self.rmeas.struct_pf,
+            ys=self.ys,
+            theta=self.theta,
+            covars=self.covars,
+            Nsim=Nsim,
+            key=key,
+        )
+        return {"X": X, "Y": Y}

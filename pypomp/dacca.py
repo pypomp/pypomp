@@ -274,5 +274,7 @@ def dmeas(y, state, params, covars=None):
 
 
 def dacca():
-    dacca_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
+    dacca_obj = Pomp(
+        rinit=rinit, rproc=rproc, dmeas=dmeas, ys=ys, theta=theta, covars=covars
+    )
     return dacca_obj

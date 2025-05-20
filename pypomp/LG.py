@@ -8,6 +8,7 @@ from pypomp.pomp_class import Pomp
 from pypomp.model_struct import RInit
 from pypomp.model_struct import RProc
 from pypomp.model_struct import DMeas
+from pypomp.model_struct import RMeas
 
 
 def get_thetas(theta):
@@ -74,6 +75,13 @@ def dmeas(y, state, params, covars=None):
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
 
 
+@RMeas
+def rmeas(state, params, key, covars=None):
+    """Measurement simulator for the linear Gaussian model"""
+    A, C, Q, R = get_thetas(params)
+    return jax.random.multivariate_normal(key=key, mean=C @ state, cov=R)
+
+
 def LG(
     T=4,
     A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
@@ -112,5 +120,13 @@ def LG(
     theta = transform_thetas(A, C, Q, R)
     covars = None
     ys = Generate_data(T=T, A=A, C=C, Q=Q, R=R, key=key)
-    LG_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)
+    LG_obj = Pomp(
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        rmeas=rmeas,
+        ys=ys,
+        theta=theta,
+        covars=covars,
+    )
     return LG_obj

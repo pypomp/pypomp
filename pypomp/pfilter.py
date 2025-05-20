@@ -139,7 +139,7 @@ def _pfilter_helper(t, inputs, rprocess, dmeasure):
     else:
         particlesP = rprocess(particlesF, theta, keys, None)
 
-    measurements = dmeasure(ys[t], particlesP, theta)
+    measurements = dmeasure(ys[t], particlesP, theta, covars)
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
 

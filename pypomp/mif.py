@@ -284,7 +284,7 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
         particlesP = rprocesses(particlesF, thetas, keys, None)
 
     measurements = jnp.nan_to_num(
-        dmeasures(ys[t], particlesP, thetas).squeeze(), nan=jnp.log(1e-18)
+        dmeasures(ys[t], particlesP, thetas, covars).squeeze(), nan=jnp.log(1e-18)
     )  # shape (Np,)
 
     if len(measurements.shape) > 1:

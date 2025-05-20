@@ -96,5 +96,5 @@ class DMeas:
         if struct.__code__.co_varnames[3] != "covars":
             raise ValueError("The fourth argument of struct must be 'covars'")
         self.struct = struct
-        self.struct_pf = jax.vmap(struct, (None, 0, None))
-        self.struct_per = jax.vmap(struct, (None, 0, 0))
+        self.struct_pf = jax.vmap(struct, (None, 0, None, None))
+        self.struct_per = jax.vmap(struct, (None, 0, 0, None))

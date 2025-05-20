@@ -76,7 +76,11 @@ def _simulate_internal(rinitializer, rprocess, rmeasure, ys, theta, covars, Nsim
         key, *keys = jax.random.split(key, num=Nsim + 1)
         keys = jnp.array(keys)
         x_sims = rprocess(x_sims, theta, keys, covars)
+
+        key, *keys = jax.random.split(key, num=Nsim + 1)
+        keys = jnp.array(keys)
         y_sims = rmeasure(x_sims, theta, keys, covars)
+
         x_list[i + 1] = x_sims
         y_list[i] = y_sims
     X = jnp.stack(x_list, axis=0)

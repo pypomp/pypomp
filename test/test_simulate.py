@@ -17,26 +17,21 @@ class TestSimulate_LG(unittest.TestCase):
         self.rmeas = self.LG.rmeas
 
     def test_internal_basic(self):
-        val1 = pp.simulate(self.LG, Nsim=1, key=self.key)
-        self.assertIsInstance(val1, dict)
-        self.assertIn("X", val1)
-        self.assertIn("Y", val1)
-
-        val2 = pp.simulate(
+        val1 = pp.simulate(
             rinit=self.rinit,
             rproc=self.rproc,
             rmeas=self.rmeas,
-            ys=self.ys,
+            ylen=len(self.ys),
             theta=self.theta,
             covars=self.covars,
             Nsim=1,
             key=self.key,
         )
+        self.assertIsInstance(val1, dict)
+        self.assertIn("X", val1)
+        self.assertIn("Y", val1)
+
+        val2 = self.LG.simulate(Nsim=1, key=self.key)
         self.assertIsInstance(val2, dict)
         self.assertIn("X", val2)
         self.assertIn("Y", val2)
-
-        val3 = self.LG.simulate(Nsim=1, key=self.key)
-        self.assertIsInstance(val3, dict)
-        self.assertIn("X", val3)
-        self.assertIn("Y", val3)

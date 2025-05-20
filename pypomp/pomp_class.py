@@ -2,7 +2,7 @@
 This module implements the OOP structure for POMP models.
 """
 
-from .simulate import _simulate_internal
+from .simulate import simulate
 from .mop import _mop_internal
 from .pfilter import _pfilter_internal
 from .mif import _mif_internal
@@ -393,29 +393,62 @@ class Pomp:
             key=key,
         )
 
-    def simulate(self, Nsim=1, key=None):
+    def simulate(
+        self,
+        rinit=None,
+        rproc=None,
+        rmeas=None,
+        theta=None,
+        ylen=None,
+        covars=None,
+        Nsim=1,
+        key=None,
+    ):
         """
-        Instance method for simulating the evolution of a system over time using
-        the initialized instance parameters and '_simulate_internal' function.
+        Instance method for simulating a POMP model. By default, it uses this object’s
+        attributes, but these can be overridden by providing them as arguments.
 
         Args:
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                Defaults to None.
+            rproc (RProc, optional): Simulator for the process model. Defaults to None.
+            rmeas (RMeas, optional): Simulator for the measurement model. Defaults to
+                None.
+            theta (array-like, optional): Parameters involved in the POMP model.
+                Defaults to None.
+            ylen (int, optional): The number of observations to generate in one time
+                series. Defaults to None, in which case simulate uses the length of the
+                time series stored in the Pomp object.
+            covars (array-like, optional): Covariates for the process, or None if not
+                applicable. Defaults to None.
             Nsim (int, optional): The number of simulations to perform. Defaults to 1.
-            key (jax.random.PRNGKey, optional): The random key for random number generation.
+            key (jax.random.PRNGKey, optional): The random key for random number
+                generation.
 
         Returns:
             dict: A dictionary of simulated values. 'X' contains the unobserved values
                 whereas 'Y' contains the observed values.
         """
-        if self.rmeas is None:
-            raise ValueError("rmeas cannot be None")
-        X, Y = _simulate_internal(
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            rmeasure=self.rmeas.struct_pf,
-            ys=self.ys,
-            theta=self.theta,
-            covars=self.covars,
+        # Use arguments instead of attributes if given
+        rinit = self.rinit if rinit is None else rinit
+        rproc = self.rproc if rproc is None else rinit
+        rmeas = self.rmeas if rmeas is None else rinit
+        theta = self.theta if theta is None else rinit
+        ylen = len(self.ys) if ylen is None else ylen
+        covars = self.covars if covars is None else covars
+
+        if rmeas is None:
+            raise ValueError(
+                "rmeas cannot be None. Did you forget to supply it to the object or method?"
+            )
+
+        return simulate(
+            rinit=rinit,
+            rproc=rproc,
+            rmeas=rmeas,
+            theta=theta,
+            ylen=ylen,
+            covars=covars,
             Nsim=Nsim,
             key=key,
         )
-        return {"X": X, "Y": Y}

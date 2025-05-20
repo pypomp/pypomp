@@ -4,34 +4,27 @@ from .internal_functions import _keys_helper
 
 
 def simulate(
-    pomp_obj=None,
     rinit=None,
     rproc=None,
     rmeas=None,
-    ys=None,
     theta=None,
+    ylen=None,
     covars=None,
     Nsim=1,
     key=None,
 ):
     """
     Simulates the evolution of a system over time using a Partially Observed
-    Markov Process (POMP) model. This function can either execute on a POMP
-    object or utilize the specified parameters directly to perform the
-    simulation.
+    Markov Process (POMP) model.
 
     Args:
-        pomp_obj (Pomp, optional): An instance of the POMP class. If provided,
-            the function will execute on this object to perform the simulation.
-            If not provided, the necessary model components must be provided
-            separately. Defaults to None.
         rinit (RInit, optional): Simulator for the initial-state distribution. Defaults
             to None.
         rproc (RProc, optional): Simulator for the process model. Defaults to None.
         rmeas (RMeas, optional): Simulator for the measurement model. Defaults to None.
-        ys (array-like, optional): The measurement array. Defaults to None.
         theta (array-like, optional): Parameters involved in the POMP model.
             Defaults to None.
+        ylen (int, optional): Number of observations to generate in one time series.
         covars (array-like, optional): Covariates for the process, or None if
             not applicable. Defaults to None.
         Nsim (int, optional): The number of simulations to perform. Defaults to 1.
@@ -42,26 +35,31 @@ def simulate(
         dict: A dictionary of simulated values. 'X' contains the unobserved values
             whereas 'Y' contains the observed values.
     """
-    if pomp_obj is not None:
-        X, Y = pomp_obj.simulate(Nsim=Nsim, key=key)
-    elif (
-        rinit is not None and rproc is not None and theta is not None and ys is not None
+    if (
+        rinit is not None
+        and rproc is not None
+        and rmeas is not None
+        and theta is not None
+        and ylen is not None
     ):
         X, Y = _simulate_internal(
             rinitializer=rinit.struct_pf,
             rprocess=rproc.struct_pf,
             rmeasure=rmeas.struct_pf,
-            ys=ys,
             theta=theta,
+            ylen=ylen,
             covars=covars,
             Nsim=Nsim,
             key=key,
         )
+    else:
+        raise ValueError("Invalid arguments given to simulate")
     return {"X": X, "Y": Y}
 
 
-def _simulate_internal(rinitializer, rprocess, rmeasure, ys, theta, covars, Nsim, key):
-    ylen = len(ys)
+def _simulate_internal(
+    rinitializer, rprocess, rmeasure, theta, ylen, covars, Nsim, key
+):
     key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
     x_sims = rinitializer(theta, keys, covars)
 

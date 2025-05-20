@@ -54,9 +54,10 @@ def Generate_data(
 
 # TODO: Add custom starting position.
 @RInit
-def rinit(params, J, covars=None):
+def rinit(params, key, covars=None):
     """Initial state process simulator for the linear Gaussian model"""
-    return jnp.ones((J, 2))
+    A, C, Q, R = get_thetas(params)
+    return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
 
 
 @RProc
@@ -67,10 +68,11 @@ def rproc(state, params, key, covars=None):
 
 
 @DMeas
-def dmeas(y, state, params):
+def dmeas(y, state, params, covars=None):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(params)
     return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
+
 
 def LG(
     T=4,

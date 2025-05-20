@@ -57,7 +57,7 @@ def mop(
         float: Negative log-likelihood value
     """
     if pomp_object is not None:
-        return pomp_object.mop(J, alpha, key=key)
+        return pomp_object.mop(J=J, alpha=alpha, key=key)
     elif (
         rinit is not None
         and rproc is not None
@@ -69,7 +69,7 @@ def mop(
             theta=theta,
             ys=ys,
             J=J,
-            rinit=rinit.struct,
+            rinitializer=rinit.struct_pf,
             rprocess=rproc.struct_pf,
             dmeasure=dmeas.struct_pf,
             covars=covars,
@@ -81,7 +81,7 @@ def mop(
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key):
+def _mop_internal(theta, ys, J, rinitializer, rprocess, dmeasure, covars, alpha, key):
     """
     Internal function for MOP algorithm, which calls function 'mop_helper'
     iteratively.
@@ -89,7 +89,8 @@ def _mop_internal(theta, ys, J, rinit, rprocess, dmeasure, covars, alpha, key):
     # if key is None:
     # key = jax.random.PRNGKey(np.random.choice(int(1e18)))
 
-    particlesF = rinit(theta, J, covars=covars)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
+    particlesF = rinitializer(theta, keys, covars)
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0

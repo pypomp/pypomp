@@ -15,11 +15,13 @@ class TestPompClass_LG(unittest.TestCase):
         self.sigmas = 0.02
         self.key = jax.random.key(111)
 
-        self.rinit = self.LG.rinit.struct
-        self.rproc = self.LG.rproc.struct
-        self.dmeas = self.LG.dmeas.struct
+        self.rinit = self.LG.rinit
+        self.rproc = self.LG.rproc
+        self.dmeas = self.LG.dmeas
+        self.rinitalizer = self.LG.rinit.struct_pf
         self.rprocess = self.LG.rproc.struct_pf
         self.dmeasure = self.LG.dmeas.struct_pf
+        self.rinitalizers = self.LG.rinit.struct_per
         self.rprocesses = self.LG.rproc.struct_per
         self.dmeasures = self.LG.dmeas.struct_per
 
@@ -66,9 +68,9 @@ class TestPompClass_LG(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.LG.mop(key=self.key)
         # inappropriate input
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.mop(0, alpha=0.97, key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.mop(-1, alpha=0.97, key=self.key)
         with self.assertRaises(ValueError):
             self.LG.mop(jnp.array([10, 20]), alpha=0.97, key=self.key)
@@ -125,9 +127,9 @@ class TestPompClass_LG(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.LG.pfilter(key=self.key)
         # inappropriate input
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.pfilter(0, thresh=100, key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.pfilter(-1, thresh=100, key=self.key)
         with self.assertRaises(ValueError):
             self.LG.pfilter(jnp.array([10, 20]), key=self.key)
@@ -245,13 +247,13 @@ class TestPompClass_LG(unittest.TestCase):
     def test_fit_GD_invalid(self):
         with self.assertRaises(TypeError):
             self.LG.fit(mode="SGD", key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.fit(J=0, mode="GD", key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.fit(J=-1, mode="GD", key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.fit(Jh=0, mode="GD", key=self.key)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             self.LG.fit(Jh=-1, mode="GD", key=self.key)
 
         # useless input

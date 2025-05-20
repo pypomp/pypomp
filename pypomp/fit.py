@@ -9,10 +9,8 @@ def fit(
     Jh=1000,
     theta=None,
     rinit=None,
-    rprocess=None,
-    dmeasure=None,
-    rprocesses=None,
-    dmeasures=None,
+    rproc=None,
+    dmeas=None,
     ys=None,
     sigmas=None,
     sigmas_init=None,
@@ -52,16 +50,12 @@ def fit(
             obtaining the Hessian matrix. Defaults to 1000.
         theta (array-like, optional): Initial parameters involved in the POMP
             model. Defaults to None.
-        rinit (function, optional): Simulator for the initial-state
+        rinit (RInit, optional): Simulator for the initial-state
             distribution. Defaults to None.
-        rprocess (function, optional): Simulator for the process model. Defaults
+        rproc (RProc, optional): Simulator for the process model. Defaults
             to None.
-        dmeasure (function, optional): Density evaluation for the measurement
+        dmeas (DMeas, optional): Density evaluation for the measurement
             model. Defaults to None.
-        rprocesses (function, optional): Simulator for the perturbed process
-            model. Defaults to None.
-        dmeasures (function, optional): Density evaluation for the perturbed
-            measurement model. Defaults to None.
         ys (array-like, optional): The measurement array. Defaults to None.
         sigmas (float, optional): Random walk standard deviation (RWSD) for
             t > 0. Defaults to None. You can  instead supply an array-like to
@@ -119,6 +113,10 @@ def fit(
         - An array of negative log-likelihood through the iterations
         - An array of parameters through the iterations
     """
+    if J < 1:
+        raise ValueError("J should be greater than 0")
+    if Jh < 1:
+        raise ValueError("Jh should be greater than 0")
     if pomp_object is not None:
         if mode == "IF2" or mode == "IFAD":
             if sigmas is None or sigmas_init is None:
@@ -152,31 +150,27 @@ def fit(
         )
     elif (
         rinit is not None
-        and rprocess is not None
-        and dmeasure is not None
+        and rproc is not None
+        and dmeas is not None
         and theta is not None
         and ys is not None
     ):
         if mode == "IF2" or mode == "IFAD":
-            if (
-                rprocesses is None
-                or dmeasures is None
-                or sigmas is None
-                or sigmas_init is None
-            ):
+            if sigmas is None or sigmas_init is None:
                 raise ValueError(
-                    "Invalid Argument Input with Missing workhorse or sigmas"
+                    "Invalid Argument Input with Missing sigmas or sigmas_init"
                 )
         elif mode != "GD":
             raise ValueError("Invalid Mode Input")
         return _fit_internal(
             theta=theta,
             ys=ys,
-            rinit=rinit,
-            rprocess=rprocess,
-            dmeasure=dmeasure,
-            rprocesses=rprocesses,
-            dmeasures=dmeasures,
+            rinitializer=rinit.struct_pf,
+            rprocess=rproc.struct_pf,
+            dmeasure=dmeas.struct_pf,
+            rinitializers=rinit.struct_per,
+            rprocesses=rproc.struct_per,
+            dmeasures=dmeas.struct_per,
             sigmas=sigmas,
             sigmas_init=sigmas_init,
             covars=covars,
@@ -207,9 +201,10 @@ def fit(
 def _fit_internal(
     theta,
     ys,
-    rinit,
+    rinitializer,
     rprocess,
     dmeasure,
+    rinitializers,
     rprocesses,
     dmeasures,
     sigmas,
@@ -243,7 +238,8 @@ def _fit_internal(
     """
     if mode == "IF2":
         if (
-            rprocesses is not None
+            rinitializers
+            and rprocesses is not None
             and dmeasures is not None
             and sigmas is not None
             and sigmas_init is not None
@@ -252,9 +248,10 @@ def _fit_internal(
             mif_logliks_warm, mif_params_warm = _mif_internal(
                 theta=theta,
                 ys=ys,
-                rinit=rinit,
+                rinitializer=rinitializer,
                 rprocess=rprocess,
                 dmeasure=dmeasure,
+                rinitializers=rinitializers,
                 rprocesses=rprocesses,
                 dmeasures=dmeasures,
                 sigmas=sigmas,
@@ -277,7 +274,7 @@ def _fit_internal(
         gd_logliks, gd_ests = _train_internal(
             theta_ests=theta,
             ys=ys,
-            rinit=rinit,
+            rinitializer=rinitializer,
             rprocess=rprocess,
             dmeasure=dmeasure,
             covars=covars,
@@ -309,9 +306,10 @@ def _fit_internal(
             mif_logliks_warm, mif_params_warm = _mif_internal(
                 theta=theta,
                 ys=ys,
-                rinit=rinit,
+                rinitializer=rinitializer,
                 rprocess=rprocess,
                 dmeasure=dmeasure,
+                rinitializers=rinitializers,
                 rprocesses=rprocesses,
                 dmeasures=dmeasures,
                 sigmas=sigmas,
@@ -329,7 +327,7 @@ def _fit_internal(
             gd_logliks, gd_ests = _train_internal(
                 theta_ests=theta_ests,
                 ys=ys,
-                rinit=rinit,
+                rinitializer=rinitializer,
                 rprocess=rprocess,
                 dmeasure=dmeasure,
                 covars=covars,

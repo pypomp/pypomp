@@ -5,7 +5,8 @@ from jax import jit
 from tqdm import tqdm
 from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
-from .internal_functions import _rinits_internal
+
+# from .internal_functions import _rinits_internal
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
@@ -18,21 +19,22 @@ MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 def _mif_internal(
     theta,
     ys,
-    rinit,
+    rinitializer,
     rprocess,
     dmeasure,
+    rinitializers,
     rprocesses,
     dmeasures,
     sigmas,
     sigmas_init,
-    covars=None,
-    M=10,
-    a=0.95,
-    J=100,
-    thresh=100,
-    monitor=False,
-    verbose=False,
-    key=None,
+    covars,
+    M,
+    a,
+    J,
+    thresh,
+    monitor,
+    verbose,
+    key,
 ):
     """
     Internal function for conducting the iterated filtering (IF2) algorithm.
@@ -82,7 +84,7 @@ def _mif_internal(
                         thetas.mean(0),
                         ys,
                         J,
-                        rinit,
+                        rinitializer,
                         rprocess,
                         dmeasure,
                         covars=covars,
@@ -106,7 +108,7 @@ def _mif_internal(
             ys,
             J,
             sigmas,
-            rinit,
+            rinitializers,
             rprocesses,
             dmeasures,
             ndim=ndim,
@@ -126,7 +128,7 @@ def _mif_internal(
                             thetas.mean(0),
                             ys,
                             J,
-                            rinit,
+                            rinitializer,
                             rprocess,
                             dmeasure,
                             covars=covars,
@@ -153,7 +155,7 @@ def _perfilter_internal(
     ys,
     J,
     sigmas,
-    rinit,
+    rinitializers,
     rprocesses,
     dmeasures,
     ndim,
@@ -170,7 +172,12 @@ def _perfilter_internal(
     thetas = theta + sigmas * jax.random.normal(
         shape=(J,) + theta.shape[-ndim:], key=subkey
     )
-    particlesF = _rinits_internal(rinit, thetas, 1, covars=covars)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
+    # Took this if statement from _perfilter_helper, but I'm not sure why it's needed.
+    if covars is not None:
+        particlesF = rinitializers(thetas, keys, covars)
+    else:
+        particlesF = rinitializers(thetas, keys, None)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     # if key is None:
@@ -216,7 +223,7 @@ def _perfilter_internal_mean(
     ys,
     J,
     sigmas,
-    rinit,
+    rinitializers,
     rprocesses,
     dmeasures,
     ndim,
@@ -229,7 +236,17 @@ def _perfilter_internal_mean(
     filtering algorithm across the measurements.
     """
     value, thetas = _perfilter_internal(
-        theta, ys, J, sigmas, rinit, rprocesses, dmeasures, ndim, covars, thresh, key
+        theta,
+        ys,
+        J,
+        sigmas,
+        rinitializers,
+        rprocesses,
+        dmeasures,
+        ndim,
+        covars,
+        thresh,
+        key,
     )
     return value / len(ys), thetas
 
@@ -262,13 +279,9 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
     # Get prediction particles
     # r processes: particleF and thetas are both vectorized (J times)
     if covars is not None:
-        particlesP = rprocesses(
-            particlesF, thetas, keys, covars
-        )  # if t>0 else particlesF
+        particlesP = rprocesses(particlesF, thetas, keys, covars)
     else:
-        particlesP = rprocesses(
-            particlesF, thetas, keys, None
-        )  # if t>0 else particlesF
+        particlesP = rprocesses(particlesF, thetas, keys, None)
 
     measurements = jnp.nan_to_num(
         dmeasures(ys[t], particlesP, thetas).squeeze(), nan=jnp.log(1e-18)

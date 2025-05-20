@@ -18,11 +18,9 @@ class TestFit_LG(unittest.TestCase):
         self.J = 5
         self.key = jax.random.key(111)
 
-        self.rinit = self.LG.rinit.struct
-        self.rprocess = self.LG.rproc.struct_pf
-        self.dmeasure = self.LG.dmeas.struct_pf
-        self.rprocesses = self.LG.rproc.struct_per
-        self.dmeasures = self.LG.dmeas.struct_per
+        self.rinit = self.LG.rinit
+        self.rproc = self.LG.rproc
+        self.dmeas = self.LG.dmeas
 
     def test_internal_mif_basic(self):
         mif_loglik1, mif_theta1 = fit(
@@ -30,10 +28,8 @@ class TestFit_LG(unittest.TestCase):
             Jh=3,
             theta=self.theta,
             rinit=self.rinit,
-            rprocess=self.rprocess,
-            dmeasure=self.dmeasure,
-            rprocesses=self.rprocesses,
-            dmeasures=self.dmeasures,
+            rproc=self.rproc,
+            dmeas=self.dmeas,
             ys=self.ys,
             sigmas=0.02,
             sigmas_init=1e-20,
@@ -148,10 +144,8 @@ class TestFit_LG(unittest.TestCase):
                 J=self.J,
                 theta=self.theta,
                 rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
+                rproc=self.rproc,
+                dmeas=self.dmeas,
                 ys=self.ys,
                 sigmas=0.02,
                 sigmas_init=1e-20,
@@ -164,28 +158,6 @@ class TestFit_LG(unittest.TestCase):
             )
         self.assertEqual(str(text.exception), "Invalid Mode Input")
 
-        with self.assertRaises(ValueError) as text:
-            fit(
-                J=self.J,
-                theta=self.theta,
-                rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                ys=self.ys,
-                sigmas=0.02,
-                sigmas_init=1e-20,
-                covars=None,
-                M=2,
-                a=0.9,
-                thresh_mif=-1,
-                mode="IF2",
-                key=self.key,
-            )
-        self.assertEqual(
-            str(text.exception),
-            "Invalid Argument Input with Missing workhorse or sigmas",
-        )
-
         for arg in ["sigmas", "sigmas_init"]:
             with self.subTest(arg=arg):
                 with self.assertRaises(ValueError) as text:
@@ -193,10 +165,8 @@ class TestFit_LG(unittest.TestCase):
                         J=self.J,
                         theta=self.theta,
                         rinit=self.rinit,
-                        rprocess=self.rprocess,
-                        dmeasure=self.dmeasure,
-                        rprocesses=self.rprocesses,
-                        dmeasures=self.dmeasures,
+                        rproc=self.rproc,
+                        dmeas=self.dmeas,
                         ys=self.ys,
                         **{arg: getattr(self, arg)},
                         covars=None,
@@ -208,7 +178,7 @@ class TestFit_LG(unittest.TestCase):
                     )
                 self.assertEqual(
                     str(text.exception),
-                    "Invalid Argument Input with Missing workhorse or sigmas",
+                    "Invalid Argument Input with Missing sigmas or sigmas_init",
                 )
 
     def test_internal_GD_basic(self):
@@ -221,8 +191,8 @@ class TestFit_LG(unittest.TestCase):
                     theta=self.theta,
                     ys=self.ys,
                     rinit=self.rinit,
-                    rprocess=self.rprocess,
-                    dmeasure=self.dmeasure,
+                    rproc=self.rproc,
+                    dmeas=self.dmeas,
                     itns=2,
                     method=method,
                     alpha=0.97,
@@ -275,8 +245,8 @@ class TestFit_LG(unittest.TestCase):
                 Jh=10,
                 theta=self.theta,
                 rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
+                rproc=self.rproc,
+                dmeas=self.dmeas,
                 ys=self.ys,
                 itns=2,
                 alpha=0.97,
@@ -295,10 +265,8 @@ class TestFit_LG(unittest.TestCase):
                     Jh=3,
                     theta=self.theta,
                     rinit=self.rinit,
-                    rprocess=self.rprocess,
-                    dmeasure=self.dmeasure,
-                    rprocesses=self.rprocesses,
-                    dmeasures=self.dmeasures,
+                    rproc=self.rproc,
+                    dmeas=self.dmeas,
                     ys=self.ys,
                     sigmas=self.sigmas,
                     sigmas_init=1e-20,
@@ -393,10 +361,8 @@ class TestFit_LG(unittest.TestCase):
                 Jh=10,
                 theta=self.theta,
                 rinit=self.rinit,
-                rprocess=self.rprocess,
-                dmeasure=self.dmeasure,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
+                rproc=self.rproc,
+                dmeas=self.dmeas,
                 ys=self.ys,
                 sigmas=self.sigmas,
                 sigmas_init=1e-20,
@@ -420,10 +386,8 @@ class TestFit_LG(unittest.TestCase):
                             Jh=10,
                             theta=self.theta,
                             rinit=self.rinit,
-                            rprocess=self.rprocess,
-                            dmeasure=self.dmeasure,
-                            rprocesses=self.rprocesses,
-                            dmeasures=self.dmeasures,
+                            rproc=self.rproc,
+                            dmeas=self.dmeas,
                             ys=self.ys,
                             **{arg: getattr(self, arg)},
                             M=2,
@@ -437,7 +401,7 @@ class TestFit_LG(unittest.TestCase):
                         )
                     self.assertEqual(
                         str(text.exception),
-                        "Invalid Argument Input with Missing workhorse or sigmas",
+                        "Invalid Argument Input with Missing sigmas or sigmas_init",
                     )
 
         with self.assertRaises(ValueError) as text:
@@ -446,8 +410,6 @@ class TestFit_LG(unittest.TestCase):
                 Jh=10,
                 theta=self.theta,
                 rinit=self.rinit,
-                rprocesses=self.rprocesses,
-                dmeasures=self.dmeasures,
                 ys=self.ys,
                 sigmas=self.sigmas,
                 sigmas_init=1e-20,

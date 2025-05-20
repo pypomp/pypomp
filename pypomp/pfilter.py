@@ -52,6 +52,8 @@ def pfilter(
     Returns:
         float: Negative log-likelihood value
     """
+    if J < 1:
+        raise ValueError("J should be greater than 0")
     if pomp_object is not None:
         return pomp_object.pfilter(J, thresh, key)
     elif (
@@ -65,7 +67,7 @@ def pfilter(
             theta=theta,
             ys=ys,
             J=J,
-            rinit=rinit.struct,
+            rinitializer=rinit.struct_pf,
             rprocess=rproc.struct_pf,
             dmeasure=dmeas.struct_pf,
             covars=covars,
@@ -78,13 +80,14 @@ def pfilter(
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
 def _pfilter_internal(
-    theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None
+    theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
 ):
     """
     Internal functions for particle filtering algorithm, which calls function
     'pfilter_helper' iteratively.
     """
-    particlesF = rinit(theta, J, covars=covars)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
+    particlesF = rinitializer(theta, keys, covars)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0
@@ -114,10 +117,10 @@ def _pfilter_internal(
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
 def _pfilter_internal_mean(
-    theta, ys, J, rinit, rprocess, dmeasure, covars=None, thresh=100, key=None
+    theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
 ):
     return _pfilter_internal(
-        theta, ys, J, rinit, rprocess, dmeasure, covars, thresh, key
+        theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
     ) / len(ys)
 
 

@@ -72,12 +72,13 @@ class Pomp:
         Returns:
             float: Negative log-likelihood value
         """
-
+        if J < 1:
+            raise ValueError("J should be greater than 0")
         return _mop_internal(
             theta=self.theta,
             ys=self.ys,
             J=J,
-            rinit=self.rinit.struct,
+            rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
             covars=self.covars,
@@ -100,12 +101,13 @@ class Pomp:
         Returns:
             float: Negative log-likelihood value
         """
-
+        if J < 1:
+            raise ValueError("J should be greater than 0")
         return _pfilter_internal(
             theta=self.theta,
             ys=self.ys,
             J=J,
-            rinit=self.rinit.struct,
+            rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
             covars=self.covars,
@@ -152,9 +154,10 @@ class Pomp:
         return _mif_internal(
             theta=self.theta,
             ys=self.ys,
-            rinit=self.rinit.struct,
+            rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
+            rinitializers=self.rinit.struct_per,
             rprocesses=self.rproc.struct_per,
             dmeasures=self.dmeas.struct_per,
             sigmas=sigmas,
@@ -227,11 +230,14 @@ class Pomp:
             - An array of negative log-likelihood through the iterations
             - An array of parameters through the iterations
         """
-
+        if J < 1:
+            raise ValueError("J should be greater than 0")
+        if Jh < 1:
+            raise ValueError("Jh should be greater than 0")
         return _train_internal(
             theta_ests=theta_ests,
             ys=self.ys,
-            rinit=self.rinit.struct,
+            rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
             covars=self.covars,
@@ -327,13 +333,17 @@ class Pomp:
             - An array of negative log-likelihood through the iterations
             - An array of parameters through the iterations
         """
-
+        if J < 1:
+            raise ValueError("J should be greater than 0")
+        if Jh < 1:
+            raise ValueError("Jh should be greater than 0")
         return _fit_internal(
             theta=self.theta,
             ys=self.ys,
-            rinit=self.rinit.struct,
+            rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
+            rinitializers=self.rinit.struct_per,
             rprocesses=self.rproc.struct_per,
             dmeasures=self.dmeas.struct_per,
             sigmas=sigmas,

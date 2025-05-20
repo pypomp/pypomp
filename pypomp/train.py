@@ -16,7 +16,7 @@ MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 def _train_internal(
     theta_ests,
     ys,
-    rinit,
+    rinitializer,
     rprocess,
     dmeasure,
     covars=None,
@@ -36,8 +36,7 @@ def _train_internal(
     key=None,
 ):
     """
-    Internal function for conducting the MOP gradient estimate method, is called
-     in 'fit_internal' function.
+    Internal function for conducting the MOP gradient estimate method.
 
     Args:
         theta_ests (array-like): Initial value of parameter values before SGD.
@@ -91,7 +90,7 @@ def _train_internal(
                 theta_ests,
                 ys,
                 J,
-                rinit,
+                rinitializer,
                 rprocess,
                 dmeasure,
                 covars=covars,
@@ -105,7 +104,7 @@ def _train_internal(
                 theta_ests,
                 ys,
                 J,
-                rinit,
+                rinitializer,
                 rprocess,
                 dmeasure,
                 covars=covars,
@@ -119,7 +118,7 @@ def _train_internal(
                             theta_ests,
                             ys,
                             J,
-                            rinit,
+                            rinitializer,
                             rprocess,
                             dmeasure,
                             covars=covars,
@@ -136,7 +135,7 @@ def _train_internal(
                 theta_ests,
                 ys,
                 Jh,
-                rinit,
+                rinitializer,
                 rprocess,
                 dmeasure,
                 covars=covars,
@@ -159,7 +158,7 @@ def _train_internal(
                     theta_ests,
                     ys,
                     Jh,
-                    rinit,
+                    rinitializer,
                     rprocess,
                     dmeasure,
                     covars=covars,
@@ -179,7 +178,7 @@ def _train_internal(
                     theta_ests,
                     ys,
                     Jh,
-                    rinit,
+                    rinitializer,
                     rprocess,
                     dmeasure,
                     covars=covars,
@@ -236,7 +235,7 @@ def _train_internal(
                     _pfilter_internal,
                     ys=ys,
                     J=J,
-                    rinit=rinit,
+                    rinitializer=rinitializer,
                     rprocess=rprocess,
                     dmeasure=dmeasure,
                     covars=covars,
@@ -271,7 +270,7 @@ def _train_internal(
                         theta_ests,
                         ys,
                         J,
-                        rinit,
+                        rinitializer,
                         rprocess,
                         dmeasure,
                         covars=covars,
@@ -345,7 +344,9 @@ def _line_search(
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jgrad(
+    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None
+):
     """
     calculates the gradient of a mean particle filter objective (function
     'pfilter_internal_mean') w.r.t. the current estimated parameter value using
@@ -371,7 +372,7 @@ def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,
@@ -381,7 +382,7 @@ def _jgrad(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jvg(theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None):
     """
     Calculates the both the value and gradient of a mean particle filter
     objective (function 'pfilter_internal_mean') w.r.t. the current estimated
@@ -410,7 +411,7 @@ def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None)
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,
@@ -421,7 +422,7 @@ def _jvg(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None)
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
 def _jgrad_mop(
-    theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None
+    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha=0.97, key=None
 ):
     """
     Calculates the gradient of a mean MOP objective (function
@@ -447,7 +448,7 @@ def _jgrad_mop(
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,
@@ -458,7 +459,7 @@ def _jgrad_mop(
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
 def _jvg_mop(
-    theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha=0.97, key=None
+    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha=0.97, key=None
 ):
     """
     calculates the both the value and gradient of a mean MOP objective (function
@@ -487,7 +488,7 @@ def _jvg_mop(
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,
@@ -497,7 +498,9 @@ def _jvg_mop(
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=None):
+def _jhess(
+    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None
+):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
     'pfilter_internal_mean') w.r.t. the current estimated parameter value using
@@ -523,7 +526,7 @@ def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,
@@ -534,7 +537,9 @@ def _jhess(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, thresh, key=Non
 
 # get the hessian matrix from mop
 @partial(jit, static_argnums=(2, 3, 4, 5))
-def _jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=None):
+def _jhess_mop(
+    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha, key=None
+):
     """
     calculates the Hessian matrix of a mean MOP objective (function
     'mop_internal_mean') w.r.t. the current estimated parameter value using
@@ -559,7 +564,7 @@ def _jhess_mop(theta_ests, ys, J, rinit, rprocess, dmeasure, covars, alpha, key=
         theta_ests,
         ys,
         J,
-        rinit,
+        rinitializer,
         rprocess,
         dmeasure,
         covars=covars,

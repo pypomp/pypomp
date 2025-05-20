@@ -127,7 +127,7 @@ covars = covars
 
 
 @RInit
-def rinit(params, J, covars=None):
+def rinit(params, key, covars=None):
     S_0 = 0.621
     I_0 = 0.378
     Y_0 = 0
@@ -144,7 +144,7 @@ def rinit(params, J, covars=None):
     Mn = 0
     t = 0
     count = 0
-    return jnp.tile(jnp.array([S, I, Y, Mn, R1, R2, R3, t, count]), (J, 1))
+    return jnp.array([S, I, Y, Mn, R1, R2, R3, t, count])
 
 
 @RProc
@@ -249,14 +249,14 @@ def dmeas_helper_tol(y, deaths, v, tol, ltol):
 
 
 @DMeas
-def dmeas(y, state, params, keys=None):
+def dmeas(y, state, params, covars=None):
     deaths = state[3]
     count = state[-1]
     tol = 1.0e-18
     ltol = jnp.log(tol)
-    (
-        gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta
-    ) = get_thetas(params)
+    (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
+        get_thetas(params)
+    )
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
     return jax.lax.cond(
@@ -271,6 +271,7 @@ def dmeas(y, state, params, keys=None):
         tol,
         ltol,
     )
+
 
 def dacca():
     dacca_obj = Pomp(rinit, rproc, dmeas, ys, theta, covars)

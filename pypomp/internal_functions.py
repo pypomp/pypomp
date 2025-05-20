@@ -28,25 +28,6 @@ def _keys_helper(key, J, covars):
     return key, keys
 
 
-def _rinits_internal(rinit, thetas, J, covars):
-    """
-    Simulator for the initial-state distribution, specifically for the perturbed
-    particle filtering method.
-
-    Args:
-        rinit (function): Simulator for the initial-state distribution for the
-            unperturbed particle filtering method.
-        thetas (array-like): Array of parameters used in the likelihood-based
-            inference.
-        J (int): The number of particles.
-        covars (array-like or None): Covariates or None if not applicable.
-
-    Returns:
-        array-like: The simulated initial latent states.
-    """
-    return rinit(thetas[0], len(thetas), covars)
-
-
 def _resample(norm_weights, subkey):
     """
     Systematic resampling method based on input normalized weights.

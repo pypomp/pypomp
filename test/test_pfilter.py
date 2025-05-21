@@ -19,7 +19,7 @@ class TestPfilter_LG(unittest.TestCase):
         self.rproc = self.LG.rproc
         self.dmeas = self.LG.dmeas
 
-    def test_internal_basic(self):
+    def test_function_basic(self):
         val1 = pfilter(
             J=self.J,
             rinit=self.rinit,
@@ -36,27 +36,13 @@ class TestPfilter_LG(unittest.TestCase):
         self.assertEqual(val1.dtype, jnp.float32)
 
     def test_class_basic(self):
-        val1 = pfilter(self.LG, key=self.key)
-        val2 = pfilter(
-            self.LG,
-            J=self.J,
-            rinit=self.rinit,
-            rproc=self.rproc,
-            dmeas=self.dmeas,
-            theta=[],
-            ys=[],
-            key=self.key,
-        )
+        val1 = self.LG.pfilter(J=self.J, key=self.key)
         self.assertEqual(val1.shape, ())
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
-        self.assertEqual(val2.shape, ())
-        self.assertTrue(jnp.isfinite(val2.item()))
-        self.assertEqual(val2.dtype, jnp.float32)
 
     def test_invalid_input(self):
         arguments = [
-            {"key": self.key},
             {"J": self.J, "key": self.key},
             {"J": self.J, "thresh": -1, "key": self.key},
             {"J": self.J, "theta": self.theta, "ys": self.ys, "key": self.key},
@@ -87,7 +73,9 @@ class TestPfilter_LG(unittest.TestCase):
         for arg in arguments:
             with self.assertRaises(ValueError) as text:
                 pfilter(**arg)
-            self.assertEqual(str(text.exception), "Invalid Arguments Input")
+            self.assertEqual(
+                str(text.exception), "Missing rinit, rproc, dmeas, theta, or ys."
+            )
 
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@ This module implements the OOP structure for POMP models.
 
 from .simulate import simulate
 from .mop import _mop_internal
-from .pfilter import _pfilter_internal
-from .mif import _mif_internal
+from .pfilter import pfilter
+from .mif import mif
 from .train import _train_internal
 from .fit import _fit_internal
 from .model_struct import RInit
@@ -67,9 +67,6 @@ class Pomp:
         self.theta = theta
         self.covars = covars
 
-    # def rinits(self, thetas, J, covars):
-    #     return rinits_internal(self.rinit, thetas, J, covars)
-
     def mop(self, J, alpha=0.97, key=None):
         """
         Instance method for MOP algorithm, which uses the initialized instance
@@ -100,7 +97,18 @@ class Pomp:
             key=key,
         )
 
-    def pfilter(self, J, thresh=100, key=None):
+    def pfilter(
+        self,
+        J,
+        theta=None,
+        ys=None,
+        rinit=None,
+        rproc=None,
+        dmeas=None,
+        covars=None,
+        thresh=0,
+        key=None,
+    ):
         """
         Instance method for particle filtering algorithm, which uses the
         initialized instance parameters and calls 'pfilter_internal' function.
@@ -108,25 +116,31 @@ class Pomp:
         Args:
             J (int): The number of particles
             thresh (float, optional): Threshold value to determine whether to
-                resample particles. Defaults to 100.
+                resample particles. Defaults to 0.
             key (jax.random.PRNGKey, optional): The random key. Defaults to
                 None.
 
         Returns:
             float: Negative log-likelihood value
         """
-        if J < 1:
-            raise ValueError("J should be greater than 0")
+        theta = self.theta if theta is None else theta
+        ys = self.ys if ys is None else ys
+        rinit = self.rinit if rinit is None else rinit
+        rproc = self.rproc if rproc is None else rproc
+        dmeas = self.dmeas if dmeas is None else dmeas
+        covars = self.covars if covars is None else covars
+
         if self.dmeas is None:
             raise ValueError("dmeas cannot be None")
-        return _pfilter_internal(
-            theta=self.theta,
-            ys=self.ys,
+
+        return pfilter(
+            theta=theta,
+            ys=ys,
             J=J,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            covars=self.covars,
+            rinit=rinit,
+            rproc=rproc,
+            dmeas=dmeas,
+            covars=covars,
             thresh=thresh,
             key=key,
         )
@@ -135,10 +149,16 @@ class Pomp:
         self,
         sigmas,
         sigmas_init,
-        M=10,
-        a=0.9,
-        J=100,
-        thresh=100,
+        M,
+        a,
+        J,
+        ys=None,
+        theta=None,
+        rinit=None,
+        rproc=None,
+        dmeas=None,
+        covars=None,
+        thresh=0,
         monitor=False,
         verbose=False,
         key=None,
@@ -151,37 +171,39 @@ class Pomp:
         Args:
             sigmas (float): Perturbed factor
             sigmas_init (float): Initial perturbed factor
-            M (int, optional): Algorithm Iteration. Defaults to 10.
-            a (float, optional): Decay factor for sigmas. Defaults to 0.95.
+            M (int, optional): Algorithm Iteration.
+            a (float, optional): Decay factor for sigmas.
             J (int, optional): The number of particles. Defaults to 100.
             thresh (float, optional): Threshold value to determine whether to
-                resample particles. Defaults to 100.
+                resample particles.
             monitor (bool, optional): Boolean flag controlling whether to
-                monitor the log-likelihood value. Defaults to False.
+                monitor the log-likelihood value.
             verbose (bool, optional): Boolean flag controlling whether to print
-                out the log-likelihood and parameter information. Defaults to
-                False.
+                out the log-likelihood and parameter information.
         Returns:
             tuple: A tuple containing:
             - An array of negative log-likelihood through the iterations
             - An array of parameters through the iterations
         """
+        theta = self.theta if theta is None else theta
+        ys = self.ys if ys is None else ys
+        rinit = self.rinit if rinit is None else rinit
+        rproc = self.rproc if rproc is None else rproc
+        dmeas = self.dmeas if dmeas is None else dmeas
+        covars = self.covars if covars is None else covars
         if J < 1:
             raise ValueError("J should be greater than 0")
         if self.dmeas is None:
             raise ValueError("dmeas cannot be None")
-        return _mif_internal(
-            theta=self.theta,
-            ys=self.ys,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            rinitializers=self.rinit.struct_per,
-            rprocesses=self.rproc.struct_per,
-            dmeasures=self.dmeas.struct_per,
+        return mif(
+            rinit=rinit,
+            rproc=rproc,
+            dmeas=dmeas,
+            theta=theta,
+            ys=ys,
             sigmas=sigmas,
             sigmas_init=sigmas_init,
-            covars=self.covars,
+            covars=covars,
             M=M,
             a=a,
             J=J,

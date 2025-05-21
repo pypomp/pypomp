@@ -9,26 +9,20 @@ from .internal_functions import _normalize_weights
 
 
 def pfilter(
-    pomp_object=None,
-    J=50,
+    J,
     rinit=None,
     rproc=None,
     dmeas=None,
     theta=None,
     ys=None,
     covars=None,
-    thresh=100,
+    thresh=0,
     key=None,
 ):
     """
-    An outside function for particle filtering algorithm. It receives two kinds
-    of input - pomp class object or required arguments of 'pfilter_internal'
-    function, and executes on the object or calls 'pfilter_internal' directly.
+    An outside function for particle filtering algorithm.
 
     Args:
-        pomp_object (Pomp, optional): An instance of the POMP class. If
-            provided, the function will execute on this object to conduct the
-            particle filtering algorithm. Defaults to None.
         J (int, optional): The number of particles. Defaults to 50.
         rinit (RInit, optional): Simulator for the initial-state
             distribution. Defaults to None.
@@ -53,29 +47,21 @@ def pfilter(
         float: Negative log-likelihood value
     """
     if J < 1:
-        raise ValueError("J should be greater than 0")
-    if pomp_object is not None:
-        return pomp_object.pfilter(J=J, thresh=thresh, key=key)
-    elif (
-        rinit is not None
-        and rproc is not None
-        and dmeas is not None
-        and theta is not None
-        and ys is not None
-    ):
-        return _pfilter_internal(
-            theta=theta,
-            ys=ys,
-            J=J,
-            rinitializer=rinit.struct_pf,
-            rprocess=rproc.struct_pf,
-            dmeasure=dmeas.struct_pf,
-            covars=covars,
-            thresh=thresh,
-            key=key,
-        )
-    else:
-        raise ValueError("Invalid Arguments Input")
+        raise ValueError("J should be greater than 0.")
+    if rinit is None or rproc is None or dmeas is None or theta is None or ys is None:
+        raise ValueError("Missing rinit, rproc, dmeas, theta, or ys.")
+
+    return _pfilter_internal(
+        theta=theta,
+        ys=ys,
+        J=J,
+        rinitializer=rinit.struct_pf,
+        rprocess=rproc.struct_pf,
+        dmeasure=dmeas.struct_pf,
+        covars=covars,
+        thresh=thresh,
+        key=key,
+    )
 
 
 @partial(jit, static_argnums=(2, 3, 4, 5))

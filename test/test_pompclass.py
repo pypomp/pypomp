@@ -137,24 +137,6 @@ class TestPompClass_LG(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.LG.pfilter(self.J, a=0.97, key=self.key)
 
-        # useless args
-        with self.assertRaises(TypeError):
-            self.LG.pfilter(
-                self.theta,
-                self.ys,
-                self.J,
-                self.rinit,
-                self.rprocess,
-                self.dmeasure,
-                self.covars,
-                key=self.key,
-            )
-
-        with self.assertRaises(TypeError):
-            self.LG.pfilter(
-                self.J, self.rinit, self.rprocess, self.dmeasure, key=self.key
-            )
-
     def test_fit_mif_valid(self):
         configurations = [
             {"M": 2, "loglik_shape": (3,), "monitor": True, "theta_shape": 3},

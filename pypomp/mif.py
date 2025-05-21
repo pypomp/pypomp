@@ -13,7 +13,101 @@ from .internal_functions import _no_resampler_thetas
 
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
+
 # TODO: add external mif function
+def mif(
+    rinit,
+    rproc,
+    dmeas,
+    ys,
+    theta,
+    sigmas,
+    sigmas_init,
+    covars,
+    M,
+    a,
+    J,
+    thresh=0,
+    monitor=False,
+    verbose=False,
+    key=None,
+):
+    """
+    Perform the iterated filtering (IF2) algorithm for a partially observed
+    Markov process (POMP) model to estimate model parameters by maximizing
+    the likelihood.
+
+    Args:
+        rinit (RInit): Simulator for the initial-state distribution.
+        rproc (RProc): Simulator for the process model.
+        dmeas (DMeas): Density evaluation for the measurement model.
+        ys (array-like): The measurement array.
+        theta (array-like): Initial parameters for the POMP model.
+        sigmas (float): Perturbation factor for parameters.
+        sigmas_init (float): Initial perturbation factor for parameters.
+        covars (array-like): Covariates or None if not applicable.
+        M (int): Number of algorithm iterations.
+        a (float): Decay factor for sigmas.
+        J (int): Number of particles.
+        thresh (float): Resampling threshold.
+        monitor (bool): Flag to monitor log-likelihood values.
+        verbose (bool): Flag to print log-likelihood and parameter information.
+        key (jax.random.PRNGKey): Random key for reproducibility.
+
+    Raises:
+        ValueError: If J is less than 1 or any required arguments are missing.
+
+    Returns:
+        tuple: Contains:
+            - Array of negative log-likelihood values through iterations.
+            - Array of parameters through iterations.
+    """
+
+    if J < 1:
+        raise ValueError("J should be greater than 0.")
+    missing_args = [
+        arg
+        for arg in [
+            rinit,
+            rproc,
+            dmeas,
+            ys,
+            theta,
+            sigmas,
+            sigmas_init,
+            covars,
+            M,
+            a,
+            J,
+            key,
+        ]
+        if arg is None
+    ]
+    if len(missing_args) > 0:
+        raise ValueError(
+            f"The following arguments are missing: {missing_args}. Please check your arguments and try again."
+        )
+
+    return _mif_internal(
+        theta=theta,
+        ys=ys,
+        rinitializer=rinit.struct_pf,
+        rprocess=rproc.struct_pf,
+        dmeasure=dmeas.struct_pf,
+        rinitializers=rinit.struct_per,
+        rprocesses=rproc.struct_per,
+        dmeasures=dmeas.struct_per,
+        sigmas=sigmas,
+        sigmas_init=sigmas_init,
+        covars=covars,
+        M=M,
+        a=a,
+        J=J,
+        thresh=thresh,
+        monitor=monitor,
+        verbose=verbose,
+        key=key,
+    )
 
 
 def _mif_internal(

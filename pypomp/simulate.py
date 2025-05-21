@@ -35,25 +35,19 @@ def simulate(
         dict: A dictionary of simulated values. 'X' contains the unobserved values
             whereas 'Y' contains the observed values.
     """
-    if (
-        rinit is not None
-        and rproc is not None
-        and rmeas is not None
-        and theta is not None
-        and ylen is not None
-    ):
-        X, Y = _simulate_internal(
-            rinitializer=rinit.struct_pf,
-            rprocess=rproc.struct_pf,
-            rmeasure=rmeas.struct_pf,
-            theta=theta,
-            ylen=ylen,
-            covars=covars,
-            Nsim=Nsim,
-            key=key,
-        )
-    else:
+    if rinit is None or rproc is None or rmeas is None or theta is None or ylen is None:
         raise ValueError("Invalid arguments given to simulate")
+
+    X, Y = _simulate_internal(
+        rinitializer=rinit.struct_pf,
+        rprocess=rproc.struct_pf,
+        rmeasure=rmeas.struct_pf,
+        theta=theta,
+        ylen=ylen,
+        covars=covars,
+        Nsim=Nsim,
+        key=key,
+    )
     return {"X": X, "Y": Y}
 
 

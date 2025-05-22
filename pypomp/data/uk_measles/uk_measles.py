@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-import pickle
 
 raw_location = "pypomp/data/uk_measles/raw"
 urr = {}
@@ -44,12 +43,6 @@ coord = pd.concat([urr["coord_rural"], urr["coord_urban"]], axis=0)
 coord = pd.DataFrame({"unit": coord["X"], "long": coord["Long"], "lat": coord["Lat"]})
 coord = coord.sort_values(["unit"])
 
-uk_measles = {
-    "measles": measles.reset_index(drop=True),
-    "demog": demog.reset_index(drop=True),
-    "coord": coord.reset_index(drop=True),
-}
-
 # TODO: IIRC the he10 data has coordinates that the UK data doesn't have. These could be
 # added in later.
 # preexisting_units = uk_measles["coord"]["unit"][
@@ -63,5 +56,41 @@ uk_measles = {
 # )
 # ur_measles = {k: v.to_dict() for k, v in uk_measles.items()}
 
-with open("pypomp/data/uk_measles/uk_measles.pkl", "wb") as f:
-    pickle.dump(uk_measles, f)
+
+# Not sure if this is the best way to implement this.
+class UKMeasles:
+    data = {
+        "measles": measles.reset_index(drop=True),
+        "demog": demog.reset_index(drop=True),
+        "coord": coord.reset_index(drop=True),
+    }
+
+    @staticmethod
+    def subset(units=None):
+        """
+        Return a subset of the UKMeasles data, filtered by the given units.
+
+        Parameters
+        ----------
+        units : list of str, optional
+            A list of unit names to subset the data by. If None, the entire
+            dataset is returned.
+
+        Returns
+        -------
+        A dictionary with the same structure as UKMeasles.data, but with the
+        data subsetted to only include the given units.
+        """
+        if units is None:
+            return UKMeasles.data
+        else:
+            return {
+                k: v[v["unit"].isin(units)].reset_index(drop=True)
+                for k, v in UKMeasles.data.items()
+            }
+
+    # TODO: add method or argument to return the cleaned copy of the data
+
+
+# with open("pypomp/data/uk_measles/uk_measles.pkl", "wb") as f:
+#     pickle.dump(uk_measles, f)

@@ -1,4 +1,5 @@
 from .pomp_class import Pomp
+from .panelPomp_class import PanelPomp
 from .data.uk_measles.uk_measles import UKMeasles
 from .LG import LG
 from .dacca import dacca

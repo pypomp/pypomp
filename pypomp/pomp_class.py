@@ -116,6 +116,7 @@ class Pomp:
     def pfilter(
         self,
         J,
+        key,
         theta=None,
         ys=None,
         rinit=None,
@@ -123,7 +124,6 @@ class Pomp:
         dmeas=None,
         covars=None,
         thresh=0,
-        key=None,
     ):
         """
         Instance method for particle filtering algorithm, which uses the

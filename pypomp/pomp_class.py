@@ -6,8 +6,7 @@ from .simulate import simulate
 from .mop import _mop_internal
 from .pfilter import pfilter
 from .mif import mif
-from .train import _train_internal
-from .fit import _fit_internal
+from .train import train
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas
@@ -152,6 +151,7 @@ class Pomp:
         M,
         a,
         J,
+        key,
         ys=None,
         theta=None,
         rinit=None,
@@ -161,7 +161,6 @@ class Pomp:
         thresh=0,
         monitor=False,
         verbose=False,
-        key=None,
     ):
         """
         Instance method for conducting iterated filtering (IF2) algorith, which
@@ -191,10 +190,10 @@ class Pomp:
         rproc = self.rproc if rproc is None else rproc
         dmeas = self.dmeas if dmeas is None else dmeas
         covars = self.covars if covars is None else covars
-        if J < 1:
-            raise ValueError("J should be greater than 0")
+
         if self.dmeas is None:
             raise ValueError("dmeas cannot be None")
+
         return mif(
             rinit=rinit,
             rproc=rproc,
@@ -215,75 +214,81 @@ class Pomp:
 
     def train(
         self,
-        theta_ests,
-        J=5000,
-        Jh=1000,
+        J,
+        Jh,
+        key,
+        rinit=None,
+        rproc=None,
+        dmeas=None,
+        ys=None,
+        theta=None,
+        covars=None,
         method="Newton",
         itns=20,
         beta=0.9,
         eta=0.0025,
         c=0.1,
         max_ls_itn=10,
-        thresh=100,
+        thresh=0,
         verbose=False,
         scale=False,
         ls=False,
-        alpha=1,
-        key=None,
+        alpha=0.97,
     ):
         """
         Instance method for conducting the MOP gradient-based iterative
-        optimization method, which uses the initialized instance parameters and
-        calls 'train_internal' function.
+        optimization method.
 
         Args:
-            theta_ests (array-like): Initial value of parameter values before
+            theta (array-like): Initial value of parameter values before
                 gradient descent.
             J (int, optional): The number of particles in the MOP objective for
-                obtaining the gradient. Defaults to 5000.
+                obtaining the gradient.
             Jh (int, optional): The number of particles in the MOP objective for
-                obtaining the Hessian matrix. Defaults to 1000.
+                obtaining the Hessian matrix.
             method (str, optional): The gradient-based iterative optimization
-                method to use, including Newton method, weighted Newton method
-                BFGS method, gradient descent. Defaults to 'Newton'.
+                method to use, including Newton method, weighted Newton method,
+                BFGS method, gradient descent.
             itns (int, optional): Maximum iteration for the gradient descent
-                optimization. Defaults to 20.
+                optimization.
             beta (float, optional): Initial step size for the line search
-                algorithm. Defaults to 0.9.
-            eta (float, optional): Initial step size. Defaults to 0.0025.
+                algorithm.
+            eta (float, optional): Initial step size.
             c (float, optional): The user-defined Armijo condition constant.
-                Defaults to 0.1.
             max_ls_itn (int, optional): The maximum number of iterations for the
-                line search algorithm. Defaults to 10.
+                line search algorithm.
             thresh (int, optional): Threshold value to determine whether to
-                resample particles in pfilter function. Defaults to 100.
+                resample particles in pfilter function.
             verbose (bool, optional): Boolean flag controlling whether to print
-                out the log-likelihood and parameter information. Defaults to
-                False.
+                out the log-likelihood and parameter information.
             scale (bool, optional): Boolean flag controlling normalizing the
-                direction or not. Defaults to False.
+                direction or not.
             ls (bool, optional): Boolean flag controlling using the line search
-                or not. Defaults to False.
-            alpha (int, optional): Discount factor. Defaults to 1.
+                or not.
+            alpha (int, optional): Discount factor.
 
         Returns:
             tuple: A tuple containing:
             - An array of negative log-likelihood through the iterations
             - An array of parameters through the iterations
         """
-        if J < 1:
-            raise ValueError("J should be greater than 0")
-        if Jh < 1:
-            raise ValueError("Jh should be greater than 0")
+        theta = self.theta if theta is None else theta
+        ys = self.ys if ys is None else ys
+        rinit = self.rinit if rinit is None else rinit
+        rproc = self.rproc if rproc is None else rproc
+        dmeas = self.dmeas if dmeas is None else dmeas
+        covars = self.covars if covars is None else covars
+
         if self.dmeas is None:
             raise ValueError("dmeas cannot be None")
-        return _train_internal(
-            theta_ests=theta_ests,
-            ys=self.ys,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            covars=self.covars,
+
+        return train(
+            theta=theta,
+            ys=ys,
+            rinit=rinit,
+            rproc=rproc,
+            dmeas=dmeas,
+            covars=covars,
             J=J,
             Jh=Jh,
             method=method,
@@ -300,123 +305,9 @@ class Pomp:
             key=key,
         )
 
-    def fit(
-        self,
-        sigmas=None,
-        sigmas_init=None,
-        M=10,
-        a=0.9,
-        J=100,
-        Jh=1000,
-        method="Newton",
-        itns=20,
-        beta=0.9,
-        eta=0.0025,
-        c=0.1,
-        max_ls_itn=10,
-        thresh_mif=100,
-        thresh_tr=100,
-        verbose=False,
-        scale=False,
-        ls=False,
-        alpha=0.1,
-        monitor=True,
-        mode="IFAD",
-        key=None,
-    ):
-        """
-        Instance method for executing the iterated filtering (IF2), MOP
-        gradient-based iterative optimization method (GD), and iterated
-        filtering with automatic differentiation (IFAD), which uses the
-        initialized instance parameters and calls 'fit_internal' function.
-
-        Args:
-            sigmas (float, optional): Perturbed factor. Defaults to None.
-            sigmas_init (float, optional): Initial perturbed factor. Defaults to
-                None.
-            M (int, optional): Maximum algorithm iteration for iterated
-                filtering. Defaults to 10.
-            a (float, optional): Decay factor for sigmas. Defaults to 0.9.
-            J (int, optional): The number of particles in iterated filtering and
-                the number of particles in the MOP objective for obtaining the
-                gradient in gradient-based optimization procedure. Defaults to
-                100.
-            Jh (int, optional): The number of particles in the MOP objective for
-                obtaining the Hessian matrix. Defaults to 1000.
-            method (str, optional): The gradient-based iterative optimization
-                method to use, including Newton method, weighted Newton method,
-                BFGS method and gradient descent. Defaults to 'Newton'.
-            itns (int, optional): Maximum iteration for the gradient
-                optimization. Defaults to 20.
-            beta (float, optional): Initial step size. Defaults to 0.9.
-            eta (float, optional): Initial step size. Defaults to 0.0025.
-            c (float, optional): The user-defined Armijo condition constant.
-                Defaults to 0.1.
-            max_ls_itn (int, optional): The maximum number of iterations for the
-                line search algorithm. Defaults to 10.
-            thresh_mif (int, optional): Threshold value to determine whether to
-                resample particles in iterated filtering. Defaults to 100.
-            thresh_tr (int, optional): Threshold value to determine whether to
-                resample particles in gradient optimization. Defaults to 100.
-            verbose (bool, optional):  Boolean flag controlling whether to print
-                out the log-likelihood and parameter information. Defaults to
-                False.
-            scale (bool, optional): Boolean flag controlling normalizing the
-                direction or not. Defaults to False.
-            ls (bool, optional): Boolean flag controlling using the line search
-                or not. Defaults to False.
-            alpha (float, optional): Discount factor. Defaults to 0.1.
-            monitor (bool, optional): Boolean flag controlling whether to
-                monitor the log-likelihood value. Defaults to True.
-            mode (str, optional): The optimization algorithm to use, including
-                'IF2', 'GD', and 'IFAD'. Defaults to "IFAD".
-
-        Returns:
-            tuple: A tuple containing:
-            - An array of negative log-likelihood through the iterations
-            - An array of parameters through the iterations
-        """
-        if J < 1:
-            raise ValueError("J should be greater than 0")
-        if Jh < 1:
-            raise ValueError("Jh should be greater than 0")
-        if self.dmeas is None:
-            raise ValueError("dmeas cannot be None")
-        return _fit_internal(
-            theta=self.theta,
-            ys=self.ys,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            rinitializers=self.rinit.struct_per,
-            rprocesses=self.rproc.struct_per,
-            dmeasures=self.dmeas.struct_per,
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
-            covars=self.covars,
-            M=M,
-            a=a,
-            J=J,
-            Jh=Jh,
-            method=method,
-            itns=itns,
-            beta=beta,
-            eta=eta,
-            c=c,
-            max_ls_itn=max_ls_itn,
-            thresh_mif=thresh_mif,
-            thresh_tr=thresh_tr,
-            verbose=verbose,
-            scale=scale,
-            ls=ls,
-            alpha=alpha,
-            monitor=monitor,
-            mode=mode,
-            key=key,
-        )
-
     def simulate(
         self,
+        key,
         rinit=None,
         rproc=None,
         rmeas=None,
@@ -424,7 +315,6 @@ class Pomp:
         ylen=None,
         covars=None,
         Nsim=1,
-        key=None,
     ):
         """
         Instance method for simulating a POMP model. By default, it uses this object’s

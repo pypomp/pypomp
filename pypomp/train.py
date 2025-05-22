@@ -10,7 +10,114 @@ from .mop import _mop_internal_mean
 
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
-# TODO: add external train function
+
+def train(
+    rinit,
+    rproc,
+    dmeas,
+    ys,
+    theta,
+    J,
+    Jh,
+    key,
+    covars=None,
+    method="Newton",
+    itns=20,
+    beta=0.9,
+    eta=0.0025,
+    c=0.1,
+    max_ls_itn=10,
+    thresh=0,
+    verbose=False,
+    scale=False,
+    ls=False,
+    alpha=0.97,
+):
+    """
+    This function runs the MOP gradient-based iterative optimization method.
+
+    Parameters
+    ----------
+    rinit : RInit
+        Simulator for the initial-state distribution.
+    rproc : RProc
+        Simulator for the process model.
+    dmeas : DMeas
+        Density evaluation for the measurement model.
+    ys : array-like
+        The measurement array.
+    theta : array-like
+        Initial parameters for the POMP model.
+    J : int
+        The number of particles for the MOP gradient-based iterative
+        optimization method.
+    Jh : int
+        The number of particles for the Hessian evaluation.
+    key : jax.random.PRNGKey
+        The random key for reproducibility.
+    covars : array-like or None
+        Covariates or None if not applicable.
+    method : str
+        The gradient-based iterative optimization method to use, including
+        Newton method, weighted Newton method, BFGS method, gradient descent.
+    itns : int
+        Maximum iteration for the gradient descent optimization.
+    beta : float
+        Initial step size for the line search algorithm.
+    eta : float
+        Initial step size.
+    c : float
+        The user-defined Armijo condition constant.
+    max_ls_itn : int
+        The maximum number of iterations for the line search algorithm.
+    thresh : int
+        Threshold value to determine whether to resample particles in pfilter
+        function.
+    verbose : bool
+        Boolean flag controlling whether to print out the log-likelihood and
+        parameter information.
+    scale : bool
+        Boolean flag controlling whether to scale the parameters.
+    ls : bool
+        Boolean flag controlling whether to use the line search algorithm.
+    alpha : float
+        The forgetting factor for the MOP algorithm.
+
+    Returns
+    -------
+    LLs : array-like
+        Array of negative log-likelihood values through iterations.
+    theta_ests : array-like
+        Array of parameters through iterations.
+    """
+    if J < 1:
+        raise ValueError("J should be greater than 0")
+    if Jh < 1:
+        raise ValueError("Jh should be greater than 0")
+
+    LLs, theta_ests = _train_internal(
+        theta_ests=theta,
+        ys=ys,
+        rinitializer=rinit.struct_pf,
+        rprocess=rproc.struct_pf,
+        dmeasure=dmeas.struct_pf,
+        J=J,
+        Jh=Jh,
+        covars=covars,
+        method=method,
+        itns=itns,
+        beta=beta,
+        eta=eta,
+        c=c,
+        max_ls_itn=max_ls_itn,
+        thresh=thresh,
+        verbose=verbose,
+        scale=scale,
+        ls=ls,
+        alpha=alpha,
+        key=key,
+    )
+    return jnp.array(LLs), jnp.array(theta_ests)
 
 
 def _train_internal(
@@ -19,63 +126,24 @@ def _train_internal(
     rinitializer,
     rprocess,
     dmeasure,
-    covars=None,
-    J=5000,
-    Jh=1000,
-    method="GD",
-    itns=20,
-    beta=0.9,
-    eta=0.0025,
-    c=0.1,
-    max_ls_itn=10,
-    thresh=100,
-    verbose=False,
-    scale=False,
-    ls=False,
-    alpha=1,
-    key=None,
+    covars,
+    J,
+    Jh,
+    method,
+    itns,
+    beta,
+    eta,
+    c,
+    max_ls_itn,
+    thresh,
+    verbose,
+    scale,
+    ls,
+    alpha,
+    key,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
-
-    Args:
-        theta_ests (array-like): Initial value of parameter values before SGD.
-        ys (array-like): The measurement array.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like, optional): Covariates or None if not applicable.
-            Defaults to None. Defaults to None.
-        J (int, optional): The number of particles in the MOP objective for
-            obtaining the gradient. Defaults to 5000.
-        Jh (int, optional): The number of particles in the MOP objective for
-            obtaining the Hessian matrix. Defaults to 1000.
-        method (str, optional): The optimization method to use, including
-            Newton's method, weighted Newton's, BFGS, and gradient descent.
-            Defaults to gradient descent.
-        itns (int, optional): Maximum iteration for the gradient descent
-            optimization. Defaults to 20.
-        beta (float, optional): Initial step size for the line search
-            algorithm. Defaults to 0.9.
-        eta (float, optional): Initial step size. Defaults to 0.0025.
-        c (float, optional): The user-defined Armijo condition constant.
-            Defaults to 0.1.
-        max_ls_itn (int, optional): The maximum number of iterations for the
-            line search algorithm. Defaults to 10.
-        thresh (int, optional): Threshold value to determine whether to resample
-            particles in pfilter function. Defaults to 100.
-        verbose (bool, optional): Boolean flag controlling whether to print out
-            the log-likelihood and parameter information. Defaults to False.
-        scale (bool, optional): Boolean flag controlling normalizing the
-            direction or not. Defaults to False.
-        ls (bool, optional): Boolean flag controlling whether to use the line
-            search or not. Defaults to False.
-        alpha (int, optional): Discount factor. Defaults to 1.
-
-    Returns:
-        tuple: A tuple containing:
-        - An array of negative log-likelihood through the iterations
-        - An array of parameters through the iterations
     """
     Acopies = []
     grads = []

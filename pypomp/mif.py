@@ -14,7 +14,6 @@ from .internal_functions import _no_resampler_thetas
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
 
-# TODO: add external mif function
 def mif(
     rinit,
     rproc,
@@ -23,14 +22,14 @@ def mif(
     theta,
     sigmas,
     sigmas_init,
-    covars,
     M,
     a,
     J,
+    key,
+    covars=None,
     thresh=0,
     monitor=False,
     verbose=False,
-    key=None,
 ):
     """
     Perform the iterated filtering (IF2) algorithm for a partially observed
@@ -65,30 +64,8 @@ def mif(
 
     if J < 1:
         raise ValueError("J should be greater than 0.")
-    missing_args = [
-        arg
-        for arg in [
-            rinit,
-            rproc,
-            dmeas,
-            ys,
-            theta,
-            sigmas,
-            sigmas_init,
-            covars,
-            M,
-            a,
-            J,
-            key,
-        ]
-        if arg is None
-    ]
-    if len(missing_args) > 0:
-        raise ValueError(
-            f"The following arguments are missing: {missing_args}. Please check your arguments and try again."
-        )
 
-    return _mif_internal(
+    LLs, theta_ests = _mif_internal(
         theta=theta,
         ys=ys,
         rinitializer=rinit.struct_pf,
@@ -108,6 +85,8 @@ def mif(
         verbose=verbose,
         key=key,
     )
+
+    return jnp.array(LLs), jnp.array(theta_ests)
 
 
 def _mif_internal(

@@ -55,31 +55,31 @@ def Generate_data(
 
 # TODO: Add custom starting position.
 @RInit
-def rinit(params, key, covars=None):
+def rinit(theta_, key, covars=None):
     """Initial state process simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(params)
+    A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
 
 
 @RProc
-def rproc(state, params, key, covars=None):
+def rproc(X_, theta_, key, covars=None):
     """Process simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(params)
-    return jax.random.multivariate_normal(key=key, mean=A @ state, cov=Q)
+    A, C, Q, R = get_thetas(theta_)
+    return jax.random.multivariate_normal(key=key, mean=A @ X_, cov=Q)
 
 
 @DMeas
-def dmeas(y, state, params, covars=None):
+def dmeas(Y_, X_, theta_, covars=None):
     """Measurement model distribution for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(params)
-    return jax.scipy.stats.multivariate_normal.logpdf(y, state, R)
+    A, C, Q, R = get_thetas(theta_)
+    return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_, R)
 
 
 @RMeas
-def rmeas(state, params, key, covars=None):
+def rmeas(X_, theta_, key, covars=None):
     """Measurement simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(params)
-    return jax.random.multivariate_normal(key=key, mean=C @ state, cov=R)
+    A, C, Q, R = get_thetas(theta_)
+    return jax.random.multivariate_normal(key=key, mean=C @ X_, cov=R)
 
 
 def LG(

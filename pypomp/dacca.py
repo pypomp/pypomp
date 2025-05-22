@@ -9,6 +9,7 @@ from pypomp.model_struct import DMeas
 
 import jax.scipy.special as jspecial
 
+
 def get_thetas(theta):
     gamma = jnp.exp(theta[0])
     m = jnp.exp(theta[1])
@@ -120,7 +121,7 @@ covars = covars
 
 
 @RInit
-def rinit(params, key, covars=None):
+def rinit(theta_, key, covars=None):
     S_0 = 0.621
     I_0 = 0.378
     Y_0 = 0
@@ -141,14 +142,14 @@ def rinit(params, key, covars=None):
 
 
 @RProc
-def rproc(state, params, key, covars):
-    S = state[0]
-    I = state[1]
-    Y = state[2]
-    deaths = state[3]
-    pts = state[4:-2]
-    t = state[-2]
-    count = state[-1]
+def rproc(X_, theta_, key, covars):
+    S = X_[0]
+    I = X_[1]
+    Y = X_[2]
+    deaths = X_[3]
+    pts = X_[4:-2]
+    t = X_[-2]
+    count = X_[-1]
     t = t.astype(int)
     trends = covars[:, 0]
     dpopdts = covars[:, 1]
@@ -168,7 +169,7 @@ def rproc(state, params, key, covars):
         omegas,
         nrstage,
         delta,
-    ) = get_thetas(params)
+    ) = get_thetas(theta_)
     dt = 1 / 240
     deaths = 0
     nrstage = 3
@@ -242,13 +243,13 @@ def dmeas_helper_tol(y, deaths, v, tol, ltol):
 
 
 @DMeas
-def dmeas(y, state, params, covars=None):
-    deaths = state[3]
-    count = state[-1]
+def dmeas(Y_, X_, theta_, covars=None):
+    deaths = X_[3]
+    count = X_[-1]
     tol = 1.0e-18
     ltol = jnp.log(tol)
     (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
-        get_thetas(params)
+        get_thetas(theta_)
     )
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
@@ -258,7 +259,7 @@ def dmeas(y, state, params, covars=None):
         ),  # if Y < 0 then count violation
         dmeas_helper_tol,
         dmeas_helper,
-        y,
+        Y_,
         deaths,
         v,
         tol,

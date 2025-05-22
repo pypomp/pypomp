@@ -16,16 +16,16 @@ class RInit:
 
         Args:
             struct (function): A function with a specific structure where the
-                first three arguments must be 'params', 'key', and 'covars'.
+                first three arguments must be 'theta_', 'key', and 'covars'.
 
         Raises:
-            ValueError: If the first argument of the function is not 'params'.
+            ValueError: If the first argument of the function is not 'theta_'.
             ValueError: If the second argument of the function is not 'key'.
             ValueError: If the third argument of the function is not 'covars'.
         """
 
-        if struct.__code__.co_varnames[0] != "params":
-            raise ValueError("The first argument of struct must be 'params'")
+        if struct.__code__.co_varnames[0] != "theta_":
+            raise ValueError("The first argument of struct must be 'theta_'")
         if struct.__code__.co_varnames[1] != "key":
             raise ValueError("The second argument of struct must be 'key'")
         if struct.__code__.co_varnames[2] != "covars":
@@ -45,20 +45,20 @@ class RProc:
 
         Args:
             struct (function): A function with a specific structure where the
-                first four arguments must be 'state', 'params', 'key', and
+                first four arguments must be 'X_', 'theta_', 'key', and
                 'covars'.
 
         Raises:
-            ValueError: If the first argument of the function is not 'state'.
-            ValueError: If the second argument of the function is not 'params'.
+            ValueError: If the first argument of the function is not 'X_'.
+            ValueError: If the second argument of the function is not 'theta_'.
             ValueError: If the third argument of the function is not 'key'.
             ValueError: If the fourth argument of the function is not 'covars'.
         """
 
-        if struct.__code__.co_varnames[0] != "state":
-            raise ValueError("The first argument of struct must be 'state'")
-        if struct.__code__.co_varnames[1] != "params":
-            raise ValueError("The second argument of struct must be 'params'")
+        if struct.__code__.co_varnames[0] != "X_":
+            raise ValueError("The first argument of struct must be 'X_'")
+        if struct.__code__.co_varnames[1] != "theta_":
+            raise ValueError("The second argument of struct must be 'theta_'")
         if struct.__code__.co_varnames[2] != "key":
             raise ValueError("The third argument of struct must be 'key'")
         if struct.__code__.co_varnames[3] != "covars":
@@ -78,21 +78,21 @@ class DMeas:
 
         Args:
             struct (function): A function with a specific structure where the
-                first four arguments must be 'y', 'state', 'params', and 'covars'.
+                first four arguments must be 'Y_', 'X_', 'theta_', and 'covars'.
 
         Raises:
-            ValueError: If the first argument of the function is not 'y'.
-            ValueError: If the second argument of the function is not 'state'.
-            ValueError: If the third argument of the function is not 'params'.
+            ValueError: If the first argument of the function is not 'Y_'.
+            ValueError: If the second argument of the function is not 'X_'.
+            ValueError: If the third argument of the function is not 'theta_'.
             ValueError: If the fourth argument of the function is not 'covars'.
         """
 
-        if struct.__code__.co_varnames[0] != "y":
-            raise ValueError("The first argument of struct must be 'y'")
-        if struct.__code__.co_varnames[1] != "state":
-            raise ValueError("The second argument of struct must be 'state'")
-        if struct.__code__.co_varnames[2] != "params":
-            raise ValueError("The third argument of struct must be 'params'")
+        if struct.__code__.co_varnames[0] != "Y_":
+            raise ValueError("The first argument of struct must be 'Y_'")
+        if struct.__code__.co_varnames[1] != "X_":
+            raise ValueError("The second argument of struct must be 'X_'")
+        if struct.__code__.co_varnames[2] != "theta_":
+            raise ValueError("The third argument of struct must be 'theta_'")
         if struct.__code__.co_varnames[3] != "covars":
             raise ValueError("The fourth argument of struct must be 'covars'")
         self.struct = struct
@@ -110,19 +110,19 @@ class RMeas:
 
         Args:
             struct (function): A function with a specific structure where the
-                first four arguments must be 'state', 'params', 'key', and 'covars'.
+                first four arguments must be 'X_', 'theta_', 'key', and 'covars'.
 
         Raises:
-            ValueError: If the first argument of the function is not 'state'.
-            ValueError: If the second argument of the function is not 'params'.
+            ValueError: If the first argument of the function is not 'X_'.
+            ValueError: If the second argument of the function is not 'theta_'.
             ValueError: If the third argument of the function is not 'key'.
             ValueError: If the fourth argument of the function is not 'covars'.
         """
 
-        if struct.__code__.co_varnames[0] != "state":
-            raise ValueError("The first argument of struct must be 'state'")
-        if struct.__code__.co_varnames[1] != "params":
-            raise ValueError("The second argument of struct must be 'params'")
+        if struct.__code__.co_varnames[0] != "X_":
+            raise ValueError("The first argument of struct must be 'X_'")
+        if struct.__code__.co_varnames[1] != "theta_":
+            raise ValueError("The second argument of struct must be 'theta_'")
         if struct.__code__.co_varnames[2] != "key":
             raise ValueError("The third argument of struct must be 'key'")
         if struct.__code__.co_varnames[3] != "covars":

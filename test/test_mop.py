@@ -36,15 +36,12 @@ class TestMop_LG(unittest.TestCase):
         self.assertEqual(val1.dtype, jnp.float32)
 
     def test_class_basic(self):
-        val1 = mop(self.LG, J=self.J, alpha=0.97, key=self.key)
-        val2 = mop(
-            self.LG,
+        val1 = self.LG.mop(J=self.J, alpha=0.97, key=self.key)
+        val2 = self.LG.mop(
             J=self.J,
             rinit=self.rinit,
             rproc=self.rproc,
             dmeas=self.dmeas,
-            theta=[],
-            ys=[],
             key=self.key,
         )
         self.assertEqual(val1.shape, ())
@@ -86,9 +83,8 @@ class TestMop_LG(unittest.TestCase):
             },
         ]
         for arg in arguments:
-            with self.assertRaises(ValueError) as text:
+            with self.assertRaises(TypeError):
                 mop(**arg)
-            self.assertEqual(str(text.exception), "Invalid Arguments Input")
 
 
 if __name__ == "__main__":

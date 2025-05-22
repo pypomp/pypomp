@@ -3,7 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 from .simulate import simulate
-from .mop import _mop_internal
+from .mop import mop
 from .pfilter import pfilter
 from .mif import mif
 from .train import train
@@ -66,7 +66,18 @@ class Pomp:
         self.theta = theta
         self.covars = covars
 
-    def mop(self, J, alpha=0.97, key=None):
+    def mop(
+        self,
+        J,
+        key,
+        rinit=None,
+        rproc=None,
+        dmeas=None,
+        theta=None,
+        ys=None,
+        covars=None,
+        alpha=0.97,
+    ):
         """
         Instance method for MOP algorithm, which uses the initialized instance
             parameters and calls 'mop_internal' function.
@@ -80,20 +91,26 @@ class Pomp:
         Returns:
             float: Negative log-likelihood value
         """
-        if J < 1:
-            raise ValueError("J should be greater than 0")
+        rinit = self.rinit if rinit is None else rinit
+        rproc = self.rproc if rproc is None else rproc
+        dmeas = self.dmeas if dmeas is None else dmeas
+        theta = self.theta if theta is None else theta
+        ys = self.ys if ys is None else ys
+        covars = self.covars if covars is None else covars
+
         if self.dmeas is None:
             raise ValueError("dmeas cannot be None")
-        return _mop_internal(
-            theta=self.theta,
-            ys=self.ys,
+
+        return mop(
             J=J,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            covars=self.covars,
-            alpha=alpha,
+            rinit=rinit,
+            rproc=rproc,
+            dmeas=dmeas,
+            theta=theta,
+            ys=ys,
             key=key,
+            covars=covars,
+            alpha=alpha,
         )
 
     def pfilter(
@@ -322,19 +339,15 @@ class Pomp:
 
         Args:
             rinit (RInit, optional): Simulator for the initial-state distribution.
-                Defaults to None.
-            rproc (RProc, optional): Simulator for the process model. Defaults to None.
-            rmeas (RMeas, optional): Simulator for the measurement model. Defaults to
-                None.
-            theta (array-like, optional): Parameters involved in the POMP model.
-                Defaults to None.
+            rproc (RProc, optional): Simulator for the process model.
+            rmeas (RMeas, optional): Simulator for the measurement model.            theta (array-like, optional): Parameters involved in the POMP model.
             ylen (int, optional): The number of observations to generate in one time
                 series. Defaults to None, in which case simulate uses the length of the
                 time series stored in the Pomp object.
             covars (array-like, optional): Covariates for the process, or None if not
-                applicable. Defaults to None.
-            Nsim (int, optional): The number of simulations to perform. Defaults to 1.
-            key (jax.random.PRNGKey, optional): The random key for random number
+                applicable.
+            Nsim (int, optional): The number of simulations to perform.
+            key (jax.random.PRNGKey): The random key for random number
                 generation.
 
         Returns:

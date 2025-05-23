@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 import os
 
-raw_location = "pypomp/data/uk_measles/raw"
+current_dir = os.path.dirname(__file__)
+raw_location = os.path.join(current_dir, "raw")
 urr = {}
 for file in os.listdir(raw_location):
     if file.endswith(".csv"):

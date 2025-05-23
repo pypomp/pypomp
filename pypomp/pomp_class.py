@@ -79,8 +79,7 @@ class Pomp:
         alpha=0.97,
     ):
         """
-        Instance method for MOP algorithm, which uses the initialized instance
-            parameters and calls 'mop_internal' function.
+        Instance method for MOP algorithm.
 
         Args:
             J (int): The number of particles
@@ -89,7 +88,7 @@ class Pomp:
                 None.
 
         Returns:
-            float: Negative log-likelihood value
+            float: The log-likelihood estimate
         """
         rinit = self.rinit if rinit is None else rinit
         rproc = self.rproc if rproc is None else rproc
@@ -126,8 +125,7 @@ class Pomp:
         thresh=0,
     ):
         """
-        Instance method for particle filtering algorithm, which uses the
-        initialized instance parameters and calls 'pfilter_internal' function.
+        Instance method for particle filtering algorithm.
 
         Args:
             J (int): The number of particles
@@ -137,7 +135,7 @@ class Pomp:
                 None.
 
         Returns:
-            float: Negative log-likelihood value
+            float: The log-likelihood estimate
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -197,9 +195,9 @@ class Pomp:
             verbose (bool, optional): Boolean flag controlling whether to print
                 out the log-likelihood and parameter information.
         Returns:
-            tuple: A tuple containing:
-            - An array of negative log-likelihood through the iterations
-            - An array of parameters through the iterations
+            dict: A dictionary containing:
+            - An xarray of log-likelihood estimates through the iterations
+            - An xarray of parameters through the iterations
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -285,9 +283,9 @@ class Pomp:
             alpha (int, optional): Discount factor.
 
         Returns:
-            tuple: A tuple containing:
-            - An array of negative log-likelihood through the iterations
-            - An array of parameters through the iterations
+            dict: a dictionary containing:
+                - xarray of log-likelihood values through iterations.
+                - xarray of parameters through iterations.
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -352,7 +350,9 @@ class Pomp:
 
         Returns:
             dict: A dictionary of simulated values. 'X' contains the unobserved values
-                whereas 'Y' contains the observed values.
+            whereas 'Y' contains the observed values as JAX arrays. In each case, the
+            first dimension is the observation index, the second indexes the element of
+            the observation vector, and the third is the simulation number.
         """
         # Use arguments instead of attributes if given
         rinit = self.rinit if rinit is None else rinit

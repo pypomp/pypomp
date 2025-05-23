@@ -26,7 +26,7 @@ class TestFit_LG(unittest.TestCase):
         methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
         for method in methods:
             with self.subTest(method=method):
-                GD_loglik, GD_theta = pp.train(
+                GD_out = pp.train(
                     J=self.J,
                     Jh=self.Jh,
                     theta=self.theta,
@@ -39,16 +39,16 @@ class TestFit_LG(unittest.TestCase):
                     scale=True,
                     key=self.key,
                 )
-                self.assertEqual(GD_loglik.shape, (3,))
-                self.assertEqual(GD_theta.shape, (3,) + self.theta.shape)
-                self.assertTrue(jnp.issubdtype(GD_loglik.dtype, jnp.float32))
-                self.assertTrue(jnp.issubdtype(GD_theta.dtype, jnp.float32))
+                self.assertEqual(GD_out["logLik"].shape, (3,))
+                self.assertEqual(GD_out["thetas"].shape, (3,) + self.theta.shape)
+                self.assertTrue(jnp.issubdtype(GD_out["logLik"].dtype, jnp.float32))
+                self.assertTrue(jnp.issubdtype(GD_out["thetas"], jnp.float32))
 
     def test_class_GD_basic(self):
         methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
         for method in methods:
             with self.subTest(method=method):
-                GD_loglik, GD_theta = self.LG.train(
+                GD_out = self.LG.train(
                     J=self.J,
                     Jh=self.Jh,
                     itns=self.itns,
@@ -57,14 +57,14 @@ class TestFit_LG(unittest.TestCase):
                     ls=True,
                     key=self.key,
                 )
-                self.assertEqual(GD_loglik.shape, (3,))
-                self.assertEqual(GD_theta.shape, (3,) + self.theta.shape)
-                self.assertTrue(jnp.issubdtype(GD_loglik.dtype, jnp.float32))
-                self.assertTrue(jnp.issubdtype(GD_theta.dtype, jnp.float32))
+                self.assertEqual(GD_out["logLik"].shape, (3,))
+                self.assertEqual(GD_out["thetas"].shape, (3,) + self.theta.shape)
+                self.assertTrue(jnp.issubdtype(GD_out["logLik"], jnp.float32))
+                self.assertTrue(jnp.issubdtype(GD_out["thetas"], jnp.float32))
 
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError):
-            GD_loglik, GD_theta = self.LG.train(
+            GD_out1 = self.LG.train(
                 J=0,
                 Jh=self.Jh,
                 itns=self.itns,
@@ -73,7 +73,7 @@ class TestFit_LG(unittest.TestCase):
                 key=self.key,
             )
         with self.assertRaises(ValueError):
-            GD_loglik, GD_theta = self.LG.train(
+            GD_out2 = self.LG.train(
                 J=self.J,
                 Jh=0,
                 itns=self.itns,

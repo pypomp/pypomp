@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from tqdm import tqdm
+import xarray as xr
 from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
 
@@ -57,15 +58,15 @@ def mif(
         ValueError: If J is less than 1 or any required arguments are missing.
 
     Returns:
-        tuple: Contains:
-            - Array of negative log-likelihood values through iterations.
-            - Array of parameters through iterations.
+        dict: a dictionary containing:
+            - xarray of log-likelihood values through iterations.
+            - xarray of parameters through iterations.
     """
 
     if J < 1:
         raise ValueError("J should be greater than 0.")
 
-    LLs, theta_ests = _mif_internal(
+    nLLs, theta_ests = _mif_internal(
         theta=theta,
         ys=ys,
         rinitializer=rinit.struct_pf,
@@ -86,7 +87,10 @@ def mif(
         key=key,
     )
 
-    return jnp.array(LLs), jnp.array(theta_ests)
+    return {
+        "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
+        "thetas": xr.DataArray(theta_ests, dims=["iteration", "particle", "theta"]),
+    }
 
 
 def _mif_internal(

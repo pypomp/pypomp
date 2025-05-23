@@ -44,14 +44,14 @@ def pfilter(
             calling 'pfilter_internal' directly
 
     Returns:
-        float: Negative log-likelihood value
+        float: The log-likelihood estimate
     """
     if J < 1:
         raise ValueError("J should be greater than 0.")
     if rinit is None or rproc is None or dmeas is None or theta is None or ys is None:
         raise ValueError("Missing rinit, rproc, dmeas, theta, or ys.")
 
-    return _pfilter_internal(
+    return -_pfilter_internal(
         theta=theta,
         ys=ys,
         J=J,

@@ -14,7 +14,7 @@ class Test_Dacca(unittest.TestCase):
         # Check whether dacca.mif() finishes running. I think this should be sufficient
         # to check whether dacca's attributes are set up correctly, as mif uses all of
         # them.
-        loglik1, params1 = self.dacca.mif(
+        mif_out1 = self.dacca.mif(
             sigmas=0.02, sigmas_init=0.1, J=self.J, thresh=-1, key=self.key, M=1, a=0.9
         )
 

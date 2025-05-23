@@ -41,12 +41,12 @@ def mop(
         key (jax.random.PRNGKey, optional): The random key.
 
     Returns:
-        float: Negative log-likelihood value
+        float: The log-likelihood estimate
     """
     if J < 1:
         raise ValueError("J should be greater than 0")
 
-    return _mop_internal(
+    return -_mop_internal(
         theta=theta,
         ys=ys,
         J=J,

@@ -3,3 +3,4 @@ tqdm>=4.66.4
 pypomp>=0.0.1
 numpy>=1.24
 pandas
+xarray

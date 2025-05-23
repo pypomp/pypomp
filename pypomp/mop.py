@@ -46,8 +46,13 @@ def mop(
     if J < 1:
         raise ValueError("J should be greater than 0")
 
+    if not isinstance(theta, dict):
+        raise TypeError("theta must be a dictionary")
+    if not all(isinstance(val, float) for val in theta.values()):
+        raise TypeError("Each element of theta must be a float")
+
     return -_mop_internal(
-        theta=theta,
+        theta=jnp.array(list(theta.values())),
         ys=ys,
         J=J,
         rinitializer=rinit.struct_pf,

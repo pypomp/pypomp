@@ -28,7 +28,8 @@ class Pomp:
                 measurement model.
             rmeas (RMeas): Measurement simulator.
             ys (array-like): The measurement array.
-            theta (array-like): Parameters involved in the POMP model.
+            theta (dict): Parameters involved in the POMP model. Each value should be a
+                float.
             covars (array-like, optional): Covariates or None if not applicable.
                  Defaults to None.
 
@@ -55,8 +56,10 @@ class Pomp:
 
         if ys is None:
             raise TypeError("ys cannot be None")
-        if theta is None:
-            raise TypeError("theta cannot be None")
+        if not isinstance(theta, dict):
+            raise TypeError("theta must be a dictionary")
+        if not all(isinstance(val, float) for val in theta.values()):
+            raise TypeError("Each element of theta must be a float")
 
         self.rinit = rinit
         self.rproc = rproc
@@ -129,10 +132,21 @@ class Pomp:
 
         Args:
             J (int): The number of particles
+            key (jax.random.PRNGKey, optional): The random key.
+            theta (dict, optional): Parameters involved in the POMP model.
+                Each value must be a float. Replaced with Pomp.theta if None.
+            ys (array-like, optional): The measurement array. Replaced with
+                Pomp.ys if None.
+            rinit (RInit, optional): Simulator for the initial-state
+                distribution. Replaced with Pomp.rinit if None.
+            rproc (RProc, optional): Simulator for the process model.
+                Replaced with Pomp.rproc if None.
+            dmeas (DMeas, optional): Density evaluation for the measurement
+                model. Replaced with Pomp.dmeas if None.
+            covars (array-like, optional): Covariates or None if not applicable.
+                Replaced with Pomp.covars if None.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to
-                None.
 
         Returns:
             float: The log-likelihood estimate
@@ -178,26 +192,36 @@ class Pomp:
         verbose=False,
     ):
         """
-        Instance method for conducting iterated filtering (IF2) algorith, which
-        uses the initialized instance parameters and calls 'mif_internal'
+        Instance method for conducting the iterated filtering (IF2) algorithm,
+        which uses the initialized instance parameters and calls the 'mif'
         function.
 
         Args:
-            sigmas (float): Perturbed factor
-            sigmas_init (float): Initial perturbed factor
-            M (int, optional): Algorithm Iteration.
-            a (float, optional): Decay factor for sigmas.
-            J (int, optional): The number of particles. Defaults to 100.
-            thresh (float, optional): Threshold value to determine whether to
-                resample particles.
-            monitor (bool, optional): Boolean flag controlling whether to
-                monitor the log-likelihood value.
-            verbose (bool, optional): Boolean flag controlling whether to print
-                out the log-likelihood and parameter information.
+            sigmas (float): Perturbation factor for parameters.
+            sigmas_init (float): Initial perturbation factor for parameters.
+            M (int): Number of algorithm iterations.
+            a (float): Decay factor for sigmas.
+            J (int): The number of particles.
+            key (jax.random.PRNGKey): The random key for reproducibility.
+            ys (array-like, optional): The measurement array. Defaults to self.ys.
+            theta (dict, optional): Initial parameters for the POMP model.
+                Defaults to self.theta.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                Defaults to self.rinit.
+            rproc (RProc, optional): Simulator for the process model.
+                Defaults to self.rproc.
+            dmeas (DMeas, optional): Simulator for the measurement model.
+                Defaults to self.dmeas.
+            covars (array-like, optional): Covariates or None if not applicable.
+                Defaults to self.covars.
+            thresh (float, optional): Resampling threshold. Defaults to 0.
+            monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
+            verbose (bool, optional): Flag to print log-likelihood and parameter information. Defaults to False.
+
         Returns:
             dict: A dictionary containing:
-            - An xarray of log-likelihood estimates through the iterations
-            - An xarray of parameters through the iterations
+                - An xarray of log-likelihood estimates through the iterations.
+                - An xarray of parameters through the iterations.
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -255,8 +279,7 @@ class Pomp:
         optimization method.
 
         Args:
-            theta (array-like): Initial value of parameter values before
-                gradient descent.
+            theta (dict): Starting parameter values. Each value should be a float.
             J (int, optional): The number of particles in the MOP objective for
                 obtaining the gradient.
             Jh (int, optional): The number of particles in the MOP objective for

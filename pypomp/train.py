@@ -47,8 +47,8 @@ def train(
         Density evaluation for the measurement model.
     ys : array-like
         The measurement array.
-    theta : array-like
-        Initial parameters for the POMP model.
+    theta : dict
+        Initial parameters for the POMP model. Each value should be a float.
     J : int
         The number of particles for the MOP gradient-based iterative
         optimization method.
@@ -95,8 +95,13 @@ def train(
     if Jh < 1:
         raise ValueError("Jh should be greater than 0")
 
+    if not isinstance(theta, dict):
+        raise TypeError("theta must be a dictionary")
+    if not all(isinstance(val, float) for val in theta.values()):
+        raise TypeError("Each element of theta must be a float")
+
     nLLs, theta_ests = _train_internal(
-        theta_ests=theta,
+        theta_ests=jnp.array(list(theta.values())),
         ys=ys,
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,

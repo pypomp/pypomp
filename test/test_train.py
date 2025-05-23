@@ -40,7 +40,7 @@ class TestFit_LG(unittest.TestCase):
                     key=self.key,
                 )
                 self.assertEqual(GD_out["logLik"].shape, (3,))
-                self.assertEqual(GD_out["thetas"].shape, (3,) + self.theta.shape)
+                self.assertEqual(GD_out["thetas"].shape, (3,) + (len(self.theta),))
                 self.assertTrue(jnp.issubdtype(GD_out["logLik"].dtype, jnp.float32))
                 self.assertTrue(jnp.issubdtype(GD_out["thetas"], jnp.float32))
 
@@ -58,7 +58,7 @@ class TestFit_LG(unittest.TestCase):
                     key=self.key,
                 )
                 self.assertEqual(GD_out["logLik"].shape, (3,))
-                self.assertEqual(GD_out["thetas"].shape, (3,) + self.theta.shape)
+                self.assertEqual(GD_out["thetas"].shape, (3,) + (len(self.theta),))
                 self.assertTrue(jnp.issubdtype(GD_out["logLik"], jnp.float32))
                 self.assertTrue(jnp.issubdtype(GD_out["thetas"], jnp.float32))
 

@@ -1,4 +1,3 @@
-from functools import partial
 import jax
 import jax.numpy as jnp
 import xarray as xr
@@ -6,11 +5,11 @@ from .internal_functions import _keys_helper
 
 
 def simulate(
-    rinit=None,
-    rproc=None,
-    rmeas=None,
-    theta=None,
-    ylen=None,
+    rinit,
+    rproc,
+    rmeas,
+    theta,
+    ylen,
     covars=None,
     Nsim=1,
     key=None,
@@ -20,13 +19,11 @@ def simulate(
     Markov Process (POMP) model.
 
     Args:
-        rinit (RInit, optional): Simulator for the initial-state distribution. Defaults
-            to None.
-        rproc (RProc, optional): Simulator for the process model. Defaults to None.
-        rmeas (RMeas, optional): Simulator for the measurement model. Defaults to None.
-        theta (array-like, optional): Parameters involved in the POMP model.
-            Defaults to None.
-        ylen (int, optional): Number of observations to generate in one time series.
+        rinit (RInit): Simulator for the initial-state distribution.
+        rproc (RProc): Simulator for the process model.
+        rmeas (RMeas): Simulator for the measurement model.
+        theta (array-like): Parameters involved in the POMP model.
+        ylen (int): Number of observations to generate in one time series.
         covars (array-like, optional): Covariates for the process, or None if
             not applicable. Defaults to None.
         Nsim (int, optional): The number of simulations to perform. Defaults to 1.
@@ -35,18 +32,20 @@ def simulate(
 
     Returns:
         dict: A dictionary of simulated values. 'X' contains the unobserved values
-            whereas 'Y' contains the observed values as JAX arrays. In each case, the
+            whereas 'Y' contains the observed values as xarrays. In each case, the
             first dimension is the observation index, the second indexes the element of
             the observation vector, and the third is the simulation number.
     """
-    if rinit is None or rproc is None or rmeas is None or theta is None or ylen is None:
-        raise ValueError("Invalid arguments given to simulate")
+    if not isinstance(theta, dict):
+        raise TypeError("theta must be a dictionary")
+    if not all(isinstance(val, float) for val in theta.values()):
+        raise TypeError("Each element of theta must be a float")
 
     X_sims, Y_sims = _simulate_internal(
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         rmeasure=rmeas.struct_pf,
-        theta=theta,
+        theta=jnp.array(list(theta.values())),
         ylen=ylen,
         covars=covars,
         Nsim=Nsim,

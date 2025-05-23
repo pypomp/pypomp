@@ -10,34 +10,29 @@ from .internal_functions import _normalize_weights
 
 def pfilter(
     J,
-    rinit=None,
-    rproc=None,
-    dmeas=None,
-    theta=None,
-    ys=None,
+    rinit,
+    rproc,
+    dmeas,
+    theta,
+    ys,
+    key,
     covars=None,
     thresh=0,
-    key=None,
 ):
     """
     An outside function for particle filtering algorithm.
 
     Args:
-        J (int, optional): The number of particles. Defaults to 50.
-        rinit (RInit, optional): Simulator for the initial-state
-            distribution. Defaults to None.
-        rprocess (RProc, optional): Simulator for the process model. Defaults
-            to None.
-        dmeasure (DMeas, optional): Density evaluation for the measurement
-            model. Defaults to None.
-        theta (array-like, optional): Parameters involved in the POMP model.
-            Defaults to None.
-        ys (array-like, optional): The measurement array. Defaults to None.
+        J (int): The number of particles.
+        rinit (RInit): Simulator for the initial-state distribution.
+        rproc (RProc): Simulator for the process model.
+        dmeas (DMeas): Density evaluation for the measurement model.
+        theta (dict): Parameters involved in the POMP model. Each value must be a float.
+        ys (array-like): The measurement array.
+        key (jax.random.PRNGKey): The random key.
         covars (array-like, optional): Covariates or None if not applicable.
-            Defaults to None.
-        thresh (float, optional):Threshold value to determine whether to
-            resample particles. Defaults to 100.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
+        thresh (float, optional): Threshold value to determine whether to
+            resample particles.
 
     Raises:
         ValueError: Missing the pomp class object and required arguments for
@@ -48,11 +43,16 @@ def pfilter(
     """
     if J < 1:
         raise ValueError("J should be greater than 0.")
-    if rinit is None or rproc is None or dmeas is None or theta is None or ys is None:
+    if rinit is None or rproc is None or dmeas is None or ys is None:
         raise ValueError("Missing rinit, rproc, dmeas, theta, or ys.")
 
+    if not isinstance(theta, dict):
+        raise TypeError("theta must be a dictionary")
+    if not all(isinstance(val, float) for val in theta.values()):
+        raise TypeError("Each element of theta must be a float")
+
     return -_pfilter_internal(
-        theta=theta,
+        theta=jnp.array(list(theta.values())),
         ys=ys,
         J=J,
         rinitializer=rinit.struct_pf,

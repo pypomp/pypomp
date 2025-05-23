@@ -43,7 +43,7 @@ class TestFit_LG(unittest.TestCase):
         self.assertEqual(mif_out1["logLik"].shape, (3,))
         self.assertEqual(
             mif_out1["thetas"].shape,
-            (3, self.J) + self.theta.shape,
+            (3, self.J) + (len(self.theta),),
         )
         self.assertTrue(jnp.issubdtype(mif_out1["logLik"].dtype, jnp.float32))
         self.assertTrue(jnp.issubdtype(mif_out1["thetas"].dtype, jnp.float32))
@@ -60,7 +60,7 @@ class TestFit_LG(unittest.TestCase):
                 monitor=True,
             )
             self.assertEqual(mif_out1["logLik"].shape, (M + 1,))
-            self.assertEqual(mif_out1["thetas"].shape, (M + 1, J) + self.theta.shape)
+            self.assertEqual(mif_out1["thetas"].shape, (M + 1, J) + (len(self.theta),))
             self.assertTrue(jnp.issubdtype(mif_out1["logLik"].dtype, jnp.float32))
             self.assertTrue(jnp.issubdtype(mif_out1["thetas"], jnp.float32))
 

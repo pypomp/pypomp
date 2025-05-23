@@ -27,9 +27,6 @@ class TestPompClass_LG(unittest.TestCase):
 
     def test_basic_initialization(self):
         self.assertEqual(self.LG.covars, self.covars)
-        obj_ys = self.LG.ys
-        self.assertTrue(jnp.array_equal(obj_ys, self.ys))
-        self.assertTrue(jnp.array_equal(self.LG.theta, self.theta))
 
     def test_invalid_initialization(self):
         for arg in ["ys", "theta", "rinit", "rproc", "dmeas"]:

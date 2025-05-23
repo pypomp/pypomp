@@ -117,7 +117,9 @@ def LG(
         A Pomp object initialized with the linear Gaussian model parameters and
         the generated data.
     """
-    theta = transform_thetas(A, C, Q, R)
+    theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
+    theta = dict(zip(theta_names, transform_thetas(A, C, Q, R).tolist()))
+
     covars = None
     ys = Generate_data(T=T, A=A, C=C, Q=Q, R=R, key=key)
     LG_obj = Pomp(

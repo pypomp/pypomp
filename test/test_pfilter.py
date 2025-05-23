@@ -71,11 +71,8 @@ class TestPfilter_LG(unittest.TestCase):
             },
         ]
         for arg in arguments:
-            with self.assertRaises(ValueError) as text:
+            with self.assertRaises(Exception):
                 pfilter(**arg)
-            self.assertEqual(
-                str(text.exception), "Missing rinit, rproc, dmeas, theta, or ys."
-            )
 
 
 if __name__ == "__main__":

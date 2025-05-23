@@ -113,8 +113,28 @@ for col in range(covars_data.shape[1]):
     covars = jnp.array(interpolated_covars).T
 
 key = jax.random.key(111)
-theta = transform_thetas(
-    gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
+theta_names = (
+    [
+        "gamma",
+        "m",
+        "rho",
+        "epsilon",
+        "omega",
+        "c",
+        "beta_trend",
+        "sigma",
+        "tau",
+    ]
+    + [f"b{i}" for i in range(1, 7)]
+    + [f"omega{i}" for i in range(1, 7)]
+)
+theta = dict(
+    zip(
+        theta_names,
+        transform_thetas(
+            gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
+        ).tolist(),
+    )
 )
 ys = ys
 covars = covars

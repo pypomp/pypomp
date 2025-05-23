@@ -42,7 +42,7 @@ def mif(
         rproc (RProc): Simulator for the process model.
         dmeas (DMeas): Density evaluation for the measurement model.
         ys (array-like): The measurement array.
-        theta (array-like): Initial parameters for the POMP model.
+        theta (dict): Initial parameters for the POMP model. Each value must be a float.
         sigmas (float): Perturbation factor for parameters.
         sigmas_init (float): Initial perturbation factor for parameters.
         covars (array-like): Covariates or None if not applicable.
@@ -62,12 +62,16 @@ def mif(
             - xarray of log-likelihood values through iterations.
             - xarray of parameters through iterations.
     """
-
     if J < 1:
         raise ValueError("J should be greater than 0.")
 
+    if not isinstance(theta, dict):
+        raise TypeError("theta must be a dictionary")
+    if not all(isinstance(val, float) for val in theta.values()):
+        raise TypeError("Each element of theta must be a float")
+
     nLLs, theta_ests = _mif_internal(
-        theta=theta,
+        theta=jnp.array(list(theta.values())),
         ys=ys,
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,

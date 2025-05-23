@@ -39,7 +39,7 @@ def simulate(
     if not isinstance(theta, dict):
         raise TypeError("theta must be a dictionary")
     if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each element of theta must be a float")
+        raise TypeError("Each value of theta must be a float")
 
     X_sims, Y_sims = _simulate_internal(
         rinitializer=rinit.struct_pf,
@@ -51,8 +51,8 @@ def simulate(
         Nsim=Nsim,
         key=key,
     )
-    X_sims = xr.DataArray(X_sims, dims=["t", "i", "sim"])
-    Y_sims = xr.DataArray(Y_sims, dims=["t", "i", "sim"])
+    X_sims = xr.DataArray(X_sims, dims=["time", "element", "sim"])
+    Y_sims = xr.DataArray(Y_sims, dims=["time", "element", "sim"])
     return {"X_sims": X_sims, "Y_sims": Y_sims}
 
 

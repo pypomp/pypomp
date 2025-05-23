@@ -68,7 +68,7 @@ def mif(
     if not isinstance(theta, dict):
         raise TypeError("theta must be a dictionary")
     if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each element of theta must be a float")
+        raise TypeError("Each value of theta must be a float")
 
     nLLs, theta_ests = _mif_internal(
         theta=jnp.array(list(theta.values())),
@@ -93,7 +93,11 @@ def mif(
 
     return {
         "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-        "thetas": xr.DataArray(theta_ests, dims=["iteration", "particle", "theta"]),
+        "thetas": xr.DataArray(
+            theta_ests,
+            dims=["iteration", "particle", "theta"],
+            coords={"theta": list(theta.keys())},
+        ),
     }
 
 

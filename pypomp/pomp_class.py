@@ -59,7 +59,7 @@ class Pomp:
         if not isinstance(theta, dict):
             raise TypeError("theta must be a dictionary")
         if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each element of theta must be a float")
+            raise TypeError("Each value of theta must be a float")
 
         self.rinit = rinit
         self.rproc = rproc

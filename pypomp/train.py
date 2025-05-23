@@ -98,7 +98,7 @@ def train(
     if not isinstance(theta, dict):
         raise TypeError("theta must be a dictionary")
     if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each element of theta must be a float")
+        raise TypeError("Each value of theta must be a float")
 
     nLLs, theta_ests = _train_internal(
         theta_ests=jnp.array(list(theta.values())),
@@ -124,7 +124,11 @@ def train(
     )
     return {
         "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-        "thetas": xr.DataArray(theta_ests, dims=["iteration", "theta"]),
+        "thetas": xr.DataArray(
+            theta_ests,
+            dims=["iteration", "theta"],
+            coords={"theta": list(theta.keys())},
+        ),
     }
 
 

@@ -47,10 +47,11 @@ def simulate(
         rmeasure=rmeas.struct_pf,
         theta=jnp.array(list(theta.values())),
         ylen=ylen,
-        covars=covars,
+        covars=jnp.array(covars) if covars is not None else None,
         Nsim=Nsim,
         key=key,
     )
+    # TODO: Add state names as coords
     X_sims = xr.DataArray(X_sims, dims=["time", "element", "sim"])
     Y_sims = xr.DataArray(Y_sims, dims=["time", "element", "sim"])
     return {"X_sims": X_sims, "Y_sims": Y_sims}

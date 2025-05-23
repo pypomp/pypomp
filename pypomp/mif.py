@@ -72,7 +72,7 @@ def mif(
 
     nLLs, theta_ests = _mif_internal(
         theta=jnp.array(list(theta.values())),
-        ys=ys,
+        ys=jnp.array(ys),
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         dmeasure=dmeas.struct_pf,
@@ -81,7 +81,7 @@ def mif(
         dmeasures=dmeas.struct_per,
         sigmas=sigmas,
         sigmas_init=sigmas_init,
-        covars=covars,
+        covars=jnp.array(covars) if covars is not None else None,
         M=M,
         a=a,
         J=J,
@@ -96,7 +96,11 @@ def mif(
         "thetas": xr.DataArray(
             theta_ests,
             dims=["iteration", "particle", "theta"],
-            coords={"theta": list(theta.keys())},
+            coords={
+                "iteration": range(0, M + 1),
+                "particle": range(1, J + 1),
+                "theta": list(theta.keys()),
+            },
         ),
     }
 

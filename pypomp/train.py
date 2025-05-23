@@ -102,13 +102,13 @@ def train(
 
     nLLs, theta_ests = _train_internal(
         theta_ests=jnp.array(list(theta.values())),
-        ys=ys,
+        ys=jnp.array(ys),
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         dmeasure=dmeas.struct_pf,
         J=J,
         Jh=Jh,
-        covars=covars,
+        covars=jnp.array(covars) if covars is not None else None,
         method=method,
         itns=itns,
         beta=beta,
@@ -127,7 +127,10 @@ def train(
         "thetas": xr.DataArray(
             theta_ests,
             dims=["iteration", "theta"],
-            coords={"theta": list(theta.keys())},
+            coords={
+                "iteration": range(0, itns + 1),
+                "theta": list(theta.keys()),
+            },
         ),
     }
 

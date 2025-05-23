@@ -1,6 +1,5 @@
 import jax
 import unittest
-import jax.numpy as jnp
 
 import pypomp as pp
 

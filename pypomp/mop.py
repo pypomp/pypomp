@@ -53,12 +53,12 @@ def mop(
 
     return -_mop_internal(
         theta=jnp.array(list(theta.values())),
-        ys=ys,
+        ys=jnp.array(ys),
         J=J,
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         dmeasure=dmeas.struct_pf,
-        covars=covars,
+        covars=jnp.array(covars) if covars is not None else None,
         alpha=alpha,
         key=key,
     )

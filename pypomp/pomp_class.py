@@ -2,6 +2,7 @@
 This module implements the OOP structure for POMP models.
 """
 
+import jax.numpy as jnp
 from .simulate import simulate
 from .mop import mop
 from .pfilter import pfilter
@@ -54,20 +55,24 @@ class Pomp:
             if rmeas is not None and not isinstance(rmeas, RMeas):
                 raise TypeError("rmeas must be an instance of the class RMeas")
 
-        if ys is None:
-            raise TypeError("ys cannot be None")
         if not isinstance(theta, dict):
             raise TypeError("theta must be a dictionary")
         if not all(isinstance(val, float) for val in theta.values()):
             raise TypeError("Each value of theta must be a float")
 
+        try:
+            self.ys = jnp.array(ys)
+        except Exception as e:
+            raise ValueError("Invalid 'ys': {}. Use an array-like.".format(e))
+        try:
+            self.covars = jnp.array(covars) if covars is not None else None
+        except Exception as e:
+            raise ValueError("Invalid 'covars': {}. Use an array-like.".format(e))
         self.rinit = rinit
         self.rproc = rproc
         self.dmeas = dmeas
         self.rmeas = rmeas
-        self.ys = ys
         self.theta = theta
-        self.covars = covars
 
     def mop(
         self,

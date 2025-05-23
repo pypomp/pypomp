@@ -1,3 +1,4 @@
+from functools import partial
 import jax
 import jax.numpy as jnp
 import xarray as xr
@@ -57,26 +58,45 @@ def simulate(
     return {"X_sims": X_sims, "Y_sims": Y_sims}
 
 
+@partial(jax.jit, static_argnums=(0, 1, 2, 4, 6))
 def _simulate_internal(
     rinitializer, rprocess, rmeasure, theta, ylen, covars, Nsim, key
 ):
     key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
     x_sims = rinitializer(theta, keys, covars)
 
-    x_list = [None] * (ylen + 1)
-    x_list[0] = x_sims
-    y_list = [None] * ylen
-    for i in range(ylen):
-        key, *keys = jax.random.split(key, num=Nsim + 1)
-        keys = jnp.array(keys)
-        x_sims = rprocess(x_sims, theta, keys, covars)
+    x_list = jnp.zeros((ylen + 1, *x_sims.shape))
+    x_list = x_list.at[0].set(x_sims)
+    y_list = jnp.zeros((ylen, *rmeasure(x_sims, theta, keys, covars).shape))
+    _simulate_helper2 = partial(
+        _simulate_helper,
+        rprocess=rprocess,
+        rmeasure=rmeasure,
+        theta=theta,
+        covars=covars,
+        Nsim=Nsim,
+    )
+    x_sims, x_list, y_list, key = jax.lax.fori_loop(
+        lower=0,
+        upper=ylen,
+        body_fun=_simulate_helper2,
+        init_val=(x_sims, x_list, y_list, key),
+    )
 
-        key, *keys = jax.random.split(key, num=Nsim + 1)
-        keys = jnp.array(keys)
-        y_sims = rmeasure(x_sims, theta, keys, covars)
-
-        x_list[i + 1] = x_sims
-        y_list[i] = y_sims
     X = jnp.swapaxes(jnp.stack(x_list, axis=0), 1, 2)
     Y = jnp.swapaxes(jnp.stack(y_list, axis=0), 1, 2)
     return X, Y
+
+
+def _simulate_helper(i, inputs, rprocess, rmeasure, theta, covars, Nsim):
+    (x_sims, x_list, y_list, key) = inputs
+    key, *keys = jax.random.split(key, num=Nsim + 1)
+    keys = jnp.array(keys)
+    x_sims = rprocess(x_sims, theta, keys, covars)
+
+    key, *keys = jax.random.split(key, num=Nsim + 1)
+    keys = jnp.array(keys)
+    y_sims = rmeasure(x_sims, theta, keys, covars)
+    x_list = x_list.at[i + 1].set(x_sims)
+    y_list = y_list.at[i].set(y_sims)
+    return x_sims, x_list, y_list, key

@@ -1,6 +1,6 @@
 [project]
 name = "pypomp"
-version = "0.0.11"
+version = "0.0.12"
 authors = [
     { name = "The pypomp core developer team", email = "pypomp-org@umich.edu" }
 ]

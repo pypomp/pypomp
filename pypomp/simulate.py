@@ -1,5 +1,7 @@
+from functools import partial
 import jax
 import jax.numpy as jnp
+import xarray as xr
 from .internal_functions import _keys_helper
 
 
@@ -33,12 +35,14 @@ def simulate(
 
     Returns:
         dict: A dictionary of simulated values. 'X' contains the unobserved values
-            whereas 'Y' contains the observed values.
+            whereas 'Y' contains the observed values as JAX arrays. In each case, the
+            first dimension is the observation index, the second indexes the element of
+            the observation vector, and the third is the simulation number.
     """
     if rinit is None or rproc is None or rmeas is None or theta is None or ylen is None:
         raise ValueError("Invalid arguments given to simulate")
 
-    X, Y = _simulate_internal(
+    X_sims, Y_sims = _simulate_internal(
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         rmeasure=rmeas.struct_pf,
@@ -48,7 +52,9 @@ def simulate(
         Nsim=Nsim,
         key=key,
     )
-    return {"X": X, "Y": Y}
+    X_sims = xr.DataArray(X_sims, dims=["t", "i", "sim"])
+    Y_sims = xr.DataArray(Y_sims, dims=["t", "i", "sim"])
+    return {"X_sims": X_sims, "Y_sims": Y_sims}
 
 
 def _simulate_internal(
@@ -71,6 +77,6 @@ def _simulate_internal(
 
         x_list[i + 1] = x_sims
         y_list[i] = y_sims
-    X = jnp.stack(x_list, axis=0)
-    Y = jnp.stack(y_list, axis=0)
+    X = jnp.swapaxes(jnp.stack(x_list, axis=0), 1, 2)
+    Y = jnp.swapaxes(jnp.stack(y_list, axis=0), 1, 2)
     return X, Y

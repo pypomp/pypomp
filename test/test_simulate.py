@@ -11,6 +11,7 @@ class TestSimulate_LG(unittest.TestCase):
         self.ys = self.LG.ys
         self.theta = self.LG.theta
         self.covars = self.LG.covars
+        self.Nsim = 1
 
         self.rinit = self.LG.rinit
         self.rproc = self.LG.rproc
@@ -24,14 +25,16 @@ class TestSimulate_LG(unittest.TestCase):
             ylen=len(self.ys),
             theta=self.theta,
             covars=self.covars,
-            Nsim=1,
+            Nsim=self.Nsim,
             key=self.key,
         )
-        self.assertIsInstance(val1, dict)
-        self.assertIn("X", val1)
-        self.assertIn("Y", val1)
+        val2 = self.LG.simulate(Nsim=self.Nsim, key=self.key)
 
-        val2 = self.LG.simulate(Nsim=1, key=self.key)
-        self.assertIsInstance(val2, dict)
-        self.assertIn("X", val2)
-        self.assertIn("Y", val2)
+        for val in [val1, val2]:
+            self.assertIsInstance(val, dict)
+            self.assertIn("X_sims", val)
+            self.assertIn("Y_sims", val)
+            self.assertEqual(
+                val["X_sims"].shape,
+                (len(self.ys) + 1, len(self.ys[0,]), self.Nsim),
+            )

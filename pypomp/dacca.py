@@ -1,3 +1,4 @@
+from functools import partial
 import os
 import csv
 import jax
@@ -161,6 +162,71 @@ def rinit(theta_, key, covars=None):
     return jnp.array([S, I, Y, Mn, R1, R2, R3, t, count])
 
 
+def rproc_step(
+    i,
+    loop_vars,
+    trends,
+    dpopdts,
+    pops,
+    seass,
+    std,
+    dt,
+    passages,
+    nrstage,
+    neps,
+    rho,
+    sd_beta,
+    delta,
+    deltaI,
+    clin,
+):
+    S, I, Y, deaths, pts, t, count, key = loop_vars
+    trend = trends[t]
+    dpopdt = dpopdts[t]
+    pop = pops[t]
+    seas = seass[t]
+    beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
+    omega = jnp.exp(jnp.dot(omegas, seas))
+
+    subkey, key = jax.random.split(key)
+    dw = jax.random.normal(subkey) * std
+
+    effI = I / pop
+    births = dpopdt + delta * pop
+    passages = passages.at[0].set(gamma * I)
+    ideaths = delta * I
+    disease = deltaI * I
+    ydeaths = delta * Y
+    wanings = rho * Y
+
+    rdeaths = jnp.zeros(nrstage)
+
+    rdeaths = pts * delta
+    passages = passages.at[1:].set(pts * neps)
+
+    infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
+    sdeaths = delta * S
+
+    S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
+    I += (clin * infections - disease - ideaths - passages[0]) * dt
+    Y += ((1 - clin) * infections - ydeaths - wanings) * dt
+
+    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+
+    deaths += disease * dt
+
+    count += jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
+
+    S = jnp.clip(S, 0)
+    I = jnp.clip(I, 0)
+    Y = jnp.clip(Y, 0)
+    pts = jnp.clip(pts, 0)
+    deaths = jnp.clip(deaths, 0)
+
+    t += 1
+    return S, I, Y, deaths, pts, t, count, key
+
+
 @RProc
 def rproc(X_, theta_, key, covars):
     S = X_[0]
@@ -198,54 +264,31 @@ def rproc(X_, theta_, key, covars):
     std = jnp.sqrt(dt)  # onp.sqrt(onp.sqrt(dt))
 
     neps = eps * nrstage  # rate
-    rdeaths = jnp.zeros(nrstage)  # the number of death in R1, R2, R3
+    # rdeaths = jnp.zeros(nrstage)  # the number of death in R1, R2, R3
     passages = jnp.zeros(nrstage + 1)
 
-    for i in range(20):
-        trend = trends[t]
-        dpopdt = dpopdts[t]
-        pop = pops[t]
-        seas = seass[t]
-        beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
-        omega = jnp.exp(jnp.dot(omegas, seas))
+    rproc_step2 = partial(
+        rproc_step,
+        trends=trends,
+        dpopdts=dpopdts,
+        pops=pops,
+        seass=seass,
+        std=std,
+        dt=dt,
+        passages=passages,
+        nrstage=nrstage,
+        clin=clin,
+        rho=rho,
+        sd_beta=sd_beta,
+        delta=delta,
+        deltaI=deltaI,
+        neps=neps,
+    )
 
-        subkey, key = jax.random.split(key)
-        dw = jax.random.normal(subkey) * std
-
-        effI = I / pop
-        births = dpopdt + delta * pop  # births
-        passages = passages.at[0].set(gamma * I)  # recovery
-        ideaths = delta * I  # natural i deaths
-        disease = deltaI * I  # disease death
-        ydeaths = delta * Y  # natural rs deaths
-        wanings = rho * Y  # loss of immunity
-
-        for j in range(nrstage):
-            rdeaths = rdeaths.at[j].set(pts[j] * delta)  # natural R deaths
-            passages = passages.at[j + 1].set(
-                pts[j] * neps
-            )  # passage to the next immunity class
-
-        infections = (omega + (beta + sd_beta * dw / dt) * effI) * S  # infection
-        sdeaths = delta * S  # natural S deaths
-
-        S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-        I += (clin * infections - disease - ideaths - passages[0]) * dt
-        Y += ((1 - clin) * infections - ydeaths - wanings) * dt
-
-        for j in range(nrstage):
-            pts = pts.at[j].add((passages[j] - passages[j + 1] - rdeaths[j]) * dt)
-        deaths += disease * dt  # cumulative deaths from disease
-
-        count += jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
-
-        S = jnp.clip(S, min=0)
-        I = jnp.clip(I, min=0)
-        Y = jnp.clip(Y, min=0)
-        pts = jnp.clip(pts, min=0)
-        deaths = jnp.clip(deaths, min=0)
-
-        t += 1
+    initial_loop_vars = (S, I, Y, deaths, pts, t, count, key)
+    S, I, Y, deaths, pts, t, count, key = jax.lax.fori_loop(
+        lower=0, upper=20, body_fun=rproc_step2, init_val=initial_loop_vars
+    )
 
     return jnp.hstack(
         [jnp.array([S, I, Y, deaths]), pts, jnp.array([t]), jnp.array([count])]

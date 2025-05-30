@@ -62,21 +62,21 @@ def rinit(theta_, key, covars=None):
 
 
 @RProc
-def rproc(X_, theta_, key, covars=None):
+def rproc(X_, theta_, key, covars=None, t=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=A @ X_, cov=Q)
 
 
 @DMeas
-def dmeas(Y_, X_, theta_, covars=None):
+def dmeas(Y_, X_, theta_, covars=None, t=None):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_, R)
 
 
 @RMeas
-def rmeas(X_, theta_, key, covars=None):
+def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=C @ X_, cov=R)
@@ -88,7 +88,7 @@ def LG(
     C=jnp.eye(2),
     Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
     R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
-    key=jax.random.PRNGKey(111),
+    key=jax.random.key(111),
 ):
     """
     Initialize a Pomp object with the linear Gaussian model.

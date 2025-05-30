@@ -228,7 +228,7 @@ def rproc_step(
 
 
 @RProc
-def rproc(X_, theta_, key, covars):
+def rproc(X_, theta_, key, covars, t=None):
     S = X_[0]
     I = X_[1]
     Y = X_[2]
@@ -306,7 +306,7 @@ def dmeas_helper_tol(y, deaths, v, tol, ltol):
 
 
 @DMeas
-def dmeas(Y_, X_, theta_, covars=None):
+def dmeas(Y_, X_, theta_, covars=None, t=None):
     deaths = X_[3]
     count = X_[-1]
     tol = 1.0e-18

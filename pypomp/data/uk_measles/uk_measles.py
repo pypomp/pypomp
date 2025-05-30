@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import pickle
 
 current_dir = os.path.dirname(__file__)
 raw_location = os.path.join(current_dir, "raw")
@@ -57,41 +58,11 @@ coord = coord.sort_values(["unit"])
 # )
 # ur_measles = {k: v.to_dict() for k, v in uk_measles.items()}
 
+uk_measles = {
+    "measles": measles.reset_index(drop=True),
+    "demog": demog.reset_index(drop=True),
+    "coord": coord.reset_index(drop=True),
+}
 
-# Not sure if this is the best way to implement this.
-class UKMeasles:
-    data = {
-        "measles": measles.reset_index(drop=True),
-        "demog": demog.reset_index(drop=True),
-        "coord": coord.reset_index(drop=True),
-    }
-
-    @staticmethod
-    def subset(units=None):
-        """
-        Return a subset of the UKMeasles data, filtered by the given units.
-
-        Parameters
-        ----------
-        units : list of str, optional
-            A list of unit names to subset the data by. If None, the entire
-            dataset is returned.
-
-        Returns
-        -------
-        A dictionary with the same structure as UKMeasles.data, but with the
-        data subsetted to only include the given units.
-        """
-        if units is None:
-            return UKMeasles.data
-        else:
-            return {
-                k: v[v["unit"].isin(units)].reset_index(drop=True)
-                for k, v in UKMeasles.data.items()
-            }
-
-    # TODO: add method or argument to return the cleaned copy of the data
-
-
-# with open("pypomp/data/uk_measles/uk_measles.pkl", "wb") as f:
-#     pickle.dump(uk_measles, f)
+with open("pypomp/data/uk_measles/uk_measles.pkl", "wb") as f:
+    pickle.dump(uk_measles, f)

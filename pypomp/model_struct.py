@@ -2,6 +2,7 @@
 This file contains the classes for components that define the model structure.
 """
 
+from functools import partial
 import jax
 
 
@@ -25,7 +26,7 @@ def euler(rproc, dt):
 
 
 class RInit:
-    def __init__(self, struct):
+    def __init__(self, struct, t0=None):
         """
         Initializes the RInit class with the required function structure.
         While this function can check that the arguments of struct are in the
@@ -35,14 +36,25 @@ class RInit:
 
         Args:
             struct (function): A function with a specific structure where the
-                first three arguments must be 'theta_', 'key', and 'covars'.
+                first three arguments must be 'theta_', 'key', 'covars', and 't0'.
         """
-        for i, arg in enumerate(["theta_", "key", "covars"]):
+        for i, arg in enumerate(["theta_", "key", "covars", "t0"]):
             if struct.__code__.co_varnames[i] != arg:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
-        self.struct = struct
-        self.struct_pf = jax.vmap(struct, (None, 0, None))
-        self.struct_per = jax.vmap(struct, (0, 0, None))
+
+        struct_t0 = partial(struct, t0=t0)
+        self.t0 = t0
+        self.struct = struct_t0
+        self.struct_pf = jax.vmap(struct_t0, (None, 0, None))
+        self.struct_per = jax.vmap(struct_t0, (0, 0, None))
+
+        @property
+        def t0(self):
+            return self.t0
+
+        @t0.setter
+        def t0(self, t0):
+            raise AttributeError("t0 cannot be set.")
 
 
 class RProc:

@@ -55,7 +55,7 @@ def Generate_data(
 
 # TODO: Add custom starting position.
 @RInit
-def rinit(theta_, key, covars=None):
+def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)

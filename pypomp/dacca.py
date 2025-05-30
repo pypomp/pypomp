@@ -142,7 +142,7 @@ covars = covars
 
 
 @RInit
-def rinit(theta_, key, covars=None):
+def rinit(theta_, key, covars=None, t0=None):
     S_0 = 0.621
     I_0 = 0.378
     Y_0 = 0

@@ -2,61 +2,95 @@ import numpy as np
 import pandas as pd
 import pypomp.measles.model_001b as m001b
 from pypomp.pomp_class import Pomp
-from pypomp.data.uk_measles.uk_measles import UKMeasles
 from pypomp.model_struct import RInit
 from pypomp.model_struct import RProc
 from pypomp.model_struct import DMeas
 from pypomp.model_struct import RMeas
+import pickle
 
 
-def measles_Pomp(
-    unit,
-    theta,
-    interp_method="shifted_splines",
-    first_year=1950,
-    last_year=1963,
-    dt=1 / 365.25,
-):
-    data = UKMeasles.subset(unit)
-    measles = data["measles"]
-    demog = data["demog"]
+# Not sure if this is the best way to implement this.
+class UKMeasles:
+    with open("pypomp/data/uk_measles/uk_measles.pkl", "rb") as f:
+        data = pickle.load(f)
 
-    # ----prep-data-------------------------------------------------
-    dat = measles.copy()
-    dat["year"] = dat["date"].dt.year
-    dat_filtered = dat[(dat["year"] >= first_year) & (dat["year"] <= last_year)]
-    dat_filtered["time"] = (
-        (dat_filtered["date"] - pd.Timestamp(f"{first_year}-01-01")).dt.days / 365.25
-    ) + first_year
-    dat_filtered = dat_filtered[
-        (dat_filtered["time"] > first_year) & (dat_filtered["time"] < last_year + 1)
-    ][["time", "cases"]]
+    @staticmethod
+    def subset(units=None):
+        """
+        Return a subset of the UKMeasles data, filtered by the given units.
 
-    # ----prep-covariates-------------------------------------------------
-    demog = demog.drop(columns=["unit"])
-    times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
-    if interp_method == "shifted_splines":
-        # TODO apply splines properly
-        pop_interp = np.interp(times, demog["year"], demog["pop"])
-        births_interp = np.interp(times - 4, demog["year"] + 0.5, demog["births"])
-    elif interp_method == "linear":
-        pop_interp = np.interp(times, demog["year"], demog["pop"])
-        births_interp = np.interp(times - 4, demog["year"], demog["births"])
+        Parameters
+        ----------
+        units : list of str, optional
+            A list of unit names to subset the data by. If None, the entire
+            dataset is returned.
 
-    covar_df = pd.DataFrame(
-        {"time": times, "pop": pop_interp, "birthrate": births_interp}
-    )
+        Returns
+        -------
+        A dictionary with the same structure as UKMeasles.data, but with the
+        data subsetted to only include the given units.
+        """
+        if units is None:
+            return UKMeasles.data
+        else:
+            return {
+                k: v[v["unit"].isin(units)].reset_index(drop=True)
+                for k, v in UKMeasles.data.items()
+            }
 
-    # ----pomp-construction-----------------------------------------------
-    # time = covar_df["time"]
-    return Pomp(
-        ys=dat_filtered["cases"],
-        theta=theta,
-        covars=covar_df,
-        rinit=RInit(m001b.rinit),
-        rproc=RProc(m001b.rproc, time_helper="euler", dt=dt),
-        dmeas=DMeas(m001b.dmeas),
-        rmeas=RMeas(m001b.rmeas),
-        # t0=2 * time.iloc[0] - time.iloc[1],
-        # times="time",
-    )
+    # TODO: add method or argument to return the cleaned copy of the data
+
+    @staticmethod
+    def Pomp(
+        unit,
+        theta,
+        interp_method="shifted_splines",
+        first_year=1950,
+        last_year=1963,
+        dt=1 / 365.25,
+    ):
+        data = UKMeasles.subset(unit)
+        measles = data["measles"]
+        demog = data["demog"]
+
+        # ----prep-data-------------------------------------------------
+        dat = measles.copy()
+        dat["year"] = dat["date"].dt.year
+        dat_filtered = dat[
+            (dat["year"] >= first_year) & (dat["year"] <= last_year)
+        ].copy()
+        dat_filtered["time"] = (
+            (dat_filtered["date"] - pd.Timestamp(f"{first_year}-01-01")).dt.days
+            / 365.25
+        ) + first_year
+        dat_filtered = dat_filtered[
+            (dat_filtered["time"] > first_year) & (dat_filtered["time"] < last_year + 1)
+        ][["time", "cases"]]
+        dat_filtered.set_index("time", inplace=True)
+
+        # ----prep-covariates-------------------------------------------------
+        demog = demog.drop(columns=["unit"])
+        times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
+        if interp_method == "shifted_splines":
+            # TODO apply splines properly
+            pop_interp = np.interp(times, demog["year"], demog["pop"])
+            births_interp = np.interp(times - 4, demog["year"] + 0.5, demog["births"])
+        elif interp_method == "linear":
+            pop_interp = np.interp(times, demog["year"], demog["pop"])
+            births_interp = np.interp(times - 4, demog["year"], demog["births"])
+
+        covar_df = pd.DataFrame(
+            {"time": times, "pop": pop_interp, "birthrate": births_interp}
+        )
+
+        # ----pomp-construction-----------------------------------------------
+        t0 = float(2 * covar_df["time"].iloc[0] - covar_df["time"].iloc[1])
+        return Pomp(
+            ys=dat_filtered,
+            theta=theta,
+            covars=covar_df,
+            rinit=RInit(m001b.rinit, t0=t0),
+            rproc=RProc(m001b.rproc, time_helper="euler", dt=dt),
+            dmeas=DMeas(m001b.dmeas),
+            rmeas=RMeas(m001b.rmeas),
+        )

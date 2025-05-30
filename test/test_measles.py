@@ -5,7 +5,7 @@ import pypomp as pp
 
 class Test_Measles(unittest.TestCase):
     def setUp(self):
-        self.measles = pp.measles_Pomp(
+        self.measles = pp.UKMeasles.Pomp(
             unit=["London"],
             theta={
                 "R0": float(jnp.log(56.8)),
@@ -24,6 +24,6 @@ class Test_Measles(unittest.TestCase):
             },
         )
 
-    def test_measles_basic(self):
+    def test_measles_pomp(self):
         x = self.measles
-        "breakpoint palceholder"
+        "breakpoint placeholder"

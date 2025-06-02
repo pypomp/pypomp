@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import xarray as xr
 from .internal_functions import _keys_helper
+from .internal_functions import interp_covars
 
 
 def simulate(
@@ -10,7 +11,7 @@ def simulate(
     rproc,
     rmeas,
     theta,
-    ylen,
+    times,
     covars=None,
     Nsim=1,
     key=None,
@@ -47,56 +48,64 @@ def simulate(
         rprocess=rproc.struct_pf,
         rmeasure=rmeas.struct_pf,
         theta=jnp.array(list(theta.values())),
-        ylen=ylen,
+        t0=rinit.t0,
+        times=jnp.array(times),
+        ydim=rmeas.ydim,  # TODO: update simulate to not require ydim
         covars=jnp.array(covars) if covars is not None else None,
+        ctimes=jnp.array(covars.index),
         Nsim=Nsim,
         key=key,
     )
     # TODO: Add state names as coords
     X_sims = xr.DataArray(X_sims, dims=["time", "element", "sim"])
-    Y_sims = xr.DataArray(Y_sims, dims=["time", "element", "sim"])
+    Y_sims = xr.DataArray(
+        Y_sims, dims=["time", "element", "sim"], coords={"time": times}
+    )
     return {"X_sims": X_sims, "Y_sims": Y_sims}
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 4, 6))
+@partial(jax.jit, static_argnums=(0, 1, 2, 6, 9))
 def _simulate_internal(
-    rinitializer, rprocess, rmeasure, theta, ylen, covars, Nsim, key
+    rinitializer, rprocess, rmeasure, theta, t0, times, ydim, covars, ctimes, Nsim, key
 ):
+    ylen = len(times)
     key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
-    x_sims = rinitializer(theta, keys, covars)
+    covars_t = interp_covars(t0, ctimes=ctimes, covars=covars)
+    X_sims, t = rinitializer(theta, keys, covars_t)
 
-    x_list = jnp.zeros((ylen + 1, *x_sims.shape))
-    x_list = x_list.at[0].set(x_sims)
-    y_list = jnp.zeros((ylen, *rmeasure(x_sims, theta, keys, covars).shape))
+    X_array = jnp.zeros((ylen + 1, X_sims.shape[1], Nsim))
+    X_array = X_array.at[0].set(X_sims.T)
+    Y_array = jnp.zeros((ylen, ydim, Nsim))
     _simulate_helper2 = partial(
         _simulate_helper,
+        times=times,
         rprocess=rprocess,
         rmeasure=rmeasure,
         theta=theta,
         covars=covars,
+        ctimes=ctimes,
         Nsim=Nsim,
     )
-    x_sims, x_list, y_list, key = jax.lax.fori_loop(
+    X_sims, t, X_array, Y_array, key = jax.lax.fori_loop(
         lower=0,
         upper=ylen,
         body_fun=_simulate_helper2,
-        init_val=(x_sims, x_list, y_list, key),
+        init_val=(X_sims, t, X_array, Y_array, key),
     )
 
-    X = jnp.swapaxes(jnp.stack(x_list, axis=0), 1, 2)
-    Y = jnp.swapaxes(jnp.stack(y_list, axis=0), 1, 2)
-    return X, Y
+    return X_array, Y_array
 
 
-def _simulate_helper(i, inputs, rprocess, rmeasure, theta, covars, Nsim):
-    (x_sims, x_list, y_list, key) = inputs
+def _simulate_helper(i, inputs, times, rprocess, rmeasure, theta, covars, ctimes, Nsim):
+    (X_sims, t, X_array, Y_array, key) = inputs
+    covars_t = interp_covars(t, ctimes=ctimes, covars=covars)
     key, *keys = jax.random.split(key, num=Nsim + 1)
     keys = jnp.array(keys)
-    x_sims = rprocess(x_sims, theta, keys, covars)
+    X_sims, t = rprocess(X_sims, theta, keys, covars_t, t)
 
     key, *keys = jax.random.split(key, num=Nsim + 1)
     keys = jnp.array(keys)
-    y_sims = rmeasure(x_sims, theta, keys, covars)
-    x_list = x_list.at[i + 1].set(x_sims)
-    y_list = y_list.at[i].set(y_sims)
-    return x_sims, x_list, y_list, key
+    Y_sims = rmeasure(X_sims, theta, keys, covars_t, t)
+    X_array = X_array.at[i + 1].set(X_sims.T)
+    Y_array = Y_array.at[i].set(Y_sims)
+    return X_sims, t, X_array, Y_array, key

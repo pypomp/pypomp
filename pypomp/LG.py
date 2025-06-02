@@ -1,5 +1,6 @@
 """This module implements a linear Gaussian model for POMP."""
 
+from functools import partial
 import jax
 import jax.numpy as jnp
 
@@ -75,7 +76,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_, R)
 
 
-@RMeas
+@partial(RMeas, ydim=4)
 def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)

@@ -1,10 +1,14 @@
 import jax.numpy as jnp
 import unittest
 import pypomp as pp
+import jax
+import matplotlib.pyplot as plt
 
 
 class Test_Measles(unittest.TestCase):
     def setUp(self):
+        init_params = jnp.array([2.97e-02, 5.17e-05, 5.14e-05, 9.70e-01])
+        init_params_T = jnp.log(init_params / jnp.sum(init_params))
         self.measles = pp.UKMeasles.Pomp(
             unit=["London"],
             theta={
@@ -17,13 +21,23 @@ class Test_Measles(unittest.TestCase):
                 "psi": float(jnp.log(0.116)),
                 "cohort": 0.557,
                 "amplitude": 0.554,
-                "S_0": 2.97e-02,
-                "E_0": 5.17e-05,
-                "I_0": 5.14e-05,
-                "R_0": 9.70e-01,
+                "S_0": float(init_params_T[0]),
+                "E_0": float(init_params_T[1]),
+                "I_0": float(init_params_T[2]),
+                "R_0": float(init_params_T[4]),
             },
         )
 
     def test_measles_pomp(self):
         x = self.measles
+        # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
+        out2 = x.simulate(key=jax.random.key(1), Nsim=1)
+
+        if True:
+            plt.plot(out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0))
+            plt.xlabel("time")
+            plt.ylabel("Y")
+            plt.title("London")
+            plt.show()
+
         "breakpoint placeholder"

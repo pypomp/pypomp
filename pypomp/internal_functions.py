@@ -153,23 +153,29 @@ def _no_resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     """
     Obtains the original input arguments without resampling for perturbed
     filtering method.
-
-    Args:
-        counts (array-like): Indices of the resampled particles from a previous
-            resampling procedure.
-        particlesP (array-like): The original particles before resampling
-            generated from a prediction procedure.
-        norm_weights (array-like): The normalized log-weights of the particles.
-        thetas (array-like): Perturbed parameters associated with the particles.
-        subkey (jax.random.PRNGKey): The random key for sampling. This is not
-            used in this function, but is included to maintain the same
-            arguments as _resampler_thetas().
-
-    Returns:
-        tuple: A tuple containing:
-            - counts (array-like): The indices of the particles, unchanged.
-            - particlesP (array-like): The original particles, unchanged.
-            - norm_weights (array-like): The normalized log-weights, unchanged.
-            - thetas (array-like): The perturbed parameters, unchanged.
     """
     return counts, particlesP, norm_weights, thetas
+
+
+def interp_covars(t, ctimes, covars, order="linear"):
+    """
+    Interpolate covariates.
+
+    Args:
+        t (float): Time to interpolate the covariates at.
+        ctimes (array-like): Time points for the covariates.
+        covars (array-like): Covariates to be interpolated.
+        order (str): Interpolation method. Currently only 'linear' is supported.
+
+    Returns:
+        array-like: The interpolated covariates at time t.
+    """
+    # TODO: Add constant interpolation
+    upper_index = jnp.searchsorted(ctimes, t, side="left")
+    lower_index = upper_index - 1
+    return (
+        covars[lower_index]
+        + (covars[upper_index] - covars[lower_index])
+        * (t - ctimes[lower_index])
+        / (ctimes[upper_index] - ctimes[lower_index])
+    ).ravel()

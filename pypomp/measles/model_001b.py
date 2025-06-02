@@ -1,7 +1,7 @@
 """He10 model without alpha or mu"""
 
 import jax.numpy as jnp
-import jax.random
+import jax
 
 
 param_names = (
@@ -23,7 +23,7 @@ param_names = (
 
 def rinit(theta_, key, covars=None, t0=None):
     S_0, E_0, I_0, R_0 = jnp.exp(theta_[9:]) / jnp.sum(jnp.exp(theta_[9:]))
-    m = covars[0, 0] / (S_0 + E_0 + I_0 + R_0)
+    m = covars[0] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
     E = jnp.round(m * E_0)
     I = jnp.round(m * I_0)
@@ -34,7 +34,7 @@ def rinit(theta_, key, covars=None, t0=None):
 
 
 def rproc(X_, theta_, key, covars, t):
-    S, E, I, R, W, C, t = X_
+    S, E, I, R, W, C = X_
     R0 = theta_[0]
     sigma = theta_[1]
     gamma = theta_[2]
@@ -42,26 +42,33 @@ def rproc(X_, theta_, key, covars, t):
     sigmaSE = theta_[5]
     cohort = theta_[7]
     amplitude = theta_[8]
-    pop = covars[t, 0]
-    birthrate = covars[t, 1]
-    dt = 1 / 365.25
+    pop = covars[0]
+    birthrate = covars[1]
+    dt = 1 / 365.25  # TODO make this an argument
     mu = 0.02
-    if jnp.abs(t - jnp.floor(t) - 251.0 / 365.0) < 0.5 * dt:
-        br = cohort * birthrate / dt + (1 - cohort) * birthrate
-    else:
-        br = (1.0 - cohort) * birthrate
+    br = jax.lax.cond(
+        jnp.squeeze(jnp.abs(t - jnp.floor(t) - 251.0 / 365.0)) < 0.5 * dt,
+        lambda cohort, birthrate, dt: cohort * birthrate / dt
+        + (1 - cohort) * birthrate,
+        lambda cohort, birthrate, dt: (1.0 - cohort) * birthrate,
+        cohort,
+        birthrate,
+        dt,
+    )
 
     # term-time seasonality
     t = (t - jnp.floor(t)) * 365.25
-    if (
-        (t >= 7) & (t <= 100)
-        | (t >= 115) & (t <= 199)
-        | (t >= 252) & (t <= 300)
-        | (t >= 308) & (t <= 356)
-    ):
-        seas = 1.0 + amplitude * 0.2411 / 0.7589
-    else:
-        seas = 1.0 - amplitude
+    seas = jax.lax.cond(
+        jnp.squeeze(
+            (t >= 7) & (t <= 100)
+            | (t >= 115) & (t <= 199)
+            | (t >= 252) & (t <= 300)
+            | (t >= 308) & (t <= 356)
+        ),
+        lambda amplitude: 1.0 + amplitude * 0.2411 / 0.7589,
+        lambda amplitude: 1 - amplitude,
+        amplitude,
+    )
 
     # transmission rate
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
@@ -70,24 +77,31 @@ def rproc(X_, theta_, key, covars, t):
     foi = beta * (I + iota) / pop
 
     # white noise (extrademographic stochasticity)
-    key, subkey = jax.random.key(key)
-    dw = jnp.random.gamma(sigmaSE, dt, key=subkey)
+    key, subkey = jax.random.split(key)
+    dw = jax.random.gamma(subkey, dt / sigmaSE**2) / sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
-    key_last, subkey = jax.random.key(key)
+    key, subkey = jax.random.split(key)
     births = jax.random.poisson(subkey, br * dt)
 
     # transitions between classes
-    trans = jax.random.poisson(key_last, rate * dt)  # TODO: fix this
+    key, subkey = jax.random.split(key)
+    rt = (rate[0:2]) / (rate[0] + rate[1]) * (1 - jnp.exp(-rate[0] - rate[1]))
+    trans_S = jax.random.multinomial(subkey, S, rt)
+    key_last, subkey = jax.random.split(key)
+    rt = (rate[2:4]) / (rate[2] + rate[3]) * (1 - jnp.exp(-rate[2] - rate[3]))
+    trans_E = jax.random.multinomial(subkey, E, rt)
+    rt = (rate[4:6]) / (rate[4] + rate[5]) * (1 - jnp.exp(-rate[4] - rate[5]))
+    trans_I = jax.random.multinomial(key_last, I, rt)
 
-    S = S + births - trans[0] - trans[1]
-    E = E + trans[0] - trans[2] - trans[3]
-    I = I + trans[2] - trans[4] - trans[5]
+    S = S + births - trans_S[0] - trans_S[1]
+    E = E + trans_S[0] - trans_E[0] - trans_E[1]
+    I = I + trans_E[0] - trans_I[0] - trans_I[1]
     R = pop - S - E - I
     W = W + (dw - dt) / theta_[6]
-    C = C + trans[4]
+    C = C + trans_I[0]
     return jnp.array([S, E, I, R, W, C])
 
 
@@ -117,5 +131,5 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     m = theta_[4] * X_[5]
     v = m * (1.0 - theta_[4] + theta_[6] ** 2 * m)
     tol = 1.0e-18  # 1.0e-18 in He10 model; 0.0 is 'correct'
-    cases = jax.random.normal(key, (m, jnp.sqrt(v) + tol))
+    cases = jax.random.normal(key) * (jnp.sqrt(v) + tol) + m
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)

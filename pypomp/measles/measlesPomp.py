@@ -72,7 +72,7 @@ class UKMeasles:
         demog = demog.drop(columns=["unit"])
         times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
         if interp_method == "shifted_splines":
-            # TODO apply splines properly
+            # TODO find a spline interpolation function
             pop_interp = np.interp(times, demog["year"], demog["pop"])
             births_interp = np.interp(times - 4, demog["year"] + 0.5, demog["births"])
         elif interp_method == "linear":
@@ -82,9 +82,10 @@ class UKMeasles:
         covar_df = pd.DataFrame(
             {"time": times, "pop": pop_interp, "birthrate": births_interp}
         )
+        covar_df.set_index("time", inplace=True)
 
         # ----pomp-construction-----------------------------------------------
-        t0 = float(2 * covar_df["time"].iloc[0] - covar_df["time"].iloc[1])
+        t0 = float(2 * covar_df.index[0] - covar_df.index[1])
         return Pomp(
             ys=dat_filtered,
             theta=theta,
@@ -92,5 +93,5 @@ class UKMeasles:
             rinit=RInit(m001b.rinit, t0=t0),
             rproc=RProc(m001b.rproc, time_helper="euler", dt=dt),
             dmeas=DMeas(m001b.dmeas),
-            rmeas=RMeas(m001b.rmeas),
+            rmeas=RMeas(m001b.rmeas, ydim=1),
         )

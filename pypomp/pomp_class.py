@@ -3,6 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 import jax.numpy as jnp
+import pandas as pd
 from .simulate import simulate
 from .mop import mop
 from .pfilter import pfilter
@@ -22,26 +23,18 @@ class Pomp:
         Initializes the necessary components for a specific POMP model.
 
         Args:
+            ys (DataFrame): The measurement data frame. The row index should contain the
+                observation times.
             rinit (RInit): Simulator for the process model.
             rproc (RProc): Basic component of the simulator for the process
                 model.
             dmeas (DMeas): Basic component of the density evaluation for the
                 measurement model.
             rmeas (RMeas): Measurement simulator.
-            ys (array-like): The measurement array.
             theta (dict): Parameters involved in the POMP model. Each value should be a
                 float.
             covars (array-like, optional): Covariates or None if not applicable.
                  Defaults to None.
-
-        Raises:
-            TypeError: The required argument 'rinit' is not an RInit.
-            TypeError: The required argument 'rproc' is not an RProc.
-            ValueError: 'dmeas' and 'rmeas' are both None.
-            TypeError: The required argument 'dmeas' is not a DMeas.
-            TypeError: The required argument 'rmeas' is not an RMeas.
-            TypeError: The required argument 'ys' is None.
-            TypeError: The required argument 'theta' is None.
         """
         if not isinstance(rinit, RInit):
             raise TypeError("rinit must be an instance of the class RInit")
@@ -60,19 +53,18 @@ class Pomp:
         if not all(isinstance(val, float) for val in theta.values()):
             raise TypeError("Each value of theta must be a float")
 
-        try:
-            self.ys = jnp.array(ys)
-        except Exception as e:
-            raise ValueError("Invalid 'ys': {}. Use an array-like.".format(e))
-        try:
-            self.covars = jnp.array(covars) if covars is not None else None
-        except Exception as e:
-            raise ValueError("Invalid 'covars': {}. Use an array-like.".format(e))
+        if not isinstance(ys, pd.DataFrame):
+            raise TypeError("ys must be a pandas DataFrame")
+        if covars is not None and not isinstance(covars, pd.DataFrame):
+            raise TypeError("covars must be a pandas DataFrame if provided")
+
+        self.ys = ys
+        self.theta = theta
         self.rinit = rinit
         self.rproc = rproc
         self.dmeas = dmeas
         self.rmeas = rmeas
-        self.theta = theta
+        self.covars = covars
 
     def mop(
         self,
@@ -355,7 +347,7 @@ class Pomp:
         rproc=None,
         rmeas=None,
         theta=None,
-        ylen=None,
+        times=None,
         covars=None,
         Nsim=1,
     ):
@@ -367,9 +359,7 @@ class Pomp:
             rinit (RInit, optional): Simulator for the initial-state distribution.
             rproc (RProc, optional): Simulator for the process model.
             rmeas (RMeas, optional): Simulator for the measurement model.            theta (array-like, optional): Parameters involved in the POMP model.
-            ylen (int, optional): The number of observations to generate in one time
-                series. Defaults to None, in which case simulate uses the length of the
-                time series stored in the Pomp object.
+            times (array-like, optional): Times of the simulated observations.
             covars (array-like, optional): Covariates for the process, or None if not
                 applicable.
             Nsim (int, optional): The number of simulations to perform.
@@ -387,7 +377,7 @@ class Pomp:
         rproc = self.rproc if rproc is None else rinit
         rmeas = self.rmeas if rmeas is None else rinit
         theta = self.theta if theta is None else rinit
-        ylen = len(self.ys) if ylen is None else ylen
+        times = self.ys.index if times is None else times
         covars = self.covars if covars is None else covars
 
         if rmeas is None:
@@ -400,7 +390,7 @@ class Pomp:
             rproc=rproc,
             rmeas=rmeas,
             theta=theta,
-            ylen=ylen,
+            times=times,
             covars=covars,
             Nsim=Nsim,
             key=key,

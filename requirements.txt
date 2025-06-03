@@ -4,3 +4,4 @@ pypomp>=0.0.1
 numpy>=1.24
 pandas
 xarray
+scipy

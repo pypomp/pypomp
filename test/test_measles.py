@@ -49,4 +49,15 @@ class Test_Measles(unittest.TestCase):
             plt.title("London")
             plt.show()
 
+        if False:
+            fig, axs = plt.subplots(2, 1, sharex=True)
+            for i, key in enumerate(["pop", "birthrate"]):
+                axs[i].plot(x.covars.index, x.covars[key], label=key)
+                axs[i].set_title(key)
+                axs[i].set_xlabel("Time")
+                axs[i].set_ylabel(key.capitalize())
+                axs[i].legend()
+            plt.tight_layout()
+            plt.show()
+
         "breakpoint placeholder"

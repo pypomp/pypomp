@@ -47,12 +47,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     mu = 0.02
     br = jax.lax.cond(
         jnp.squeeze(jnp.abs(t - jnp.floor(t) - 251.0 / 365.0)) < 0.5 * dt,
-        lambda cohort, birthrate, dt: cohort * birthrate / dt
-        + (1 - cohort) * birthrate,
-        lambda cohort, birthrate, dt: (1.0 - cohort) * birthrate,
-        cohort,
-        birthrate,
-        dt,
+        lambda cohort, birthrate, dt: (
+            cohort * birthrate / dt + (1 - cohort) * birthrate
+        ),
+        lambda cohort, birthrate, dt: (1 - cohort) * birthrate,
+        *(cohort, birthrate, dt),
     )
 
     # term-time seasonality
@@ -86,6 +85,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     births = jax.random.poisson(subkey, br * dt)
 
     # transitions between classes
+    # TODO use a loop for this
     key, subkey = jax.random.split(key)
     p0 = jnp.exp(-(rate[0] + rate[1]) * dt)
     rt = (rate[0:2]) / (rate[0] + rate[1]) * (1 - p0)
@@ -107,7 +107,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     E = E + trans_S[0] - trans_E[0] - trans_E[1]
     I = I + trans_E[0] - trans_I[0] - trans_I[1]
     R = pop - S - E - I
-    W = W + (dw - dt) / theta_[6]
+    W = W + (dw - dt) / sigmaSE
     C = C + trans_I[0]
     return jnp.array([S, E, I, R, W, C])
 

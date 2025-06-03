@@ -28,15 +28,9 @@ def euler(rproc, dt):
                     jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int),
                     (t2 - t1) / jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int),
                 ),
-                t1,
-                t2,
-                dt,
-                tol,
+                *(t1, t2, dt, tol),
             ),
-            t1,
-            t2,
-            dt,
-            tol,
+            *(t1, t2, dt, tol),
         )
         return nstep, dt2
 

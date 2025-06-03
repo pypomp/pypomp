@@ -31,10 +31,15 @@ class Test_Measles(unittest.TestCase):
     def test_measles_pomp(self):
         x = self.measles
         # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
-        out2 = x.simulate(key=jax.random.key(1), Nsim=1)
+        out2 = x.simulate(
+            key=jax.random.key(1),
+            Nsim=1,  # , times=self.measles.ys.index[0:10]
+        )
 
         if True:
-            plt.plot(out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0))
+            plt.plot(
+                out2["X_sims"].coords["time"], out2["X_sims"].sel(sim=0, element=1)
+            )
             plt.xlabel("time")
             plt.ylabel("Y")
             plt.title("London")

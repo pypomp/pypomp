@@ -35,11 +35,11 @@ def rinit(theta_, key, covars=None, t0=None):
 
 def rproc(X_, theta_, key, covars, t):
     S, E, I, R, W, C = X_
-    R0 = theta_[0]
-    sigma = theta_[1]
-    gamma = theta_[2]
-    iota = theta_[3]
-    sigmaSE = theta_[5]
+    R0 = jnp.exp(theta_[0])
+    sigma = jnp.exp(theta_[1])
+    gamma = jnp.exp(theta_[2])
+    iota = jnp.exp(theta_[3])
+    sigmaSE = jnp.exp(theta_[5])
     cohort = theta_[7]
     amplitude = theta_[8]
     pop = covars[0]
@@ -78,7 +78,7 @@ def rproc(X_, theta_, key, covars, t):
 
     # white noise (extrademographic stochasticity)
     key, subkey = jax.random.split(key)
-    dw = jax.random.gamma(subkey, dt / sigmaSE**2) / sigmaSE**2
+    dw = jax.random.gamma(subkey, dt / sigmaSE**2) * sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
@@ -88,12 +88,20 @@ def rproc(X_, theta_, key, covars, t):
 
     # transitions between classes
     key, subkey = jax.random.split(key)
-    rt = (rate[0:2]) / (rate[0] + rate[1]) * (1 - jnp.exp(-rate[0] - rate[1]))
+    p0 = jnp.exp(-(rate[0] + rate[1]) * dt)
+    rt = (rate[0:2]) / (rate[0] + rate[1]) * (1 - p0)
+    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
     trans_S = jax.random.multinomial(subkey, S, rt)
+
     key_last, subkey = jax.random.split(key)
-    rt = (rate[2:4]) / (rate[2] + rate[3]) * (1 - jnp.exp(-rate[2] - rate[3]))
+    p0 = jnp.exp(-(rate[2] + rate[3]) * dt)
+    rt = (rate[2:4]) / (rate[2] + rate[3]) * (1 - p0)
+    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
     trans_E = jax.random.multinomial(subkey, E, rt)
-    rt = (rate[4:6]) / (rate[4] + rate[5]) * (1 - jnp.exp(-rate[4] - rate[5]))
+
+    p0 = jnp.exp(-(rate[4] + rate[5]) * dt)
+    rt = (rate[4:6]) / (rate[4] + rate[5]) * (1 - p0)
+    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
     trans_I = jax.random.multinomial(key_last, I, rt)
 
     S = S + births - trans_S[0] - trans_S[1]

@@ -3,21 +3,41 @@ This file contains the classes for components that define the model structure.
 """
 
 import jax
+import jax.numpy as jnp
 
 
 def euler(rproc, dt):
     def euler_helper(i, inputs):
         X_, theta_, key, covars, t = inputs
-        X_ = rproc(
-            X_, theta_, key, covars, t
-        )  # TODO consider applying vmap here so t isn't copied unnecessarily
+        X_ = rproc(X_, theta_, key, covars, t)
         t = t + dt
         return (X_, theta_, key, covars, t)
 
-    def rproc_euler(X_, theta_, key, covars, t):
+    def num_euler_steps(t1, t2, dt):
+        tol = jnp.sqrt(jnp.finfo(float).eps)
+        nstep, dt2 = jax.lax.cond(
+            t1 >= t2,
+            lambda t1, t2, dt, tol: (0, 0),
+            lambda t1, t2, dt, tol: jax.lax.cond(
+                t1 + dt >= t2,
+                lambda t1, t2, dt, tol: (1, t2 - t1),
+                lambda t1, t2, dt, tol: (
+                    int(jnp.ceil((t2 - t1) / dt / (1 + tol))),
+                    (t2 - t1) / int(jnp.ceil((t2 - t1) / dt / (1 + tol))),
+                ),
+            ),
+            t1,
+            t2,
+            dt,
+            tol,
+        )
+        return nstep, dt2
+
+    def rproc_euler(X_, theta_, key, covars, t, dt=dt):
+        nstep, dt2 = num_euler_steps(t1, t2, dt)
         X_, theta_, key, covars, t = jax.lax.fori_loop(
             lower=0,
-            upper=14,  # int(1 / dt),  # TODO FIX THIS
+            upper=nstep,  # int(1 / dt),  # TODO FIX THIS
             body_fun=euler_helper,
             init_val=(X_, theta_, key, covars, t),
         )

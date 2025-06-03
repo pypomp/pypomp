@@ -37,11 +37,15 @@ class Test_Measles(unittest.TestCase):
         )
 
         if True:
-            plt.plot(
-                out2["X_sims"].coords["time"], out2["X_sims"].sel(sim=0, element=1)
-            )
+            fig, axs = plt.subplots(4, 1, sharex=True)
+            for i in range(4):
+                axs[i].plot(
+                    out2["X_sims"].coords["time"],
+                    out2["X_sims"].sel(sim=0, element=i),
+                )
+                axs[i].set_title(f"Element {i}")
             plt.xlabel("time")
-            plt.ylabel("Y")
+            plt.ylabel("Value")
             plt.title("London")
             plt.show()
 

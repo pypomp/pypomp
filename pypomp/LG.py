@@ -63,7 +63,7 @@ def rinit(theta_, key, covars=None, t0=None):
 
 
 @RProc
-def rproc(X_, theta_, key, covars=None, t=None):
+def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=A @ X_, cov=Q)

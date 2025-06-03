@@ -33,7 +33,7 @@ def rinit(theta_, key, covars=None, t0=None):
     return jnp.array([S, E, I, R, W, C])
 
 
-def rproc(X_, theta_, key, covars, t):
+def rproc(X_, theta_, key, covars, t, dt):
     S, E, I, R, W, C = X_
     R0 = jnp.exp(theta_[0])
     sigma = jnp.exp(theta_[1])
@@ -44,7 +44,6 @@ def rproc(X_, theta_, key, covars, t):
     amplitude = theta_[8]
     pop = covars[0]
     birthrate = covars[1]
-    dt = 1 / 365.25  # TODO make this an argument
     mu = 0.02
     br = jax.lax.cond(
         jnp.squeeze(jnp.abs(t - jnp.floor(t) - 251.0 / 365.0)) < 0.5 * dt,

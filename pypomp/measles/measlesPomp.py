@@ -85,7 +85,7 @@ class UKMeasles:
         covar_df.set_index("time", inplace=True)
 
         # ----pomp-construction-----------------------------------------------
-        t0 = float(2 * covar_df.index[0] - covar_df.index[1])
+        t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(
             ys=dat_filtered,
             theta=theta,

@@ -228,7 +228,7 @@ def rproc_step(
 
 
 @RProc
-def rproc(X_, theta_, key, covars, t=None):
+def rproc(X_, theta_, key, covars, t=None, dt=None):
     S = X_[0]
     I = X_[1]
     Y = X_[2]

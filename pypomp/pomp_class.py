@@ -4,6 +4,7 @@ This module implements the OOP structure for POMP models.
 
 import jax
 import pandas as pd
+from typing import Optional
 from .simulate import simulate
 from .mop import mop
 from .pfilter import pfilter
@@ -24,9 +25,9 @@ class Pomp:
         theta: dict,
         rinit: RInit,
         rproc: RProc,
-        dmeas: DMeas = None,
-        rmeas: RMeas = None,
-        covars: pd.DataFrame = None,
+        dmeas: Optional[DMeas] = None,
+        rmeas: Optional[RMeas] = None,
+        covars: Optional[pd.DataFrame] = None,
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -79,12 +80,12 @@ class Pomp:
         self,
         J: int,
         key: jax.Array,
-        rinit: RInit = None,
-        rproc: RProc = None,
-        dmeas: DMeas = None,
-        theta: dict = None,
-        ys: pd.DataFrame = None,
-        covars: pd.DataFrame = None,
+        rinit: Optional[RInit] = None,
+        rproc: Optional[RProc] = None,
+        dmeas: Optional[DMeas] = None,
+        theta: Optional[dict] = None,
+        ys: Optional[pd.DataFrame] = None,
+        covars: Optional[pd.DataFrame] = None,
         alpha: float = 0.97,
     ) -> float:
         """
@@ -125,12 +126,12 @@ class Pomp:
         self,
         J: int,
         key: jax.Array,
-        theta: dict = None,
-        ys: pd.DataFrame = None,
-        rinit: RInit = None,
-        rproc: RProc = None,
-        dmeas: DMeas = None,
-        covars: pd.DataFrame = None,
+        theta: Optional[dict] = None,
+        ys: Optional[pd.DataFrame] = None,
+        rinit: Optional[RInit] = None,
+        rproc: Optional[RProc] = None,
+        dmeas: Optional[DMeas] = None,
+        covars: Optional[pd.DataFrame] = None,
         thresh: float = 0,
     ) -> float:
         """
@@ -189,10 +190,10 @@ class Pomp:
         key: jax.Array,
         ys: pd.DataFrame = None,
         theta: dict = None,
-        rinit: RInit = None,
-        rproc: RProc = None,
-        dmeas: DMeas = None,
-        covars: pd.DataFrame = None,
+        rinit: Optional[RInit] = None,
+        rproc: Optional[RProc] = None,
+        dmeas: Optional[DMeas] = None,
+        covars: Optional[pd.DataFrame] = None,
         thresh: float = 0,
         monitor: bool = False,
         verbose: bool = False,
@@ -262,12 +263,12 @@ class Pomp:
         J: int,
         Jh: int,
         key: jax.Array,
-        rinit: RInit = None,
-        rproc: RProc = None,
-        dmeas: DMeas = None,
-        ys: pd.DataFrame = None,
-        theta: dict = None,
-        covars: pd.DataFrame = None,
+        rinit: Optional[RInit] = None,
+        rproc: Optional[RProc] = None,
+        dmeas: Optional[DMeas] = None,
+        ys: Optional[pd.DataFrame] = None,
+        theta: Optional[dict] = None,
+        covars: Optional[pd.DataFrame] = None,
         method: str = "Newton",
         itns: int = 20,
         beta: float = 0.9,
@@ -352,12 +353,12 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array,
-        rinit: RInit = None,
-        rproc: RProc = None,
-        rmeas: RMeas = None,
-        theta: dict = None,
-        times: jax.Array = None,
-        covars: pd.DataFrame = None,
+        rinit: Optional[RInit] = None,
+        rproc: Optional[RProc] = None,
+        rmeas: Optional[RMeas] = None,
+        theta: Optional[dict] = None,
+        times: Optional[jax.Array] = None,
+        covars: Optional[pd.DataFrame] = None,
         Nsim: int = 1,
     ) -> dict:
         """

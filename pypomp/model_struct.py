@@ -5,20 +5,22 @@ This file contains the classes for components that define the model structure.
 import jax
 import jax.numpy as jnp
 from functools import partial
+from typing import Optional
 from pypomp.internal_functions import interp_covars
 
 
-def euler(rproc: callable, dt: float):
-    def euler_helper(
+# TODO make _euler more general (e.g., rename and add support for other time step schemes, add parameter transformations)
+def _euler(rproc: callable, dt: float, accumvars: tuple[int, ...]) -> callable:
+    def _euler_helper(
         i: int, inputs: tuple, ctimes: jax.Array, covars: jax.Array, dt: float
-    ) -> tuple:
+    ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
         X_, theta_, key, t = inputs
         covars_t = interp_covars(t, ctimes, covars)
         X_ = rproc(X_, theta_, key, covars_t, t, dt)
         t = t + dt
         return (X_, theta_, key, t)
 
-    def num_euler_steps(t1: float, t2: float, dt: float):
+    def _num_euler_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
         tol = jnp.sqrt(jnp.finfo(float).eps)
         nstep, dt2 = jax.lax.cond(
             t1 >= t2,
@@ -36,7 +38,7 @@ def euler(rproc: callable, dt: float):
         )
         return nstep, dt2
 
-    def rproc_euler(
+    def _rproc_euler(
         X_: jax.Array,
         theta_: jax.Array,
         key: jax.Array,
@@ -44,10 +46,12 @@ def euler(rproc: callable, dt: float):
         covars: jax.Array,
         t1: float,
         t2: float,
-        dt: float = dt,
+        dt: float,
+        accumvars: tuple[int, ...],
     ) -> jax.Array:
-        nstep, dt2 = num_euler_steps(t1, t2, dt=dt)
-        euler_helper2 = partial(euler_helper, ctimes=ctimes, covars=covars, dt=dt2)
+        X_ = X_.at[:, accumvars].set(0)
+        nstep, dt2 = _num_euler_steps(t1, t2, dt=dt)
+        euler_helper2 = partial(_euler_helper, ctimes=ctimes, covars=covars, dt=dt2)
         X_, theta_, key, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep,
@@ -56,11 +60,11 @@ def euler(rproc: callable, dt: float):
         )
         return X_
 
-    return rproc_euler
+    return partial(_rproc_euler, dt=dt, accumvars=accumvars)
 
 
 class RInit:
-    def __init__(self, struct: callable, t0: float = None):
+    def __init__(self, struct: callable, t0: Optional[float] = None):
         """
         Initializes the RInit class with the required function structure.
         While this function can check that the arguments of struct are in the
@@ -91,7 +95,13 @@ class RInit:
 
 
 class RProc:
-    def __init__(self, struct: callable, time_helper: str = None, dt: float = None):
+    def __init__(
+        self,
+        struct: callable,
+        time_helper: Optional[str] = None,
+        dt: Optional[float] = None,
+        accumvars: Optional[tuple[int, ...]] = None,
+    ):
         """
         Initializes the RProc class with the required function structure.
         While this function can check that the arguments of struct are in the
@@ -111,12 +121,16 @@ class RProc:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
         if time_helper == "euler":
-            self.struct = euler(struct, dt=dt)
-            self.struct_pf = euler(
-                jax.vmap(struct, (0, None, 0, None, None, None)), dt=dt
+            self.struct = _euler(struct, dt=dt, accumvars=accumvars)
+            self.struct_pf = _euler(
+                jax.vmap(struct, (0, None, 0, None, None, None)),
+                dt=dt,
+                accumvars=accumvars,
             )
-            self.struct_per = euler(
-                jax.vmap(struct, (0, 0, 0, None, None, None)), dt=dt
+            self.struct_per = _euler(
+                jax.vmap(struct, (0, 0, 0, None, None, None)),
+                dt=dt,
+                accumvars=accumvars,
             )
         else:
             print("time_helper must be 'euler' (CHANGE THIS TO AN ERROR LATER)")

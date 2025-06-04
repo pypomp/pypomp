@@ -33,23 +33,35 @@ class Test_Measles(unittest.TestCase):
         # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
         out2 = x.simulate(
             key=jax.random.key(1),
-            Nsim=1,  # , times=self.measles.ys.index[0:10]
+            Nsim=1,  # times=self.measles.ys.index[0:5]
         )
 
-        if True:
-            fig, axs = plt.subplots(4, 1, sharex=True)
-            for i in range(4):
+        if True:  # Process and obs plots
+            fig, axs = plt.subplots(7, 1, sharex=True)
+            for i in range(6):
                 axs[i].plot(
                     out2["X_sims"].coords["time"],
                     out2["X_sims"].sel(sim=0, element=i),
                 )
                 axs[i].set_title(f"Element {i}")
+            axs[6].plot(
+                out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0, element=0)
+            )
+            axs[6].set_title("Observed")
             plt.xlabel("time")
             plt.ylabel("Value")
             plt.title("London")
             plt.show()
 
-        if False:
+            # fig, ax = plt.subplots(1, 1)
+            # ax.plot(out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0, element=0))
+            # ax.set_title("Observed")
+            # ax.set_xlabel("Time")
+            # ax.set_ylabel("Cases")
+            # ax.set_title("London")
+            # plt.show()
+
+        if False:  # Covars plots
             fig, axs = plt.subplots(2, 1, sharex=True)
             for i, key in enumerate(["pop", "birthrate"]):
                 axs[i].plot(x.covars.index, x.covars[key], label=key)

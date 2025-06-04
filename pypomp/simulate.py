@@ -70,8 +70,18 @@ def simulate(
 
 @partial(jax.jit, static_argnums=(0, 1, 2, 6, 9))
 def _simulate_internal(
-    rinitializer, rprocess, rmeasure, theta, t0, times, ydim, covars, ctimes, Nsim, key
-):
+    rinitializer: callable,
+    rprocess: callable,
+    rmeasure: callable,
+    theta: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ydim: int,
+    covars: jax.Array,
+    ctimes: jax.Array,
+    Nsim: int,
+    key: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
     ylen = len(times)
     key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
     covars_t = interp_covars(t0, ctimes=ctimes, covars=covars)
@@ -100,7 +110,17 @@ def _simulate_internal(
     return X_array, Y_array
 
 
-def _simulate_helper(i, inputs, times, rprocess, rmeasure, theta, covars, ctimes, Nsim):
+def _simulate_helper(
+    i: int,
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+    times: jax.Array,
+    rprocess: callable,
+    rmeasure: callable,
+    theta: jax.Array,
+    covars: jax.Array,
+    ctimes: jax.Array,
+    Nsim: int,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     (X_sims, X_array, Y_array, key) = inputs
     t1 = times[i]
     t2 = times[i + 1]

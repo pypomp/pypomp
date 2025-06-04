@@ -58,10 +58,10 @@ def rproc(X_, theta_, key, covars, t, dt):
     t = (t - jnp.floor(t)) * 365.25
     seas = jax.lax.cond(
         jnp.squeeze(
-            (t >= 7) & (t <= 100)
-            | (t >= 115) & (t <= 199)
-            | (t >= 252) & (t <= 300)
-            | (t >= 308) & (t <= 356)
+            ((t >= 7) & (t <= 100))
+            | ((t >= 115) & (t <= 199))
+            | ((t >= 252) & (t <= 300))
+            | ((t >= 308) & (t <= 356))
         ),
         lambda amplitude: 1.0 + amplitude * 0.2411 / 0.7589,
         lambda amplitude: 1 - amplitude,
@@ -135,8 +135,11 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
-    m = theta_[4] * X_[5]
-    v = m * (1.0 - theta_[4] + theta_[6] ** 2 * m)
+    rho = theta_[4]
+    psi = theta_[6]
+    C = X_[5]
+    m = rho * C
+    v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-18  # 1.0e-18 in He10 model; 0.0 is 'correct'
     cases = jax.random.normal(key) * (jnp.sqrt(v) + tol) + m
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)

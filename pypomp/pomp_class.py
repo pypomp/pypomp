@@ -2,7 +2,7 @@
 This module implements the OOP structure for POMP models.
 """
 
-import jax.numpy as jnp
+import jax
 import pandas as pd
 from .simulate import simulate
 from .mop import mop
@@ -18,7 +18,16 @@ from .model_struct import RMeas
 class Pomp:
     MONITORS = 1
 
-    def __init__(self, ys, theta, rinit, rproc, dmeas=None, rmeas=None, covars=None):
+    def __init__(
+        self,
+        ys: pd.DataFrame,
+        theta: dict,
+        rinit: RInit,
+        rproc: RProc,
+        dmeas: DMeas = None,
+        rmeas: RMeas = None,
+        covars: pd.DataFrame = None,
+    ):
         """
         Initializes the necessary components for a specific POMP model.
 
@@ -68,16 +77,16 @@ class Pomp:
 
     def mop(
         self,
-        J,
-        key,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        theta=None,
-        ys=None,
-        covars=None,
-        alpha=0.97,
-    ):
+        J: int,
+        key: jax.Array,
+        rinit: RInit = None,
+        rproc: RProc = None,
+        dmeas: DMeas = None,
+        theta: dict = None,
+        ys: pd.DataFrame = None,
+        covars: pd.DataFrame = None,
+        alpha: float = 0.97,
+    ) -> float:
         """
         Instance method for MOP algorithm.
 
@@ -114,16 +123,16 @@ class Pomp:
 
     def pfilter(
         self,
-        J,
-        key,
-        theta=None,
-        ys=None,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        covars=None,
-        thresh=0,
-    ):
+        J: int,
+        key: jax.Array,
+        theta: dict = None,
+        ys: pd.DataFrame = None,
+        rinit: RInit = None,
+        rproc: RProc = None,
+        dmeas: DMeas = None,
+        covars: pd.DataFrame = None,
+        thresh: float = 0,
+    ) -> float:
         """
         Instance method for particle filtering algorithm.
 
@@ -172,22 +181,22 @@ class Pomp:
 
     def mif(
         self,
-        sigmas,
-        sigmas_init,
-        M,
-        a,
-        J,
-        key,
-        ys=None,
-        theta=None,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        covars=None,
-        thresh=0,
-        monitor=False,
-        verbose=False,
-    ):
+        sigmas: float,
+        sigmas_init: float,
+        M: int,
+        a: float,
+        J: int,
+        key: jax.Array,
+        ys: pd.DataFrame = None,
+        theta: dict = None,
+        rinit: RInit = None,
+        rproc: RProc = None,
+        dmeas: DMeas = None,
+        covars: pd.DataFrame = None,
+        thresh: float = 0,
+        monitor: bool = False,
+        verbose: bool = False,
+    ) -> dict:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
         which uses the initialized instance parameters and calls the 'mif'
@@ -250,27 +259,27 @@ class Pomp:
 
     def train(
         self,
-        J,
-        Jh,
-        key,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        ys=None,
-        theta=None,
-        covars=None,
-        method="Newton",
-        itns=20,
-        beta=0.9,
-        eta=0.0025,
-        c=0.1,
-        max_ls_itn=10,
-        thresh=0,
-        verbose=False,
-        scale=False,
-        ls=False,
-        alpha=0.97,
-    ):
+        J: int,
+        Jh: int,
+        key: jax.Array,
+        rinit: RInit = None,
+        rproc: RProc = None,
+        dmeas: DMeas = None,
+        ys: pd.DataFrame = None,
+        theta: dict = None,
+        covars: pd.DataFrame = None,
+        method: str = "Newton",
+        itns: int = 20,
+        beta: float = 0.9,
+        eta: float = 0.0025,
+        c: float = 0.1,
+        max_ls_itn: int = 10,
+        thresh: int = 0,
+        verbose: bool = False,
+        scale: bool = False,
+        ls: bool = False,
+        alpha: float = 0.97,
+    ) -> dict:
         """
         Instance method for conducting the MOP gradient-based iterative
         optimization method.
@@ -342,15 +351,15 @@ class Pomp:
 
     def simulate(
         self,
-        key,
-        rinit=None,
-        rproc=None,
-        rmeas=None,
-        theta=None,
-        times=None,
-        covars=None,
-        Nsim=1,
-    ):
+        key: jax.Array,
+        rinit: RInit = None,
+        rproc: RProc = None,
+        rmeas: RMeas = None,
+        theta: dict = None,
+        times: jax.Array = None,
+        covars: pd.DataFrame = None,
+        Nsim: int = 1,
+    ) -> dict:
         """
         Instance method for simulating a POMP model. By default, it uses this object’s
         attributes, but these can be overridden by providing them as arguments.

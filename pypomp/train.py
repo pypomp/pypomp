@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 from tqdm import tqdm
+from typing import Optional
 from .pfilter import _pfilter_internal
 from .pfilter import _pfilter_internal_mean
 from .mop import _mop_internal_mean
@@ -102,12 +103,15 @@ def train(
 
     nLLs, theta_ests = _train_internal(
         theta_ests=jnp.array(list(theta.values())),
+        t0=rinit.t0,
+        times=jnp.array(ys.index),
         ys=jnp.array(ys),
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
         dmeasure=dmeas.struct_pf,
         J=J,
         Jh=Jh,
+        ctimes=jnp.array(covars.index) if covars is not None else None,
         covars=jnp.array(covars) if covars is not None else None,
         method=method,
         itns=itns,
@@ -136,26 +140,29 @@ def train(
 
 
 def _train_internal(
-    theta_ests,
-    ys,
-    rinitializer,
-    rprocess,
-    dmeasure,
-    covars,
-    J,
-    Jh,
-    method,
-    itns,
-    beta,
-    eta,
-    c,
-    max_ls_itn,
-    thresh,
-    verbose,
-    scale,
-    ls,
-    alpha,
-    key,
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    rinitializer: callable,
+    rprocess: callable,
+    dmeasure: callable,
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    J: int,
+    Jh: int,
+    method: str,
+    itns: int,
+    beta: float,
+    eta: float,
+    c: float,
+    max_ls_itn: int,
+    thresh: float,
+    verbose: bool,
+    scale: bool,
+    ls: bool,
+    alpha: float,
+    key: jax.Array,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -170,12 +177,15 @@ def _train_internal(
         # key = jax.random.PRNGKey(np.random.choice(int(1e18)))
         if MONITORS == 1:
             loglik, grad = _jvg_mop(
-                theta_ests,
-                ys,
-                J,
-                rinitializer,
-                rprocess,
-                dmeasure,
+                theta_ests=theta_ests,
+                t0=t0,
+                times=times,
+                ys=ys,
+                J=J,
+                rinitializer=rinitializer,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
                 key=key,
@@ -184,12 +194,15 @@ def _train_internal(
             loglik *= len(ys)
         else:
             grad = _jgrad_mop(
-                theta_ests,
-                ys,
-                J,
-                rinitializer,
-                rprocess,
-                dmeasure,
+                theta_ests=theta_ests,
+                t0=t0,
+                times=times,
+                ys=ys,
+                J=J,
+                rinitializer=rinitializer,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
                 key=key,
@@ -198,12 +211,15 @@ def _train_internal(
                 jnp.array(
                     [
                         _pfilter_internal(
-                            theta_ests,
-                            ys,
-                            J,
-                            rinitializer,
-                            rprocess,
-                            dmeasure,
+                            theta=theta_ests,
+                            t0=t0,
+                            times=times,
+                            ys=ys,
+                            J=J,
+                            rinitializer=rinitializer,
+                            rprocess=rprocess,
+                            dmeasure=dmeasure,
+                            ctimes=ctimes,
                             covars=covars,
                             thresh=-1,
                             key=key,
@@ -215,12 +231,15 @@ def _train_internal(
 
         if method == "Newton":
             hess = _jhess_mop(
-                theta_ests,
-                ys,
-                Jh,
-                rinitializer,
-                rprocess,
-                dmeasure,
+                theta_ests=theta_ests,
+                t0=t0,
+                times=times,
+                ys=ys,
+                J=J,
+                rinitializer=rinitializer,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
                 key=key,
@@ -238,12 +257,15 @@ def _train_internal(
         elif method == "WeightedNewton":
             if i == 0:
                 hess = _jhess_mop(
-                    theta_ests,
-                    ys,
-                    Jh,
-                    rinitializer,
-                    rprocess,
-                    dmeasure,
+                    theta_ests=theta_ests,
+                    t0=t0,
+                    times=times,
+                    ys=ys,
+                    J=J,
+                    rinitializer=rinitializer,
+                    rprocess=rprocess,
+                    dmeasure=dmeasure,
+                    ctimes=ctimes,
                     covars=covars,
                     alpha=alpha,
                     key=key,
@@ -258,12 +280,15 @@ def _train_internal(
 
             else:
                 hess = _jhess_mop(
-                    theta_ests,
-                    ys,
-                    Jh,
-                    rinitializer,
-                    rprocess,
-                    dmeasure,
+                    theta_ests=theta_ests,
+                    t0=t0,
+                    times=times,
+                    ys=ys,
+                    J=J,
+                    rinitializer=rinitializer,
+                    rprocess=rprocess,
+                    dmeasure=dmeasure,
+                    ctimes=ctimes,
                     covars=covars,
                     alpha=alpha,
                     key=key,
@@ -316,23 +341,29 @@ def _train_internal(
             eta = _line_search(
                 partial(
                     _pfilter_internal,
+                    t0=t0,
+                    times=times,
                     ys=ys,
                     J=J,
                     rinitializer=rinitializer,
                     rprocess=rprocess,
                     dmeasure=dmeasure,
+                    ctimes=ctimes,
                     covars=covars,
                     thresh=thresh,
                     key=key,
                 ),
-                loglik,
-                theta_ests,
-                grad,
-                direction,
+                curr_obj=loglik,
+                pt=theta_ests,
+                grad=grad,
+                direction=direction,
                 k=i + 1,
                 eta=beta,
-                c=c,
+                xi=10,
                 tau=max_ls_itn,
+                c=c,
+                frac=0.5,
+                stoch=False,
             )
 
         # try:
@@ -350,12 +381,15 @@ def _train_internal(
             jnp.array(
                 [
                     _pfilter_internal(
-                        theta_ests,
-                        ys,
-                        J,
-                        rinitializer,
-                        rprocess,
-                        dmeasure,
+                        theta=theta_ests,
+                        t0=t0,
+                        times=times,
+                        ys=ys,
+                        J=J,
+                        rinitializer=rinitializer,
+                        rprocess=rprocess,
+                        dmeasure=dmeasure,
+                        ctimes=ctimes,
                         covars=covars,
                         thresh=thresh,
                         key=key,
@@ -371,19 +405,19 @@ def _train_internal(
 
 
 def _line_search(
-    obj,
-    curr_obj,
-    pt,
-    grad,
-    direction,
-    k=1,
-    eta=0.9,
-    xi=10,
-    tau=10,
-    c=0.1,
-    frac=0.5,
-    stoch=False,
-):
+    obj: callable,
+    curr_obj: float,
+    pt: jnp.ndarray,
+    grad: jnp.ndarray,
+    direction: jnp.ndarray,
+    k: int,
+    eta: float,
+    xi: int,
+    tau: int,
+    c: float,
+    frac: float,
+    stoch: bool,
+) -> float:
     """
     Conducts line search algorithm to determine the step size under stochastic
     Quasi-Newton methods. The implentation of the algorithm refers to
@@ -397,15 +431,14 @@ def _line_search(
         grad (array-like): The gradient of the objective function at the current
             point.
         direction (array-like): The direction to update the parameters.
-        k (int, optional): Iteration index. Defaults to 1.
-        eta (float, optional): Initial step size. Defaults to 0.9.
-        xi (int, optional): Reduction limit. Defaults to 10.
-        tau (int, optional): The maximum number of iterations. Defaults to 10.
+        k (int, optional): Iteration index.
+        eta (float, optional): Initial step size.
+        xi (int, optional): Reduction limit.
+        tau (int, optional): The maximum number of iterations.
         c (float, optional): The user-defined Armijo condition constant.
-            Defaults to 0.1.
-        frac (float, optional): The fact. Defaults to 0.5.
+        frac (float, optional): The fact.
         stoch (bool, optional): Boolean argument controlling whether to adjust
-            the initial step size. Defaults to False.
+            the initial step size.
 
     Returns:
         float: optimal step size
@@ -426,46 +459,61 @@ def _line_search(
     return eta
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _jgrad(
-    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
+    key: jax.Array,
 ):
     """
     calculates the gradient of a mean particle filter objective (function
     'pfilter_internal_mean') w.r.t. the current estimated parameter value using
     JAX's automatic differentiation.
 
-    Args:
-        theta_ests (array-like): Estimated parameter
-        ys (array-like): The measurements
-        J (int): Number of particles
-        rinit (function): Simulator for the initial-state distribution
-        rprocess (function): Simulator for the process model
-        dmeasure (function): Density evaluation for the measurement model
-        covars (array-like): Covariates or None if not applicable
-        thresh (float): Threshold value to determine whether to resample
-            particles.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
-
     Returns:
         array-like: the gradient of the pfilter_internal_mean function w.r.t.
             theta_ests.
     """
     return jax.grad(_pfilter_internal_mean)(
-        theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        theta_ests,  # for some reason this needs to be given as a positional argument
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         thresh=thresh,
         key=key,
     )
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
-def _jvg(theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None):
+@partial(jit, static_argnums=(4, 5, 6, 7))
+def _jvg(
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
+    key: jax.Array,
+):
     """
     Calculates the both the value and gradient of a mean particle filter
     objective (function 'pfilter_internal_mean') w.r.t. the current estimated
@@ -492,36 +540,39 @@ def _jvg(theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, ke
     """
     return jax.value_and_grad(_pfilter_internal_mean)(
         theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         thresh=thresh,
         key=key,
     )
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _jgrad_mop(
-    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha=0.97, key=None
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    alpha: float,
+    key: jax.Array,
 ):
     """
     Calculates the gradient of a mean MOP objective (function
     'mop_internal_mean') w.r.t. the current estimated parameter value using
     JAX's automatic differentiation.
-
-    Args:
-        theta_ests (array-like): Estimated parameter.
-        ys (array-like): The measurements.
-        J (int): Number of particles.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like): Covariates or None if not applicable.
-        alpha (float, optional): Discount factor. Defaults to 0.97.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
 
     Returns:
         array-like: the gradient of the mop_internal_mean function w.r.t.
@@ -529,36 +580,39 @@ def _jgrad_mop(
     """
     return jax.grad(_mop_internal_mean)(
         theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         alpha=alpha,
         key=key,
     )
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _jvg_mop(
-    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha=0.97, key=None
-):
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    alpha: float,
+    key: jax.Array,
+) -> tuple:
     """
-    calculates the both the value and gradient of a mean MOP objective (function
+    Calculates the both the value and gradient of a mean MOP objective (function
     'mop_internal_mean') w.r.t. the current estimated parameter value using
     JAX's automatic differentiation.
-
-    Args:
-        theta_ests (array-like): Estimated parameter.
-        ys (array-like): The measurements.
-        J (int): Number of particles.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like): Covariates or None if not applicable.
-        alpha (float, optional): Discount factor. Defaults to 0.97.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
 
     Returns:
         tuple: A tuple containing:
@@ -569,37 +623,39 @@ def _jvg_mop(
     """
     return jax.value_and_grad(_mop_internal_mean)(
         theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         alpha=alpha,
         key=key,
     )
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _jhess(
-    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key=None
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
+    key: jax.Array,
 ):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
     'pfilter_internal_mean') w.r.t. the current estimated parameter value using
     JAX's automatic differentiation.
-
-    Args:
-        theta_ests (array-like): Estimated parameter.
-        ys (array-like): The measurements.
-        J (int): Number of particles.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like): Covariates or None if not applicable.
-        thresh (float): Threshold value to determine whether to resample
-            particles.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
 
     Returns:
         array-like: the Hessian matrix of the pfilter_internal_mean function
@@ -607,11 +663,14 @@ def _jhess(
     """
     return jax.hessian(_pfilter_internal_mean)(
         theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         thresh=thresh,
         key=key,
@@ -619,25 +678,25 @@ def _jhess(
 
 
 # get the hessian matrix from mop
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _jhess_mop(
-    theta_ests, ys, J, rinitializer, rprocess, dmeasure, covars, alpha, key=None
+    theta_ests: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    alpha: float,
+    key: jax.Array,
 ):
     """
     calculates the Hessian matrix of a mean MOP objective (function
     'mop_internal_mean') w.r.t. the current estimated parameter value using
     JAX's automatic differentiation.
-
-    Args:
-        theta_ests (array-like): Estimated parameter.
-        ys (array-like): The measurements.
-        J (int): Number of particles.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like): Covariates or None if not applicable.
-        alpha (float): Discount factor.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
 
     Returns:
         array-like: the Hessian matrix of the mop_internal_mean function w.r.t.
@@ -645,11 +704,14 @@ def _jhess_mop(
     """
     return jax.hessian(_mop_internal_mean)(
         theta_ests,
-        ys,
-        J,
-        rinitializer,
-        rprocess,
-        dmeasure,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
         covars=covars,
         alpha=alpha,
         key=key,

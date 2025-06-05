@@ -71,7 +71,7 @@ def pfilter(
 
 @partial(jit, static_argnums=(4, 5, 6, 7))
 def _pfilter_internal(
-    theta: jax.Array,
+    theta: jax.Array,  # should be first for _line_search
     t0: float,
     times: jax.Array,
     ys: jax.Array,
@@ -98,12 +98,12 @@ def _pfilter_internal(
     pfilter_helper_2 = partial(
         _pfilter_helper,
         times0=jnp.concatenate([jnp.array([t0]), times]),
+        ys=ys,
+        theta=theta,
         rprocess=rprocess,
         dmeasure=dmeasure,
-        theta=theta,
         ctimes=ctimes,
         covars=covars,
-        ys=ys,
         thresh=thresh,
     )
     particlesF, loglik, norm_weights, counts, key = jax.lax.fori_loop(
@@ -116,12 +116,39 @@ def _pfilter_internal(
     return -loglik
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5))
+@partial(jit, static_argnums=(4, 5, 6, 7))
 def _pfilter_internal_mean(
-    theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
+    theta: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    rinitializer: callable,  # static
+    rprocess: callable,  # static
+    dmeasure: callable,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
+    key: jax.Array,
 ):
+    """
+    Internal function for calculating the particle filter estimate of the log
+    likelihood divided by the length of the observations. This is used in internal
+    pypomp.train functions.
+    """
     return _pfilter_internal(
-        theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
+        theta=theta,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        ctimes=ctimes,
+        covars=covars,
+        thresh=thresh,
+        key=key,
     ) / len(ys)
 
 
@@ -129,12 +156,12 @@ def _pfilter_helper(
     i: int,
     inputs: tuple[jax.Array, float, jax.Array, jax.Array, jax.Array],
     times0: jax.Array,
+    ys: jax.Array,
+    theta: jax.Array,
     rprocess: callable,
     dmeasure: callable,
-    theta: jax.Array,
     ctimes: jax.Array,
     covars: jax.Array,
-    ys: jax.Array,
     thresh: float,
 ) -> tuple[jax.Array, float, jax.Array, jax.Array, jax.Array]:
     """

@@ -6,19 +6,24 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Optional
-from pypomp.internal_functions import interp_covars
+from pypomp.internal_functions import _interp_covars
 
 
 # TODO make _euler more general (e.g., rename and add support for other time step schemes, add parameter transformations)
-def _euler(rproc: callable, dt: float, accumvars: tuple[int, ...]) -> callable:
-    def _euler_helper(
+def _time_interp(
+    rproc: callable, step_type: str, dt: float, accumvars: tuple[int, ...]
+) -> callable:
+    def _interp_helper(
         i: int, inputs: tuple, ctimes: jax.Array, covars: jax.Array, dt: float
     ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
         X_, theta_, key, t = inputs
-        covars_t = interp_covars(t, ctimes, covars)
+        covars_t = _interp_covars(t, ctimes, covars)
         X_ = rproc(X_, theta_, key, covars_t, t, dt)
         t = t + dt
         return (X_, theta_, key, t)
+
+    def _num_onestep_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
+        return 1, t2 - t1
 
     def _num_euler_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
         tol = jnp.sqrt(jnp.finfo(float).eps)
@@ -38,7 +43,13 @@ def _euler(rproc: callable, dt: float, accumvars: tuple[int, ...]) -> callable:
         )
         return nstep, dt2
 
-    def _rproc_euler(
+    match step_type:
+        case "onestep":
+            num_step_func = _num_onestep_steps
+        case "euler":
+            num_step_func = _num_euler_steps
+
+    def _rproc_interp(
         X_: jax.Array,
         theta_: jax.Array,
         key: jax.Array,
@@ -48,10 +59,11 @@ def _euler(rproc: callable, dt: float, accumvars: tuple[int, ...]) -> callable:
         t2: float,
         dt: float,
         accumvars: tuple[int, ...],
+        num_step_func: callable,
     ) -> jax.Array:
         X_ = X_.at[:, accumvars].set(0)
-        nstep, dt2 = _num_euler_steps(t1, t2, dt=dt)
-        euler_helper2 = partial(_euler_helper, ctimes=ctimes, covars=covars, dt=dt2)
+        nstep, dt2 = num_step_func(t1, t2, dt=dt)
+        euler_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
         X_, theta_, key, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep,
@@ -60,7 +72,9 @@ def _euler(rproc: callable, dt: float, accumvars: tuple[int, ...]) -> callable:
         )
         return X_
 
-    return partial(_rproc_euler, dt=dt, accumvars=accumvars)
+    return partial(
+        _rproc_interp, dt=dt, accumvars=accumvars, num_step_func=num_step_func
+    )
 
 
 class RInit:
@@ -98,7 +112,7 @@ class RProc:
     def __init__(
         self,
         struct: callable,
-        time_helper: Optional[str] = None,
+        step_type: Optional[str] = "onestep",
         dt: Optional[float] = None,
         accumvars: Optional[tuple[int, ...]] = None,
     ):
@@ -112,7 +126,7 @@ class RProc:
             struct (callable): A function with a specific structure where the
                 first six arguments must be 'X_', 'theta_', 'key', 'covars', 't', and
                 'dt', in that order.
-            time_helper (str, optional): Method to describe how the process evolves over time. Currently only 'euler' is supported. Defaults to None.
+            step_type (str, optional): Method to describe how the process evolves over time.
             dt (float, optional): The time step used for the time_helper method.
                 Required if time_helper is 'euler'.
         """
@@ -120,20 +134,21 @@ class RProc:
             if struct.__code__.co_varnames[i] != arg:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
-        if time_helper == "euler":
-            self.struct = _euler(struct, dt=dt, accumvars=accumvars)
-            self.struct_pf = _euler(
-                jax.vmap(struct, (0, None, 0, None, None, None)),
-                dt=dt,
-                accumvars=accumvars,
-            )
-            self.struct_per = _euler(
-                jax.vmap(struct, (0, 0, 0, None, None, None)),
-                dt=dt,
-                accumvars=accumvars,
-            )
-        else:
-            print("time_helper must be 'euler' (CHANGE THIS TO AN ERROR LATER)")
+        self.struct = _time_interp(
+            struct, step_type=step_type, dt=dt, accumvars=accumvars
+        )
+        self.struct_pf = _time_interp(
+            jax.vmap(struct, (0, None, 0, None, None, None)),
+            step_type=step_type,
+            dt=dt,
+            accumvars=accumvars,
+        )
+        self.struct_per = _time_interp(
+            jax.vmap(struct, (0, 0, 0, None, None, None)),
+            step_type=step_type,
+            dt=dt,
+            accumvars=accumvars,
+        )
 
 
 class DMeas:

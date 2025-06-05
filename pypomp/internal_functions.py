@@ -157,7 +157,9 @@ def _no_resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     return counts, particlesP, norm_weights, thetas
 
 
-def interp_covars(t, ctimes, covars, order="linear"):
+def _interp_covars(
+    t: float, ctimes: jax.Array, covars: jax.Array, order: str = "linear"
+) -> jax.Array:
     """
     Interpolate covariates.
 
@@ -171,11 +173,14 @@ def interp_covars(t, ctimes, covars, order="linear"):
         array-like: The interpolated covariates at time t.
     """
     # TODO: Add constant interpolation
-    upper_index = jnp.searchsorted(ctimes, t, side="left")
-    lower_index = upper_index - 1
-    return (
-        covars[lower_index]
-        + (covars[upper_index] - covars[lower_index])
-        * (t - ctimes[lower_index])
-        / (ctimes[upper_index] - ctimes[lower_index])
-    ).ravel()
+    if (covars is None) | (ctimes is None):
+        return None
+    else:
+        upper_index = jnp.searchsorted(ctimes, t, side="left")
+        lower_index = upper_index - 1
+        return (
+            covars[lower_index]
+            + (covars[upper_index] - covars[lower_index])
+            * (t - ctimes[lower_index])
+            / (ctimes[upper_index] - ctimes[lower_index])
+        ).ravel()

@@ -20,7 +20,7 @@ def pfilter(
     thresh=0,
 ):
     """
-    An outside function for particle filtering algorithm.
+    An outside function for the particle filtering algorithm.
 
     Args:
         J (int): The number of particles.
@@ -66,7 +66,15 @@ def pfilter(
 
 @partial(jit, static_argnums=(2, 3, 4, 5))
 def _pfilter_internal(
-    theta, ys, J, rinitializer, rprocess, dmeasure, covars, thresh, key
+    theta: jax.Array,
+    ys: jax.Array,
+    J: int,
+    rinitializer: callable,
+    rprocess: callable,
+    dmeasure: callable,
+    covars: jax.Array,
+    thresh: float,
+    key: jax.Array,
 ):
     """
     Internal functions for particle filtering algorithm, which calls function
@@ -110,7 +118,22 @@ def _pfilter_internal_mean(
     ) / len(ys)
 
 
-def _pfilter_helper(t, inputs, rprocess, dmeasure):
+def _pfilter_helper(
+    t: int,
+    inputs: tuple[
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        float,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        float,
+        jax.Array,
+    ],
+    rprocess: callable,
+    dmeasure: callable,
+) -> tuple:
     """
     Helper functions for particle filtering algorithm in POMP, which conducts a
     single iteration of filtering.

@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import xarray as xr
 from .internal_functions import _keys_helper
-from .internal_functions import interp_covars
+from .internal_functions import _interp_covars
 
 
 def simulate(
@@ -52,7 +52,7 @@ def simulate(
         times=jnp.array(times),
         ydim=rmeas.ydim,  # TODO: update simulate to not require ydim
         covars=jnp.array(covars) if covars is not None else None,
-        ctimes=jnp.array(covars.index),
+        ctimes=jnp.array(covars.index) if covars is not None else None,
         Nsim=Nsim,
         key=key,
     )
@@ -84,7 +84,7 @@ def _simulate_internal(
 ) -> tuple[jax.Array, jax.Array]:
     ylen = len(times)
     key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
-    covars_t = interp_covars(t0, ctimes=ctimes, covars=covars)
+    covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
     X_sims = rinitializer(theta, keys, covars_t, t0)
 
     X_array = jnp.zeros((ylen + 1, X_sims.shape[1], Nsim))
@@ -129,11 +129,11 @@ def _simulate_helper(
     keys = jnp.array(keys)
     X_sims = rprocess(X_sims, theta, keys, ctimes, covars, t1, t2)
 
-    covars_t = interp_covars(t2, ctimes=ctimes, covars=covars)
+    covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
     key, *keys = jax.random.split(key, num=Nsim + 1)
     keys = jnp.array(keys)
     Y_sims = rmeasure(X_sims, theta, keys, covars_t, t2)
 
     X_array = X_array.at[i + 1].set(X_sims.T)
-    Y_array = Y_array.at[i].set(Y_sims)
+    Y_array = Y_array.at[i].set(Y_sims.T)
     return X_sims, X_array, Y_array, key

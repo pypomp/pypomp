@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 import unittest
 import pypomp as pp
 
@@ -22,7 +23,7 @@ class TestSimulate_LG(unittest.TestCase):
             rinit=self.rinit,
             rproc=self.rproc,
             rmeas=self.rmeas,
-            ylen=len(self.ys),
+            times=jnp.array(self.ys.index),
             theta=self.theta,
             covars=self.covars,
             Nsim=self.Nsim,
@@ -36,5 +37,5 @@ class TestSimulate_LG(unittest.TestCase):
             self.assertIn("Y_sims", val)
             self.assertEqual(
                 val["X_sims"].shape,
-                (len(self.ys) + 1, len(self.ys[0,]), self.Nsim),
+                (len(self.ys) + 1, self.rmeas.ydim, self.Nsim),
             )

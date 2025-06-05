@@ -191,7 +191,9 @@ def _mif_internal(
         key, *subkeys = jax.random.split(key=key, num=3)
         sigmas = a * sigmas
         sigmas_init = a * sigmas_init
-        thetas += sigmas_init * jax.random.normal(shape=thetas.shape, key=subkeys[0])
+        thetas = thetas + sigmas_init * jax.random.normal(
+            shape=thetas.shape, key=subkeys[0]
+        )
         loglik_ext, thetas = _perfilter_internal(
             thetas,
             ys,

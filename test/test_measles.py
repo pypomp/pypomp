@@ -4,6 +4,8 @@ import pypomp as pp
 import jax
 import matplotlib.pyplot as plt
 
+# jax.config.update("jax_enable_x64", True)
+
 
 class Test_Measles(unittest.TestCase):
     def setUp(self):
@@ -26,6 +28,7 @@ class Test_Measles(unittest.TestCase):
                 "I_0": float(init_params_T[2]),
                 "R_0": float(init_params_T[4]),
             },
+            # dt=7 / 365.25,
         )
 
     def test_measles_pomp(self):
@@ -33,33 +36,26 @@ class Test_Measles(unittest.TestCase):
         # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
         out2 = x.simulate(
             key=jax.random.key(1),
-            Nsim=1,  # times=self.measles.ys.index[0:5]
+            Nsim=1,  # times=self.measles.ys.index[0:1]
         )
 
-        if True:  # Process and obs plots
+        if False:  # Process and obs plots
             fig, axs = plt.subplots(7, 1, sharex=True)
+            sim_n = 0
             for i in range(6):
                 axs[i].plot(
                     out2["X_sims"].coords["time"],
-                    out2["X_sims"].sel(sim=0, element=i),
+                    out2["X_sims"].sel(sim=sim_n, element=i),
                 )
                 axs[i].set_title(f"Element {i}")
             axs[6].plot(
-                out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0, element=0)
+                out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=sim_n, element=0)
             )
             axs[6].set_title("Observed")
             plt.xlabel("time")
             plt.ylabel("Value")
             plt.title("London")
             plt.show()
-
-            # fig, ax = plt.subplots(1, 1)
-            # ax.plot(out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=0, element=0))
-            # ax.set_title("Observed")
-            # ax.set_xlabel("Time")
-            # ax.set_ylabel("Cases")
-            # ax.set_title("London")
-            # plt.show()
 
         if False:  # Covars plots
             fig, axs = plt.subplots(2, 1, sharex=True)
@@ -71,5 +67,3 @@ class Test_Measles(unittest.TestCase):
                 axs[i].legend()
             plt.tight_layout()
             plt.show()
-
-        "breakpoint placeholder"

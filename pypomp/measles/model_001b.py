@@ -77,7 +77,13 @@ def rproc(X_, theta_, key, covars, t, dt):
     # white noise (extrademographic stochasticity)
     key, subkey = jax.random.split(key)
     dw = jax.random.gamma(subkey, dt / sigmaSE**2) * sigmaSE**2
+    # dw = jnp.exp(
+    #     jax.random.loggamma(subkey, jnp.exp(jnp.log(dt) - 2 * jnp.log(sigmaSE)))
+    #     + 2 * jnp.log(sigmaSE)
+    # )
 
+    # ir = jnp.exp(jnp.log(foi) + jnp.log(dw) - jnp.log(dt))
+    # rate = jnp.array([ir, mu, sigma, mu, gamma, mu])
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
@@ -92,7 +98,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
     trans_S = jax.random.multinomial(subkey, S, rt)
 
-    key_last, subkey = jax.random.split(key)
+    lastkey, subkey = jax.random.split(key)
     p0 = jnp.exp(-(rate[2] + rate[3]) * dt)
     rt = (rate[2:4]) / (rate[2] + rate[3]) * (1 - p0)
     rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
@@ -101,7 +107,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     p0 = jnp.exp(-(rate[4] + rate[5]) * dt)
     rt = (rate[4:6]) / (rate[4] + rate[5]) * (1 - p0)
     rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
-    trans_I = jax.random.multinomial(key_last, I, rt)
+    trans_I = jax.random.multinomial(lastkey, I, rt)
 
     S = S + births - trans_S[0] - trans_S[1]
     E = E + trans_S[0] - trans_E[0] - trans_E[1]
@@ -109,6 +115,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
     C = C + trans_I[0]
+    jax.debug.print("dt: {x}", x=dt)
+    jax.debug.print("dw: {x}", x=dw)
+    jax.debug.print("foi: {x}", x=foi)
+    jax.debug.print("dw/dt: {x}", x=dw / dt)
+    jax.debug.print("rate[0]: {x}", x=rate[0])
     return jnp.array([S, E, I, R, W, C])
 
 
@@ -136,7 +147,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 def rmeas(X_, theta_, key, covars=None, t=None):
     rho = theta_[4]
-    psi = theta_[6]
+    psi = jnp.exp(theta_[6])
     C = X_[5]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)

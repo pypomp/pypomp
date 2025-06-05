@@ -3,6 +3,7 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
+import pandas as pd
 
 from tqdm import tqdm
 from pypomp.pomp_class import Pomp
@@ -30,39 +31,15 @@ def transform_thetas(A, C, Q, R):
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
-# TODO: Replace this with a simulate function.
-def Generate_data(
-    T=4,
-    A=jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
-    C=jnp.eye(2),
-    Q=jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
-    R=jnp.array([[1, 0.1], [0.1, 1]]) / 10,
-    key=jax.random.PRNGKey(111),
-):
-    xs = []
-    ys = []
-    for i in tqdm(range(T)):
-        x = jnp.ones(2)
-        key, subkey = jax.random.split(key)
-        x = jax.random.multivariate_normal(key=subkey, mean=A @ x, cov=Q)
-        key, subkey = jax.random.split(key)
-        y = jax.random.multivariate_normal(key=subkey, mean=C @ x, cov=R)
-        xs.append(x)
-        ys.append(y)
-    xs = jnp.array(xs)
-    ys = jnp.array(ys)
-    return ys
-
-
 # TODO: Add custom starting position.
-@RInit
+@partial(RInit, t0=0)
 def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
 
 
-@RProc
+@partial(RProc, step_type="onestep")
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
@@ -76,7 +53,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_, R)
 
 
-@partial(RMeas, ydim=4)
+@partial(RMeas, ydim=2)
 def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
@@ -121,15 +98,30 @@ def LG(
     theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
     theta = dict(zip(theta_names, transform_thetas(A, C, Q, R).tolist()))
 
-    covars = None
-    ys = Generate_data(T=T, A=A, C=C, Q=Q, R=R, key=key)
+    ys_temp = pd.DataFrame(0, index=range(1, T + 1), columns=["Y"])
+
+    LG_obj_temp = Pomp(
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        rmeas=rmeas,
+        ys=ys_temp,
+        theta=theta,
+        covars=None,
+    )
+    sims = LG_obj_temp.simulate(key=key)
+    sims["Y_sims"]
+
     LG_obj = Pomp(
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,
         rmeas=rmeas,
-        ys=ys,
+        ys=pd.DataFrame(
+            sims["Y_sims"].squeeze(), index=range(1, T + 1), columns=["Y1", "Y2"]
+        ),
         theta=theta,
-        covars=covars,
+        covars=None,
     )
+
     return LG_obj

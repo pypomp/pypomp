@@ -15,7 +15,7 @@ from pypomp.model_struct import RMeas
 # Not sure if this is the best way to implement this.
 class UKMeasles:
     module_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(module_dir,os.pardir,"data/uk_measles")
+    data_dir = os.path.join(module_dir, os.pardir, "data/uk_measles")
     data_file = os.path.join(data_dir, "uk_measles.pkl")
     with open(data_file, "rb") as f:
         data = pickle.load(f)
@@ -99,7 +99,7 @@ class UKMeasles:
             theta=theta,
             covars=covar_df,
             rinit=RInit(m001b.rinit, t0=t0),
-            rproc=RProc(m001b.rproc, time_helper="euler", dt=dt, accumvars=(4, 5)),
+            rproc=RProc(m001b.rproc, step_type="euler", dt=dt, accumvars=(4, 5)),
             dmeas=DMeas(m001b.dmeas),
             rmeas=RMeas(m001b.rmeas, ydim=1),
         )

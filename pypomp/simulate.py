@@ -92,7 +92,7 @@ def _simulate_internal(
     Y_array = jnp.zeros((ylen, ydim, Nsim))
     _simulate_helper2 = partial(
         _simulate_helper,
-        times=jnp.concatenate([jnp.array([t0]), times]),
+        times0=jnp.concatenate([jnp.array([t0]), times]),
         rprocess=rprocess,
         rmeasure=rmeasure,
         theta=theta,
@@ -113,7 +113,7 @@ def _simulate_internal(
 def _simulate_helper(
     i: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
-    times: jax.Array,
+    times0: jax.Array,
     rprocess: callable,
     rmeasure: callable,
     theta: jax.Array,
@@ -122,8 +122,8 @@ def _simulate_helper(
     Nsim: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     (X_sims, X_array, Y_array, key) = inputs
-    t1 = times[i]
-    t2 = times[i + 1]
+    t1 = times0[i]
+    t2 = times0[i + 1]
 
     key, *keys = jax.random.split(key, num=Nsim + 1)
     keys = jnp.array(keys)

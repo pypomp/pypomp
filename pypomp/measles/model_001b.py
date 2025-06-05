@@ -124,24 +124,28 @@ def rproc(X_, theta_, key, covars, t, dt):
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
+    rho = theta_[4]
+    psi = jnp.exp(theta_[6])
     C = X_[5]
-    m = theta_[4] * C
-    v = m * (1.0 - theta_[4] + theta_[6] ** 2 * m)
     tol = 1.0e-18
-    if jnp.isnan(Y_):
-        lik = 1.0
-    else:
-        if C < 0:
-            lik = 0.0
-        else:
-            if Y_ > tol:
-                lik = (
-                    jax.scipy.stats.norm.cdf(Y_ + 0.5, m, jnp.sqrt(v) + tol)
-                    - jax.scipy.stats.norm.cdf(Y_ - 0.5, m, jnp.sqrt(v) + tol)
-                    + tol
-                )
-            else:
-                lik = jax.scipy.stats.norm.cdf(Y_ + 0.5, m, jnp.sqrt(v) + tol) + tol
+
+    m = rho * C
+    v = m * (1.0 - rho + psi**2 * m)
+    sqrt_v_tol = jnp.sqrt(v) + tol
+
+    upper_cdf = jax.scipy.stats.norm.cdf(Y_ + 0.5, m, sqrt_v_tol)
+
+    lik = (
+        jnp.where(
+            Y_ > tol,
+            upper_cdf - jax.scipy.stats.norm.cdf(Y_ - 0.5, m, sqrt_v_tol),
+            upper_cdf,
+        )
+        + tol
+    )
+
+    lik = jnp.where(C < 0, 0.0, lik)
+    lik = jnp.where(jnp.isnan(Y_), 1.0, lik)
     return jnp.log(lik)
 
 

@@ -34,7 +34,7 @@ class PanelPomp:
         rproc=None,
         rmeas=None,
         theta=None,
-        ylen=None,
+        times=None,
         covars=None,
         Nsim=1,
     ):
@@ -57,10 +57,9 @@ class PanelPomp:
             Simulator for the measurement model. Defaults to None.
         theta : array-like, optional
             Parameters involved in the POMP model. Defaults to None.
-        ylen : int, optional
-            The number of observations to generate in one time series. Defaults
-            to None, in which case simulate uses the length of the time series
-            stored in the Pomp object.
+        times : jax.Array, optional
+            The times at which to generate observations. Defaults to None, in which
+            case simulate uses the times stored in the Pomp object.
         covars : array-like, optional
             Covariates for the process, or None if not applicable. Defaults to
             None.
@@ -82,7 +81,7 @@ class PanelPomp:
                 rproc=rproc,
                 rmeas=rmeas,
                 theta=theta,
-                ylen=ylen,
+                times=times,
                 covars=covars,
                 Nsim=Nsim,
             )

@@ -1,16 +1,16 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
+import xarray as xr
 from jax import jit
 from tqdm import tqdm
-import xarray as xr
+from typing import Optional, Union
 from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
-
-# from .internal_functions import _rinits_internal
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
+from .internal_functions import _interp_covars
 
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
@@ -72,6 +72,8 @@ def mif(
 
     nLLs, theta_ests = _mif_internal(
         theta=jnp.array(list(theta.values())),
+        t0=rinit.t0,
+        times=jnp.array(ys.index),
         ys=jnp.array(ys),
         rinitializer=rinit.struct_pf,
         rprocess=rproc.struct_pf,
@@ -81,6 +83,7 @@ def mif(
         dmeasures=dmeas.struct_per,
         sigmas=sigmas,
         sigmas_init=sigmas_init,
+        ctimes=jnp.array(covars.index) if covars is not None else None,
         covars=jnp.array(covars) if covars is not None else None,
         M=M,
         a=a,
@@ -106,57 +109,28 @@ def mif(
 
 
 def _mif_internal(
-    theta,
-    ys,
-    rinitializer,
-    rprocess,
-    dmeasure,
-    rinitializers,
-    rprocesses,
-    dmeasures,
-    sigmas,
-    sigmas_init,
-    covars,
-    M,
-    a,
-    J,
-    thresh,
-    monitor,
-    verbose,
-    key,
-):
-    """
-    Internal function for conducting the iterated filtering (IF2) algorithm.
-    This is called in the '_fit_internal' function.
-
-    Args:
-        theta (array-like): Parameters involved in the POMP model.
-        ys (array-like): The measurement array.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        rprocesses (function): Simulator for the perturbed process model.
-        dmeasures (function): Density evaluation for the perturbed measurement
-            model.
-        sigmas (float): Perturbed factor.
-        sigmas_init (float): Initial perturbed factor.
-        covars (array-like, optional): Covariates or None if not applicable.
-            Defaults to None.
-        M (int, optional): Algorithm Iteration. Defaults to 10.
-        a (float, optional): Decay factor for sigmas. Defaults to 0.95.
-        J (int, optional): The number of particles. Defaults to 100.
-        thresh (float, optional): Threshold value to determine whether to
-            resample particles. Defaults to 100.
-        monitor (bool, optional): Boolean flag controlling whether to monitor
-            the log-likelihood value. Defaults to False.
-        verbose (bool, optional): Boolean flag controlling whether to print out
-            the log-likehood and parameter information. Defaults to False.
-
-    Returns:
-        tuple: A tuple containing:
-        - An array of negative log-likelihood through the iterations.
-        - An array of parameters through the iterations.
-    """
+    theta: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    rinitializer: callable,
+    rprocess: callable,
+    dmeasure: callable,
+    rinitializers: callable,
+    rprocesses: callable,
+    dmeasures: callable,
+    sigmas: Union[float, jax.Array],
+    sigmas_init: Union[float, jax.Array],
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    M: int,
+    a: float,
+    J: int,
+    thresh: float,
+    monitor: bool,
+    verbose: bool,
+    key: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
     logliks = []
     params = []
 
@@ -170,12 +144,15 @@ def _mif_internal(
             jnp.array(
                 [
                     _pfilter_internal(
-                        thetas.mean(0),
-                        ys,
-                        J,
-                        rinitializer,
-                        rprocess,
-                        dmeasure,
+                        theta=thetas.mean(0),
+                        t0=t0,
+                        times=times,
+                        ys=ys,
+                        J=J,
+                        rinitializer=rinitializer,
+                        rprocess=rprocess,
+                        dmeasure=dmeasure,
+                        ctimes=ctimes,
                         covars=covars,
                         thresh=thresh,
                         key=subkey,
@@ -195,19 +172,21 @@ def _mif_internal(
             shape=thetas.shape, key=subkeys[0]
         )
         loglik_ext, thetas = _perfilter_internal(
-            thetas,
-            ys,
-            J,
-            sigmas,
-            rinitializers,
-            rprocesses,
-            dmeasures,
+            thetas=thetas,
+            t0=t0,
+            times=times,
+            ys=ys,
+            J=J,
+            sigmas=sigmas,
+            rinitializers=rinitializers,
+            rprocesses=rprocesses,
+            dmeasures=dmeasures,
             ndim=ndim,
+            ctimes=ctimes,
             covars=covars,
             thresh=thresh,
             key=subkeys[1],
         )
-
         params.append(thetas)
 
         if monitor:
@@ -216,12 +195,15 @@ def _mif_internal(
                 jnp.array(
                     [
                         _pfilter_internal(
-                            thetas.mean(0),
-                            ys,
-                            J,
-                            rinitializer,
-                            rprocess,
-                            dmeasure,
+                            theta=thetas.mean(0),
+                            t0=t0,
+                            times=times,
+                            ys=ys,
+                            J=J,
+                            rinitializer=rinitializer,
+                            rprocess=rprocess,
+                            dmeasure=dmeasure,
+                            ctimes=ctimes,
                             covars=covars,
                             thresh=thresh,
                             key=subkey,
@@ -230,7 +212,6 @@ def _mif_internal(
                     ]
                 )
             )
-
             logliks.append(loglik)
 
             if verbose:
@@ -240,142 +221,92 @@ def _mif_internal(
     return jnp.array(logliks), jnp.array(params)
 
 
-@partial(jit, static_argnums=(2, 4, 5, 6, 7))
+@partial(jit, static_argnums=(4, 6, 7, 8, 9))
 def _perfilter_internal(
-    theta,
-    ys,
-    J,
-    sigmas,
-    rinitializers,
-    rprocesses,
-    dmeasures,
-    ndim,
-    covars,
-    thresh,
-    key,
+    thetas: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,  # static
+    sigmas: Union[float, jax.Array],
+    rinitializers: callable,  # static
+    rprocesses: callable,  # static
+    dmeasures: callable,  # static
+    ndim: int,  # static
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
+    key: jax.Array,
 ):
     """
-    Internal functions for perturbed particle filtering algorithm, which calls
+    Internal function for the perturbed particle filtering algorithm, which calls
     function 'perfilter_helper' iteratively.
     """
     loglik = 0
     key, subkey = jax.random.split(key)
-    thetas = theta + sigmas * jax.random.normal(
-        shape=(J,) + theta.shape[-ndim:], key=subkey
+    thetas = thetas + sigmas * jax.random.normal(
+        shape=(J,) + thetas.shape[-ndim:], key=subkey
     )
+
     key, keys = _keys_helper(key=key, J=J, covars=covars)
-    # Took this if statement from _perfilter_helper, but I'm not sure why it's needed.
-    if covars is not None:
-        particlesF = rinitializers(thetas, keys, covars)
-    else:
-        particlesF = rinitializers(thetas, keys, None)
+    covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
+    particlesF = rinitializers(thetas, keys, covars_t, t0)
+
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
-    # if key is None:
-    # key = jax.random.PRNGKey(np.random.choice(int(1e18)))
+
     perfilter_helper_2 = partial(
-        _perfilter_helper, rprocesses=rprocesses, dmeasures=dmeasures
+        _perfilter_helper,
+        times0=jnp.concatenate([jnp.array([t0]), times]),
+        ys=ys,
+        rprocesses=rprocesses,
+        dmeasures=dmeasures,
+        sigmas=sigmas,
+        ctimes=ctimes,
+        covars=covars,
+        thresh=thresh,
     )
-    (
-        particlesF,
-        thetas,
-        sigmas,
-        covars,
-        loglik,
-        norm_weights,
-        counts,
-        ys,
-        thresh,
-        key,
-    ) = jax.lax.fori_loop(
+    (particlesF, thetas, loglik, norm_weights, counts, key) = jax.lax.fori_loop(
         lower=0,
         upper=len(ys),
         body_fun=perfilter_helper_2,
-        init_val=[
-            particlesF,
-            thetas,
-            sigmas,
-            covars,
-            loglik,
-            norm_weights,
-            counts,
-            ys,
-            thresh,
-            key,
-        ],
+        init_val=[particlesF, thetas, loglik, norm_weights, counts, key],
     )
 
     return -loglik, thetas
 
 
-@partial(jit, static_argnums=(2, 4, 5, 6, 7))
-def _perfilter_internal_mean(
-    theta,
-    ys,
-    J,
-    sigmas,
-    rinitializers,
-    rprocesses,
-    dmeasures,
-    ndim,
-    covars,
-    thresh,
-    key,
+def _perfilter_helper(
+    i: int,
+    inputs,
+    times0: jax.Array,
+    ys: jax.Array,
+    rprocesses: callable,
+    dmeasures: callable,
+    sigmas: jax.Array,
+    ctimes: Optional[jax.Array],
+    covars: Optional[jax.Array],
+    thresh: float,
 ):
-    """
-    Internal functions for calculating the mean result using perturbed particle
-    filtering algorithm across the measurements.
-    """
-    value, thetas = _perfilter_internal(
-        theta,
-        ys,
-        J,
-        sigmas,
-        rinitializers,
-        rprocesses,
-        dmeasures,
-        ndim,
-        covars,
-        thresh,
-        key,
-    )
-    return value / len(ys), thetas
-
-
-def _perfilter_helper(t, inputs, rprocesses, dmeasures):
     """
     Helper functions for perturbed particle filtering algorithm, which conducts
     a single iteration of filtering and is called in function
     'perfilter_internal'.
     """
-    (
-        particlesF,
-        thetas,
-        sigmas,
-        covars,
-        loglik,
-        norm_weights,
-        counts,
-        ys,
-        thresh,
-        key,
-    ) = inputs
+    (particlesF, thetas, loglik, norm_weights, counts, key) = inputs
     J = len(particlesF)
-
-    key, keys = _keys_helper(key=key, J=J, covars=covars)
+    t1 = times0[i]
+    t2 = times0[i + 1]
 
     key, subkey = jax.random.split(key)
     thetas += sigmas * jnp.array(jax.random.normal(shape=thetas.shape, key=subkey))
 
-    # Get prediction particles
-    # r processes: particleF and thetas are both vectorized (J times)
-    if covars is not None:
-        particlesP = rprocesses(particlesF, thetas, keys, covars)
-    else:
-        particlesP = rprocesses(particlesF, thetas, keys, None)
+    key, keys = _keys_helper(key=key, J=J, covars=covars)
+    particlesP = rprocesses(particlesF, thetas, keys, ctimes, covars, t1, t2)
 
+    covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
     measurements = jnp.nan_to_num(
-        dmeasures(ys[t], particlesP, thetas, covars).squeeze(), nan=jnp.log(1e-18)
+        dmeasures(ys[i], particlesP, thetas, covars_t, t2).squeeze(), nan=jnp.log(1e-18)
     )  # shape (Np,)
 
     if len(measurements.shape) > 1:
@@ -391,22 +322,7 @@ def _perfilter_helper(t, inputs, rprocesses, dmeasures):
         oddr > thresh,
         _resampler_thetas,
         _no_resampler_thetas,
-        counts,
-        particlesP,
-        norm_weights,
-        thetas,
-        subkey,
+        *(counts, particlesP, norm_weights, thetas, subkey),
     )
 
-    return [
-        particlesF,
-        thetas,
-        sigmas,
-        covars,
-        loglik,
-        norm_weights,
-        counts,
-        ys,
-        thresh,
-        key,
-    ]
+    return [particlesF, thetas, loglik, norm_weights, counts, key]

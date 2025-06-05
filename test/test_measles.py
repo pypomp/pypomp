@@ -30,8 +30,14 @@ class Test_Measles(unittest.TestCase):
             },
             # dt=7 / 365.25,
         )
+        self.J = 3
+        self.key = jax.random.key(1)
+        self.M = 2
+        self.sigmas = 0.02
+        self.sigmas_init = 0.1
+        self.a = 0.987
 
-    def test_measles_pomp(self):
+    def test_measles_sim(self):
         x = self.measles
         # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
         out2 = x.simulate(
@@ -67,3 +73,16 @@ class Test_Measles(unittest.TestCase):
                 axs[i].legend()
             plt.tight_layout()
             plt.show()
+
+    def test_measles_pfilter(self):
+        self.measles.pfilter(J=self.J, key=self.key)
+
+    def test_measles_mif(self):
+        self.measles.mif(
+            J=self.J,
+            key=self.key,
+            M=self.M,
+            sigmas=self.sigmas,
+            sigmas_init=self.sigmas_init,
+            a=self.a,
+        )

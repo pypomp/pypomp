@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import os
 import pickle
 import pypomp.measles.model_001b as m001b
 from scipy.interpolate import make_splrep
@@ -13,7 +14,10 @@ from pypomp.model_struct import RMeas
 
 # Not sure if this is the best way to implement this.
 class UKMeasles:
-    with open("pypomp/data/uk_measles/uk_measles.pkl", "rb") as f:
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(module_dir,os.pardir,"data/uk_measles")
+    data_file = os.path.join(data_dir, "uk_measles.pkl")
+    with open(data_file, "rb") as f:
         data = pickle.load(f)
 
     @staticmethod

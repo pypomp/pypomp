@@ -10,7 +10,10 @@ from pypomp.internal_functions import _interp_covars
 
 
 def _time_interp(
-    rproc: Callable, step_type: str, dt: float | None, accumvars: tuple[int, ...] | None
+    rproc: Callable,
+    step_type: str,
+    dt: float | None,
+    accumvars: tuple[int, ...] | None,
 ) -> Callable:
     def _interp_helper(
         i: int,
@@ -42,15 +45,18 @@ def _time_interp(
 
         check2 = t1 >= t2
         nstep = jnp.where(check2, 0, nstep)
-        dt2 = jnp.where(check2, 0.0, nstep)
+        dt2 = jnp.where(check2, 0.0, dt2)
 
         return nstep, dt2
 
+    num_step_func = None
     match step_type:
         case "onestep":
             num_step_func = _num_onestep_steps
         case "euler":
             num_step_func = _num_euler_steps
+    if num_step_func is None:
+        raise ValueError("step_type must be either 'onestep' or 'euler'")
 
     def _rproc_interp(
         X_: jax.Array,
@@ -66,11 +72,11 @@ def _time_interp(
     ) -> jax.Array:
         X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
         nstep, dt2 = num_step_func(t1, t2, dt=dt)
-        euler_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
+        interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
         X_, theta_, key, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep,
-            body_fun=euler_helper2,
+            body_fun=interp_helper2,
             init_val=(X_, theta_, key, t1),
         )
         return X_

@@ -324,7 +324,7 @@ class Pomp:
         dmeas = self.dmeas if dmeas is None else dmeas
         covars = self.covars if covars is None else covars
 
-        if self.dmeas is None:
+        if dmeas is None:
             raise ValueError("dmeas cannot be None")
 
         return train(

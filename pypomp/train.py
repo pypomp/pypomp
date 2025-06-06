@@ -2,6 +2,7 @@ from functools import partial
 import jax
 from jax import jit
 import jax.numpy as jnp
+import pandas as pd
 import numpy as np
 import xarray as xr
 from tqdm import tqdm
@@ -9,32 +10,33 @@ from typing import Callable
 from .pfilter import _pfilter_internal
 from .pfilter import _pfilter_internal_mean
 from .mop import _mop_internal_mean
+from .model_struct import RInit, RProc, DMeas
 
 MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
 
 def train(
-    rinit,
-    rproc,
-    dmeas,
-    ys,
-    theta,
-    J,
-    Jh,
-    key,
-    covars=None,
-    method="Newton",
-    itns=20,
-    beta=0.9,
-    eta=0.0025,
-    c=0.1,
-    max_ls_itn=10,
-    thresh=0,
-    verbose=False,
-    scale=False,
-    ls=False,
-    alpha=0.97,
-):
+    rinit: RInit,
+    rproc: RProc,
+    dmeas: DMeas,
+    ys: pd.DataFrame,
+    theta: dict,
+    J: int,
+    Jh: int,
+    key: jax.Array,
+    covars: pd.DataFrame | None = None,
+    method: str = "Newton",
+    itns: int = 20,
+    beta: float = 0.9,
+    eta: float = 0.0025,
+    c: float = 0.1,
+    max_ls_itn: int = 10,
+    thresh: int = 0,
+    verbose: bool = False,
+    scale: bool = False,
+    ls: bool = False,
+    alpha: float = 0.97,
+) -> dict:
     """
     This function runs the MOP gradient-based iterative optimization method.
 

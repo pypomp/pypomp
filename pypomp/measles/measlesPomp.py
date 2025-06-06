@@ -86,6 +86,8 @@ class UKMeasles:
         elif interp_method == "linear":
             pop_interp = np.interp(times, demog["year"], demog["pop"])
             births_interp = np.interp(times - 4, demog["year"], demog["births"])
+        else:
+            raise ValueError(f"interp_method {interp_method} not recognized")
 
         covar_df = pd.DataFrame(
             {"time": times, "pop": pop_interp, "birthrate": births_interp}

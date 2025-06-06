@@ -1,7 +1,6 @@
 from .pomp_class import Pomp
 from .panelPomp_class import PanelPomp
 from .LG import LG
-from .dacca import dacca
 from .measles.measlesPomp import UKMeasles
 from .simulate import simulate
 from .pfilter import pfilter

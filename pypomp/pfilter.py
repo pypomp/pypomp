@@ -52,15 +52,15 @@ def pfilter(
         raise TypeError("Each value of theta must be a float")
 
     return -_pfilter_internal(
-        theta=jnp.array(list(theta.values())),
-        ys=jnp.array(ys),
-        J=J,
-        rinitializer=rinit.struct_pf,
-        rprocess=rproc.struct_pf,
-        dmeasure=dmeas.struct_pf,
-        covars=jnp.array(covars) if covars is not None else None,
-        thresh=thresh,
-        key=key,
+        jnp.array(list(theta.values())),
+        jnp.array(ys),
+        J,
+        rinit.struct_pf,
+        rproc.struct_pf,
+        dmeas.struct_pf,
+        jnp.array(covars) if covars is not None else None,
+        thresh,
+        key,
     )
 
 

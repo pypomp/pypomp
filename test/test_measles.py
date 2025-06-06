@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import unittest
 import pypomp as pp
 import jax
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 # jax.config.update("jax_enable_x64", True)
 
@@ -45,34 +45,34 @@ class Test_Measles(unittest.TestCase):
             Nsim=1,  # times=self.measles.ys.index[0:1]
         )
 
-        if False:  # Process and obs plots
-            fig, axs = plt.subplots(7, 1, sharex=True)
-            sim_n = 0
-            for i in range(6):
-                axs[i].plot(
-                    out2["X_sims"].coords["time"],
-                    out2["X_sims"].sel(sim=sim_n, element=i),
-                )
-                axs[i].set_title(f"Element {i}")
-            axs[6].plot(
-                out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=sim_n, element=0)
-            )
-            axs[6].set_title("Observed")
-            plt.xlabel("time")
-            plt.ylabel("Value")
-            plt.title("London")
-            plt.show()
+        # if False:  # Process and obs plots
+        #     fig, axs = plt.subplots(7, 1, sharex=True)
+        #     sim_n = 0
+        #     for i in range(6):
+        #         axs[i].plot(
+        #             out2["X_sims"].coords["time"],
+        #             out2["X_sims"].sel(sim=sim_n, element=i),
+        #         )
+        #         axs[i].set_title(f"Element {i}")
+        #     axs[6].plot(
+        #         out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=sim_n, element=0)
+        #     )
+        #     axs[6].set_title("Observed")
+        #     plt.xlabel("time")
+        #     plt.ylabel("Value")
+        #     plt.title("London")
+        #     plt.show()
 
-        if False:  # Covars plots
-            fig, axs = plt.subplots(2, 1, sharex=True)
-            for i, key in enumerate(["pop", "birthrate"]):
-                axs[i].plot(x.covars.index, x.covars[key], label=key)
-                axs[i].set_title(key)
-                axs[i].set_xlabel("Time")
-                axs[i].set_ylabel(key.capitalize())
-                axs[i].legend()
-            plt.tight_layout()
-            plt.show()
+        # if False:  # Covars plots
+        #     fig, axs = plt.subplots(2, 1, sharex=True)
+        #     for i, key in enumerate(["pop", "birthrate"]):
+        #         axs[i].plot(x.covars.index, x.covars[key], label=key)
+        #         axs[i].set_title(key)
+        #         axs[i].set_xlabel("Time")
+        #         axs[i].set_ylabel(key.capitalize())
+        #         axs[i].legend()
+        #     plt.tight_layout()
+        #     plt.show()
 
     def test_measles_pfilter(self):
         self.measles.pfilter(J=self.J, key=self.key)

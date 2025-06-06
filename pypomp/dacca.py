@@ -1,4 +1,4 @@
-from functools import partial
+# from functools import partial
 import os
 import csv
 import jax
@@ -22,7 +22,7 @@ def get_thetas(theta):
     sigma = jnp.exp(theta[7])
     tau = jnp.exp(theta[8])
     bs = theta[9:15]
-    omegas = theta[15:]
+    omegas = theta[15:21]
     k = 3
     delta = 0.02
     return (
@@ -267,7 +267,7 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
     # rdeaths = jnp.zeros(nrstage)  # the number of death in R1, R2, R3
     passages = jnp.zeros(nrstage + 1)
 
-    rproc_step2 = partial(
+    rproc_step2 = jax.tree_util.Partial(
         rproc_step,
         trends=trends,
         dpopdts=dpopdts,

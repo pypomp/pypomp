@@ -6,7 +6,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
-from typing import Optional
+from typing import Callable
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
@@ -76,11 +76,11 @@ def _mop_internal(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ) -> float:
@@ -111,7 +111,7 @@ def _mop_internal(
         lower=0,
         upper=len(ys),
         body_fun=mop_helper_2,
-        init_val=[particlesF, loglik, weightsF, counts, key],
+        init_val=(particlesF, loglik, weightsF, counts, key),
     )
 
     return -loglik
@@ -124,11 +124,11 @@ def _mop_internal_mean(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ) -> float:
@@ -154,16 +154,16 @@ def _mop_internal_mean(
 
 def _mop_helper(
     i: int,
-    inputs: tuple[jax.Array, float, jax.Array, jax.Array, jax.Array],
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
     times0: jax.Array,
     ys: jax.Array,
     theta: jax.Array,
-    rprocess: callable,
-    dmeasure: callable,
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rprocess: Callable,
+    dmeasure: Callable,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
-) -> tuple[jax.Array, float, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper functions for MOP algorithm, which conducts a single iteration of
     filtering and is called in function 'mop_internal'.
@@ -203,4 +203,4 @@ def _mop_helper(
 
     weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[counts]
 
-    return [particlesF, loglik, weightsF, counts, key]
+    return (particlesF, loglik, weightsF, counts, key)

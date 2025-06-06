@@ -1,8 +1,10 @@
 from functools import partial
 import jax.numpy as jnp
 import jax
+import pandas as pd
 from jax import jit
-from typing import Optional
+from typing import Callable
+from .model_struct import RInit, RProc, DMeas
 from .internal_functions import _resampler
 from .internal_functions import _no_resampler
 from .internal_functions import _keys_helper
@@ -12,13 +14,13 @@ from .internal_functions import _interp_covars
 
 def pfilter(
     J: int,
-    rinit: callable,
-    rproc: callable,
-    dmeas: callable,
+    rinit: RInit,
+    rproc: RProc,
+    dmeas: DMeas,
     theta: dict,
-    ys: jax.Array,
+    ys: pd.DataFrame,
     key: jax.Array,
-    covars: Optional[jax.Array] = None,
+    covars: pd.DataFrame | None = None,
     thresh: float = 0,
 ) -> float:
     """
@@ -76,11 +78,11 @@ def _pfilter_internal(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -110,7 +112,7 @@ def _pfilter_internal(
         lower=0,
         upper=len(ys),
         body_fun=pfilter_helper_2,
-        init_val=[particlesF, loglik, norm_weights, counts, key],
+        init_val=(particlesF, loglik, norm_weights, counts, key),
     )
 
     return -loglik
@@ -123,11 +125,11 @@ def _pfilter_internal_mean(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -158,12 +160,12 @@ def _pfilter_helper(
     times0: jax.Array,
     ys: jax.Array,
     theta: jax.Array,
-    rprocess: callable,
-    dmeasure: callable,
-    ctimes: jax.Array,
-    covars: jax.Array,
+    rprocess: Callable,
+    dmeasure: Callable,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
-) -> tuple[jax.Array, float, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper function for the particle filtering algorithm in POMP, which conducts
     filtering for one time-iteration.
@@ -194,4 +196,4 @@ def _pfilter_helper(
         *(counts, particlesP, norm_weights, subkey),
     )
 
-    return [particlesF, loglik, norm_weights, counts, key]
+    return (particlesF, loglik, norm_weights, counts, key)

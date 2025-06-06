@@ -2,8 +2,10 @@
 This module implements the OOP structure for PanelPOMP models.
 """
 
-from .pomp_class import Pomp
 import jax
+import pandas as pd
+from .pomp_class import Pomp
+from .model_struct import RInit, RProc, DMeas, RMeas
 
 
 class PanelPomp:
@@ -29,15 +31,15 @@ class PanelPomp:
 
     def simulate(
         self,
-        key,
-        rinit=None,
-        rproc=None,
-        rmeas=None,
-        theta=None,
-        times=None,
-        covars=None,
-        Nsim=1,
-    ):
+        key: jax.Array,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        rmeas: RMeas | None = None,
+        theta: dict | None = None,
+        times: jax.Array | None = None,
+        covars: pd.DataFrame | None = None,
+        Nsim: int = 1,
+    ) -> dict:
         """
         Simulate the PanelPOMP model.
 
@@ -89,16 +91,16 @@ class PanelPomp:
 
     def pfilter(
         self,
-        J,
-        key=None,
-        theta=None,
-        ys=None,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        covars=None,
-        thresh=0,
-    ):
+        J: int,
+        key: jax.Array,
+        theta: dict | None = None,
+        ys: jax.Array | None = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        covars: pd.DataFrame | None = None,
+        thresh: float = 0,
+    ) -> dict:
         """
         Run the pfilter method on the individual Pomp models.
 
@@ -150,22 +152,22 @@ class PanelPomp:
 
     def mif(
         self,
-        J,
-        key,
-        sigmas,
-        sigmas_init,
-        M,
-        a,
-        theta=None,
-        ys=None,
-        rinit=None,
-        rproc=None,
-        dmeas=None,
-        covars=None,
-        thresh=0,
-        monitor=False,
-        verbose=False,
-    ):
+        J: int,
+        key: jax.Array,
+        sigmas: float,
+        sigmas_init: float,
+        M: int,
+        a: float,
+        theta: dict | None = None,
+        ys: jax.Array | None = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        covars: pd.DataFrame | None = None,
+        thresh: float = 0,
+        monitor: bool = False,
+        verbose: bool = False,
+    ) -> dict:
         """
         Run the mif method on the individual Pomp models.
 

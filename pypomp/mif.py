@@ -2,9 +2,11 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import xarray as xr
+import pandas as pd
 from jax import jit
 from tqdm import tqdm
-from typing import Optional, Union
+from typing import Callable
+from .model_struct import RInit, RProc, DMeas
 from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
@@ -16,21 +18,21 @@ MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
 
 def mif(
-    rinit,
-    rproc,
-    dmeas,
-    ys,
-    theta,
-    sigmas,
-    sigmas_init,
-    M,
-    a,
-    J,
-    key,
-    covars=None,
-    thresh=0,
-    monitor=False,
-    verbose=False,
+    rinit: RInit,
+    rproc: RProc,
+    dmeas: DMeas,
+    ys: pd.DataFrame,
+    theta: dict,
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
+    M: int,
+    a: float,
+    J: int,
+    key: jax.Array,
+    covars: pd.DataFrame | None = None,
+    thresh: float = 0.0,
+    monitor: bool = False,
+    verbose: bool = False,
 ):
     """
     Perform the iterated filtering (IF2) algorithm for a partially observed
@@ -113,16 +115,16 @@ def _mif_internal(
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    rinitializer: callable,
-    rprocess: callable,
-    dmeasure: callable,
-    rinitializers: callable,
-    rprocesses: callable,
-    dmeasures: callable,
-    sigmas: Union[float, jax.Array],
-    sigmas_init: Union[float, jax.Array],
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,
+    rprocess: Callable,
+    dmeasure: Callable,
+    rinitializers: Callable,
+    rprocesses: Callable,
+    dmeasures: Callable,
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     M: int,
     a: float,
     J: int,
@@ -228,13 +230,13 @@ def _perfilter_internal(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    sigmas: Union[float, jax.Array],
-    rinitializers: callable,  # static
-    rprocesses: callable,  # static
-    dmeasures: callable,  # static
+    sigmas: jax.Array,
+    rinitializers: Callable,  # static
+    rprocesses: Callable,  # static
+    dmeasures: Callable,  # static
     ndim: int,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -270,7 +272,7 @@ def _perfilter_internal(
         lower=0,
         upper=len(ys),
         body_fun=perfilter_helper_2,
-        init_val=[particlesF, thetas, loglik, norm_weights, counts, key],
+        init_val=(particlesF, thetas, loglik, norm_weights, counts, key),
     )
 
     return -loglik, thetas
@@ -278,16 +280,16 @@ def _perfilter_internal(
 
 def _perfilter_helper(
     i: int,
-    inputs,
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
     times0: jax.Array,
     ys: jax.Array,
-    rprocesses: callable,
-    dmeasures: callable,
+    rprocesses: Callable,
+    dmeasures: Callable,
     sigmas: jax.Array,
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
-):
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper functions for perturbed particle filtering algorithm, which conducts
     a single iteration of filtering and is called in function
@@ -325,4 +327,4 @@ def _perfilter_helper(
         *(counts, particlesP, norm_weights, thetas, subkey),
     )
 
-    return [particlesF, thetas, loglik, norm_weights, counts, key]
+    return (particlesF, thetas, loglik, norm_weights, counts, key)

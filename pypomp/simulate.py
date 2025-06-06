@@ -1,20 +1,23 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
+import pandas as pd
 import xarray as xr
+from typing import Callable
+from .model_struct import RInit, RProc, RMeas
 from .internal_functions import _keys_helper
 from .internal_functions import _interp_covars
 
 
 def simulate(
-    rinit,
-    rproc,
-    rmeas,
-    theta,
-    times,
-    covars=None,
-    Nsim=1,
-    key=None,
+    rinit: RInit,
+    rproc: RProc,
+    rmeas: RMeas,
+    theta: dict,
+    times: jax.Array,
+    key: jax.Array,
+    covars: pd.DataFrame | None = None,
+    Nsim: int = 1,
 ):
     """
     Simulates the evolution of a system over time using a Partially Observed
@@ -25,12 +28,13 @@ def simulate(
         rproc (RProc): Simulator for the process model.
         rmeas (RMeas): Simulator for the measurement model.
         theta (array-like): Parameters involved in the POMP model.
-        ylen (int): Number of observations to generate in one time series.
-        covars (array-like, optional): Covariates for the process, or None if
-            not applicable. Defaults to None.
-        Nsim (int, optional): The number of simulations to perform. Defaults to 1.
-        key (jax.random.PRNGKey, optional): The random key for random number
+        times (jax.Array): Times at which to generate observations.
+        key (jax.Array): The random key for random number
             generation.
+        covars (pandas.DataFrame, optional): Covariates for the process, or None if
+            not applicable. Defaults to None.
+        Nsim (int): The number of simulations to perform. Defaults to 1.
+
 
     Returns:
         dict: A dictionary of simulated values. 'X' contains the unobserved values
@@ -70,9 +74,9 @@ def simulate(
 
 @partial(jax.jit, static_argnums=(0, 1, 2, 6, 9))
 def _simulate_internal(
-    rinitializer: callable,
-    rprocess: callable,
-    rmeasure: callable,
+    rinitializer: Callable,
+    rprocess: Callable,
+    rmeasure: Callable,
     theta: jax.Array,
     t0: float,
     times: jax.Array,
@@ -114,8 +118,8 @@ def _simulate_helper(
     i: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
     times0: jax.Array,
-    rprocess: callable,
-    rmeasure: callable,
+    rprocess: Callable,
+    rmeasure: Callable,
     theta: jax.Array,
     covars: jax.Array,
     ctimes: jax.Array,

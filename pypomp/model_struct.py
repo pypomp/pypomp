@@ -5,16 +5,19 @@ This file contains the classes for components that define the model structure.
 import jax
 import jax.numpy as jnp
 from functools import partial
-from typing import Optional
+from typing import Callable
 from pypomp.internal_functions import _interp_covars
 
 
-# TODO make _euler more general (e.g., rename and add support for other time step schemes, add parameter transformations)
 def _time_interp(
-    rproc: callable, step_type: str, dt: float, accumvars: tuple[int, ...]
-) -> callable:
+    rproc: Callable, step_type: str, dt: float | None, accumvars: tuple[int, ...] | None
+) -> Callable:
     def _interp_helper(
-        i: int, inputs: tuple, ctimes: jax.Array, covars: jax.Array, dt: float
+        i: int,
+        inputs: tuple[jax.Array, jax.Array, jax.Array, float],
+        ctimes: jax.Array,
+        covars: jax.Array,
+        dt: float,
     ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
         X_, theta_, key, t = inputs
         covars_t = _interp_covars(t, ctimes, covars)
@@ -25,22 +28,22 @@ def _time_interp(
     def _num_onestep_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
         return 1, t2 - t1
 
-    def _num_euler_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
+    def _num_euler_steps(
+        t1: float, t2: float, dt: float
+    ) -> tuple[jax.Array, jax.Array]:
         tol = jnp.sqrt(jnp.finfo(float).eps)
-        nstep, dt2 = jax.lax.cond(
-            t1 >= t2,
-            lambda t1, t2, dt, tol: (0, 0.0),
-            lambda t1, t2, dt, tol: jax.lax.cond(
-                t1 + dt >= t2,
-                lambda t1, t2, dt, tol: (1, t2 - t1),
-                lambda t1, t2, dt, tol: (
-                    jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int),
-                    (t2 - t1) / jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int),
-                ),
-                *(t1, t2, dt, tol),
-            ),
-            *(t1, t2, dt, tol),
-        )
+
+        nstep = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
+        dt2 = (t2 - t1) / nstep
+
+        check1 = t1 + dt >= t2
+        nstep = jnp.where(check1, 1, nstep)
+        dt2 = jnp.where(check1, t2 - t1, dt2)
+
+        check2 = t1 >= t2
+        nstep = jnp.where(check2, 0, nstep)
+        dt2 = jnp.where(check2, 0.0, nstep)
+
         return nstep, dt2
 
     match step_type:
@@ -57,11 +60,11 @@ def _time_interp(
         covars: jax.Array,
         t1: float,
         t2: float,
-        dt: float,
-        accumvars: tuple[int, ...],
-        num_step_func: callable,
+        dt: float | None,
+        accumvars: tuple[int, ...] | None,
+        num_step_func: Callable,
     ) -> jax.Array:
-        X_ = X_.at[:, accumvars].set(0)
+        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
         nstep, dt2 = num_step_func(t1, t2, dt=dt)
         euler_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
         X_, theta_, key, t = jax.lax.fori_loop(
@@ -78,7 +81,7 @@ def _time_interp(
 
 
 class RInit:
-    def __init__(self, struct: callable, t0: Optional[float] = None):
+    def __init__(self, struct: Callable, t0: float):
         """
         Initializes the RInit class with the required function structure.
         While this function can check that the arguments of struct are in the
@@ -99,22 +102,14 @@ class RInit:
         self.struct_pf = jax.vmap(struct, (None, 0, None, None))
         self.struct_per = jax.vmap(struct, (0, 0, None, None))
 
-        # @property
-        # def t0(self):
-        #     return self.t0
-
-        # @t0.setter
-        # def t0(self, t0):
-        #     raise AttributeError("t0 cannot be set.")
-
 
 class RProc:
     def __init__(
         self,
-        struct: callable,
-        step_type: Optional[str] = "onestep",
-        dt: Optional[float] = None,
-        accumvars: Optional[tuple[int, ...]] = None,
+        struct: Callable,
+        step_type: str = "onestep",
+        dt: float | None = None,
+        accumvars: tuple[int, ...] | None = None,
     ):
         """
         Initializes the RProc class with the required function structure.
@@ -133,7 +128,8 @@ class RProc:
         for i, arg in enumerate(["X_", "theta_", "key", "covars", "t", "dt"]):
             if struct.__code__.co_varnames[i] != arg:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
-
+        if step_type == "euler" and dt is None:
+            raise ValueError("dt must be specified if step_type is 'euler'")
         self.struct = _time_interp(
             struct, step_type=step_type, dt=dt, accumvars=accumvars
         )
@@ -152,7 +148,7 @@ class RProc:
 
 
 class DMeas:
-    def __init__(self, struct: callable):
+    def __init__(self, struct: Callable):
         """
         Initializes the DMeas class with the required function structure.
         While this function can check that the arguments of struct are in the
@@ -173,7 +169,7 @@ class DMeas:
 
 
 class RMeas:
-    def __init__(self, struct: callable, ydim: int):
+    def __init__(self, struct: Callable, ydim: int):
         """
         Initializes the RMeas class with the required function structure.
         While this function can check that the arguments of struct are in the

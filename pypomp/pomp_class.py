@@ -3,8 +3,8 @@ This module implements the OOP structure for POMP models.
 """
 
 import jax
+import jax.numpy as jnp
 import pandas as pd
-from typing import Optional
 from .simulate import simulate
 from .mop import mop
 from .pfilter import pfilter
@@ -25,9 +25,9 @@ class Pomp:
         theta: dict,
         rinit: RInit,
         rproc: RProc,
-        dmeas: Optional[DMeas] = None,
-        rmeas: Optional[RMeas] = None,
-        covars: Optional[pd.DataFrame] = None,
+        dmeas: DMeas | None = None,
+        rmeas: RMeas | None = None,
+        covars: pd.DataFrame | None = None,
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -80,12 +80,12 @@ class Pomp:
         self,
         J: int,
         key: jax.Array,
-        rinit: Optional[RInit] = None,
-        rproc: Optional[RProc] = None,
-        dmeas: Optional[DMeas] = None,
-        theta: Optional[dict] = None,
-        ys: Optional[pd.DataFrame] = None,
-        covars: Optional[pd.DataFrame] = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        theta: dict | None = None,
+        ys: pd.DataFrame | None = None,
+        covars: pd.DataFrame | None = None,
         alpha: float = 0.97,
     ) -> float:
         """
@@ -126,12 +126,12 @@ class Pomp:
         self,
         J: int,
         key: jax.Array,
-        theta: Optional[dict] = None,
-        ys: Optional[pd.DataFrame] = None,
-        rinit: Optional[RInit] = None,
-        rproc: Optional[RProc] = None,
-        dmeas: Optional[DMeas] = None,
-        covars: Optional[pd.DataFrame] = None,
+        theta: dict | None = None,
+        ys: pd.DataFrame | None = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        covars: pd.DataFrame | None = None,
         thresh: float = 0,
     ) -> float:
         """
@@ -165,7 +165,7 @@ class Pomp:
         dmeas = self.dmeas if dmeas is None else dmeas
         covars = self.covars if covars is None else covars
 
-        if self.dmeas is None:
+        if dmeas is None:
             raise ValueError("dmeas cannot be None")
 
         return pfilter(
@@ -188,12 +188,12 @@ class Pomp:
         a: float,
         J: int,
         key: jax.Array,
-        ys: pd.DataFrame = None,
-        theta: dict = None,
-        rinit: Optional[RInit] = None,
-        rproc: Optional[RProc] = None,
-        dmeas: Optional[DMeas] = None,
-        covars: Optional[pd.DataFrame] = None,
+        ys: pd.DataFrame | None = None,
+        theta: dict | None = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        covars: pd.DataFrame | None = None,
         thresh: float = 0,
         monitor: bool = False,
         verbose: bool = False,
@@ -237,7 +237,7 @@ class Pomp:
         dmeas = self.dmeas if dmeas is None else dmeas
         covars = self.covars if covars is None else covars
 
-        if self.dmeas is None:
+        if dmeas is None:
             raise ValueError("dmeas cannot be None")
 
         return mif(
@@ -263,12 +263,12 @@ class Pomp:
         J: int,
         Jh: int,
         key: jax.Array,
-        rinit: Optional[RInit] = None,
-        rproc: Optional[RProc] = None,
-        dmeas: Optional[DMeas] = None,
-        ys: Optional[pd.DataFrame] = None,
-        theta: Optional[dict] = None,
-        covars: Optional[pd.DataFrame] = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        dmeas: DMeas | None = None,
+        ys: pd.DataFrame | None = None,
+        theta: dict | None = None,
+        covars: pd.DataFrame | None = None,
         method: str = "Newton",
         itns: int = 20,
         beta: float = 0.9,
@@ -353,12 +353,12 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array,
-        rinit: Optional[RInit] = None,
-        rproc: Optional[RProc] = None,
-        rmeas: Optional[RMeas] = None,
-        theta: Optional[dict] = None,
-        times: Optional[jax.Array] = None,
-        covars: Optional[pd.DataFrame] = None,
+        rinit: RInit | None = None,
+        rproc: RProc | None = None,
+        rmeas: RMeas | None = None,
+        theta: dict | None = None,
+        times: jax.Array | None = None,
+        covars: pd.DataFrame | None = None,
         Nsim: int = 1,
     ) -> dict:
         """
@@ -384,10 +384,10 @@ class Pomp:
         """
         # Use arguments instead of attributes if given
         rinit = self.rinit if rinit is None else rinit
-        rproc = self.rproc if rproc is None else rinit
-        rmeas = self.rmeas if rmeas is None else rinit
-        theta = self.theta if theta is None else rinit
-        times = self.ys.index if times is None else times
+        rproc = self.rproc if rproc is None else rproc
+        rmeas = self.rmeas if rmeas is None else rmeas
+        theta = self.theta if theta is None else theta
+        times = jnp.array(self.ys.index) if times is None else times
         covars = self.covars if covars is None else covars
 
         if rmeas is None:

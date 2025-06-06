@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 from tqdm import tqdm
-from typing import Optional
+from typing import Callable
 from .pfilter import _pfilter_internal
 from .pfilter import _pfilter_internal_mean
 from .mop import _mop_internal_mean
@@ -144,11 +144,11 @@ def _train_internal(
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    rinitializer: callable,
-    rprocess: callable,
-    dmeasure: callable,
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,
+    rprocess: Callable,
+    dmeasure: Callable,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     J: int,
     Jh: int,
     method: str,
@@ -405,7 +405,7 @@ def _train_internal(
 
 
 def _line_search(
-    obj: callable,
+    obj: Callable,
     curr_obj: float,
     pt: jnp.ndarray,
     grad: jnp.ndarray,
@@ -466,11 +466,11 @@ def _jgrad(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -506,11 +506,11 @@ def _jvg(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -561,11 +561,11 @@ def _jgrad_mop(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ):
@@ -601,11 +601,11 @@ def _jvg_mop(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ) -> tuple:
@@ -644,11 +644,11 @@ def _jhess(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ):
@@ -685,11 +685,11 @@ def _jhess_mop(
     times: jax.Array,
     ys: jax.Array,
     J: int,  # static
-    rinitializer: callable,  # static
-    rprocess: callable,  # static
-    dmeasure: callable,  # static
-    ctimes: Optional[jax.Array],
-    covars: Optional[jax.Array],
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    dmeasure: Callable,  # static
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ):

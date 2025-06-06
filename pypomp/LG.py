@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 
-from tqdm import tqdm
 from pypomp.pomp_class import Pomp
 from pypomp.model_struct import RInit
 from pypomp.model_struct import RProc
@@ -98,7 +97,7 @@ def LG(
     theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
     theta = dict(zip(theta_names, transform_thetas(A, C, Q, R).tolist()))
 
-    ys_temp = pd.DataFrame(0, index=range(1, T + 1), columns=["Y"])
+    ys_temp = pd.DataFrame(0, index=range(1, T + 1), columns=pd.Index(["Y1", "Y2"]))
 
     LG_obj_temp = Pomp(
         rinit=rinit,
@@ -118,7 +117,9 @@ def LG(
         dmeas=dmeas,
         rmeas=rmeas,
         ys=pd.DataFrame(
-            sims["Y_sims"].squeeze(), index=range(1, T + 1), columns=["Y1", "Y2"]
+            sims["Y_sims"].squeeze(),
+            index=range(1, T + 1),
+            columns=pd.Index(["Y1", "Y2"]),
         ),
         theta=theta,
         covars=None,

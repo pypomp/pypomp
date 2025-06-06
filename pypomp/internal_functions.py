@@ -14,7 +14,7 @@ import jax.numpy as jnp
 """resampling functions"""
 
 
-def _keys_helper(key, J, covars):
+def _keys_helper(key: jax.Array, J: int, covars: jax.Array | None):
     """
     This function is a helper for generating random keys for resampling in the
     particle filtering algorithms.
@@ -28,7 +28,7 @@ def _keys_helper(key, J, covars):
     return key, keys
 
 
-def _resample(norm_weights, subkey):
+def _resample(norm_weights: jax.Array, subkey: jax.Array):
     """
     Systematic resampling method based on input normalized weights.
 
@@ -54,7 +54,7 @@ def _resample(norm_weights, subkey):
     return counts
 
 
-def _normalize_weights(weights):
+def _normalize_weights(weights: jax.Array):
     """
     Acquires the normalized log-weights and calculates the log-likelihood.
 
@@ -75,7 +75,9 @@ def _normalize_weights(weights):
     return norm_weights, loglik_t
 
 
-def _resampler(counts, particlesP, norm_weights, subkey):
+def _resampler(
+    counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
+):
     """
     Resamples the particles based on the weighted resampling rule determined by
     norm_weights and the original particles generated from the previous
@@ -107,14 +109,22 @@ def _resampler(counts, particlesP, norm_weights, subkey):
     return counts, particlesF, norm_weights
 
 
-def _no_resampler(counts, particlesP, norm_weights, subkey):
+def _no_resampler(
+    counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
+):
     """
     Obtains the original input arguments without resampling.
     """
     return counts, particlesP, norm_weights
 
 
-def _resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
+def _resampler_thetas(
+    counts: jax.Array,
+    particlesP: jax.Array,
+    norm_weights: jax.Array,
+    thetas: jax.Array,
+    subkey: jax.Array,
+):
     """
     Resamples the particles for perturbed particle filtering method, with their
     corresponding parameters also resampled
@@ -149,7 +159,13 @@ def _resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
     return counts, particlesF, norm_weights, thetasF
 
 
-def _no_resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
+def _no_resampler_thetas(
+    counts: jax.Array,
+    particlesP: jax.Array,
+    norm_weights: jax.Array,
+    thetas: jax.Array,
+    subkey: jax.Array,
+):
     """
     Obtains the original input arguments without resampling for perturbed
     filtering method.
@@ -158,24 +174,29 @@ def _no_resampler_thetas(counts, particlesP, norm_weights, thetas, subkey):
 
 
 def _interp_covars(
-    t: float, ctimes: jax.Array, covars: jax.Array, order: str = "linear"
-) -> jax.Array:
+    t: float | jax.Array,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
+    order: str = "linear",
+) -> jax.Array | None:
     """
     Interpolate covariates.
 
     Args:
-        t (float): Time to interpolate the covariates at.
-        ctimes (array-like): Time points for the covariates.
-        covars (array-like): Covariates to be interpolated.
+        t (float | jax.Array): Time to interpolate the covariates at.
+        ctimes (jax.Array): Time points for the covariates.
+        covars (jax.Array): Covariates to be interpolated.
         order (str): Interpolation method. Currently only 'linear' is supported.
 
     Returns:
-        array-like: The interpolated covariates at time t.
+        jax.Array | None: The interpolated covariates at time t.
     """
     # TODO: Add constant interpolation
     if (covars is None) | (ctimes is None):
         return None
     else:
+        assert ctimes is not None
+        assert covars is not None
         upper_index = jnp.searchsorted(ctimes, t, side="left")
         lower_index = upper_index - 1
         return (

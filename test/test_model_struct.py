@@ -7,15 +7,15 @@ class TestModelStruct(unittest.TestCase):
     def test_RInit_value_error(self):
         # Test that an error is thrown with incorrect arguments
         with self.assertRaises(ValueError):
-            pp.RInit(lambda foo, key, covars, t0: jnp.array([0]))
+            pp.RInit(lambda foo, key, covars, t0: jnp.array([0]), t0=0)
         with self.assertRaises(ValueError):
-            pp.RInit(lambda theta_, foo, covars, t0: jnp.array([0]))
+            pp.RInit(lambda theta_, foo, covars, t0: jnp.array([0]), t0=0)
         with self.assertRaises(ValueError):
-            pp.RInit(lambda theta_, key, foo, t0: jnp.array([0]))
+            pp.RInit(lambda theta_, key, foo, t0: jnp.array([0]), t0=0)
         with self.assertRaises(ValueError):
-            pp.RInit(lambda theta_, key, covars, foo: jnp.array([0]))
+            pp.RInit(lambda theta_, key, covars, foo: jnp.array([0]), t0=0)
         # Test that correct arguments run without error
-        pp.RInit(lambda theta_, key, covars, t0: jnp.array([0]))
+        pp.RInit(lambda theta_, key, covars, t0: jnp.array([0]), t0=0)
 
     def test_RProc_value_error(self):
         # Test that an error is thrown with incorrect arguments

@@ -21,7 +21,7 @@ param_names = (
 )
 
 
-def rinit(theta_, key, covars=None, t0=None):
+def rinit(theta_, key, covars, t0=None):
     S_0, E_0, I_0, R_0 = jnp.exp(theta_[9:]) / jnp.sum(jnp.exp(theta_[9:]))
     m = covars[0] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)

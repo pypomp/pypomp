@@ -141,8 +141,8 @@ ys = ys
 covars = covars
 
 
-@RInit
-def rinit(theta_, key, covars=None, t0=None):
+@partial(RInit, t0=0)
+def rinit(theta_, key, covars, t0=None):
     S_0 = 0.621
     I_0 = 0.378
     Y_0 = 0
@@ -230,7 +230,7 @@ def rproc_step(
 @RProc
 def rproc(X_, theta_, key, covars, t=None, dt=None):
     S = X_[0]
-    I = X_[1]
+    I = X_[1]  # noqa
     Y = X_[2]
     deaths = X_[3]
     pts = X_[4:-2]

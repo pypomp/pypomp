@@ -17,6 +17,31 @@ from .model_struct import RMeas
 
 
 class Pomp:
+    """
+    A class representing a Partially Observed Markov Process (POMP) model.
+
+    This class provides a structured way to define and work with POMP models, which are
+    used for modeling time series data where the underlying state process is only
+    partially observed. The class encapsulates the model components including the
+    initial state distribution, process model, and measurement model.
+
+    The class provides methods for:
+    - Simulation of the model
+    - Particle filtering
+    - Maximum likelihood estimation
+    - Iterated filtering
+    - Model training using a differentiable particle filter
+
+    Attributes:
+        ys (pd.DataFrame): The measurement data frame with observation times as index
+        theta (dict): Model parameters, where each value is a float
+        rinit (RInit): Simulator for the initial state distribution
+        rproc (RProc): Simulator for the process model
+        dmeas (DMeas | None): Density evaluation for the measurement model
+        rmeas (RMeas | None): Measurement simulator
+        covars (pd.DataFrame | None): Covariates for the model if applicable
+    """
+
     def __init__(
         self,
         ys: pd.DataFrame,

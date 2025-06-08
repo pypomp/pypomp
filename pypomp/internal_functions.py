@@ -183,8 +183,8 @@ def _interp_covars(
     Interpolate covariates.
 
     Args:
-        t (float | jax.Array): Time point(s) at which to interpolate the covariates.
-            Can be a single float or an array of times.
+        t (float | jax.Array): Time point at which to interpolate the covariates.
+            Can be a single float or an array containing one time point.
         ctimes (jax.Array | None): Array of time points for which covariates are available.
             Must be sorted in ascending order.
         covars (jax.Array | None): Array of covariate values corresponding to ctimes.

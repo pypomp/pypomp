@@ -27,9 +27,9 @@ def mif(
     J: int,
     M: int,
     a: float,
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
     covars: pd.DataFrame | None = None,
-    sigmas: float | jax.Array = 0.01,
-    sigmas_init: float | jax.Array = 0.01,
     thresh: float = 0.0,
     monitor: bool = False,
     verbose: bool = False,
@@ -38,19 +38,19 @@ def mif(
     Implements the iterated filtering (IF2) algorithm for parameter estimation.
 
     Args:
+        ys (pd.DataFrame): Observed measurements with time index.
+        theta (dict): Initial parameters for the POMP model. Each value must be a float.
         rinit (RInit): Simulator for the initial-state distribution.
         rproc (RProc): Simulator for the process model.
         dmeas (DMeas): Density evaluator for the measurement model.
-        theta (dict): Initial parameters for the POMP model. Each value must be a float.
-        ys (pd.DataFrame): Observed measurements with time index.
-        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
-        J (int): Number of particles to use in the filter.
         key (jax.Array): Random key for reproducibility.
+        J (int): Number of particles to use in the filter.
         M (int): Number of algorithm iterations.
-        a (float): Decay factor for sigmas.
+        a (float): Decay factor for sigmas.        
+        sigmas (float | jax.Array): Perturbation factor for parameters.
+        sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
+        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
         thresh (float, optional): Resampling threshold. Defaults to 0.
-        sigmas (float): Perturbation factor for parameters.
-        sigmas_init (float): Initial perturbation factor for parameters.
         monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
         verbose (bool, optional): Flag to print log-likelihood and parameter information.
             Defaults to False.

@@ -24,26 +24,32 @@ def pfilter(
     thresh: float = 0,
 ) -> float:
     """
-    An outside function for the particle filtering algorithm.
+    Implements a particle filtering algorithm for a Partially Observed Markov Process (POMP) model.
+    This function estimates the log-likelihood of the observed data given the model parameters
+    using sequential Monte Carlo methods.
 
     Args:
-        J (int): The number of particles.
+        J (int): The number of particles to use in the filter. Must be greater than 0.
         rinit (RInit): Simulator for the initial-state distribution.
         rproc (RProc): Simulator for the process model.
         dmeas (DMeas): Density evaluation for the measurement model.
         theta (dict): Parameters involved in the POMP model. Each value must be a float.
-        ys (array-like): The measurement array.
-        key (jax.random.PRNGKey): The random key.
-        covars (array-like, optional): Covariates or None if not applicable.
-        thresh (float, optional): Threshold value to determine whether to
-            resample particles.
-
-    Raises:
-        ValueError: Missing the pomp class object and required arguments for
-            calling 'pfilter_internal' directly
+        ys (pd.DataFrame): The measurement array with time index.
+        key (jax.Array): The random key for reproducibility.
+        covars (pd.DataFrame | None, optional): Covariates for the process, or None if
+            not applicable. Defaults to None.
+        thresh (float, optional): Threshold value to determine whether to resample particles.
+            If the effective sample size falls below this threshold, systematic resampling
+            is performed. Defaults to 0.
 
     Returns:
-        float: The log-likelihood estimate
+        float: The estimated log-likelihood of the observed data given the model parameters.
+            This is computed as the sum of the log-likelihood contributions at each time point.
+
+    Note:
+        The particle filter uses systematic resampling when the effective sample size
+        falls below the specified threshold. The effective sample size is computed as
+        1/sum(w^2) where w are the normalized weights of the particles.
     """
     if J < 1:
         raise ValueError("J should be greater than 0.")

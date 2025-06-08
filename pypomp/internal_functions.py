@@ -183,13 +183,23 @@ def _interp_covars(
     Interpolate covariates.
 
     Args:
-        t (float | jax.Array): Time to interpolate the covariates at.
-        ctimes (jax.Array): Time points for the covariates.
-        covars (jax.Array): Covariates to be interpolated.
-        order (str): Interpolation method. Currently only 'linear' is supported.
+        t (float | jax.Array): Time point(s) at which to interpolate the covariates.
+            Can be a single float or an array of times.
+        ctimes (jax.Array | None): Array of time points for which covariates are available.
+            Must be sorted in ascending order.
+        covars (jax.Array | None): Array of covariate values corresponding to ctimes.
+            Shape should be (len(ctimes), n_covars) where n_covars is the number of covariates.
+        order (str, optional): Interpolation method. Currently only 'linear' is supported.
+            Defaults to 'linear'.
 
     Returns:
-        jax.Array | None: The interpolated covariates at time t.
+        jax.Array | None: The interpolated covariates at time t. Returns None if either
+            ctimes or covars is None. Shape is (n_covars,) for a single time point,
+            or (len(t), n_covars) for multiple time points.
+
+    Note:
+        This function assumes that ctimes is sorted in ascending order. If t is outside
+        the range of ctimes, the nearest available covariate value will be used.
     """
     # TODO: Add constant interpolation
     if (covars is None) | (ctimes is None):

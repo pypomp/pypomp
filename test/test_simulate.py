@@ -12,7 +12,7 @@ class TestSimulate_LG(unittest.TestCase):
         self.ys = self.LG.ys
         self.theta = self.LG.theta
         self.covars = self.LG.covars
-        self.Nsim = 1
+        self.nsim = 1
 
         self.rinit = self.LG.rinit
         self.rproc = self.LG.rproc
@@ -26,10 +26,10 @@ class TestSimulate_LG(unittest.TestCase):
             times=jnp.array(self.ys.index),
             theta=self.theta,
             covars=self.covars,
-            Nsim=self.Nsim,
+            nsim=self.nsim,
             key=self.key,
         )
-        val2 = self.LG.simulate(Nsim=self.Nsim, key=self.key)
+        val2 = self.LG.simulate(nsim=self.nsim, key=self.key)
 
         for val in [val1, val2]:
             self.assertIsInstance(val, dict)
@@ -37,5 +37,5 @@ class TestSimulate_LG(unittest.TestCase):
             self.assertIn("Y_sims", val)
             self.assertEqual(
                 val["X_sims"].shape,
-                (len(self.ys) + 1, self.rmeas.ydim, self.Nsim),
+                (len(self.ys) + 1, self.rmeas.ydim, self.nsim),
             )

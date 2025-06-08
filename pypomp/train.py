@@ -409,9 +409,9 @@ def _train_internal(
 def _line_search(
     obj: Callable,
     curr_obj: float,
-    pt: jnp.ndarray,
-    grad: jnp.ndarray,
-    direction: jnp.ndarray,
+    pt: jax.Array,
+    grad: jax.Array,
+    direction: jax.Array,
     k: int,
     eta: float,
     xi: int,

@@ -6,7 +6,9 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
+import pandas as pd
 from typing import Callable
+from .model_struct import RInit, RProc, DMeas
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
@@ -14,33 +16,29 @@ from .internal_functions import _interp_covars
 
 
 def mop(
-    J,
-    rinit,
-    rproc,
-    dmeas,
-    theta,
-    ys,
-    key,
-    covars=None,
-    alpha=0.97,
-):
+    J: int,
+    key: jax.Array,
+    rinit: RInit,
+    rproc: RProc,
+    dmeas: DMeas,
+    theta: dict,
+    ys: pd.DataFrame,
+    covars: pd.DataFrame | None = None,
+    alpha: float = 0.97,
+) -> float:
     """
-    An outside function for the MOP algorithm.
+    Computes the mean negative log-likelihood using particle filtering.
 
     Args:
-        J (int, optional): The number of particles.
-        rinit (RInit, optional): Simulator for the initial-state
-            distribution.
-        rproc (RProc, optional): Simulator for the process model.
-        dmeas (DMeas, optional): Density evaluation for the measurement
-            model.
-        theta (array-like, optional): Parameters involved in the POMP
-            model.
-        ys (array-like, optional): The measurement array.
-        covars (array-like, optional): Covariates or None if not
-            applicable.
-        alpha (float, optional): Discount factor.
-        key (jax.random.PRNGKey, optional): The random key.
+        J (int): Number of particles to use in the filter.
+        key (jax.Array): Random key for reproducibility.
+        rinit (RInit): Simulator for the initial-state distribution.
+        rproc (RProc): Simulator for the process model.
+        dmeas (DMeas): Density evaluator for the measurement model.
+        theta (dict): Parameters involved in the POMP model. Each value must be a float.
+        ys (pd.DataFrame): Observed measurements with time index.
+        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
+        alpha (float, optional): Systematic resampling threshold. Defaults to 0.97.
 
     Returns:
         float: The log-likelihood estimate

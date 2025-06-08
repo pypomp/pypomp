@@ -92,13 +92,24 @@ class Pomp:
         Instance method for MOP algorithm.
 
         Args:
-            J (int): The number of particles
+            J (int): The number of particles.
+            key (jax.Array): The random key for reproducibility.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                Defaults to self.rinit.
+            rproc (RProc, optional): Simulator for the process model.
+                Defaults to self.rproc.
+            dmeas (DMeas, optional): Density evaluation for the measurement model.
+                Defaults to self.dmeas.
+            theta (dict, optional): Parameters involved in the POMP model.
+                Defaults to self.theta.
+            ys (pd.DataFrame, optional): The measurement array.
+                Defaults to self.ys.
+            covars (pd.DataFrame, optional): Covariates or None if not applicable.
+                Defaults to self.covars.
             alpha (float, optional): Discount factor. Defaults to 0.97.
-            key (jax.random.PRNGKey, optional): The random key. Defaults to
-                None.
 
         Returns:
-            float: The log-likelihood estimate
+            float: The estimated log-likelihood of the observed data given the model parameters.
         """
         rinit = self.rinit if rinit is None else rinit
         rproc = self.rproc if rproc is None else rproc
@@ -107,7 +118,7 @@ class Pomp:
         ys = self.ys if ys is None else ys
         covars = self.covars if covars is None else covars
 
-        if self.dmeas is None:
+        if dmeas is None:
             raise ValueError("dmeas cannot be None")
 
         return mop(
@@ -282,40 +293,50 @@ class Pomp:
         alpha: float = 0.97,
     ) -> dict:
         """
-        Instance method for conducting the MOP gradient-based iterative
-        optimization method.
+        Instance method for conducting the MOP gradient-based iterative optimization method.
 
         Args:
-            theta (dict): Starting parameter values. Each value should be a float.
-            J (int, optional): The number of particles in the MOP objective for
-                obtaining the gradient.
-            Jh (int, optional): The number of particles in the MOP objective for
-                obtaining the Hessian matrix.
-            method (str, optional): The gradient-based iterative optimization
-                method to use, including Newton method, weighted Newton method,
-                BFGS method, gradient descent.
-            itns (int, optional): Maximum iteration for the gradient descent
-                optimization.
-            beta (float, optional): Initial step size for the line search
-                algorithm.
-            eta (float, optional): Initial step size.
+            J (int): The number of particles in the MOP objective for obtaining the gradient.
+            Jh (int): The number of particles in the MOP objective for obtaining the Hessian matrix.
+            key (jax.Array): The random key for reproducibility.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                Defaults to self.rinit.
+            rproc (RProc, optional): Simulator for the process model.
+                Defaults to self.rproc.
+            dmeas (DMeas, optional): Density evaluation for the measurement model.
+                Defaults to self.dmeas.
+            ys (pd.DataFrame, optional): The measurement array.
+                Defaults to self.ys.
+            theta (dict, optional): Parameters involved in the POMP model.
+                Defaults to self.theta.
+            covars (pd.DataFrame, optional): Covariates or None if not applicable.
+                Defaults to self.covars.
+            method (str, optional): The gradient-based iterative optimization method to use.
+                Options include "Newton", "weighted Newton", "BFGS", "gradient descent".
+                Defaults to "Newton".
+            itns (int, optional): Maximum iteration for the gradient descent optimization.
+                Defaults to 20.
+            beta (float, optional): Initial step size for the line search algorithm.
+                Defaults to 0.9.
+            eta (float, optional): Initial step size. Defaults to 0.0025.
             c (float, optional): The user-defined Armijo condition constant.
-            max_ls_itn (int, optional): The maximum number of iterations for the
-                line search algorithm.
-            thresh (int, optional): Threshold value to determine whether to
-                resample particles in pfilter function.
-            verbose (bool, optional): Boolean flag controlling whether to print
-                out the log-likelihood and parameter information.
-            scale (bool, optional): Boolean flag controlling normalizing the
-                direction or not.
-            ls (bool, optional): Boolean flag controlling using the line search
-                or not.
-            alpha (int, optional): Discount factor.
+                Defaults to 0.1.
+            max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm.
+                Defaults to 10.
+            thresh (int, optional): Threshold value to determine whether to resample particles.
+                Defaults to 0.
+            verbose (bool, optional): Boolean flag controlling whether to print out the
+                log-likelihood and parameter information. Defaults to False.
+            scale (bool, optional): Boolean flag controlling whether to normalize the
+                search direction. Defaults to False.
+            ls (bool, optional): Boolean flag controlling whether to use the line search algorithm.
+                Defaults to False.
+            alpha (float, optional): Discount factor. Defaults to 0.97.
 
         Returns:
-            dict: a dictionary containing:
-                - xarray of log-likelihood values through iterations.
-                - xarray of parameters through iterations.
+            dict: A dictionary containing:
+                - 'loglik' (xarray.DataArray): Log-likelihood values through iterations
+                - 'params' (xarray.DataArray): Parameter values through iterations
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -359,28 +380,32 @@ class Pomp:
         theta: dict | None = None,
         times: jax.Array | None = None,
         covars: pd.DataFrame | None = None,
-        Nsim: int = 1,
+        nsim: int = 1,
     ) -> dict:
         """
-        Instance method for simulating a POMP model. By default, it uses this object’s
-        attributes, but these can be overridden by providing them as arguments.
+        Simulates the evolution of a system over time using a Partially Observed
+        Markov Process (POMP) model.
 
         Args:
+            key (jax.Array): The random key for random number generation.
             rinit (RInit, optional): Simulator for the initial-state distribution.
+                If provided, overrides the unit-specific simulator.
             rproc (RProc, optional): Simulator for the process model.
-            rmeas (RMeas, optional): Simulator for the measurement model.            theta (array-like, optional): Parameters involved in the POMP model.
-            times (array-like, optional): Times of the simulated observations.
-            covars (array-like, optional): Covariates for the process, or None if not
-                applicable.
-            Nsim (int, optional): The number of simulations to perform.
-            key (jax.random.PRNGKey): The random key for random number
-                generation.
+                If provided, overrides the unit-specific simulator.
+            rmeas (RMeas, optional): Simulator for the measurement model.
+                If provided, overrides the unit-specific simulator.
+            theta (dict, optional): Parameters involved in the POMP model.
+                If provided, overrides the unit-specific parameters.
+            times (jax.Array, optional): Times at which to generate observations.
+                If provided, overrides the unit-specific times.
+            covars (pd.DataFrame, optional): Covariates for the process.
+                If provided, overrides the unit-specific covariates.
+            nsim (int, optional): The number of simulations to perform. Defaults to 1.
 
         Returns:
-            dict: A dictionary of simulated values. 'X' contains the unobserved values
-            whereas 'Y' contains the observed values as JAX arrays. In each case, the
-            first dimension is the observation index, the second indexes the element of
-            the observation vector, and the third is the simulation number.
+            dict: A dictionary containing:
+                - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
+                - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
         # Use arguments instead of attributes if given
         rinit = self.rinit if rinit is None else rinit
@@ -401,7 +426,7 @@ class Pomp:
             rmeas=rmeas,
             theta=theta,
             times=times,
-            covars=covars,
-            Nsim=Nsim,
             key=key,
+            covars=covars,
+            nsim=nsim,
         )

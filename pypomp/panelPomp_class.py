@@ -11,11 +11,14 @@ from .model_struct import RInit, RProc, DMeas, RMeas
 class PanelPomp:
     def __init__(self, Pomp_dict):
         """
-        Initializes the necessary components for a PanelPOMP model.
+        Initializes a PanelPOMP model, which consists of multiple POMP models
+        (units) that share the same structure but may have different parameters
+        and observations.
 
         Args:
-            Pomp_dict: A dictionary of Pomp objects. Each key is used as the name of
-                the corresponding unit.
+            Pomp_dict (dict): A dictionary mapping unit names to Pomp objects.
+                Each Pomp object represents a single unit in the panel data.
+                The keys are used as unit identifiers.
         """
         if not isinstance(Pomp_dict, dict):
             raise TypeError("Pomp_dict must be an instance of the class RInit")
@@ -38,41 +41,32 @@ class PanelPomp:
         theta: dict | None = None,
         times: jax.Array | None = None,
         covars: pd.DataFrame | None = None,
-        Nsim: int = 1,
+        nsim: int = 1,
     ) -> dict:
         """
-        Simulate the PanelPOMP model.
+        Simulates the PanelPOMP model by applying the simulate method to each unit.
 
-        This method applies the simulate method to each of the individual Pomp
-        models. Returns a dictionary of simulated values. Each key is the name of
-        a unit, and the value is the output of the simulate method for that unit.
+        Args:
+            key (jax.Array): The random key for random number generation.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                If provided, overrides the unit-specific simulator.
+            rproc (RProc, optional): Simulator for the process model.
+                If provided, overrides the unit-specific simulator.
+            rmeas (RMeas, optional): Simulator for the measurement model.
+                If provided, overrides the unit-specific simulator.
+            theta (dict, optional): Parameters involved in the POMP model.
+                If provided, overrides the unit-specific parameters.
+            times (jax.Array, optional): Times at which to generate observations.
+                If provided, overrides the unit-specific times.
+            covars (pd.DataFrame, optional): Covariates for the process.
+                If provided, overrides the unit-specific covariates.
+            nsim (int, optional): The number of simulations to perform. Defaults to 1.
 
-        Parameters
-        ----------
-        key : jax.random.PRNGKey
-            The random key for random number generation.
-        rinit : RInit, optional
-            Simulator for the initial-state distribution. Defaults to None.
-        rproc : RProc, optional
-            Simulator for the process model. Defaults to None.
-        rmeas : RMeas, optional
-            Simulator for the measurement model. Defaults to None.
-        theta : array-like, optional
-            Parameters involved in the POMP model. Defaults to None.
-        times : jax.Array, optional
-            The times at which to generate observations. Defaults to None, in which
-            case simulate uses the times stored in the Pomp object.
-        covars : array-like, optional
-            Covariates for the process, or None if not applicable. Defaults to
-            None.
-        Nsim : int, optional
-            The number of simulations to perform. Defaults to 1.
-
-        Returns
-        -------
-        dict
-            A dictionary of simulated values. Each key is the name of a unit,
-            and the value is the output of the simulate method for that unit.
+        Returns:
+            dict: A dictionary mapping unit names to simulation results. Each result
+                is a dictionary containing:
+                - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
+                - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
         results = {}
         for unit, obj in self.unit_objects.items():
@@ -85,7 +79,7 @@ class PanelPomp:
                 theta=theta,
                 times=times,
                 covars=covars,
-                Nsim=Nsim,
+                nsim=nsim,
             )
         return results
 
@@ -102,37 +96,29 @@ class PanelPomp:
         thresh: float = 0,
     ) -> dict:
         """
-        Run the pfilter method on the individual Pomp models.
+        Runs the particle filter on each unit in the panel.
 
-        Parameters
-        ----------
-        J : int
-            The number of particles
-        key : jax.random.PRNGKey, optional
-            The random key for random number generation. Defaults to None.
-        theta : array-like, optional
-            Parameters involved in the POMP model. Defaults to None.
-        ys : array-like, optional
-            The measurement array. Defaults to None.
-        rinit : RInit, optional
-            Simulator for the initial-state distribution. Defaults to None.
-        rproc : RProc, optional
-            Simulator for the process model. Defaults to None.
-        dmeas : DMeas, optional
-            Simulator for the measurement model. Defaults to None.
-        covars : array-like, optional
-            Covariates for the process, or None if not applicable. Defaults to
-            None.
-        thresh : float, optional
-            Threshold value to determine whether to resample particles.
-            Defaults to 0.
+        Args:
+            J (int): The number of particles to use in the filter.
+            key (jax.Array): The random key for reproducibility.
+            theta (dict, optional): Parameters involved in the POMP model.
+                If provided, overrides the unit-specific parameters.
+            ys (pd.DataFrame, optional): The measurement array.
+                If provided, overrides the unit-specific measurements.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                If provided, overrides the unit-specific simulator.
+            rproc (RProc, optional): Simulator for the process model.
+                If provided, overrides the unit-specific simulator.
+            dmeas (DMeas, optional): Density evaluation for the measurement model.
+                If provided, overrides the unit-specific evaluator.
+            covars (pd.DataFrame, optional): Covariates for the process.
+                If provided, overrides the unit-specific covariates.
+            thresh (float, optional): Threshold value to determine whether to resample particles.
+                Defaults to 0.
 
-        Returns
-        -------
-        dict
-            A dictionary of particle filter results. Each key is the name of a
-            unit, and the value is the output of the pfilter method for that
-            unit.
+        Returns:
+            dict: A dictionary mapping unit names to log-likelihood estimates.
+                Each value is the estimated log-likelihood for that unit.
         """
         results = {}
         for unit, obj in self.unit_objects.items():
@@ -169,45 +155,37 @@ class PanelPomp:
         verbose: bool = False,
     ) -> dict:
         """
-        Run the mif method on the individual Pomp models.
+        Runs the iterated filtering (IF2) algorithm on each unit in the panel.
 
-        Parameters
-        ----------
-        J : int
-            The number of particles.
-        key : jax.random.PRNGKey
-            The random key for random number generation.
-        sigmas : float
-            Perturbation factor for parameters.
-        sigmas_init : float
-            Initial perturbation factor for parameters.
-        M : int
-            Number of algorithm iterations.
-        a : float
-            Decay factor for sigmas.
-        theta : array-like, optional
-            Initial parameters for the POMP model.
-        ys : array-like, optional
-            The measurement array.
-        rinit : RInit, optional
-            Simulator for the initial-state distribution.
-        rproc : RProc, optional
-            Simulator for the process model.
-        dmeas : DMeas, optional
-            Simulator for the measurement model.
-        covars : array-like, optional
-            Covariates or None if not applicable.
-        thresh : float, optional
-            Resampling threshold.
-        monitor : bool, optional
-            Flag to monitor log-likelihood values.
-        verbose : bool, optional
-            Flag to print log-likelihood and parameter information.
+        Args:
+            J (int): The number of particles.
+            key (jax.Array): The random key for reproducibility.
+            sigmas (float): Perturbation factor for parameters.
+            sigmas_init (float): Initial perturbation factor for parameters.
+            M (int): Number of algorithm iterations.
+            a (float): Decay factor for sigmas.
+            theta (dict, optional): Initial parameters for the POMP model.
+                If provided, overrides the unit-specific parameters.
+            ys (pd.DataFrame, optional): The measurement array.
+                If provided, overrides the unit-specific measurements.
+            rinit (RInit, optional): Simulator for the initial-state distribution.
+                If provided, overrides the unit-specific simulator.
+            rproc (RProc, optional): Simulator for the process model.
+                If provided, overrides the unit-specific simulator.
+            dmeas (DMeas, optional): Density evaluation for the measurement model.
+                If provided, overrides the unit-specific evaluator.
+            covars (pd.DataFrame, optional): Covariates for the process.
+                If provided, overrides the unit-specific covariates.
+            thresh (float, optional): Resampling threshold. Defaults to 0.
+            monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
+            verbose (bool, optional): Flag to print log-likelihood and parameter information.
+                Defaults to False.
 
-        Returns
-        -------
-        dict
-            A dictionary of mif results. Each key is the name of a unit, and the value is the output of the mif method for that unit.
+        Returns:
+            dict: A dictionary mapping unit names to MIF results. Each result is a dictionary
+                containing:
+                - 'loglik' (xarray.DataArray): Log-likelihood values through iterations
+                - 'params' (xarray.DataArray): Parameter values through iterations
         """
         results = {}
         for unit, obj in self.unit_objects.items():

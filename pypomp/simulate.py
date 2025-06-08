@@ -17,7 +17,7 @@ def simulate(
     times: jax.Array,
     key: jax.Array,
     covars: pd.DataFrame | None = None,
-    Nsim: int = 1,
+    nsim: int = 1,
 ):
     """
     Simulates the evolution of a system over time using a Partially Observed
@@ -27,20 +27,23 @@ def simulate(
         rinit (RInit): Simulator for the initial-state distribution.
         rproc (RProc): Simulator for the process model.
         rmeas (RMeas): Simulator for the measurement model.
-        theta (array-like): Parameters involved in the POMP model.
+        theta (dict): Parameters involved in the POMP model. Each value must be a float.
         times (jax.Array): Times at which to generate observations.
-        key (jax.Array): The random key for random number
-            generation.
+        key (jax.Array): The random key for random number generation.
         covars (pandas.DataFrame, optional): Covariates for the process, or None if
             not applicable. Defaults to None.
-        Nsim (int): The number of simulations to perform. Defaults to 1.
-
+        nsim (int): The number of simulations to perform. Defaults to 1.
 
     Returns:
-        dict: A dictionary of simulated values. 'X' contains the unobserved values
-            whereas 'Y' contains the observed values as xarrays. In each case, the
-            first dimension is the observation index, the second indexes the element of
-            the observation vector, and the third is the simulation number.
+        dict: A dictionary containing:
+            - 'X' (xarray.DataArray): Unobserved state values with dimensions:
+                - First dimension: observation index
+                - Second dimension: state vector elements
+                - Third dimension: simulation number
+            - 'Y' (xarray.DataArray): Observed values with dimensions:
+                - First dimension: observation index
+                - Second dimension: measurement vector elements
+                - Third dimension: simulation number
     """
     if not isinstance(theta, dict):
         raise TypeError("theta must be a dictionary")
@@ -57,7 +60,7 @@ def simulate(
         ydim=rmeas.ydim,  # TODO: update simulate to not require ydim
         covars=jnp.array(covars) if covars is not None else None,
         ctimes=jnp.array(covars.index) if covars is not None else None,
-        Nsim=Nsim,
+        nsim=nsim,
         key=key,
     )
     # TODO: Add state names as coords
@@ -83,17 +86,17 @@ def _simulate_internal(
     ydim: int,
     covars: jax.Array,
     ctimes: jax.Array,
-    Nsim: int,
+    nsim: int,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     ylen = len(times)
-    key, keys = _keys_helper(key=key, J=Nsim, covars=covars)
+    key, keys = _keys_helper(key=key, J=nsim, covars=covars)
     covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
     X_sims = rinitializer(theta, keys, covars_t, t0)
 
-    X_array = jnp.zeros((ylen + 1, X_sims.shape[1], Nsim))
+    X_array = jnp.zeros((ylen + 1, X_sims.shape[1], nsim))
     X_array = X_array.at[0].set(X_sims.T)
-    Y_array = jnp.zeros((ylen, ydim, Nsim))
+    Y_array = jnp.zeros((ylen, ydim, nsim))
     _simulate_helper2 = partial(
         _simulate_helper,
         times0=jnp.concatenate([jnp.array([t0]), times]),
@@ -102,7 +105,7 @@ def _simulate_internal(
         theta=theta,
         covars=covars,
         ctimes=ctimes,
-        Nsim=Nsim,
+        nsim=nsim,
     )
     X_sims, X_array, Y_array, key = jax.lax.fori_loop(
         lower=0,
@@ -123,18 +126,18 @@ def _simulate_helper(
     theta: jax.Array,
     covars: jax.Array,
     ctimes: jax.Array,
-    Nsim: int,
+    nsim: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     (X_sims, X_array, Y_array, key) = inputs
     t1 = times0[i]
     t2 = times0[i + 1]
 
-    key, *keys = jax.random.split(key, num=Nsim + 1)
+    key, *keys = jax.random.split(key, num=nsim + 1)
     keys = jnp.array(keys)
     X_sims = rprocess(X_sims, theta, keys, ctimes, covars, t1, t2)
 
     covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
-    key, *keys = jax.random.split(key, num=Nsim + 1)
+    key, *keys = jax.random.split(key, num=nsim + 1)
     keys = jnp.array(keys)
     Y_sims = rmeasure(X_sims, theta, keys, covars_t, t2)
 

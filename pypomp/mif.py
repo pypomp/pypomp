@@ -18,51 +18,47 @@ MONITORS = 1  # TODO: figure out what this is for and remove it if possible
 
 
 def mif(
+    ys: pd.DataFrame,
+    theta: dict,
     rinit: RInit,
     rproc: RProc,
     dmeas: DMeas,
-    ys: pd.DataFrame,
-    theta: dict,
-    sigmas: float | jax.Array,
-    sigmas_init: float | jax.Array,
+    key: jax.Array,
+    J: int,
     M: int,
     a: float,
-    J: int,
-    key: jax.Array,
     covars: pd.DataFrame | None = None,
+    sigmas: float | jax.Array = 0.01,
+    sigmas_init: float | jax.Array = 0.01,
     thresh: float = 0.0,
     monitor: bool = False,
     verbose: bool = False,
-):
+) -> dict:
     """
-    Perform the iterated filtering (IF2) algorithm for a partially observed
-    Markov process (POMP) model to estimate model parameters by maximizing
-    the likelihood.
+    Implements the iterated filtering (IF2) algorithm for parameter estimation.
 
     Args:
         rinit (RInit): Simulator for the initial-state distribution.
         rproc (RProc): Simulator for the process model.
-        dmeas (DMeas): Density evaluation for the measurement model.
-        ys (array-like): The measurement array.
+        dmeas (DMeas): Density evaluator for the measurement model.
         theta (dict): Initial parameters for the POMP model. Each value must be a float.
-        sigmas (float): Perturbation factor for parameters.
-        sigmas_init (float): Initial perturbation factor for parameters.
-        covars (array-like): Covariates or None if not applicable.
+        ys (pd.DataFrame): Observed measurements with time index.
+        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
+        J (int): Number of particles to use in the filter.
+        key (jax.Array): Random key for reproducibility.
         M (int): Number of algorithm iterations.
         a (float): Decay factor for sigmas.
-        J (int): Number of particles.
-        thresh (float): Resampling threshold.
-        monitor (bool): Flag to monitor log-likelihood values.
-        verbose (bool): Flag to print log-likelihood and parameter information.
-        key (jax.random.PRNGKey): Random key for reproducibility.
-
-    Raises:
-        ValueError: If J is less than 1 or any required arguments are missing.
+        thresh (float, optional): Resampling threshold. Defaults to 0.
+        sigmas (float): Perturbation factor for parameters.
+        sigmas_init (float): Initial perturbation factor for parameters.
+        monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
+        verbose (bool, optional): Flag to print log-likelihood and parameter information.
+            Defaults to False.
 
     Returns:
-        dict: a dictionary containing:
-            - xarray of log-likelihood values through iterations.
-            - xarray of parameters through iterations.
+        dict: A dictionary containing:
+            - 'loglik' (xarray.DataArray): Log-likelihood values through iterations
+            - 'params' (xarray.DataArray): Parameter values through iterations
     """
     if J < 1:
         raise ValueError("J should be greater than 0.")

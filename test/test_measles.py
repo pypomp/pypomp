@@ -39,10 +39,10 @@ class Test_Measles(unittest.TestCase):
 
     def test_measles_sim(self):
         x = self.measles
-        # out1 = x.simulate(key=jax.random.key(1), Nsim=2)
+        # out1 = x.simulate(key=jax.random.key(1), nsim=2)
         out2 = x.simulate(
             key=jax.random.key(1),
-            Nsim=1,  # times=self.measles.ys.index[0:1]
+            nsim=1,  # times=self.measles.ys.index[0:1]
         )
 
         # if False:  # Process and obs plots

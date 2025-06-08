@@ -89,15 +89,26 @@ def _time_interp(
 class RInit:
     def __init__(self, struct: Callable, t0: float):
         """
-        Initializes the RInit class with the required function structure.
-        While this function can check that the arguments of struct are in the
-        correct order, it cannot check that the output is correct. In this case,
-        the user must make sure that struct returns a shape (dim(X),) JAX
-        array.
+        Initializes the RInit class with the required function structure for simulating
+        the initial state distribution of a POMP model.
 
         Args:
-            struct (function): A function with a specific structure where the
-                first three arguments must be 'theta_', 'key', 'covars', and 't0'.
+            struct (Callable): A function that simulates the initial state distribution.
+                Must have the following signature:
+                struct(theta_: jax.Array, key: jax.Array, covars: jax.Array | None, t0: float) -> jax.Array
+                where:
+                - theta_: Model parameters
+                - key: Random key for reproducibility
+                - covars: Optional covariates
+                - t0: Initial time
+                The function must return a JAX array of shape (dim(X),) where dim(X) is
+                the dimension of the state vector.
+            t0 (float): The initial time point for the simulation.
+
+        Note:
+            While this function can check that the arguments of struct are in the
+            correct order, it cannot check that the output is correct. The user must
+            ensure that struct returns a JAX array of the correct shape.
         """
         for i, arg in enumerate(["theta_", "key", "covars", "t0"]):
             if struct.__code__.co_varnames[i] != arg:

@@ -1,3 +1,4 @@
 {
-  "exclude": ["**/.venv"]
+  "exclude": ["**/.venv"],
+  "typeCheckingMode": "standard"
 }

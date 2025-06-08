@@ -14,9 +14,6 @@ from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _interp_covars
 
-MONITORS = 1  # TODO: figure out what this is for and remove it if possible
-
-
 def mif(
     ys: pd.DataFrame,
     theta: dict,
@@ -33,6 +30,7 @@ def mif(
     thresh: float = 0.0,
     monitor: bool = False,
     verbose: bool = False,
+    n_monitors: int = 1,
 ) -> dict:
     """
     Implements the iterated filtering (IF2) algorithm for parameter estimation.
@@ -54,6 +52,8 @@ def mif(
         monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
         verbose (bool, optional): Flag to print log-likelihood and parameter information.
             Defaults to False.
+        n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
+            Defaults to 1.
 
     Returns:
         dict: A dictionary containing:
@@ -90,6 +90,7 @@ def mif(
         monitor=monitor,
         verbose=verbose,
         key=key,
+        n_monitors=n_monitors,
     )
 
     return {
@@ -128,6 +129,7 @@ def _mif_internal(
     monitor: bool,
     verbose: bool,
     key: jax.Array,
+    n_monitors: int,
 ) -> tuple[jax.Array, jax.Array]:
     logliks = []
     params = []
@@ -155,7 +157,7 @@ def _mif_internal(
                         thresh=thresh,
                         key=subkey,
                     )
-                    for i in range(MONITORS)
+                    for i in range(n_monitors)
                 ]
             )
         )
@@ -206,7 +208,7 @@ def _mif_internal(
                             thresh=thresh,
                             key=subkey,
                         )
-                        for i in range(MONITORS)
+                        for i in range(n_monitors)
                     ]
                 )
             )

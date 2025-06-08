@@ -17,8 +17,6 @@ from .model_struct import RMeas
 
 
 class Pomp:
-    MONITORS = 1
-
     def __init__(
         self,
         ys: pd.DataFrame,
@@ -208,6 +206,7 @@ class Pomp:
         thresh: float = 0,
         monitor: bool = False,
         verbose: bool = False,
+        n_monitors: int = 1,
     ) -> dict:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
@@ -235,6 +234,8 @@ class Pomp:
             thresh (float, optional): Resampling threshold. Defaults to 0.
             monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
             verbose (bool, optional): Flag to print log-likelihood and parameter information. Defaults to False.
+            n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
+                Defaults to 1.
 
         Returns:
             dict: A dictionary containing:
@@ -267,6 +268,7 @@ class Pomp:
             monitor=monitor,
             verbose=verbose,
             key=key,
+            n_monitors=n_monitors,
         )
 
     def train(
@@ -291,6 +293,7 @@ class Pomp:
         scale: bool = False,
         ls: bool = False,
         alpha: float = 0.97,
+        n_monitors: int = 1,
     ) -> dict:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
@@ -332,6 +335,8 @@ class Pomp:
             ls (bool, optional): Boolean flag controlling whether to use the line search algorithm.
                 Defaults to False.
             alpha (float, optional): Discount factor. Defaults to 0.97.
+            n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
+                Defaults to 1.
 
         Returns:
             dict: A dictionary containing:
@@ -369,6 +374,7 @@ class Pomp:
             ls=ls,
             alpha=alpha,
             key=key,
+            n_monitors=n_monitors,
         )
 
     def simulate(

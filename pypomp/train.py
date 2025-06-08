@@ -12,8 +12,6 @@ from .pfilter import _pfilter_internal_mean
 from .mop import _mop_internal_mean
 from .model_struct import RInit, RProc, DMeas
 
-MONITORS = 1  # TODO: figure out what this is for and remove it if possible
-
 
 def train(
     rinit: RInit,
@@ -36,6 +34,7 @@ def train(
     scale: bool = False,
     ls: bool = False,
     alpha: float = 0.97,
+    n_monitors: int = 1,
 ) -> dict:
     """
     This function runs the MOP gradient-based iterative optimization method.
@@ -57,7 +56,7 @@ def train(
         optimization method.
     Jh : int
         The number of particles for the Hessian evaluation.
-    key : jax.random.PRNGKey
+    key : jax.Array
         The random key for reproducibility.
     covars : array-like or None
         Covariates or None if not applicable.
@@ -86,6 +85,9 @@ def train(
         Boolean flag controlling whether to use the line search algorithm.
     alpha : float
         The forgetting factor for the MOP algorithm.
+    n_monitors : int
+        Number of particle filter runs to average for log-likelihood estimation.
+        Defaults to 1.
 
     Returns
     -------
@@ -127,6 +129,7 @@ def train(
         ls=ls,
         alpha=alpha,
         key=key,
+        n_monitors=n_monitors,
     )
     return {
         "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
@@ -165,6 +168,7 @@ def _train_internal(
     ls: bool,
     alpha: float,
     key: jax.Array,
+    n_monitors: int,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -177,7 +181,7 @@ def _train_internal(
 
     for i in tqdm(range(itns)):
         # key = jax.random.PRNGKey(np.random.choice(int(1e18)))
-        if MONITORS == 1:
+        if n_monitors == 1:
             loglik, grad = _jvg_mop(
                 theta_ests=theta_ests,
                 t0=t0,
@@ -226,7 +230,7 @@ def _train_internal(
                             thresh=-1,
                             key=key,
                         )
-                        for i in range(MONITORS)
+                        for i in range(n_monitors)
                     ]
                 )
             )
@@ -396,7 +400,7 @@ def _train_internal(
                         thresh=thresh,
                         key=key,
                     )
-                    for i in range(MONITORS)
+                    for i in range(n_monitors)
                 ]
             )
         )

@@ -92,9 +92,6 @@ class PanelPomp:
     def simulate(
         self,
         key: jax.Array,
-        rinit: RInit | None = None,
-        rproc: RProc | None = None,
-        rmeas: RMeas | None = None,
         theta: dict | None = None,
         times: jax.Array | None = None,
         covars: pd.DataFrame | None = None,
@@ -105,12 +102,6 @@ class PanelPomp:
 
         Args:
             key (jax.Array): The random key for random number generation.
-            rinit (RInit, optional): Simulator for the initial-state distribution.
-                If provided, overrides the unit-specific simulator.
-            rproc (RProc, optional): Simulator for the process model.
-                If provided, overrides the unit-specific simulator.
-            rmeas (RMeas, optional): Simulator for the measurement model.
-                If provided, overrides the unit-specific simulator.
             theta (dict, optional): Parameters involved in the POMP model.
                 If provided, overrides the unit-specific parameters.
             times (jax.Array, optional): Times at which to generate observations.
@@ -131,9 +122,6 @@ class PanelPomp:
             unit_theta = theta if theta is not None else self.get_unit_parameters(unit)
             results[unit] = obj.simulate(
                 key=subkey,
-                rinit=rinit,
-                rproc=rproc,
-                rmeas=rmeas,
                 theta=unit_theta,
                 times=times,
                 covars=covars,
@@ -147,9 +135,6 @@ class PanelPomp:
         key: jax.Array,
         theta: dict | None = None,
         ys: pd.DataFrame | None = None,
-        rinit: RInit | None = None,
-        rproc: RProc | None = None,
-        dmeas: DMeas | None = None,
         covars: pd.DataFrame | None = None,
         thresh: float = 0,
     ) -> dict:
@@ -163,12 +148,6 @@ class PanelPomp:
                 If provided, overrides the unit-specific parameters.
             ys (pd.DataFrame, optional): The measurement array.
                 If provided, overrides the unit-specific measurements.
-            rinit (RInit, optional): Simulator for the initial-state distribution.
-                If provided, overrides the unit-specific simulator.
-            rproc (RProc, optional): Simulator for the process model.
-                If provided, overrides the unit-specific simulator.
-            dmeas (DMeas, optional): Density evaluation for the measurement model.
-                If provided, overrides the unit-specific evaluator.
             covars (pd.DataFrame, optional): Covariates for the process.
                 If provided, overrides the unit-specific covariates.
             thresh (float, optional): Threshold value to determine whether to resample particles.
@@ -187,9 +166,6 @@ class PanelPomp:
                 key=subkey,
                 theta=unit_theta,
                 ys=ys,
-                rinit=rinit,
-                rproc=rproc,
-                dmeas=dmeas,
                 covars=covars,
                 thresh=thresh,
             )
@@ -240,9 +216,6 @@ class PanelPomp:
         J: int,
         ys: dict[str, pd.DataFrame] | None,
         covars: dict[str, pd.DataFrame] | None,
-        rinit: RInit | None,
-        rproc: RProc | None,
-        dmeas: DMeas | None,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
         thresh: float,
@@ -257,9 +230,9 @@ class PanelPomp:
         )
 
         # Get unit-specific components
-        unit_rinit = rinit or self.unit_objects[unit].rinit
-        unit_rproc = rproc or self.unit_objects[unit].rproc
-        unit_dmeas = dmeas or self.unit_objects[unit].dmeas
+        unit_rinit = self.unit_objects[unit].rinit
+        unit_rproc = self.unit_objects[unit].rproc
+        unit_dmeas = self.unit_objects[unit].dmeas
 
         if unit_rinit is None or unit_rproc is None or unit_dmeas is None:
             raise ValueError(f"Missing required components for unit {unit}")
@@ -433,9 +406,6 @@ class PanelPomp:
         a: float,
         theta: dict | None = None,
         ys: dict | None = None,
-        rinit: RInit | None = None,
-        rproc: RProc | None = None,
-        dmeas: DMeas | None = None,
         covars: dict | None = None,
         thresh: float = 0,
         verbose: bool = False,
@@ -457,12 +427,6 @@ class PanelPomp:
                 If provided, overrides the unit-specific parameters.
             ys (dict, optional): Dictionary mapping unit names to measurement arrays.
                 If provided, overrides the unit-specific measurements.
-            rinit (RInit, optional): Simulator for the initial-state distribution.
-                If provided, overrides the unit-specific simulator.
-            rproc (RProc, optional): Simulator for the process model.
-                If provided, overrides the unit-specific simulator.
-            dmeas (DMeas, optional): Density evaluation for the measurement model.
-                If provided, overrides the unit-specific evaluator.
             covars (dict, optional): Dictionary mapping unit names to covariate arrays.
                 If provided, overrides the unit-specific covariates.
             thresh (float, optional): Resampling threshold. Defaults to 0.
@@ -539,9 +503,6 @@ class PanelPomp:
                     J,
                     ys,
                     covars,
-                    rinit,
-                    rproc,
-                    dmeas,
                     sigmas,
                     sigmas_init,
                     thresh,

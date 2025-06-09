@@ -2,11 +2,6 @@ from .pomp_class import Pomp
 from .panelPomp_class import PanelPomp
 from .LG import LG
 from .measles.measlesPomp import UKMeasles
-from .simulate import simulate
-from .pfilter import pfilter
-from .mop import mop
-from .mif import mif
-from .train import train
 from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas

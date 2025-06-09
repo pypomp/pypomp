@@ -1,78 +1,13 @@
+"""
+This file contains the internal simulation functions for POMP models.
+"""
+
 from functools import partial
 import jax
 import jax.numpy as jnp
-import pandas as pd
-import xarray as xr
 from typing import Callable
-from .model_struct import RInit, RProc, RMeas
 from .internal_functions import _keys_helper
 from .internal_functions import _interp_covars
-
-
-def simulate(
-    rinit: RInit,
-    rproc: RProc,
-    rmeas: RMeas,
-    theta: dict,
-    times: jax.Array,
-    key: jax.Array,
-    covars: pd.DataFrame | None = None,
-    nsim: int = 1,
-):
-    """
-    Simulates the evolution of a system over time using a Partially Observed
-    Markov Process (POMP) model.
-
-    Args:
-        rinit (RInit): Simulator for the initial-state distribution.
-        rproc (RProc): Simulator for the process model.
-        rmeas (RMeas): Simulator for the measurement model.
-        theta (dict): Parameters involved in the POMP model. Each value must be a float.
-        times (jax.Array): Times at which to generate observations.
-        key (jax.Array): The random key for random number generation.
-        covars (pandas.DataFrame, optional): Covariates for the process, or None if
-            not applicable. Defaults to None.
-        nsim (int): The number of simulations to perform. Defaults to 1.
-
-    Returns:
-        dict: A dictionary containing:
-            - 'X' (xarray.DataArray): Unobserved state values with dimensions:
-                - First dimension: observation index
-                - Second dimension: state vector elements
-                - Third dimension: simulation number
-            - 'Y' (xarray.DataArray): Observed values with dimensions:
-                - First dimension: observation index
-                - Second dimension: measurement vector elements
-                - Third dimension: simulation number
-    """
-    if not isinstance(theta, dict):
-        raise TypeError("theta must be a dictionary")
-    if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each value of theta must be a float")
-
-    X_sims, Y_sims = _simulate_internal(
-        rinitializer=rinit.struct_pf,
-        rprocess=rproc.struct_pf,
-        rmeasure=rmeas.struct_pf,
-        theta=jnp.array(list(theta.values())),
-        t0=rinit.t0,
-        times=jnp.array(times),
-        ydim=rmeas.ydim,  # TODO: update simulate to not require ydim
-        covars=jnp.array(covars) if covars is not None else None,
-        ctimes=jnp.array(covars.index) if covars is not None else None,
-        nsim=nsim,
-        key=key,
-    )
-    # TODO: Add state names as coords
-    X_sims = xr.DataArray(
-        X_sims,
-        dims=["time", "element", "sim"],
-        coords={"time": jnp.concatenate([jnp.array([rinit.t0]), jnp.array(times)])},
-    )
-    Y_sims = xr.DataArray(
-        Y_sims, dims=["time", "element", "sim"], coords={"time": times}
-    )
-    return {"X_sims": X_sims, "Y_sims": Y_sims}
 
 
 @partial(jax.jit, static_argnums=(0, 1, 2, 6, 9))
@@ -84,8 +19,8 @@ def _simulate_internal(
     t0: float,
     times: jax.Array,
     ydim: int,
-    covars: jax.Array,
-    ctimes: jax.Array,
+    covars: jax.Array | None,
+    ctimes: jax.Array | None,
     nsim: int,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
@@ -124,8 +59,8 @@ def _simulate_helper(
     rprocess: Callable,
     rmeasure: Callable,
     theta: jax.Array,
-    covars: jax.Array,
-    ctimes: jax.Array,
+    covars: jax.Array | None,
+    ctimes: jax.Array | None,
     nsim: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     (X_sims, X_array, Y_array, key) = inputs

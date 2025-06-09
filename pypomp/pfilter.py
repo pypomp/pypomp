@@ -1,85 +1,13 @@
 from functools import partial
 import jax.numpy as jnp
 import jax
-import pandas as pd
 from jax import jit
 from typing import Callable
-from .model_struct import RInit, RProc, DMeas
 from .internal_functions import _resampler
 from .internal_functions import _no_resampler
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _interp_covars
-
-
-def pfilter(
-    J: int,
-    rinit: RInit,
-    rproc: RProc,
-    dmeas: DMeas,
-    theta: dict,
-    ys: pd.DataFrame,
-    key: jax.Array,
-    covars: pd.DataFrame | None = None,
-    thresh: float = 0,
-    reps: int = 1,
-) -> jax.Array:
-    """
-    Implements a particle filtering algorithm for a Partially Observed Markov Process (POMP) model.
-    This function estimates the log-likelihood of the observed data given the model parameters
-    using sequential Monte Carlo methods.
-
-    Args:
-        J (int): The number of particles to use in the filter. Must be greater than 0.
-        rinit (RInit): Simulator for the initial-state distribution.
-        rproc (RProc): Simulator for the process model.
-        dmeas (DMeas): Density evaluation for the measurement model.
-        theta (dict): Parameters involved in the POMP model. Each value must be a float.
-        ys (pd.DataFrame): The measurement array with time index.
-        key (jax.Array): The random key for reproducibility.
-        covars (pd.DataFrame | None, optional): Covariates for the process, or None if
-            not applicable. Defaults to None.
-        thresh (float, optional): Threshold value to determine whether to resample particles.
-            If the effective sample size falls below this threshold, systematic resampling
-            is performed. Defaults to 0.
-        reps (int, optional): Number of replicates to run. Defaults to 1.
-
-    Returns:
-        jax.Array: The estimated log-likelihood(s) of the observed data given the model parameters.
-    """
-    if J < 1:
-        raise ValueError("J should be greater than 0.")
-    if rinit is None or rproc is None or dmeas is None or ys is None:
-        raise ValueError("Missing rinit, rproc, dmeas, theta, or ys.")
-
-    if not isinstance(theta, dict):
-        raise TypeError("theta must be a dictionary")
-    if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each value of theta must be a float")
-
-    # Generate keys for each replicate
-    keys = jax.random.split(key, reps)
-    # Run multiple replicates using a simple for loop
-    results = []
-    for k in keys:
-        results.append(
-            _pfilter_internal(
-                theta=jnp.array(list(theta.values())),
-                t0=rinit.t0,
-                times=jnp.array(ys.index),
-                ys=jnp.array(ys),
-                J=J,
-                rinitializer=rinit.struct_pf,
-                rprocess=rproc.struct_pf,
-                dmeasure=dmeas.struct_pf,
-                ctimes=jnp.array(covars.index) if covars is not None else None,
-                covars=jnp.array(covars) if covars is not None else None,
-                thresh=thresh,
-                key=k,
-            )
-        )
-
-    return -jnp.array(results)
 
 
 @partial(jit, static_argnums=(4, 5, 6, 7))

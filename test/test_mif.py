@@ -24,30 +24,6 @@ class TestFit_LG(unittest.TestCase):
         self.rproc = self.LG.rproc
         self.dmeas = self.LG.dmeas
 
-    def test_internal_mif_basic(self):
-        mif_out1 = pp.mif(
-            J=self.J,
-            theta=self.theta,
-            rinit=self.rinit,
-            rproc=self.rproc,
-            dmeas=self.dmeas,
-            ys=self.ys,
-            sigmas=self.sigmas,
-            sigmas_init=self.sigmas_init,
-            covars=None,
-            M=self.M,
-            a=self.a,
-            key=self.key,
-            n_monitors=1,
-        )
-        self.assertEqual(mif_out1["logLik"].shape, (3,))
-        self.assertEqual(
-            mif_out1["thetas"].shape,
-            (3, self.J) + (len(self.theta),),
-        )
-        self.assertTrue(jnp.issubdtype(mif_out1["logLik"].dtype, jnp.float32))
-        self.assertTrue(jnp.issubdtype(mif_out1["thetas"].dtype, jnp.float32))
-
     def test_class_mif_basic(self):
         for J, M in [(self.J, 2), (100, 10)]:
             mif_out1 = self.LG.mif(

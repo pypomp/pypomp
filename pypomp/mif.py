@@ -1,109 +1,15 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
-import xarray as xr
-import pandas as pd
 from jax import jit
 from tqdm import tqdm
 from typing import Callable
-from .model_struct import RInit, RProc, DMeas
 from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _interp_covars
-
-
-def mif(
-    ys: pd.DataFrame,
-    theta: dict,
-    rinit: RInit,
-    rproc: RProc,
-    dmeas: DMeas,
-    key: jax.Array,
-    J: int,
-    M: int,
-    a: float,
-    sigmas: float | jax.Array,
-    sigmas_init: float | jax.Array,
-    covars: pd.DataFrame | None = None,
-    thresh: float = 0.0,
-    verbose: bool = False,
-    n_monitors: int = 1,
-) -> dict:
-    """
-    Implements the iterated filtering (IF2) algorithm for parameter estimation.
-
-    Args:
-        ys (pd.DataFrame): Observed measurements with time index.
-        theta (dict): Initial parameters for the POMP model. Each value must be a float.
-        rinit (RInit): Simulator for the initial-state distribution.
-        rproc (RProc): Simulator for the process model.
-        dmeas (DMeas): Density evaluator for the measurement model.
-        key (jax.Array): Random key for reproducibility.
-        J (int): Number of particles to use in the filter.
-        M (int): Number of algorithm iterations.
-        a (float): Decay factor for sigmas.
-        sigmas (float | jax.Array): Perturbation factor for parameters.
-        sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
-        thresh (float, optional): Resampling threshold. Defaults to 0.
-        verbose (bool, optional): Flag to print log-likelihood and parameter information.
-            Defaults to False.
-        n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
-            Defaults to 1.
-
-    Returns:
-        dict: A dictionary containing:
-            - 'loglik' (xarray.DataArray): Log-likelihood values through iterations
-            - 'params' (xarray.DataArray): Parameter values through iterations
-    """
-    if J < 1:
-        raise ValueError("J should be greater than 0.")
-
-    if not isinstance(theta, dict):
-        raise TypeError("theta must be a dictionary")
-    if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each value of theta must be a float")
-
-    nLLs, theta_ests = _mif_internal(
-        theta=jnp.array(list(theta.values())),
-        t0=rinit.t0,
-        times=jnp.array(ys.index),
-        ys=jnp.array(ys),
-        rinitializer=rinit.struct_pf,
-        rprocess=rproc.struct_pf,
-        dmeasure=dmeas.struct_pf,
-        rinitializers=rinit.struct_per,
-        rprocesses=rproc.struct_per,
-        dmeasures=dmeas.struct_per,
-        sigmas=sigmas,
-        sigmas_init=sigmas_init,
-        ctimes=jnp.array(covars.index) if covars is not None else None,
-        covars=jnp.array(covars) if covars is not None else None,
-        M=M,
-        a=a,
-        J=J,
-        thresh=thresh,
-        verbose=verbose,
-        key=key,
-        n_monitors=n_monitors,
-        particle_thetas=False,
-    )
-
-    return {
-        "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-        "thetas": xr.DataArray(
-            theta_ests,
-            dims=["iteration", "particle", "theta"],
-            coords={
-                "iteration": range(0, M + 1),
-                "particle": range(1, J + 1),
-                "theta": list(theta.keys()),
-            },
-        ),
-    }
 
 
 def _mif_internal(

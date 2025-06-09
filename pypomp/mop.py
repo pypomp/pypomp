@@ -6,65 +6,11 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
-import pandas as pd
 from typing import Callable
-from .model_struct import RInit, RProc, DMeas
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 from .internal_functions import _interp_covars
-
-
-def mop(
-    J: int,
-    key: jax.Array,
-    rinit: RInit,
-    rproc: RProc,
-    dmeas: DMeas,
-    theta: dict,
-    ys: pd.DataFrame,
-    covars: pd.DataFrame | None = None,
-    alpha: float = 0.97,
-) -> float:
-    """
-    Computes the mean negative log-likelihood using particle filtering.
-
-    Args:
-        J (int): Number of particles to use in the filter.
-        key (jax.Array): Random key for reproducibility.
-        rinit (RInit): Simulator for the initial-state distribution.
-        rproc (RProc): Simulator for the process model.
-        dmeas (DMeas): Density evaluator for the measurement model.
-        theta (dict): Parameters involved in the POMP model. Each value must be a float.
-        ys (pd.DataFrame): Observed measurements with time index.
-        covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
-        alpha (float, optional): Systematic resampling threshold. Defaults to 0.97.
-
-    Returns:
-        float: The log-likelihood estimate
-    """
-    if J < 1:
-        raise ValueError("J should be greater than 0")
-
-    if not isinstance(theta, dict):
-        raise TypeError("theta must be a dictionary")
-    if not all(isinstance(val, float) for val in theta.values()):
-        raise TypeError("Each value of theta must be a float")
-
-    return -_mop_internal(
-        theta=jnp.array(list(theta.values())),
-        t0=rinit.t0,
-        times=jnp.array(ys.index),
-        ys=jnp.array(ys),
-        J=J,
-        rinitializer=rinit.struct_pf,
-        rprocess=rproc.struct_pf,
-        dmeasure=dmeas.struct_pf,
-        ctimes=jnp.array(covars.index) if covars is not None else None,
-        covars=jnp.array(covars) if covars is not None else None,
-        alpha=alpha,
-        key=key,
-    )
 
 
 @partial(jit, static_argnums=(4, 5, 6, 7))

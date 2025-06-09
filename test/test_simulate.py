@@ -1,5 +1,4 @@
 import jax
-import jax.numpy as jnp
 import unittest
 import pypomp as pp
 
@@ -19,23 +18,11 @@ class TestSimulate_LG(unittest.TestCase):
         self.rmeas = self.LG.rmeas
 
     def test_internal_basic(self):
-        val1 = pp.simulate(
-            rinit=self.rinit,
-            rproc=self.rproc,
-            rmeas=self.rmeas,
-            times=jnp.array(self.ys.index),
-            theta=self.theta,
-            covars=self.covars,
-            nsim=self.nsim,
-            key=self.key,
-        )
-        val2 = self.LG.simulate(nsim=self.nsim, key=self.key)
+        val = self.LG.simulate(nsim=self.nsim, key=self.key)
 
-        for val in [val1, val2]:
-            self.assertIsInstance(val, dict)
-            self.assertIn("X_sims", val)
-            self.assertIn("Y_sims", val)
-            self.assertEqual(
-                val["X_sims"].shape,
-                (len(self.ys) + 1, self.rmeas.ydim, self.nsim),
-            )
+        self.assertIsInstance(val, dict)
+        self.assertIn("X_sims", val)
+        self.assertIn("Y_sims", val)
+        self.assertEqual(
+            val["X_sims"].shape, (len(self.ys) + 1, self.rmeas.ydim, self.nsim)
+        )

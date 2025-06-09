@@ -14,6 +14,7 @@ from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _interp_covars
 
+
 def mif(
     ys: pd.DataFrame,
     theta: dict,
@@ -28,7 +29,6 @@ def mif(
     sigmas_init: float | jax.Array,
     covars: pd.DataFrame | None = None,
     thresh: float = 0.0,
-    monitor: bool = False,
     verbose: bool = False,
     n_monitors: int = 1,
 ) -> dict:
@@ -44,12 +44,11 @@ def mif(
         key (jax.Array): Random key for reproducibility.
         J (int): Number of particles to use in the filter.
         M (int): Number of algorithm iterations.
-        a (float): Decay factor for sigmas.        
+        a (float): Decay factor for sigmas.
         sigmas (float | jax.Array): Perturbation factor for parameters.
         sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
         covars (pd.DataFrame, optional): Covariates for the process. Defaults to None.
         thresh (float, optional): Resampling threshold. Defaults to 0.
-        monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
         verbose (bool, optional): Flag to print log-likelihood and parameter information.
             Defaults to False.
         n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
@@ -87,10 +86,10 @@ def mif(
         a=a,
         J=J,
         thresh=thresh,
-        monitor=monitor,
         verbose=verbose,
         key=key,
         n_monitors=n_monitors,
+        particle_thetas=False,
     )
 
     return {
@@ -126,19 +125,23 @@ def _mif_internal(
     a: float,
     J: int,
     thresh: float,
-    monitor: bool,
     verbose: bool,
     key: jax.Array,
     n_monitors: int,
+    particle_thetas: bool,  # set true when theta already contains a row for each particle
 ) -> tuple[jax.Array, jax.Array]:
     logliks = []
     params = []
 
-    ndim = theta.ndim
-    thetas = jnp.tile(theta, (J,) + (1,) * ndim)
+    if particle_thetas:
+        ndim = theta.ndim - 1
+        thetas = theta
+    else:
+        ndim = theta.ndim
+        thetas = jnp.tile(theta, (J,) + (1,) * ndim)
     params.append(thetas)
 
-    if monitor:
+    if n_monitors > 0:
         key, subkey = jax.random.split(key=key)
         loglik = jnp.mean(
             jnp.array(
@@ -189,7 +192,7 @@ def _mif_internal(
         )
         params.append(thetas)
 
-        if monitor:
+        if n_monitors > 0:
             key, subkey = jax.random.split(key=key)
             loglik = jnp.mean(
                 jnp.array(

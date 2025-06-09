@@ -38,7 +38,7 @@ class TestFit_LG(unittest.TestCase):
             M=self.M,
             a=self.a,
             key=self.key,
-            monitor=True,
+            n_monitors=1,
         )
         self.assertEqual(mif_out1["logLik"].shape, (3,))
         self.assertEqual(
@@ -57,7 +57,7 @@ class TestFit_LG(unittest.TestCase):
                 sigmas_init=1e-20,
                 a=self.a,
                 key=self.key,
-                monitor=True,
+                n_monitors=1,
             )
             self.assertEqual(mif_out1["logLik"].shape, (M + 1,))
             self.assertEqual(mif_out1["thetas"].shape, (M + 1, J) + (len(self.theta),))

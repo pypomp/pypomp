@@ -216,8 +216,8 @@ class Pomp:
 
     def mif(
         self,
-        sigmas: float,
-        sigmas_init: float,
+        sigmas: float | jax.Array,
+        sigmas_init: float | jax.Array,
         M: int,
         a: float,
         J: int,
@@ -229,7 +229,6 @@ class Pomp:
         dmeas: DMeas | None = None,
         covars: pd.DataFrame | None = None,
         thresh: float = 0,
-        monitor: bool = False,
         verbose: bool = False,
         n_monitors: int = 1,
     ) -> dict:
@@ -257,7 +256,6 @@ class Pomp:
             covars (array-like, optional): Covariates or None if not applicable.
                 Defaults to self.covars.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-            monitor (bool, optional): Flag to monitor log-likelihood values. Defaults to False.
             verbose (bool, optional): Flag to print log-likelihood and parameter information. Defaults to False.
             n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
                 Defaults to 1.
@@ -290,7 +288,6 @@ class Pomp:
             a=a,
             J=J,
             thresh=thresh,
-            monitor=monitor,
             verbose=verbose,
             key=key,
             n_monitors=n_monitors,

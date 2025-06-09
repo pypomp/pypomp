@@ -167,7 +167,8 @@ class Pomp:
         dmeas: DMeas | None = None,
         covars: pd.DataFrame | None = None,
         thresh: float = 0,
-    ) -> float:
+        reps: int = 1,
+    ) -> jax.Array:
         """
         Instance method for particle filtering algorithm.
 
@@ -188,9 +189,10 @@ class Pomp:
                 Replaced with Pomp.covars if None.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
+            reps (int, optional): Number of replicates to run. Defaults to 1.
 
         Returns:
-            float: The log-likelihood estimate
+            jax.Array: The log-likelihood estimate(s).
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -212,6 +214,7 @@ class Pomp:
             covars=covars,
             thresh=thresh,
             key=key,
+            reps=reps,
         )
 
     def mif(

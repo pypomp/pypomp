@@ -121,7 +121,7 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertIsInstance(pfilter_out, dict)
         self.assertEqual(set(pfilter_out.keys()), {"LG1", "LG2"})
         for unit in pfilter_out:
-            self.assertTrue(jnp.isscalar(pfilter_out[unit]))
+            self.assertTrue(isinstance(pfilter_out[unit], jax.Array))
 
     def test_mif(self):
         # Test that mif runs to completion
@@ -305,7 +305,7 @@ class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
         self.assertIsInstance(pfilter_out, dict)
         self.assertEqual(set(pfilter_out.keys()), {"LG1", "LG2"})
         for unit in pfilter_out:
-            self.assertTrue(jnp.isscalar(pfilter_out[unit]))
+            self.assertTrue(isinstance(pfilter_out[unit], jax.Array))
 
     def test_mif(self):
         # Test that mif runs to completion

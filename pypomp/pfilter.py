@@ -22,7 +22,8 @@ def pfilter(
     key: jax.Array,
     covars: pd.DataFrame | None = None,
     thresh: float = 0,
-) -> float:
+    reps: int = 1,
+) -> jax.Array:
     """
     Implements a particle filtering algorithm for a Partially Observed Markov Process (POMP) model.
     This function estimates the log-likelihood of the observed data given the model parameters
@@ -41,15 +42,10 @@ def pfilter(
         thresh (float, optional): Threshold value to determine whether to resample particles.
             If the effective sample size falls below this threshold, systematic resampling
             is performed. Defaults to 0.
+        reps (int, optional): Number of replicates to run. Defaults to 1.
 
     Returns:
-        float: The estimated log-likelihood of the observed data given the model parameters.
-            This is computed as the sum of the log-likelihood contributions at each time point.
-
-    Note:
-        The particle filter uses systematic resampling when the effective sample size
-        falls below the specified threshold. The effective sample size is computed as
-        1/sum(w^2) where w are the normalized weights of the particles.
+        jax.Array: The estimated log-likelihood(s) of the observed data given the model parameters.
     """
     if J < 1:
         raise ValueError("J should be greater than 0.")
@@ -61,20 +57,29 @@ def pfilter(
     if not all(isinstance(val, float) for val in theta.values()):
         raise TypeError("Each value of theta must be a float")
 
-    return -_pfilter_internal(
-        theta=jnp.array(list(theta.values())),
-        t0=rinit.t0,
-        times=jnp.array(ys.index),
-        ys=jnp.array(ys),
-        J=J,
-        rinitializer=rinit.struct_pf,
-        rprocess=rproc.struct_pf,
-        dmeasure=dmeas.struct_pf,
-        ctimes=jnp.array(covars.index) if covars is not None else None,
-        covars=jnp.array(covars) if covars is not None else None,
-        thresh=thresh,
-        key=key,
-    )
+    # Generate keys for each replicate
+    keys = jax.random.split(key, reps)
+    # Run multiple replicates using a simple for loop
+    results = []
+    for k in keys:
+        results.append(
+            _pfilter_internal(
+                theta=jnp.array(list(theta.values())),
+                t0=rinit.t0,
+                times=jnp.array(ys.index),
+                ys=jnp.array(ys),
+                J=J,
+                rinitializer=rinit.struct_pf,
+                rprocess=rproc.struct_pf,
+                dmeasure=dmeas.struct_pf,
+                ctimes=jnp.array(covars.index) if covars is not None else None,
+                covars=jnp.array(covars) if covars is not None else None,
+                thresh=thresh,
+                key=k,
+            )
+        )
+
+    return -jnp.array(results)
 
 
 @partial(jit, static_argnums=(4, 5, 6, 7))

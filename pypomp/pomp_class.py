@@ -4,6 +4,7 @@ This module implements the OOP structure for POMP models.
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 from .mop import _mop_internal
 from .mif import _mif_internal
@@ -43,6 +44,10 @@ class Pomp:
         covars (pd.DataFrame | None): Covariates for the model if applicable
         results (list | None): History of the results for the pfilter, mif, and train
             methods run on the object. This includes the algorithmic parameters used.
+        fresh_key (jax.Array | None): Running a method that takes a key argument will
+            store a fresh, unused key in this attribute. Subsequent calls to a method
+            that requires a key will use this key unless a new key is provided as an
+            argument.
     """
 
     def __init__(
@@ -102,14 +107,32 @@ class Pomp:
         self.rmeas = rmeas
         self.covars = covars
         self.results = []
+        self.fresh_key = None
+
+    def _update_fresh_key(
+        self, key: jax.Array | None = None
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Updates the fresh_key attribute and returns a new key along with the old key.
+
+        Returns:
+            tuple[jax.Array, jax.Array]: A tuple containing the new key and the old key.
+                The old key is the key that was used to update the fresh_key attribute.
+                The new key is the key that should be used for the next method call.
+        """
+        old_key = self.fresh_key if key is None else key
+        if old_key is None:
+            raise ValueError(
+                "Both the key argument and the fresh_key attribute are None."
+            )
+        self.fresh_key, new_key = jax.random.split(old_key)
+        return new_key, old_key
 
     def mop(
         self,
         J: int,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: dict | None = None,
-        ys: pd.DataFrame | None = None,
-        covars: pd.DataFrame | None = None,
         alpha: float = 0.97,
     ) -> jax.Array:
         """
@@ -117,13 +140,10 @@ class Pomp:
 
         Args:
             J (int): The number of particles.
-            key (jax.Array): The random key for reproducibility.
+            key (jax.Array, optional): The random key for reproducibility.
+                Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
-            ys (pd.DataFrame, optional): The measurement array.
-                Defaults to self.ys.
-            covars (pd.DataFrame, optional): Covariates or None if not applicable.
-                Defaults to self.covars.
             alpha (float, optional): Cooling factor for the random perturbations.
                 Defaults to 0.97.
 
@@ -131,9 +151,8 @@ class Pomp:
             jax.Array: The estimated log-likelihood of the observed data given the model
                 parameters.
         """
-        theta = self.theta if theta is None else theta
-        ys = self.ys if ys is None else ys
-        covars = self.covars if covars is None else covars
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -149,22 +168,22 @@ class Pomp:
         return -_mop_internal(
             theta=jnp.array(list(theta.values())),
             t0=self.rinit.t0,
-            times=jnp.array(ys.index),
-            ys=jnp.array(ys),
+            times=jnp.array(self.ys.index),
+            ys=jnp.array(self.ys),
             J=J,
             rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
-            ctimes=jnp.array(covars.index) if covars is not None else None,
-            covars=jnp.array(covars) if covars is not None else None,
+            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
+            covars=jnp.array(self.covars) if self.covars is not None else None,
             alpha=alpha,
-            key=key,
+            key=new_key,
         )
 
     def pfilter(
         self,
         J: int,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: dict | None = None,
         thresh: float = 0,
         reps: int = 1,
@@ -174,7 +193,7 @@ class Pomp:
 
         Args:
             J (int): The number of particles
-            key (jax.Array): The random key.
+            key (jax.Array, optional): The random key. Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Each value must be a float. Replaced with Pomp.theta if None.
             thresh (float, optional): Threshold value to determine whether to
@@ -184,7 +203,8 @@ class Pomp:
         Returns:
             None
         """
-        theta = self.theta if theta is None else theta
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -198,7 +218,7 @@ class Pomp:
             raise TypeError("Each value of theta must be a float")
 
         # Generate keys for each replicate
-        keys = jax.random.split(key, reps)
+        keys = jax.random.split(new_key, reps)
         # Run multiple replicates using a simple for loop
         results = []
         for k in keys:
@@ -227,6 +247,7 @@ class Pomp:
                 "theta": theta,
                 "J": J,
                 "thresh": thresh,
+                "key": old_key,
             }
         )
 
@@ -237,7 +258,7 @@ class Pomp:
         M: int,
         a: float,
         J: int,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: dict | None = None,
         thresh: float = 0,
         verbose: bool = False,
@@ -254,7 +275,8 @@ class Pomp:
             M (int): Number of algorithm iterations.
             a (float): Decay factor for sigmas.
             J (int): The number of particles.
-            key (jax.Array): The random key for reproducibility.
+            key (jax.Array, optional): The random key for reproducibility.
+                Defaults to self.fresh_key.
             theta (dict, optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
             thresh (float, optional): Resampling threshold. Defaults to 0.
@@ -265,7 +287,8 @@ class Pomp:
         Returns:
             None
         """
-        theta = self.theta if theta is None else theta
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -298,10 +321,12 @@ class Pomp:
             J=J,
             thresh=thresh,
             verbose=verbose,
-            key=key,
+            key=new_key,
             n_monitors=n_monitors,
             particle_thetas=False,
         )
+
+        self.theta = dict(zip(theta.keys(), np.mean(theta_ests[-1], axis=0).tolist()))
 
         self.results.append(
             {
@@ -322,6 +347,7 @@ class Pomp:
                 "sigmas_init": sigmas_init,
                 "a": a,
                 "thresh": thresh,
+                "key": old_key,
             }
         )
 
@@ -329,7 +355,7 @@ class Pomp:
         self,
         J: int,
         Jh: int,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: dict | None = None,
         method: str = "Newton",
         itns: int = 20,
@@ -350,7 +376,8 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient.
             Jh (int): The number of particles in the MOP objective for obtaining the Hessian matrix.
-            key (jax.Array): The random key for reproducibility.
+            key (jax.Array, optional): The random key for reproducibility.
+                Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             method (str, optional): The gradient-based iterative optimization method to use.
@@ -380,7 +407,8 @@ class Pomp:
         Returns:
             None
         """
-        theta = self.theta if theta is None else theta
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -418,7 +446,7 @@ class Pomp:
             scale=scale,
             ls=ls,
             alpha=alpha,
-            key=key,
+            key=new_key,
             n_monitors=n_monitors,
         )
 
@@ -445,12 +473,13 @@ class Pomp:
                 "thresh": thresh,
                 "ls": ls,
                 "alpha": alpha,
+                "key": old_key,
             }
         )
 
     def simulate(
         self,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: dict | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
@@ -460,7 +489,8 @@ class Pomp:
         Markov Process (POMP) model.
 
         Args:
-            key (jax.Array): The random key for random number generation.
+            key (jax.Array, optional): The random key for random number generation.
+                Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             times (jax.Array, optional): Times at which to generate observations.
@@ -472,7 +502,8 @@ class Pomp:
                 - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
                 - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
-        theta = self.theta if theta is None else theta
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
         times = jnp.array(self.ys.index) if times is None else times
 
         if self.rmeas is None:
@@ -496,7 +527,7 @@ class Pomp:
             covars=jnp.array(self.covars) if self.covars is not None else None,
             ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
             nsim=nsim,
-            key=key,
+            key=new_key,
         )
 
         X_sims = xr.DataArray(

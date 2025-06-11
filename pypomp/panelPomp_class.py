@@ -584,6 +584,7 @@ class PanelPomp:
                         },
                     )
 
+        # TODO: update self.theta
         # Create results
         self.results.append(
             {

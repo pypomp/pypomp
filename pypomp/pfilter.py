@@ -27,7 +27,7 @@ def _pfilter_internal(
 ) -> jax.Array:
     """
     Internal function for particle the filtering algorithm, which calls the function
-    'pfilter_helper' iteratively.
+    'pfilter_helper' iteratively. Returns the negative log-likelihood.
     """
     key, keys = _keys_helper(key=key, J=J, covars=covars)
     covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
@@ -73,7 +73,7 @@ def _pfilter_internal_mean(
     key: jax.Array,
 ) -> jax.Array:
     """
-    Internal function for calculating the particle filter estimate of the log
+    Internal function for calculating the particle filter estimate of the neagative log
     likelihood divided by the length of the observations. This is used in internal
     pypomp.train functions.
     """

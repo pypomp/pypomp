@@ -39,3 +39,19 @@ class TestPompClass_LG(unittest.TestCase):
                 }
                 kwargs[arg] = None
                 pp.Pomp(**kwargs)
+
+    def test_sample_params(self):
+        param_bounds = {
+            "R0": (0, 100),
+            "sigma": (0, 100),
+            "gamma": (0, 100),
+        }
+        n = 10
+        key = jax.random.key(1)
+        param_sets = pp.Pomp.sample_params(param_bounds, n, key)
+        self.assertEqual(len(param_sets), n)
+        for params in param_sets:
+            param_names = list(params.keys())
+            self.assertEqual(param_names, list(param_bounds.keys()))
+            for param_name, value in params.items():
+                self.assertIsInstance(value, float)

@@ -128,6 +128,33 @@ class Pomp:
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
+    @staticmethod
+    def sample_params(param_bounds: dict, n: int, key: jax.Array) -> list[dict]:
+        """
+        Sample n sets of parameters from uniform distributions.
+
+        Args:
+            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds
+            n (int): Number of parameter sets to sample
+            key (jax.Array): JAX random key for reproducibility
+
+        Returns:
+            list[dict]: List of n dictionaries containing sampled parameters
+        """
+        keys = jax.random.split(key, len(param_bounds))
+        param_sets = []
+
+        for i in range(n):
+            params = {}
+            for j, (param_name, (lower, upper)) in enumerate(param_bounds.items()):
+                subkey = jax.random.split(keys[j], n)[i]
+                params[param_name] = float(
+                    jax.random.uniform(subkey, shape=(), minval=lower, maxval=upper)
+                )
+            param_sets.append(params)
+
+        return param_sets
+
     def mop(
         self,
         J: int,

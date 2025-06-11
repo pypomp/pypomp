@@ -115,11 +115,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
     C = C + trans_I[0]
-    jax.debug.print("dt: {x}", x=dt)
-    jax.debug.print("dw: {x}", x=dw)
-    jax.debug.print("foi: {x}", x=foi)
-    jax.debug.print("dw/dt: {x}", x=dw / dt)
-    jax.debug.print("rate[0]: {x}", x=rate[0])
+    # jax.debug.print("dt: {x}", x=dt)
+    # jax.debug.print("dw: {x}", x=dw)
+    # jax.debug.print("foi: {x}", x=foi)
+    # jax.debug.print("dw/dt: {x}", x=dw / dt)
+    # jax.debug.print("rate[0]: {x}", x=rate[0])
     return jnp.array([S, E, I, R, W, C])
 
 

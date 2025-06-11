@@ -26,7 +26,7 @@ class TestFit_LG(unittest.TestCase):
 
     def test_class_mif_basic(self):
         for J, M in [(self.J, 2), (100, 10)]:
-            mif_out1 = self.LG.mif(
+            self.LG.mif(
                 J=J,
                 M=M,
                 sigmas=self.sigmas,
@@ -35,16 +35,19 @@ class TestFit_LG(unittest.TestCase):
                 key=self.key,
                 n_monitors=1,
             )
+            mif_out1 = self.LG.results[-1]
             self.assertEqual(mif_out1["logLik"].shape, (M + 1,))
-            self.assertEqual(mif_out1["thetas"].shape, (M + 1, J) + (len(self.theta),))
+            self.assertEqual(
+                mif_out1["thetas_out"].shape, (M + 1, J) + (len(self.theta),)
+            )
             self.assertTrue(jnp.issubdtype(mif_out1["logLik"].dtype, jnp.float32))
-            self.assertTrue(jnp.issubdtype(mif_out1["thetas"], jnp.float32))
+            self.assertTrue(jnp.issubdtype(mif_out1["thetas_out"], jnp.float32))
 
         # check that sigmas isn't modified by mif
         self.assertEqual(self.sigmas, 0.02)
 
         # check that sigmas array input works
-        mif_out2 = self.LG.mif(
+        self.LG.mif(
             sigmas=self.sigmas_long,
             sigmas_init=1e-20,
             J=self.J,
@@ -52,17 +55,18 @@ class TestFit_LG(unittest.TestCase):
             a=0.9,
             key=self.key,
         )
+        mif_out2 = self.LG.results[-1]
         # check that sigmas isn't modified by mif when passed as an array
         self.assertTrue(
             (self.sigmas_long == jnp.array([0.02] * (len(self.theta) - 1) + [0])).all()
         )
         # check that the last parameter is never perturbed
         self.assertTrue(
-            (mif_out2["thetas"][:, :, 15] == mif_out2["thetas"][0, 0, 15]).all()
+            (mif_out2["thetas_out"][:, :, 15] == mif_out2["thetas_out"][0, 0, 15]).all()
         )
         # check that some other parameter is perturbed
         self.assertTrue(
-            (mif_out2["thetas"][:, 0, 0] != mif_out2["thetas"][0, 0, 0]).any()
+            (mif_out2["thetas_out"][:, 0, 0] != mif_out2["thetas_out"][0, 0, 0]).any()
         )
 
     def test_invalid_mif_input(self):

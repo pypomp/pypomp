@@ -24,9 +24,9 @@ def _pfilter_internal(
     covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
-):
+) -> jax.Array:
     """
-    Internal function for particle the filtering algorithm, which calls function
+    Internal function for particle the filtering algorithm, which calls the function
     'pfilter_helper' iteratively.
     """
     key, keys = _keys_helper(key=key, J=J, covars=covars)
@@ -71,7 +71,7 @@ def _pfilter_internal_mean(
     covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
-):
+) -> jax.Array:
     """
     Internal function for calculating the particle filter estimate of the log
     likelihood divided by the length of the observations. This is used in internal

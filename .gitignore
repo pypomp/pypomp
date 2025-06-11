@@ -2,6 +2,7 @@
 .vscode
 *~
 scratch.py
+test/test_scratch.py
 
 #### the following is the default Python package gitignore from GitHub ####
 

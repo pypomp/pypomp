@@ -4,6 +4,7 @@ import pandas as pd
 import pypomp as pp
 import jax.numpy as jnp
 import numpy.testing as npt
+import xarray as xr
 
 
 class TestPompClass_LG(unittest.TestCase):
@@ -117,15 +118,22 @@ class TestPompClass_LG(unittest.TestCase):
 
     def test_pfilter(self):
         # Test that pfilter runs to completion
-        pfilter_out = self.panel.pfilter(J=self.J, key=self.key)
+        self.panel.pfilter(J=self.J, key=self.key)
+        pfilter_out = self.panel.results[-1]
         self.assertIsInstance(pfilter_out, dict)
-        self.assertEqual(set(pfilter_out.keys()), {"LG1", "LG2"})
-        for unit in pfilter_out:
-            self.assertTrue(isinstance(pfilter_out[unit], jax.Array))
+        self.assertEqual(
+            set(pfilter_out.keys()),
+            {"logLik", "shared", "unit_specific", "J", "thresh"},
+        )
+        self.assertIsInstance(pfilter_out["logLik"], xr.DataArray)
+        self.assertEqual(
+            set(pfilter_out["logLik"].coords["unit"].values), {"LG1", "LG2"}
+        )
+        self.assertEqual(set(pfilter_out["logLik"].coords["replicate"].values), {0})
 
     def test_mif(self):
         # Test that mif runs to completion
-        mif_out = self.panel.mif(
+        self.panel.mif(
             J=self.J,
             sigmas=self.sigmas,
             sigmas_init=self.sigmas_init,
@@ -133,6 +141,7 @@ class TestPompClass_LG(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
+        mif_out = self.panel.results[-1]
         self.assertIsInstance(mif_out, dict)
         self.assertIn("logLiks", mif_out)
         self.assertIn("shared_thetas", mif_out)
@@ -162,7 +171,7 @@ class TestPompClass_LG(unittest.TestCase):
     def test_mif_zero_sigmas(self):
         """Test that parameters remain unchanged when sigmas and sigmas_init are 0."""
         # Run mif with zero sigmas
-        mif_out = self.panel.mif(
+        self.panel.mif(
             J=self.J,
             sigmas=0.0,
             sigmas_init=0.0,
@@ -170,6 +179,7 @@ class TestPompClass_LG(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
+        mif_out = self.panel.results[-1]
 
         # Check shared parameters
         shared_initial = jnp.array(self.panel.shared["shared"].values)
@@ -301,15 +311,22 @@ class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
 
     def test_pfilter(self):
         # Test that pfilter runs to completion
-        pfilter_out = self.panel.pfilter(J=self.J, key=self.key)
+        self.panel.pfilter(J=self.J, key=self.key)
+        pfilter_out = self.panel.results[-1]
         self.assertIsInstance(pfilter_out, dict)
-        self.assertEqual(set(pfilter_out.keys()), {"LG1", "LG2"})
-        for unit in pfilter_out:
-            self.assertTrue(isinstance(pfilter_out[unit], jax.Array))
+        self.assertEqual(
+            set(pfilter_out.keys()),
+            {"logLik", "shared", "unit_specific", "J", "thresh"},
+        )
+        self.assertIsInstance(pfilter_out["logLik"], xr.DataArray)
+        self.assertEqual(
+            set(pfilter_out["logLik"].coords["unit"].values), {"LG1", "LG2"}
+        )
+        self.assertEqual(set(pfilter_out["logLik"].coords["replicate"].values), {0})
 
     def test_mif(self):
         # Test that mif runs to completion
-        mif_out = self.panel.mif(
+        self.panel.mif(
             J=self.J,
             sigmas=self.sigmas,
             sigmas_init=self.sigmas_init,
@@ -317,6 +334,7 @@ class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
+        mif_out = self.panel.results[-1]
         self.assertIsInstance(mif_out, dict)
         self.assertIn("logLiks", mif_out)
         self.assertNotIn("shared_thetas", mif_out)

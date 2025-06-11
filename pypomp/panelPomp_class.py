@@ -8,16 +8,16 @@ import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 from .pomp_class import Pomp
-from .model_struct import RInit, RProc, DMeas, RMeas
 from .mif import _mif_internal
+import numpy as np
 
 
 class PanelPomp:
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
-        shared: pd.DataFrame,
-        unit_specific: pd.DataFrame,
+        shared: pd.DataFrame | None = None,
+        unit_specific: pd.DataFrame | None = None,
     ):
         """
         Initializes a PanelPOMP model, which consists of multiple POMP models
@@ -58,6 +58,7 @@ class PanelPomp:
         self.unit_objects = Pomp_dict
         self.shared = shared
         self.unit_specific = unit_specific
+        self.results = []
 
         # Store original parameter order for each unit
         self._unit_param_order = {}
@@ -69,7 +70,8 @@ class PanelPomp:
 
     def get_unit_parameters(self, unit: str) -> dict:
         """
-        Get the complete parameter set for a specific unit, combining shared and unit-specific parameters.
+        Get the complete parameter set for a specific unit, combining shared and
+        unit-specific parameters.
 
         Args:
             unit (str): The unit identifier.
@@ -92,9 +94,9 @@ class PanelPomp:
     def simulate(
         self,
         key: jax.Array,
-        theta: dict | None = None,
+        shared: pd.DataFrame | None = None,
+        unit_specific: pd.DataFrame | None = None,
         times: jax.Array | None = None,
-        covars: pd.DataFrame | None = None,
         nsim: int = 1,
     ) -> dict:
         """
@@ -102,12 +104,12 @@ class PanelPomp:
 
         Args:
             key (jax.Array): The random key for random number generation.
-            theta (dict, optional): Parameters involved in the POMP model.
+            shared (pd.DataFrame, optional): Parameters involved in the POMP model.
+                If provided, overrides the shared parameters.
+            unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
                 If provided, overrides the unit-specific parameters.
             times (jax.Array, optional): Times at which to generate observations.
                 If provided, overrides the unit-specific times.
-            covars (pd.DataFrame, optional): Covariates for the process.
-                If provided, overrides the unit-specific covariates.
             nsim (int, optional): The number of simulations to perform. Defaults to 1.
 
         Returns:
@@ -116,15 +118,21 @@ class PanelPomp:
                 - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
                 - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+
         results = {}
         for unit, obj in self.unit_objects.items():
+            theta_u = {}
+            if shared is not None:
+                theta_u.update(shared["shared"].to_dict())
+            if unit_specific is not None:
+                theta_u.update(unit_specific[unit].to_dict())
             key, subkey = jax.random.split(key)
-            unit_theta = theta if theta is not None else self.get_unit_parameters(unit)
             results[unit] = obj.simulate(
                 key=subkey,
-                theta=unit_theta,
+                theta=theta_u,
                 times=times,
-                covars=covars,
                 nsim=nsim,
             )
         return results
@@ -133,64 +141,95 @@ class PanelPomp:
         self,
         J: int,
         key: jax.Array,
-        theta: dict | None = None,
-        ys: pd.DataFrame | None = None,
-        covars: pd.DataFrame | None = None,
+        shared: pd.DataFrame | None = None,
+        unit_specific: pd.DataFrame | None = None,
         thresh: float = 0,
-    ) -> dict:
+        reps: int = 1,
+    ) -> None:
         """
         Runs the particle filter on each unit in the panel.
 
         Args:
             J (int): The number of particles to use in the filter.
             key (jax.Array): The random key for reproducibility.
-            theta (dict, optional): Parameters involved in the POMP model.
+            shared (pd.DataFrame, optional): Parameters involved in the POMP model.
+                If provided, overrides the shared parameters.
+            unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
                 If provided, overrides the unit-specific parameters.
-            ys (pd.DataFrame, optional): The measurement array.
-                If provided, overrides the unit-specific measurements.
-            covars (pd.DataFrame, optional): Covariates for the process.
-                If provided, overrides the unit-specific covariates.
             thresh (float, optional): Threshold value to determine whether to resample particles.
                 Defaults to 0.
-
+            reps (int): Number of replicates to run. Defaults to 1.
         Returns:
-            dict: A dictionary mapping unit names to log-likelihood estimates.
-                Each value is the estimated log-likelihood for that unit.
+            None
         """
-        results = {}
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+
+        results = xr.DataArray(
+            np.zeros((len(self.unit_objects), reps)),
+            dims=["unit", "replicate"],
+            coords={"unit": list(self.unit_objects.keys()), "replicate": range(reps)},
+        )
         for unit, obj in self.unit_objects.items():
+            theta_u = {}
+            if shared is not None:
+                theta_u.update(shared["shared"].to_dict())
+            if unit_specific is not None:
+                theta_u.update(unit_specific[unit].to_dict())
             key, subkey = jax.random.split(key)
-            unit_theta = theta if theta is not None else self.get_unit_parameters(unit)
-            results[unit] = obj.pfilter(
+            obj.pfilter(
                 J=J,
                 key=subkey,
-                theta=unit_theta,
-                ys=ys,
-                covars=covars,
+                theta=theta_u,
                 thresh=thresh,
+                reps=reps,
             )
-        return results
+            results.loc[unit, :] = obj.results[-1]["logLik"]
+            obj.results = []
+        self.results.append(
+            {
+                "logLik": results,
+                "shared": shared,
+                "unit_specific": unit_specific,
+                "J": J,
+                "thresh": thresh,
+            }
+        )
 
     def _initialize_parameters(
-        self, J: int
+        self, J: int, shared: pd.DataFrame | None, unit_specific: pd.DataFrame | None
     ) -> tuple[jax.Array | None, jax.Array | None, list[str], list[str], list[str]]:
         """Initialize parameter matrices for MIF algorithm."""
-        shared_params = list(self.shared.index)
-        unit_specific_params = list(self.unit_specific.index)
+        # Handle None cases for shared parameters
+        if shared is None and self.shared is None:
+            shared_params = []
+            shared_values = jnp.array([])
+        else:
+            shared = shared or self.shared
+            shared_params = list(shared.index)
+            shared_values = (
+                shared["shared"].values if not shared.empty else jnp.array([])
+            )
+
+        # Handle None cases for unit-specific parameters
+        if unit_specific is None and self.unit_specific is None:
+            unit_specific_params = []
+            unit_specific_values = jnp.array([])
+        else:
+            unit_specific = unit_specific or self.unit_specific
+            unit_specific_params = list(unit_specific.index)
+            unit_specific_values = (
+                unit_specific.values if not unit_specific.empty else jnp.array([])
+            )
+
         unit_names = list(self.unit_objects.keys())
 
         # Initialize shared parameters
-        shared_values = (
-            self.shared["shared"].values if not self.shared.empty else jnp.array([])
-        )
         shared_thetas = (
             jnp.tile(shared_values, (J, 1)).T if len(shared_values) > 0 else None
         )
 
         # Initialize unit-specific parameters
-        unit_specific_values = (
-            self.unit_specific.values if not self.unit_specific.empty else jnp.array([])
-        )
         unit_specific_thetas = (
             jnp.tile(unit_specific_values[:, None, :], (1, J, 1))
             if len(unit_specific_values) > 0
@@ -214,8 +253,6 @@ class PanelPomp:
         shared_params: list[str],
         unit_specific_params: list[str],
         J: int,
-        ys: dict[str, pd.DataFrame] | None,
-        covars: dict[str, pd.DataFrame] | None,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
         thresh: float,
@@ -224,10 +261,8 @@ class PanelPomp:
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Process a single unit in the MIF algorithm."""
         # Get unit-specific data
-        unit_ys = ys[unit] if ys is not None else self.unit_objects[unit].ys
-        unit_covars = (
-            covars[unit] if covars is not None else self.unit_objects[unit].covars
-        )
+        unit_ys = self.unit_objects[unit].ys
+        unit_covars = self.unit_objects[unit].covars
 
         # Get unit-specific components
         unit_rinit = self.unit_objects[unit].rinit
@@ -404,14 +439,13 @@ class PanelPomp:
         sigmas_init: float | jax.Array,
         M: int,
         a: float,
-        theta: dict | None = None,
-        ys: dict | None = None,
-        covars: dict | None = None,
+        shared: pd.DataFrame | None = None,
+        unit_specific: pd.DataFrame | None = None,
         thresh: float = 0,
         verbose: bool = False,
         n_monitors: int = 1,
         block: bool = True,
-    ) -> dict:
+    ) -> None:
         """
         Runs the panel iterated filtering (PIF) algorithm, which estimates parameters
         by maximizing the combined log-likelihood across all units.
@@ -423,12 +457,10 @@ class PanelPomp:
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
             M (int): Number of algorithm iterations.
             a (float): Decay factor for sigmas.
-            theta (dict, optional): Initial parameters for the POMP model.
+            shared (pd.DataFrame, optional): Parameters involved in the POMP model.
+                If provided, overrides the shared parameters.
+            unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
                 If provided, overrides the unit-specific parameters.
-            ys (dict, optional): Dictionary mapping unit names to measurement arrays.
-                If provided, overrides the unit-specific measurements.
-            covars (dict, optional): Dictionary mapping unit names to covariate arrays.
-                If provided, overrides the unit-specific covariates.
             thresh (float, optional): Resampling threshold. Defaults to 0.
             verbose (bool, optional): Flag to print log-likelihood and parameter information.
                 Defaults to False.
@@ -438,11 +470,7 @@ class PanelPomp:
                 Defaults to True.
 
         Returns:
-            dict: A dictionary containing:
-                - 'logLik' (xarray.DataArray): Combined log-likelihood values through iterations
-                - 'shared_thetas' (xarray.DataArray): Shared parameter values through iterations
-                - 'unit_specific_thetas' (xarray.DataArray): Unit-specific parameter values through iterations
-                - 'unit_logLiks' (xarray.DataArray): Dictionary mapping unit names to their individual log-likelihoods
+            None
         """
         if J < 1:
             raise ValueError("J should be greater than 0.")
@@ -454,7 +482,7 @@ class PanelPomp:
             shared_params,
             unit_specific_params,
             unit_names,
-        ) = self._initialize_parameters(J)
+        ) = self._initialize_parameters(J, shared, unit_specific)
 
         # Initialize arrays to store results
         logliks = []
@@ -501,8 +529,6 @@ class PanelPomp:
                     shared_params,
                     unit_specific_params,
                     J,
-                    ys,
-                    covars,
                     sigmas,
                     sigmas_init,
                     thresh,
@@ -559,13 +585,26 @@ class PanelPomp:
                     )
 
         # Create results
-        return self._create_results(
-            jnp.array(logliks),
-            shared_params_history,
-            unit_specific_params_history,
-            unit_logliks,
-            shared_params,
-            unit_specific_params,
-            unit_names,
-            J,
+        self.results.append(
+            {
+                **self._create_results(
+                    jnp.array(logliks),
+                    shared_params_history,
+                    unit_specific_params_history,
+                    unit_logliks,
+                    shared_params,
+                    unit_specific_params,
+                    unit_names,
+                    J,
+                ),
+                "shared": shared,
+                "unit_specific": unit_specific,
+                "J": J,
+                "thresh": thresh,
+                "sigmas": sigmas,
+                "sigmas_init": sigmas_init,
+                "M": M,
+                "a": a,
+                "block": block,
+            }
         )

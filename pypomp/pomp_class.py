@@ -41,6 +41,8 @@ class Pomp:
         dmeas (DMeas | None): Density evaluation for the measurement model
         rmeas (RMeas | None): Measurement simulator
         covars (pd.DataFrame | None): Covariates for the model if applicable
+        results (list | None): History of the results for the pfilter, mif, and train
+            methods run on the object. This includes the algorithmic parameters used.
     """
 
     def __init__(
@@ -57,7 +59,7 @@ class Pomp:
         Initializes the necessary components for a specific POMP model.
 
         Args:
-            ys (DataFrame): The measurement data frame. The row index should contain the
+            ys (pd.DataFrame): The measurement data frame. The row index must contain the
                 observation times.
             rinit (RInit): Simulator for the process model.
             rproc (RProc): Basic component of the simulator for the process
@@ -67,8 +69,8 @@ class Pomp:
             rmeas (RMeas): Measurement simulator.
             theta (dict): Parameters involved in the POMP model. Each value should be a
                 float.
-            covars (array-like, optional): Covariates or None if not applicable.
-                 Defaults to None.
+            covars (pd.DataFrame, optional): Covariates or None if not applicable.
+                The row index must contain the covariate times.
         """
         if not isinstance(rinit, RInit):
             raise TypeError("rinit must be an instance of the class RInit")
@@ -90,7 +92,7 @@ class Pomp:
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
         if covars is not None and not isinstance(covars, pd.DataFrame):
-            raise TypeError("covars must be a pandas DataFrame if provided")
+            raise TypeError("covars must be a pandas DataFrame or None")
 
         self.ys = ys
         self.theta = theta
@@ -99,6 +101,7 @@ class Pomp:
         self.dmeas = dmeas
         self.rmeas = rmeas
         self.covars = covars
+        self.results = []
 
     def mop(
         self,
@@ -121,10 +124,12 @@ class Pomp:
                 Defaults to self.ys.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 Defaults to self.covars.
-            alpha (float, optional): Discount factor. Defaults to 0.97.
+            alpha (float, optional): Cooling factor for the random perturbations.
+                Defaults to 0.97.
 
         Returns:
-            jax.Array: The estimated log-likelihood of the observed data given the model parameters.
+            jax.Array: The estimated log-likelihood of the observed data given the model
+                parameters.
         """
         theta = self.theta if theta is None else theta
         ys = self.ys if ys is None else ys
@@ -161,34 +166,25 @@ class Pomp:
         J: int,
         key: jax.Array,
         theta: dict | None = None,
-        ys: pd.DataFrame | None = None,
-        covars: pd.DataFrame | None = None,
         thresh: float = 0,
         reps: int = 1,
-    ) -> jax.Array:
+    ) -> None:
         """
-        Instance method for particle filtering algorithm.
+        Instance method for the particle filtering algorithm.
 
         Args:
             J (int): The number of particles
-            key (jax.random.PRNGKey, optional): The random key.
+            key (jax.Array): The random key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Each value must be a float. Replaced with Pomp.theta if None.
-            ys (array-like, optional): The measurement array. Replaced with
-                Pomp.ys if None.
-            covars (array-like, optional): Covariates or None if not applicable.
-                Replaced with Pomp.covars if None.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
             reps (int, optional): Number of replicates to run. Defaults to 1.
 
         Returns:
-            jax.Array: The log-likelihood estimate(s).
+            None
         """
-        # Use arguments instead of attributes if given
         theta = self.theta if theta is None else theta
-        ys = self.ys if ys is None else ys
-        covars = self.covars if covars is None else covars
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -210,20 +206,29 @@ class Pomp:
                 _pfilter_internal(
                     theta=jnp.array(list(theta.values())),
                     t0=self.rinit.t0,
-                    times=jnp.array(ys.index),
-                    ys=jnp.array(ys),
+                    times=jnp.array(self.ys.index),
+                    ys=jnp.array(self.ys),
                     J=J,
                     rinitializer=self.rinit.struct_pf,
                     rprocess=self.rproc.struct_pf,
                     dmeasure=self.dmeas.struct_pf,
-                    ctimes=jnp.array(covars.index) if covars is not None else None,
-                    covars=jnp.array(covars) if covars is not None else None,
+                    ctimes=jnp.array(self.covars.index)
+                    if self.covars is not None
+                    else None,
+                    covars=jnp.array(self.covars) if self.covars is not None else None,
                     thresh=thresh,
                     key=k,
                 )
             )
-
-        return -jnp.array(results)
+        results = -jnp.array(results)
+        self.results.append(
+            {
+                "logLik": xr.DataArray(results, dims=["replicate"]),
+                "theta": theta,
+                "J": J,
+                "thresh": thresh,
+            }
+        )
 
     def mif(
         self,
@@ -233,43 +238,34 @@ class Pomp:
         a: float,
         J: int,
         key: jax.Array,
-        ys: pd.DataFrame | None = None,
         theta: dict | None = None,
-        covars: pd.DataFrame | None = None,
         thresh: float = 0,
         verbose: bool = False,
         n_monitors: int = 1,
-    ) -> dict:
+    ) -> None:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
         which uses the initialized instance parameters and calls the 'mif'
         function.
 
         Args:
-            sigmas (float): Perturbation factor for parameters.
-            sigmas_init (float): Initial perturbation factor for parameters.
+            sigmas (float | jax.Array): Perturbation factor for parameters.
+            sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
             M (int): Number of algorithm iterations.
             a (float): Decay factor for sigmas.
             J (int): The number of particles.
-            key (jax.random.PRNGKey): The random key for reproducibility.
-            ys (array-like, optional): The measurement array. Defaults to self.ys.
+            key (jax.Array): The random key for reproducibility.
             theta (dict, optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
-            covars (array-like, optional): Covariates or None if not applicable.
-                Defaults to self.covars.
             thresh (float, optional): Resampling threshold. Defaults to 0.
             verbose (bool, optional): Flag to print log-likelihood and parameter information. Defaults to False.
             n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
                 Defaults to 1.
 
         Returns:
-            dict: A dictionary containing:
-                - An xarray of log-likelihood estimates through the iterations.
-                - An xarray of parameters through the iterations.
+            None
         """
         theta = self.theta if theta is None else theta
-        ys = self.ys if ys is None else ys
-        covars = self.covars if covars is None else covars
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -285,8 +281,8 @@ class Pomp:
         nLLs, theta_ests = _mif_internal(
             theta=jnp.array(list(theta.values())),
             t0=self.rinit.t0,
-            times=jnp.array(ys.index),
-            ys=jnp.array(ys),
+            times=jnp.array(self.ys.index),
+            ys=jnp.array(self.ys),
             rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
@@ -295,8 +291,8 @@ class Pomp:
             dmeasures=self.dmeas.struct_per,
             sigmas=sigmas,
             sigmas_init=sigmas_init,
-            ctimes=jnp.array(covars.index) if covars is not None else None,
-            covars=jnp.array(covars) if covars is not None else None,
+            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
+            covars=jnp.array(self.covars) if self.covars is not None else None,
             M=M,
             a=a,
             J=J,
@@ -307,27 +303,34 @@ class Pomp:
             particle_thetas=False,
         )
 
-        return {
-            "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-            "thetas": xr.DataArray(
-                theta_ests,
-                dims=["iteration", "particle", "theta"],
-                coords={
-                    "iteration": range(0, M + 1),
-                    "particle": range(1, J + 1),
-                    "theta": list(theta.keys()),
-                },
-            ),
-        }
+        self.results.append(
+            {
+                "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
+                "thetas_out": xr.DataArray(
+                    theta_ests,
+                    dims=["iteration", "particle", "theta"],
+                    coords={
+                        "iteration": range(0, M + 1),
+                        "particle": range(1, J + 1),
+                        "theta": list(theta.keys()),
+                    },
+                ),
+                "theta": theta,
+                "M": M,
+                "J": J,
+                "sigmas": sigmas,
+                "sigmas_init": sigmas_init,
+                "a": a,
+                "thresh": thresh,
+            }
+        )
 
     def train(
         self,
         J: int,
         Jh: int,
         key: jax.Array,
-        ys: pd.DataFrame | None = None,
         theta: dict | None = None,
-        covars: pd.DataFrame | None = None,
         method: str = "Newton",
         itns: int = 20,
         beta: float = 0.9,
@@ -340,7 +343,7 @@ class Pomp:
         ls: bool = False,
         alpha: float = 0.97,
         n_monitors: int = 1,
-    ) -> dict:
+    ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
 
@@ -348,12 +351,8 @@ class Pomp:
             J (int): The number of particles in the MOP objective for obtaining the gradient.
             Jh (int): The number of particles in the MOP objective for obtaining the Hessian matrix.
             key (jax.Array): The random key for reproducibility.
-            ys (pd.DataFrame, optional): The measurement array.
-                Defaults to self.ys.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
-            covars (pd.DataFrame, optional): Covariates or None if not applicable.
-                Defaults to self.covars.
             method (str, optional): The gradient-based iterative optimization method to use.
                 Options include "Newton", "weighted Newton", "BFGS", "gradient descent".
                 Defaults to "Newton".
@@ -379,13 +378,9 @@ class Pomp:
                 Defaults to 1.
 
         Returns:
-            dict: A dictionary containing:
-                - 'loglik' (xarray.DataArray): Log-likelihood values through iterations
-                - 'params' (xarray.DataArray): Parameter values through iterations
+            None
         """
         theta = self.theta if theta is None else theta
-        ys = self.ys if ys is None else ys
-        covars = self.covars if covars is None else covars
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -403,15 +398,15 @@ class Pomp:
         nLLs, theta_ests = _train_internal(
             theta_ests=jnp.array(list(theta.values())),
             t0=self.rinit.t0,
-            times=jnp.array(ys.index),
-            ys=jnp.array(ys),
+            times=jnp.array(self.ys.index),
+            ys=jnp.array(self.ys),
             rinitializer=self.rinit.struct_pf,
             rprocess=self.rproc.struct_pf,
             dmeasure=self.dmeas.struct_pf,
             J=J,
             Jh=Jh,
-            ctimes=jnp.array(covars.index) if covars is not None else None,
-            covars=jnp.array(covars) if covars is not None else None,
+            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
+            covars=jnp.array(self.covars) if self.covars is not None else None,
             method=method,
             itns=itns,
             beta=beta,
@@ -426,24 +421,38 @@ class Pomp:
             key=key,
             n_monitors=n_monitors,
         )
-        return {
-            "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-            "thetas": xr.DataArray(
-                theta_ests,
-                dims=["iteration", "theta"],
-                coords={
-                    "iteration": range(0, itns + 1),
-                    "theta": list(theta.keys()),
-                },
-            ),
-        }
+
+        self.results.append(
+            {
+                "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
+                "thetas_out": xr.DataArray(
+                    theta_ests,
+                    dims=["iteration", "theta"],
+                    coords={
+                        "iteration": range(0, itns + 1),
+                        "theta": list(theta.keys()),
+                    },
+                ),
+                "theta": theta,
+                "J": J,
+                "Jh": Jh,
+                "method": method,
+                "itns": itns,
+                "beta": beta,
+                "eta": eta,
+                "c": c,
+                "max_ls_itn": max_ls_itn,
+                "thresh": thresh,
+                "ls": ls,
+                "alpha": alpha,
+            }
+        )
 
     def simulate(
         self,
         key: jax.Array,
         theta: dict | None = None,
         times: jax.Array | None = None,
-        covars: pd.DataFrame | None = None,
         nsim: int = 1,
     ) -> dict:
         """
@@ -453,22 +462,18 @@ class Pomp:
         Args:
             key (jax.Array): The random key for random number generation.
             theta (dict, optional): Parameters involved in the POMP model.
-                If provided, overrides the unit-specific parameters.
+                Defaults to self.theta.
             times (jax.Array, optional): Times at which to generate observations.
-                If provided, overrides the unit-specific times.
-            covars (pd.DataFrame, optional): Covariates for the process.
-                If provided, overrides the unit-specific covariates.
-            nsim (int, optional): The number of simulations to perform. Defaults to 1.
+                Defaults to self.ys.index.
+            nsim (int): The number of simulations to perform. Defaults to 1.
 
         Returns:
             dict: A dictionary containing:
                 - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
                 - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
-        # Use arguments instead of attributes if given
         theta = self.theta if theta is None else theta
         times = jnp.array(self.ys.index) if times is None else times
-        covars = self.covars if covars is None else covars
 
         if self.rmeas is None:
             raise ValueError(
@@ -488,8 +493,8 @@ class Pomp:
             t0=self.rinit.t0,
             times=jnp.array(times),
             ydim=self.rmeas.ydim,
-            covars=jnp.array(covars) if covars is not None else None,
-            ctimes=jnp.array(covars.index) if covars is not None else None,
+            covars=jnp.array(self.covars) if self.covars is not None else None,
+            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
             nsim=nsim,
             key=key,
         )

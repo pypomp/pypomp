@@ -5,16 +5,10 @@ This module implements internal functions for POMP models.
 import jax
 import jax.numpy as jnp
 
-# from tensorflow_probability.substrates import jax as tfp
 
-# tfd = tfp.distributions
-# tfb = tfp.bijectors
-# tfpk = tfp.math.psd_kernels
-
-"""resampling functions"""
-
-
-def _keys_helper(key: jax.Array, J: int, covars: jax.Array | None):
+def _keys_helper(
+    key: jax.Array, J: int, covars: jax.Array | None
+) -> tuple[jax.Array, jax.Array]:
     """
     This function is a helper for generating random keys for resampling in the
     particle filtering algorithms.
@@ -28,7 +22,7 @@ def _keys_helper(key: jax.Array, J: int, covars: jax.Array | None):
     return key, keys
 
 
-def _resample(norm_weights: jax.Array, subkey: jax.Array):
+def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     """
     Systematic resampling method based on input normalized weights.
 
@@ -54,7 +48,7 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array):
     return counts
 
 
-def _normalize_weights(weights: jax.Array):
+def _normalize_weights(weights: jax.Array) -> tuple[jax.Array, jax.Array]:
     """
     Acquires the normalized log-weights and calculates the log-likelihood.
 
@@ -63,8 +57,8 @@ def _normalize_weights(weights: jax.Array):
 
     Returns:
         tuple: A tuple containing:
-            - norm_weights (array-like): The normalized log-weights.
-            - loglik_t (float): The log of the sum of all particle likelihoods,
+            - norm_weights (jax.Array): The normalized log-weights.
+            - loglik_t (jax.Array): The log of the sum of all particle likelihoods,
                 when the weights are associate with particles, which is
                 equivalent to the total log-likelihood under the specific
                 assumptions.
@@ -77,7 +71,7 @@ def _normalize_weights(weights: jax.Array):
 
 def _resampler(
     counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
-):
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Resamples the particles based on the weighted resampling rule determined by
     norm_weights and the original particles generated from the previous
@@ -111,7 +105,7 @@ def _resampler(
 
 def _no_resampler(
     counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
-):
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Obtains the original input arguments without resampling.
     """
@@ -124,7 +118,7 @@ def _resampler_thetas(
     norm_weights: jax.Array,
     thetas: jax.Array,
     subkey: jax.Array,
-):
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Resamples the particles for perturbed particle filtering method, with their
     corresponding parameters also resampled
@@ -165,7 +159,7 @@ def _no_resampler_thetas(
     norm_weights: jax.Array,
     thetas: jax.Array,
     subkey: jax.Array,
-):
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Obtains the original input arguments without resampling for perturbed
     filtering method.

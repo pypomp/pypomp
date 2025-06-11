@@ -26,7 +26,7 @@ class TestFit_LG(unittest.TestCase):
         methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
         for method in methods:
             with self.subTest(method=method):
-                GD_out = self.LG.train(
+                self.LG.train(
                     J=self.J,
                     Jh=self.Jh,
                     itns=self.itns,
@@ -35,14 +35,15 @@ class TestFit_LG(unittest.TestCase):
                     ls=True,
                     key=self.key,
                 )
+                GD_out = self.LG.results[-1]
                 self.assertEqual(GD_out["logLik"].shape, (3,))
-                self.assertEqual(GD_out["thetas"].shape, (3,) + (len(self.theta),))
+                self.assertEqual(GD_out["thetas_out"].shape, (3,) + (len(self.theta),))
                 self.assertTrue(jnp.issubdtype(GD_out["logLik"], jnp.float32))
-                self.assertTrue(jnp.issubdtype(GD_out["thetas"], jnp.float32))
+                self.assertTrue(jnp.issubdtype(GD_out["thetas_out"], jnp.float32))
 
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError):
-            GD_out1 = self.LG.train(
+            self.LG.train(
                 J=0,
                 Jh=self.Jh,
                 itns=self.itns,
@@ -51,7 +52,7 @@ class TestFit_LG(unittest.TestCase):
                 key=self.key,
             )
         with self.assertRaises(ValueError):
-            GD_out2 = self.LG.train(
+            self.LG.train(
                 J=self.J,
                 Jh=0,
                 itns=self.itns,

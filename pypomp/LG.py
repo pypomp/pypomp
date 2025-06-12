@@ -61,7 +61,9 @@ def rmeas(X_, theta_, key, covars=None, t=None):
 
 def LG(
     T: int = 4,
-    A: jax.Array = jnp.array([[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]),
+    A: jax.Array = jnp.array(
+        [[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]
+    ),
     C: jax.Array = jnp.eye(2),
     Q: jax.Array = jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
     R: jax.Array = jnp.array([[1, 0.1], [0.1, 1]]) / 10,
@@ -116,7 +118,7 @@ def LG(
         dmeas=dmeas,
         rmeas=rmeas,
         ys=pd.DataFrame(
-            sims["Y_sims"].squeeze(),
+            sims[0]["Y_sims"].squeeze(),
             index=range(1, T + 1),
             columns=pd.Index(["Y1", "Y2"]),
         ),

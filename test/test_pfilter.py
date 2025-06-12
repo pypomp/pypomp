@@ -20,14 +20,14 @@ class TestPfilter_LG(unittest.TestCase):
 
     def test_class_basic(self):
         self.LG.pfilter(J=self.J, key=self.key)
-        val1 = self.LG.results[-1]["logLik"]
+        val1 = self.LG.results[-1]["logLiks"][0]
         self.assertEqual(val1.shape, (1,))
         self.assertTrue(jnp.isfinite(val1.item()))
         self.assertEqual(val1.dtype, jnp.float32)
 
     def test_reps(self):
         self.LG.pfilter(J=self.J, key=self.key, reps=2)
-        val1 = self.LG.results[-1]["logLik"]
+        val1 = self.LG.results[-1]["logLiks"][0]
         self.assertEqual(val1.shape, (2,))
 
 

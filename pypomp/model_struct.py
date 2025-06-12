@@ -162,6 +162,7 @@ class RProc:
             dt=dt,
             accumvars=accumvars,
         )
+        self.dt = dt
 
 
 class DMeas:

@@ -36,10 +36,12 @@ class TestFit_LG(unittest.TestCase):
                     key=self.key,
                 )
                 GD_out = self.LG.results[-1]
-                self.assertEqual(GD_out["logLik"].shape, (3,))
-                self.assertEqual(GD_out["thetas_out"].shape, (3,) + (len(self.theta),))
-                self.assertTrue(jnp.issubdtype(GD_out["logLik"], jnp.float32))
-                self.assertTrue(jnp.issubdtype(GD_out["thetas_out"], jnp.float32))
+                self.assertEqual(GD_out["logLiks"][0].shape, (3,))
+                self.assertEqual(
+                    GD_out["thetas_out"][0].shape, (3,) + (len(self.theta[0]),)
+                )
+                self.assertTrue(jnp.issubdtype(GD_out["logLiks"][0], jnp.float32))
+                self.assertTrue(jnp.issubdtype(GD_out["thetas_out"][0], jnp.float32))
 
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError):

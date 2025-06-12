@@ -64,7 +64,7 @@ class PanelPomp:
         self._unit_param_order = {}
         for unit, obj in self.unit_objects.items():
             self._unit_param_order[unit] = (
-                list(obj.theta.keys()) if obj.theta is not None else []
+                list(obj.theta[0].keys()) if obj.theta is not None else []
             )
             obj.theta = None  # type: ignore
 
@@ -134,7 +134,7 @@ class PanelPomp:
                 theta=theta_u,
                 times=times,
                 nsim=nsim,
-            )
+            )[0]
         return results
 
     def pfilter(
@@ -184,7 +184,7 @@ class PanelPomp:
                 thresh=thresh,
                 reps=reps,
             )
-            results.loc[unit, :] = obj.results[-1]["logLik"]
+            results.loc[unit, :] = obj.results[-1]["logLiks"][0]
             obj.results = []
         self.results.append(
             {

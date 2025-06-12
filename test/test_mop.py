@@ -20,9 +20,9 @@ class TestMop_LG(unittest.TestCase):
 
     def test_class_basic(self):
         val = self.LG.mop(J=self.J, alpha=0.97, key=self.key)
-        self.assertEqual(val.shape, ())
-        self.assertTrue(jnp.isfinite(val.item()))
-        self.assertEqual(val.dtype, jnp.float32)
+        self.assertEqual(val[0].shape, ())
+        self.assertTrue(jnp.isfinite(val[0].item()))
+        self.assertEqual(val[0].dtype, jnp.float32)
 
 
 if __name__ == "__main__":

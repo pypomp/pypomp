@@ -17,12 +17,6 @@ class TestPompClass_LG(unittest.TestCase):
         self.rinit = self.LG.rinit
         self.rproc = self.LG.rproc
         self.dmeas = self.LG.dmeas
-        self.rinitalizer = self.LG.rinit.struct_pf
-        self.rprocess = self.LG.rproc.struct_pf
-        self.dmeasure = self.LG.dmeas.struct_pf
-        self.rinitalizers = self.LG.rinit.struct_per
-        self.rprocesses = self.LG.rproc.struct_per
-        self.dmeasures = self.LG.dmeas.struct_per
 
     def test_basic_initialization(self):
         self.assertEqual(self.LG.covars, self.covars)

@@ -20,9 +20,10 @@ class TestSimulate_LG(unittest.TestCase):
     def test_internal_basic(self):
         val = self.LG.simulate(nsim=self.nsim, key=self.key)
 
-        self.assertIsInstance(val, dict)
-        self.assertIn("X_sims", val)
-        self.assertIn("Y_sims", val)
+        self.assertIsInstance(val, list)
+        self.assertIsInstance(val[0], dict)
+        self.assertIn("X_sims", val[0])
+        self.assertIn("Y_sims", val[0])
         self.assertEqual(
-            val["X_sims"].shape, (len(self.ys) + 1, self.rmeas.ydim, self.nsim)
+            val[0]["X_sims"].shape, (len(self.ys) + 1, self.rmeas.ydim, self.nsim)
         )

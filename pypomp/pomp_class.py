@@ -2,9 +2,9 @@
 This module implements the OOP structure for POMP models.
 """
 
+import numpy as np
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pandas as pd
 from .mop import _mop_internal
 from .mif import _mif_internal
@@ -50,10 +50,30 @@ class Pomp:
             argument.
     """
 
+    @staticmethod
+    def _validate_theta(theta):
+        """
+        Validates that theta is a dict or a list of dicts, and all values are floats.
+        Raises TypeError if invalid.
+        """
+        if isinstance(theta, dict):
+            if not all(isinstance(val, float) for val in theta.values()):
+                raise TypeError("Each value of theta must be a float")
+        elif isinstance(theta, list):
+            if not all(isinstance(t, dict) for t in theta):
+                raise TypeError("Each element of the theta list must be a dictionary")
+            for t in theta:
+                if not all(isinstance(val, float) for val in t.values()):
+                    raise TypeError(
+                        "Each value in the theta dictionaries must be a float"
+                    )
+        else:
+            raise TypeError("theta must be a dictionary or a list of dictionaries")
+
     def __init__(
         self,
         ys: pd.DataFrame,
-        theta: dict,
+        theta: dict | list[dict],
         rinit: RInit,
         rproc: RProc,
         dmeas: DMeas | None = None,
@@ -72,8 +92,8 @@ class Pomp:
             dmeas (DMeas): Basic component of the density evaluation for the
                 measurement model.
             rmeas (RMeas): Measurement simulator.
-            theta (dict): Parameters involved in the POMP model. Each value should be a
-                float.
+            theta (dict or list[dict]): Parameters involved in the POMP model. Each
+                value should be a float. Can be a single dict or a list of dicts.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
         """
@@ -89,10 +109,7 @@ class Pomp:
             if rmeas is not None and not isinstance(rmeas, RMeas):
                 raise TypeError("rmeas must be an instance of the class RMeas")
 
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
+        self._validate_theta(theta)
 
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -100,7 +117,12 @@ class Pomp:
             raise TypeError("covars must be a pandas DataFrame or None")
 
         self.ys = ys
-        self.theta = theta
+        if isinstance(theta, dict):
+            self.theta = [theta]
+        elif isinstance(theta, list):
+            self.theta = theta
+        else:
+            raise TypeError("theta must be a dictionary or a list of dictionaries")
         self.rinit = rinit
         self.rproc = rproc
         self.dmeas = dmeas
@@ -159,9 +181,9 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | None = None,
+        theta: dict | list[dict] | None = None,
         alpha: float = 0.97,
-    ) -> jax.Array:
+    ) -> list[jax.Array]:
         """
         Instance method for MOP algorithm.
 
@@ -169,17 +191,18 @@ class Pomp:
             J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (dict, optional): Parameters involved in the POMP model.
-                Defaults to self.theta.
+            theta (dict or list[dict], optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Can be a single dict or a list of dicts.
             alpha (float, optional): Cooling factor for the random perturbations.
                 Defaults to 0.97.
 
         Returns:
-            jax.Array: The estimated log-likelihood of the observed data given the model
-                parameters.
+            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model
+                parameters. Always a list, even if only one theta is provided.
         """
         theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
+        self._validate_theta(theta)
+        theta_list = theta if isinstance(theta, list) else [theta]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -187,71 +210,13 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
-
-        return -_mop_internal(
-            theta=jnp.array(list(theta.values())),
-            t0=self.rinit.t0,
-            times=jnp.array(self.ys.index),
-            ys=jnp.array(self.ys),
-            J=J,
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
-            covars=jnp.array(self.covars) if self.covars is not None else None,
-            alpha=alpha,
-            key=new_key,
-        )
-
-    def pfilter(
-        self,
-        J: int,
-        key: jax.Array | None = None,
-        theta: dict | None = None,
-        thresh: float = 0,
-        reps: int = 1,
-    ) -> None:
-        """
-        Instance method for the particle filtering algorithm.
-
-        Args:
-            J (int): The number of particles
-            key (jax.Array, optional): The random key. Defaults to self.fresh_key.
-            theta (dict, optional): Parameters involved in the POMP model.
-                Each value must be a float. Replaced with Pomp.theta if None.
-            thresh (float, optional): Threshold value to determine whether to
-                resample particles. Defaults to 0.
-            reps (int, optional): Number of replicates to run. Defaults to 1.
-
-        Returns:
-            None
-        """
-        theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
-
-        if self.dmeas is None:
-            raise ValueError("self.dmeas cannot be None")
-
-        if J < 1:
-            raise ValueError("J should be greater than 0.")
-
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
-
-        # Generate keys for each replicate
-        keys = jax.random.split(new_key, reps)
-        # Run multiple replicates using a simple for loop
+        keys = jax.random.split(new_key, len(theta_list))
         results = []
-        for k in keys:
+        for theta_i, k in zip(theta_list, keys):
             results.append(
-                _pfilter_internal(
-                    theta=jnp.array(list(theta.values())),
+                -_mop_internal(
+                    theta=jnp.array(list(theta_i.values())),
                     t0=self.rinit.t0,
                     times=jnp.array(self.ys.index),
                     ys=jnp.array(self.ys),
@@ -263,15 +228,79 @@ class Pomp:
                     if self.covars is not None
                     else None,
                     covars=jnp.array(self.covars) if self.covars is not None else None,
-                    thresh=thresh,
+                    alpha=alpha,
                     key=k,
                 )
             )
-        results = -jnp.array(results)
+        return results
+
+    def pfilter(
+        self,
+        J: int,
+        key: jax.Array | None = None,
+        theta: dict | list[dict] | None = None,
+        thresh: float = 0,
+        reps: int = 1,
+    ) -> None:
+        """
+        Instance method for the particle filtering algorithm.
+
+        Args:
+            J (int): The number of particles
+            key (jax.Array, optional): The random key. Defaults to self.fresh_key.
+            theta (dict or list[dict], optional): Parameters involved in the POMP model.
+                Each value must be a float. Replaced with Pomp.theta if None. Can be a
+                single dict or a list of dicts.
+            thresh (float, optional): Threshold value to determine whether to
+                resample particles. Defaults to 0.
+            reps (int, optional): Number of replicates to run. Defaults to 1.
+
+        Returns:
+            None. Updates self.results with lists for logLik and theta.
+        """
+        theta = theta or self.theta
+        new_key, old_key = self._update_fresh_key(key)
+        self._validate_theta(theta)
+        theta_list = theta if isinstance(theta, list) else [theta]
+
+        if self.dmeas is None:
+            raise ValueError("self.dmeas cannot be None")
+
+        if J < 1:
+            raise ValueError("J should be greater than 0.")
+
+        keys = jax.random.split(new_key, len(theta_list))
+        logLik_list = []
+        for theta_i, k in zip(theta_list, keys):
+            rep_keys = jax.random.split(k, reps)
+            results = []
+            for rk in rep_keys:
+                results.append(
+                    _pfilter_internal(
+                        theta=jnp.array(list(theta_i.values())),
+                        t0=self.rinit.t0,
+                        times=jnp.array(self.ys.index),
+                        ys=jnp.array(self.ys),
+                        J=J,
+                        rinitializer=self.rinit.struct_pf,
+                        rprocess=self.rproc.struct_pf,
+                        dmeasure=self.dmeas.struct_pf,
+                        ctimes=jnp.array(self.covars.index)
+                        if self.covars is not None
+                        else None,
+                        covars=jnp.array(self.covars)
+                        if self.covars is not None
+                        else None,
+                        thresh=thresh,
+                        key=rk,
+                    )
+                )
+            results = -jnp.array(results)
+            logLik_list.append(xr.DataArray(results, dims=["replicate"]))
         self.results.append(
             {
-                "logLik": xr.DataArray(results, dims=["replicate"]),
-                "theta": theta,
+                "logLiks": logLik_list,
+                "theta": theta_list,
                 "J": J,
                 "thresh": thresh,
                 "key": old_key,
@@ -286,7 +315,7 @@ class Pomp:
         a: float,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | None = None,
+        theta: dict | list[dict] | None = None,
         thresh: float = 0,
         verbose: bool = False,
         n_monitors: int = 1,
@@ -304,70 +333,83 @@ class Pomp:
             J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (dict, optional): Initial parameters for the POMP model.
+            theta (dict, list[dict], optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-            verbose (bool, optional): Flag to print log-likelihood and parameter information. Defaults to False.
-            n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
-                Defaults to 1.
+            verbose (bool, optional): Flag to print log-likelihood and parameter
+                information. Defaults to False.
+            n_monitors (int, optional): Number of particle filter runs to average for
+            log-likelihood estimation. Defaults to 1.
 
         Returns:
-            None
+            None. Updates self.results with lists for logLik, thetas_out, and theta.
         """
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
+        self._validate_theta(theta)
+        theta_list = theta if isinstance(theta, list) else [theta]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
-
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
-
-        nLLs, theta_ests = _mif_internal(
-            theta=jnp.array(list(theta.values())),
-            t0=self.rinit.t0,
-            times=jnp.array(self.ys.index),
-            ys=jnp.array(self.ys),
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            rinitializers=self.rinit.struct_per,
-            rprocesses=self.rproc.struct_per,
-            dmeasures=self.dmeas.struct_per,
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
-            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
-            covars=jnp.array(self.covars) if self.covars is not None else None,
-            M=M,
-            a=a,
-            J=J,
-            thresh=thresh,
-            verbose=verbose,
-            key=new_key,
-            n_monitors=n_monitors,
-            particle_thetas=False,
-        )
-
-        self.theta = dict(zip(theta.keys(), np.mean(theta_ests[-1], axis=0).tolist()))
-
-        self.results.append(
-            {
-                "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-                "thetas_out": xr.DataArray(
+        new_key, old_key = self._update_fresh_key(key)
+        keys = jax.random.split(new_key, len(theta_list))
+        logLik_list = []
+        thetas_out_list = []
+        for theta_i, k in zip(theta_list, keys):
+            nLLs, theta_ests = _mif_internal(
+                theta=jnp.array(list(theta_i.values())),
+                t0=self.rinit.t0,
+                times=jnp.array(self.ys.index),
+                ys=jnp.array(self.ys),
+                rinitializer=self.rinit.struct_pf,
+                rprocess=self.rproc.struct_pf,
+                dmeasure=self.dmeas.struct_pf,
+                rinitializers=self.rinit.struct_per,
+                rprocesses=self.rproc.struct_per,
+                dmeasures=self.dmeas.struct_per,
+                sigmas=sigmas,
+                sigmas_init=sigmas_init,
+                ctimes=jnp.array(self.covars.index)
+                if self.covars is not None
+                else None,
+                covars=jnp.array(self.covars) if self.covars is not None else None,
+                M=M,
+                a=a,
+                J=J,
+                thresh=thresh,
+                verbose=verbose,
+                key=k,
+                n_monitors=n_monitors,
+                particle_thetas=False,
+            )
+            logLik_list.append(xr.DataArray(-nLLs, dims=["iteration"]))
+            thetas_out_list.append(
+                xr.DataArray(
                     theta_ests,
                     dims=["iteration", "particle", "theta"],
                     coords={
                         "iteration": range(0, M + 1),
                         "particle": range(1, J + 1),
-                        "theta": list(theta.keys()),
+                        "theta": list(theta_i.keys()),
                     },
-                ),
-                "theta": theta,
+                )
+            )
+        self.theta = [
+            dict(
+                zip(
+                    theta_list[0].keys(), np.mean(theta_out[-1], axis=0).values.tolist()
+                )
+            )
+            for theta_out in thetas_out_list
+        ]
+        self.results.append(
+            {
+                "logLiks": logLik_list,
+                "thetas_out": thetas_out_list,
+                "theta": theta_list,
                 "M": M,
                 "J": J,
                 "sigmas": sigmas,
@@ -383,7 +425,7 @@ class Pomp:
         J: int,
         Jh: int,
         key: jax.Array | None = None,
-        theta: dict | None = None,
+        theta: dict | list[dict] | None = None,
         method: str = "Newton",
         itns: int = 20,
         beta: float = 0.9,
@@ -432,63 +474,68 @@ class Pomp:
                 Defaults to 1.
 
         Returns:
-            None
+            None. Updates self.results with lists for logLik, thetas_out, and theta.
         """
         theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
+        self._validate_theta(theta)
+        theta_list = theta if isinstance(theta, list) else [theta]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
-
         if J < 1:
             raise ValueError("J should be greater than 0")
         if Jh < 1:
             raise ValueError("Jh should be greater than 0")
 
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
-
-        nLLs, theta_ests = _train_internal(
-            theta_ests=jnp.array(list(theta.values())),
-            t0=self.rinit.t0,
-            times=jnp.array(self.ys.index),
-            ys=jnp.array(self.ys),
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            dmeasure=self.dmeas.struct_pf,
-            J=J,
-            Jh=Jh,
-            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
-            covars=jnp.array(self.covars) if self.covars is not None else None,
-            method=method,
-            itns=itns,
-            beta=beta,
-            eta=eta,
-            c=c,
-            max_ls_itn=max_ls_itn,
-            thresh=thresh,
-            verbose=verbose,
-            scale=scale,
-            ls=ls,
-            alpha=alpha,
-            key=new_key,
-            n_monitors=n_monitors,
-        )
-
-        self.results.append(
-            {
-                "logLik": xr.DataArray(-nLLs, dims=["iteration"]),
-                "thetas_out": xr.DataArray(
+        new_key, old_key = self._update_fresh_key(key)
+        keys = jax.random.split(new_key, len(theta_list))
+        logLik_list = []
+        thetas_out_list = []
+        for theta_i, k in zip(theta_list, keys):
+            nLLs, theta_ests = _train_internal(
+                theta_ests=jnp.array(list(theta_i.values())),
+                t0=self.rinit.t0,
+                times=jnp.array(self.ys.index),
+                ys=jnp.array(self.ys),
+                rinitializer=self.rinit.struct_pf,
+                rprocess=self.rproc.struct_pf,
+                dmeasure=self.dmeas.struct_pf,
+                J=J,
+                Jh=Jh,
+                ctimes=jnp.array(self.covars.index)
+                if self.covars is not None
+                else None,
+                covars=jnp.array(self.covars) if self.covars is not None else None,
+                method=method,
+                itns=itns,
+                beta=beta,
+                eta=eta,
+                c=c,
+                max_ls_itn=max_ls_itn,
+                thresh=thresh,
+                verbose=verbose,
+                scale=scale,
+                ls=ls,
+                alpha=alpha,
+                key=k,
+                n_monitors=n_monitors,
+            )
+            logLik_list.append(xr.DataArray(-nLLs, dims=["iteration"]))
+            thetas_out_list.append(
+                xr.DataArray(
                     theta_ests,
                     dims=["iteration", "theta"],
                     coords={
                         "iteration": range(0, itns + 1),
-                        "theta": list(theta.keys()),
+                        "theta": list(theta_i.keys()),
                     },
-                ),
-                "theta": theta,
+                )
+            )
+        self.results.append(
+            {
+                "logLiks": logLik_list,
+                "thetas_out": thetas_out_list,
+                "theta": theta_list,
                 "J": J,
                 "Jh": Jh,
                 "method": method,
@@ -507,10 +554,10 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: dict | None = None,
+        theta: dict | list[dict] | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> dict:
+    ) -> list[dict]:
         """
         Simulates the evolution of a system over time using a Partially Observed
         Markov Process (POMP) model.
@@ -525,46 +572,50 @@ class Pomp:
             nsim (int): The number of simulations to perform. Defaults to 1.
 
         Returns:
-            dict: A dictionary containing:
-                - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
-                - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
+            list[dict]: A list of dictionaries each containing:
+                - 'X_sims' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
+                - 'Y_sims' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
         """
         theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
-        times = jnp.array(self.ys.index) if times is None else times
+        self._validate_theta(theta)
+        theta_list = theta if isinstance(theta, list) else [theta]
 
         if self.rmeas is None:
             raise ValueError(
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
             )
 
-        if not isinstance(theta, dict):
-            raise TypeError("theta must be a dictionary")
-        if not all(isinstance(val, float) for val in theta.values()):
-            raise TypeError("Each value of theta must be a float")
-
-        X_sims, Y_sims = _simulate_internal(
-            rinitializer=self.rinit.struct_pf,
-            rprocess=self.rproc.struct_pf,
-            rmeasure=self.rmeas.struct_pf,
-            theta=jnp.array(list(theta.values())),
-            t0=self.rinit.t0,
-            times=jnp.array(times),
-            ydim=self.rmeas.ydim,
-            covars=jnp.array(self.covars) if self.covars is not None else None,
-            ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
-            nsim=nsim,
-            key=new_key,
-        )
-
-        X_sims = xr.DataArray(
-            X_sims,
-            dims=["time", "element", "sim"],
-            coords={
-                "time": jnp.concatenate([jnp.array([self.rinit.t0]), jnp.array(times)])
-            },
-        )
-        Y_sims = xr.DataArray(
-            Y_sims, dims=["time", "element", "sim"], coords={"time": times}
-        )
-        return {"X_sims": X_sims, "Y_sims": Y_sims}
+        new_key, old_key = self._update_fresh_key(key)
+        keys = jax.random.split(new_key, len(theta_list))
+        results = []
+        for theta_i, k in zip(theta_list, keys):
+            times_arr = jnp.array(self.ys.index) if times is None else times
+            X_sims, Y_sims = _simulate_internal(
+                rinitializer=self.rinit.struct_pf,
+                rprocess=self.rproc.struct_pf,
+                rmeasure=self.rmeas.struct_pf,
+                theta=jnp.array(list(theta_i.values())),
+                t0=self.rinit.t0,
+                times=jnp.array(times_arr),
+                ydim=self.rmeas.ydim,
+                covars=jnp.array(self.covars) if self.covars is not None else None,
+                ctimes=jnp.array(self.covars.index)
+                if self.covars is not None
+                else None,
+                nsim=nsim,
+                key=k,
+            )
+            X_sims = xr.DataArray(
+                X_sims,
+                dims=["time", "element", "sim"],
+                coords={
+                    "time": jnp.concatenate(
+                        [jnp.array([self.rinit.t0]), jnp.array(times_arr)]
+                    )
+                },
+            )
+            Y_sims = xr.DataArray(
+                Y_sims, dims=["time", "element", "sim"], coords={"time": times_arr}
+            )
+            results.append({"X_sims": X_sims, "Y_sims": Y_sims})
+        return results

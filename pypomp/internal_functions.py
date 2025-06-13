@@ -209,3 +209,21 @@ def _interp_covars(
             * (t - ctimes[lower_index])
             / (ctimes[upper_index] - ctimes[lower_index])
         ).ravel()
+
+
+def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
+    """
+    Calculate geometric cooling parameters for mif.
+
+    Args:
+        nt (int): Current time step
+        m (int): Current iteration
+        ntimes (int): Total number of time steps
+        a (float): Amount to cool over 50 iterations
+
+    Returns:
+        float: The fraction to cool sigmas and sigmas_init by.
+    """
+    factor = a ** (1 / 50)
+    alpha = factor ** (nt / ntimes + m - 1)
+    return alpha

@@ -145,7 +145,7 @@ class Pomp:
         old_key = self.fresh_key if key is None else key
         if old_key is None:
             raise ValueError(
-                "Both the key argument and the fresh_key attribute are None."
+                "Both the key argument and the fresh_key attribute are None. At least one key must be given."
             )
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
@@ -329,7 +329,8 @@ class Pomp:
             sigmas (float | jax.Array): Perturbation factor for parameters.
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
             M (int): Number of algorithm iterations.
-            a (float): Decay factor for sigmas.
+            a (float): A fraction specifying the amount to cool sigmas and sigmas_init
+                over 50 iterations.
             J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
@@ -424,10 +425,10 @@ class Pomp:
         self,
         J: int,
         Jh: int,
+        itns: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         method: str = "Newton",
-        itns: int = 20,
         beta: float = 0.9,
         eta: float = 0.0025,
         c: float = 0.1,
@@ -445,6 +446,7 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient.
             Jh (int): The number of particles in the MOP objective for obtaining the Hessian matrix.
+            itns (int): Maximum iteration for the gradient descent optimization.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
@@ -452,8 +454,6 @@ class Pomp:
             method (str, optional): The gradient-based iterative optimization method to use.
                 Options include "Newton", "weighted Newton", "BFGS", "gradient descent".
                 Defaults to "Newton".
-            itns (int, optional): Maximum iteration for the gradient descent optimization.
-                Defaults to 20.
             beta (float, optional): Initial step size for the line search algorithm.
                 Defaults to 0.9.
             eta (float, optional): Initial step size. Defaults to 0.0025.

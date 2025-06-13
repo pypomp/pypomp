@@ -10,6 +10,7 @@ from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _interp_covars
+from .internal_functions import _geometric_cooling
 
 
 def _mif_internal(
@@ -73,13 +74,7 @@ def _mif_internal(
         logliks.append(loglik)
 
     for m in tqdm(range(M)):
-        # TODO: Cool sigmas between time-iterations.
-        key, *subkeys = jax.random.split(key=key, num=3)
-        sigmas = a * sigmas
-        sigmas_init = a * sigmas_init
-        thetas = thetas + sigmas_init * jax.random.normal(
-            shape=thetas.shape, key=subkeys[0]
-        )
+        key, subkey = jax.random.split(key=key)
         loglik_ext, thetas = _perfilter_internal(
             thetas=thetas,
             t0=t0,
@@ -87,14 +82,16 @@ def _mif_internal(
             ys=ys,
             J=J,
             sigmas=sigmas,
+            sigmas_init=sigmas_init,
             rinitializers=rinitializers,
             rprocesses=rprocesses,
             dmeasures=dmeasures,
-            ndim=ndim,
             ctimes=ctimes,
             covars=covars,
             thresh=thresh,
-            key=subkeys[1],
+            key=subkey,
+            m=m,
+            a=a,
         )
         params.append(thetas)
 
@@ -130,7 +127,7 @@ def _mif_internal(
     return jnp.array(logliks), jnp.array(params)
 
 
-@partial(jit, static_argnums=(4, 6, 7, 8, 9))
+@partial(jit, static_argnums=(4, 7, 8, 9))
 def _perfilter_internal(
     thetas: jax.Array,
     t0: float,
@@ -138,14 +135,16 @@ def _perfilter_internal(
     ys: jax.Array,
     J: int,  # static
     sigmas: jax.Array,
+    sigmas_init: jax.Array,
     rinitializers: Callable,  # static
     rprocesses: Callable,  # static
     dmeasures: Callable,  # static
-    ndim: int,  # static
     ctimes: jax.Array | None,
     covars: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    m: int,
+    a: float,
 ):
     """
     Internal function for the perturbed particle filtering algorithm, which calls
@@ -153,8 +152,11 @@ def _perfilter_internal(
     """
     loglik = 0
     key, subkey = jax.random.split(key)
-    thetas = thetas + sigmas * jax.random.normal(
-        shape=(J,) + thetas.shape[-ndim:], key=subkey
+    sigmas_init_cooled = (
+        _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
+    )
+    thetas = thetas + sigmas_init_cooled * jax.random.normal(
+        shape=thetas.shape, key=subkey
     )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars)
@@ -174,6 +176,8 @@ def _perfilter_internal(
         ctimes=ctimes,
         covars=covars,
         thresh=thresh,
+        m=m,
+        a=a,
     )
     (particlesF, thetas, loglik, norm_weights, counts, key) = jax.lax.fori_loop(
         lower=0,
@@ -196,6 +200,8 @@ def _perfilter_helper(
     ctimes: jax.Array | None,
     covars: jax.Array | None,
     thresh: float,
+    m: int,
+    a: float,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper functions for perturbed particle filtering algorithm, which conducts
@@ -207,8 +213,11 @@ def _perfilter_helper(
     t1 = times0[i]
     t2 = times0[i + 1]
 
+    sigmas_cooled = _geometric_cooling(nt=i + 1, m=m, ntimes=len(ys), a=a) * sigmas
     key, subkey = jax.random.split(key)
-    thetas += sigmas * jnp.array(jax.random.normal(shape=thetas.shape, key=subkey))
+    thetas = thetas + sigmas_cooled * jnp.array(
+        jax.random.normal(shape=thetas.shape, key=subkey)
+    )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars)
     particlesP = rprocesses(particlesF, thetas, keys, ctimes, covars, t1, t2)

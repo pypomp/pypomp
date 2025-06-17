@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import jax.numpy as jnp
@@ -7,7 +8,11 @@ from functools import partial
 from pypomp.model_struct import RInit, RProc, DMeas
 from pypomp.pomp_class import Pomp
 
-sp500_raw = pd.read_csv("pypomp/data/SPX.csv")
+module_dir = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.path.join(module_dir, "data")
+data_file = os.path.join(data_dir, "SPX.csv")
+
+sp500_raw = pd.read_csv(data_file)
 sp500 = sp500_raw.copy()
 sp500["date"] = pd.to_datetime(sp500["Date"])
 sp500["diff_days"] = (sp500["date"] - sp500["date"].min()).dt.days

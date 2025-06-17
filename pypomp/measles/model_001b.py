@@ -1,4 +1,4 @@
-"""He10 model without alpha or mu"""
+"""He10 model without alpha or mu parameters"""
 
 import jax.numpy as jnp
 import jax

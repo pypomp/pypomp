@@ -30,8 +30,6 @@ demog_pop = pd.concat([urr["pop_rural"], urr["pop_urban"]], axis=1)
 demog_pop["year"] = demog_pop.index + 1944
 demog_pop = pd.melt(demog_pop, id_vars=["year"], var_name="unit", value_name="pop")
 
-# TODO: fix code below this line
-
 demog_births = pd.concat([urr["births_rural"], urr["births_urban"]], axis=1)
 demog_births["year"] = demog_births.index + 1944
 demog_births = pd.melt(

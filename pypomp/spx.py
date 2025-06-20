@@ -55,6 +55,7 @@ def rinit(theta_, key, covars=None, t0=None):
 def rproc(X_, theta_, key, covars, t=None, dt=None):
     V, S = X_
     mu, kappa, theta, xi, rho, V_0 = theta_
+    y_prev = covars
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     kappa = jnp.exp(kappa)
@@ -63,7 +64,7 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Wiener process generation (Gaussian noise)
     dZ = random.normal(key)
-    dWs = (covars - mu + 0.5 * V) / jnp.sqrt(V)
+    dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)

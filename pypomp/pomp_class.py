@@ -6,6 +6,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from .mop import _mop_internal
 from .mif import _mif_internal
 from .train import _train_internal
@@ -299,6 +301,7 @@ class Pomp:
             logLik_list.append(xr.DataArray(results, dims=["replicate"]))
         self.results.append(
             {
+                "method": "pfilter",
                 "logLiks": logLik_list,
                 "theta": theta_list,
                 "J": J,
@@ -318,7 +321,6 @@ class Pomp:
         theta: dict | list[dict] | None = None,
         thresh: float = 0,
         verbose: bool = False,
-        n_monitors: int = 1,
     ) -> None:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
@@ -339,8 +341,6 @@ class Pomp:
             thresh (float, optional): Resampling threshold. Defaults to 0.
             verbose (bool, optional): Flag to print log-likelihood and parameter
                 information. Defaults to False.
-            n_monitors (int, optional): Number of particle filter runs to average for
-            log-likelihood estimation. Defaults to 1.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -383,10 +383,11 @@ class Pomp:
                 thresh=thresh,
                 verbose=verbose,
                 key=k,
-                n_monitors=n_monitors,
                 particle_thetas=False,
             )
-            logLik_list.append(xr.DataArray(-nLLs, dims=["iteration"]))
+            # Prepend nan for the log-likelihood of the initial parameters
+            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs])
+            logLik_list.append(xr.DataArray(logliks_with_nan, dims=["iteration"]))
             thetas_out_list.append(
                 xr.DataArray(
                     theta_ests,
@@ -408,6 +409,7 @@ class Pomp:
         ]
         self.results.append(
             {
+                "method": "mif",
                 "logLiks": logLik_list,
                 "thetas_out": thetas_out_list,
                 "theta": theta_list,
@@ -428,7 +430,7 @@ class Pomp:
         itns: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
-        method: str = "Newton",
+        optimizer: str = "Newton",
         beta: float = 0.9,
         eta: float = 0.0025,
         c: float = 0.1,
@@ -451,7 +453,7 @@ class Pomp:
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
-            method (str, optional): The gradient-based iterative optimization method to use.
+            optimizer (str, optional): The gradient-based iterative optimization method to use.
                 Options include "Newton", "weighted Newton", "BFGS", "gradient descent".
                 Defaults to "Newton".
             beta (float, optional): Initial step size for the line search algorithm.
@@ -506,7 +508,7 @@ class Pomp:
                 if self.covars is not None
                 else None,
                 covars=jnp.array(self.covars) if self.covars is not None else None,
-                method=method,
+                optimizer=optimizer,
                 itns=itns,
                 beta=beta,
                 eta=eta,
@@ -533,12 +535,13 @@ class Pomp:
             )
         self.results.append(
             {
+                "method": "train",
                 "logLiks": logLik_list,
                 "thetas_out": thetas_out_list,
                 "theta": theta_list,
                 "J": J,
                 "Jh": Jh,
-                "method": method,
+                "optimizer": optimizer,
                 "itns": itns,
                 "beta": beta,
                 "eta": eta,
@@ -619,3 +622,160 @@ class Pomp:
             )
             results.append({"X_sims": X_sims, "Y_sims": Y_sims})
         return results
+
+    def traces(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
+        Columns:
+            - replication: The index of the parameter set (for all methods)
+            - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
+            - method: 'pfilter', 'mif', or 'train'
+            - loglik: The log-likelihood estimate (averaged over reps for pfilter)
+            - <param>: One column for each parameter
+        """
+        trace_rows = []
+        param_names = None
+        global_iters = {}  # key: param_idx, value: current iteration (start at 1)
+
+        for res in self.results:
+            method = res.get("method")
+            if method in ("mif", "train"):
+                logLiks = res["logLiks"]
+                thetas_out = res["thetas_out"]
+                for param_idx, (logLik_arr, theta_arr) in enumerate(
+                    zip(logLiks, thetas_out)
+                ):
+                    if param_names is None:
+                        if "theta" in theta_arr.coords:
+                            param_names = list(theta_arr.coords["theta"].values)
+                        else:
+                            param_names = [
+                                f"param_{j}" for j in range(theta_arr.shape[-1])
+                            ]
+                    if param_idx not in global_iters:
+                        global_iters[param_idx] = 1
+                    n_iter = logLik_arr.shape[0]
+                    for iter_idx in range(n_iter):
+                        if method == "mif":
+                            theta_vals = (
+                                theta_arr.isel(iteration=iter_idx)
+                                .mean(dim="particle")
+                                .values
+                            )
+                        else:  # train
+                            theta_vals = theta_arr.isel(iteration=iter_idx).values
+                        row = {
+                            "replication": param_idx,
+                            "iteration": global_iters[param_idx],
+                            "method": method,
+                            "loglik": float(logLik_arr[iter_idx].values),
+                        }
+                        row.update(
+                            {
+                                param: float(val)
+                                for param, val in zip(param_names, theta_vals)
+                            }
+                        )
+                        trace_rows.append(row)
+                        global_iters[param_idx] += 1
+            elif method == "pfilter":
+                logLiks = res["logLiks"]
+                thetas = res["theta"]
+                for param_idx, (logLik_arr, theta_dict) in enumerate(
+                    zip(logLiks, thetas)
+                ):
+                    if param_names is None:
+                        param_names = list(theta_dict.keys())
+                    # Use the last iteration for this param_idx
+                    last_iter = global_iters.get(param_idx, 1) - 1
+                    avg_loglik = float(logLik_arr.mean().values)
+                    row = {
+                        "replication": param_idx,
+                        "iteration": last_iter if last_iter > 0 else 1,
+                        "method": method,
+                        "loglik": avg_loglik,
+                    }
+                    row.update(
+                        {param: float(theta_dict[param]) for param in param_names}
+                    )
+                    trace_rows.append(row)
+            # else: ignore other methods for now
+        df = pd.DataFrame(trace_rows)
+        if not df.empty:
+            df = df.sort_values(["iteration", "replication"]).reset_index(drop=True)
+        return df
+
+    def plot_traces(self, show=True):
+        """
+        Plot the parameter and log-likelihood traces from the entire result history.
+        Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.
+        Lines connect mif/train points for the same replication; pfilter points are dots. Color by replication.
+        """
+
+        traces = self.traces()
+        if traces.empty:
+            print("No trace data to plot.")
+            return
+        # Melt the DataFrame to long format for FacetGrid
+        value_vars = [
+            col
+            for col in traces.columns
+            if col not in ["replication", "iteration", "method"]
+        ]
+        df_long = traces.melt(
+            id_vars=["replication", "iteration", "method"],
+            value_vars=value_vars,
+            var_name="variable",
+            value_name="value",
+        )
+        # Set up FacetGrid
+        g = sns.FacetGrid(
+            df_long,
+            col="variable",
+            sharex=True,
+            sharey=False,
+            hue="replication",
+            col_wrap=3,
+            height=3.5,
+            aspect=1.2,
+            palette="tab10",
+        )
+
+        # Plot lines for mif/train, dots for pfilter
+        def facet_plot(data, color, **kwargs):
+            # Lines for mif/train
+            for rep, group in data.groupby("replication"):
+                for method in ["mif", "train"]:
+                    sub = group[group["method"] == method]
+                    if len(sub) > 1:
+                        plt.plot(
+                            sub["iteration"], sub["value"], "-", color=color, alpha=0.8
+                        )
+                    elif len(sub) == 1:
+                        plt.scatter(
+                            sub["iteration"],
+                            sub["value"],
+                            color=color,
+                            marker="o",
+                            alpha=0.8,
+                        )
+                # Dots for pfilter
+                sub = group[group["method"] == "pfilter"]
+                if not sub.empty:
+                    plt.scatter(
+                        sub["iteration"],
+                        sub["value"],
+                        color=color,
+                        marker="o",
+                        edgecolor="k",
+                        zorder=3,
+                    )
+
+        g.map_dataframe(facet_plot)
+        g.add_legend(title="Replication")
+        g.set_axis_labels("Iteration", "Value")
+        g.set_titles(col_template="{col_name}")
+        plt.tight_layout()
+        if show:
+            plt.show()
+        return g

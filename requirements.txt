@@ -8,3 +8,5 @@ scipy
 # Need this to resolve github actions error that seems to be related to xarray and python 3.11.
 # TODO: Figure out how to resolve this error without adding this dependency.
 typing_extensions
+seaborn
+matplotlib

@@ -22,7 +22,7 @@ def _train_internal(
     covars: jax.Array | None,
     J: int,
     Jh: int,
-    method: str,
+    optimizer: str,
     itns: int,
     beta: float,
     eta: float,
@@ -101,7 +101,7 @@ def _train_internal(
                 )
             )
 
-        if method == "Newton":
+        if optimizer == "Newton":
             hess = _jhess_mop(
                 theta_ests=theta_ests,
                 t0=t0,
@@ -126,7 +126,7 @@ def _train_internal(
             # direction = direction_flat.reshape(theta_ests.shape)
 
             direction = -jnp.linalg.pinv(hess) @ grad
-        elif method == "WeightedNewton":
+        elif optimizer == "WeightedNewton":
             if i == 0:
                 hess = _jhess_mop(
                     theta_ests=theta_ests,
@@ -175,7 +175,7 @@ def _train_internal(
                 # direction = direction_flat.reshape(theta_ests.shape)
                 direction = -jnp.linalg.pinv(weighted_hess) @ grad
 
-        elif method == "BFGS" and i > 1:
+        elif optimizer == "BFGS" and i > 1:
             s_k = eta * direction
             # not grad but grads
             y_k = grad - grads[-1]

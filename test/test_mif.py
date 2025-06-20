@@ -26,14 +26,13 @@ class TestFit_LG(unittest.TestCase):
                 sigmas_init=1e-20,
                 a=self.a,
                 key=self.key,
-                n_monitors=1,
             )
             mif_out1 = self.LG.results[-1]
             self.assertEqual(mif_out1["logLiks"][0].shape, (M + 1,))
             self.assertEqual(
                 mif_out1["thetas_out"][0].shape, (M + 1, J) + (len(self.LG.theta[0]),)
             )
-            self.assertTrue(jnp.issubdtype(mif_out1["logLiks"][0].dtype, jnp.float32))
+            self.assertTrue(jnp.issubdtype(mif_out1["logLiks"][0].dtype, jnp.floating))
             self.assertTrue(jnp.issubdtype(mif_out1["thetas_out"][0], jnp.float32))
 
         # check that sigmas isn't modified by mif

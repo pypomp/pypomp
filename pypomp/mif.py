@@ -34,7 +34,6 @@ def _mif_internal(
     thresh: float,
     verbose: bool,
     key: jax.Array,
-    n_monitors: int,
     particle_thetas: bool,  # set true when theta already contains a row for each particle
 ) -> tuple[jax.Array, jax.Array]:
     logliks = []
@@ -47,31 +46,6 @@ def _mif_internal(
         ndim = theta.ndim
         thetas = jnp.tile(theta, (J,) + (1,) * ndim)
     params.append(thetas)
-
-    if n_monitors > 0:
-        key, subkey = jax.random.split(key=key)
-        loglik = jnp.mean(
-            jnp.array(
-                [
-                    _pfilter_internal(
-                        theta=thetas.mean(0),
-                        t0=t0,
-                        times=times,
-                        ys=ys,
-                        J=J,
-                        rinitializer=rinitializer,
-                        rprocess=rprocess,
-                        dmeasure=dmeasure,
-                        ctimes=ctimes,
-                        covars=covars,
-                        thresh=thresh,
-                        key=subkey,
-                    )
-                    for i in range(n_monitors)
-                ]
-            )
-        )
-        logliks.append(loglik)
 
     for m in tqdm(range(M)):
         key, subkey = jax.random.split(key=key)
@@ -94,35 +68,11 @@ def _mif_internal(
             a=a,
         )
         params.append(thetas)
+        logliks.append(loglik_ext)
 
-        if n_monitors > 0:
-            key, subkey = jax.random.split(key=key)
-            loglik = jnp.mean(
-                jnp.array(
-                    [
-                        _pfilter_internal(
-                            theta=thetas.mean(0),
-                            t0=t0,
-                            times=times,
-                            ys=ys,
-                            J=J,
-                            rinitializer=rinitializer,
-                            rprocess=rprocess,
-                            dmeasure=dmeasure,
-                            ctimes=ctimes,
-                            covars=covars,
-                            thresh=thresh,
-                            key=subkey,
-                        )
-                        for i in range(n_monitors)
-                    ]
-                )
-            )
-            logliks.append(loglik)
-
-            if verbose:
-                print(loglik)
-                print(thetas.mean(0))
+        if verbose:
+            print(loglik_ext)
+            print(thetas.mean(0))
 
     return jnp.array(logliks), jnp.array(params)
 

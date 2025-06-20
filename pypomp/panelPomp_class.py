@@ -256,7 +256,6 @@ class PanelPomp:
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
         thresh: float,
-        n_monitors: int,
         key: jax.Array,
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Process a single unit in the MIF algorithm."""
@@ -320,7 +319,6 @@ class PanelPomp:
             thresh=thresh,
             verbose=False,
             key=subkey,
-            n_monitors=n_monitors,
             particle_thetas=True,
         )
 
@@ -443,7 +441,6 @@ class PanelPomp:
         unit_specific: pd.DataFrame | None = None,
         thresh: float = 0,
         verbose: bool = False,
-        n_monitors: int = 1,
         block: bool = True,
     ) -> None:
         """
@@ -464,8 +461,6 @@ class PanelPomp:
             thresh (float, optional): Resampling threshold. Defaults to 0.
             verbose (bool, optional): Flag to print log-likelihood and parameter information.
                 Defaults to False.
-            n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
-                Defaults to 1.
             block (bool, optional): Whether to block resampling of unit-specific parameters.
                 Defaults to True.
 
@@ -532,7 +527,6 @@ class PanelPomp:
                     sigmas,
                     sigmas_init,
                     thresh,
-                    n_monitors,
                     key,
                 )
 

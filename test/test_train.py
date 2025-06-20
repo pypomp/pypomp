@@ -18,19 +18,15 @@ class TestFit_LG(unittest.TestCase):
         self.M = 2
         self.itns = 2
 
-        self.rinit = self.LG.rinit
-        self.rproc = self.LG.rproc
-        self.dmeas = self.LG.dmeas
-
     def test_class_GD_basic(self):
-        methods = ["SGD", "Newton", "WeightedNewton", "BFGS"]
-        for method in methods:
-            with self.subTest(method=method):
+        optimizers = ["SGD", "Newton", "WeightedNewton", "BFGS"]
+        for optimizer in optimizers:
+            with self.subTest(optimizer=optimizer):
                 self.LG.train(
                     J=self.J,
                     Jh=self.Jh,
                     itns=self.itns,
-                    method=method,
+                    optimizer=optimizer,
                     scale=True,
                     ls=True,
                     key=self.key,

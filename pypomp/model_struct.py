@@ -118,6 +118,7 @@ class RInit:
         self.struct = struct
         self.struct_pf = jax.vmap(struct, (None, 0, None, None))
         self.struct_per = jax.vmap(struct, (0, 0, None, None))
+        self.original_func = struct
 
 
 class RProc:
@@ -163,6 +164,9 @@ class RProc:
             accumvars=accumvars,
         )
         self.dt = dt
+        self.step_type = step_type
+        self.accumvars = accumvars
+        self.original_func = struct
 
 
 class DMeas:
@@ -184,6 +188,7 @@ class DMeas:
         self.struct = struct
         self.struct_pf = jax.vmap(struct, (None, 0, None, None, None))
         self.struct_per = jax.vmap(struct, (None, 0, 0, None, None))
+        self.original_func = struct
 
 
 class RMeas:
@@ -209,3 +214,4 @@ class RMeas:
         self.struct_pf = jax.vmap(struct, (0, None, 0, None, None))
         self.struct_per = jax.vmap(struct, (0, 0, 0, None, None))
         self.ydim = ydim
+        self.original_func = struct

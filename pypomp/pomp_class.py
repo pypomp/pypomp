@@ -2,6 +2,8 @@
 This module implements the OOP structure for POMP models.
 """
 
+import importlib
+from functools import partial
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -11,10 +13,7 @@ import seaborn as sns
 from .mop import _mop_internal
 from .mif import _mif_internal
 from .train import _train_internal
-from .model_struct import RInit
-from .model_struct import RProc
-from .model_struct import DMeas
-from .model_struct import RMeas
+from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _pfilter_internal
@@ -705,11 +704,14 @@ class Pomp:
             df = df.sort_values(["iteration", "replication"]).reset_index(drop=True)
         return df
 
-    def plot_traces(self, show=True):
+    def plot_traces(self, show: bool = True):
         """
         Plot the parameter and log-likelihood traces from the entire result history.
         Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.
         Lines connect mif/train points for the same replication; pfilter points are dots. Color by replication.
+
+        Args:
+            show (bool): Whether to display the plot. Defaults to True.
         """
 
         traces = self.traces()
@@ -779,3 +781,112 @@ class Pomp:
         if show:
             plt.show()
         return g
+
+    def __getstate__(self):
+        """
+        Custom pickling method to handle wrapped function objects.  This is
+        necessary because the JAX-wrapped functions are not picklable.
+        """
+        state = self.__dict__.copy()
+
+        # Store function names and parameters instead of the wrapped objects
+        if hasattr(self.rinit, "struct"):
+            original_func = self.rinit.original_func
+            state["_rinit_func_name"] = original_func.__name__
+            state["_rinit_t0"] = self.rinit.t0
+            state["_rinit_module"] = original_func.__module__
+
+        if hasattr(self.rproc, "struct"):
+            original_func = self.rproc.original_func
+            state["_rproc_func_name"] = original_func.__name__
+            state["_rproc_step_type"] = getattr(self.rproc, "step_type", "onestep")
+            state["_rproc_dt"] = getattr(self.rproc, "dt", None)
+            state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
+            state["_rproc_module"] = original_func.__module__
+
+        if self.dmeas is not None and hasattr(self.dmeas, "struct"):
+            original_func = self.dmeas.original_func
+            state["_dmeas_func_name"] = original_func.__name__
+            state["_dmeas_module"] = original_func.__module__
+
+        if self.rmeas is not None and hasattr(self.rmeas, "struct"):
+            original_func = self.rmeas.original_func
+            state["_rmeas_func_name"] = original_func.__name__
+            state["_rmeas_ydim"] = self.rmeas.ydim
+            state["_rmeas_module"] = original_func.__module__
+
+        # Remove the wrapped objects from state
+        state.pop("rinit", None)
+        state.pop("rproc", None)
+        state.pop("dmeas", None)
+        state.pop("rmeas", None)
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling method to reconstruct wrapped function objects. This is
+        necessary because the JAX-wrapped functions are not picklable.
+        """
+        # Restore basic attributes
+        self.__dict__.update(state)
+
+        # Reconstruct rinit
+        if "_rinit_func_name" in state:
+            module = importlib.import_module(state["_rinit_module"])
+            obj = getattr(module, state["_rinit_func_name"])
+            if isinstance(obj, RInit):
+                self.rinit = obj
+            else:
+                self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
+
+        # Reconstruct rproc
+        if "_rproc_func_name" in state:
+            module = importlib.import_module(state["_rproc_module"])
+            obj = getattr(module, state["_rproc_func_name"])
+            if isinstance(obj, RProc):
+                self.rproc = obj
+            else:
+                kwargs = {"step_type": state["_rproc_step_type"]}
+                if state["_rproc_dt"] is not None:
+                    kwargs["dt"] = state["_rproc_dt"]
+                if state["_rproc_accumvars"] is not None:
+                    kwargs["accumvars"] = state["_rproc_accumvars"]
+                self.rproc = partial(RProc, **kwargs)(obj)
+
+        # Reconstruct dmeas
+        if "_dmeas_func_name" in state:
+            module = importlib.import_module(state["_dmeas_module"])
+            obj = getattr(module, state["_dmeas_func_name"])
+            if isinstance(obj, DMeas):
+                self.dmeas = obj
+            else:
+                self.dmeas = DMeas(obj)
+
+        # Reconstruct rmeas
+        if "_rmeas_func_name" in state:
+            module = importlib.import_module(state["_rmeas_module"])
+            obj = getattr(module, state["_rmeas_func_name"])
+            if isinstance(obj, RMeas):
+                self.rmeas = obj
+            else:
+                self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
+
+        # Clean up temporary state variables
+        for key in [
+            "_rinit_func_name",
+            "_rinit_t0",
+            "_rinit_module",
+            "_rproc_func_name",
+            "_rproc_step_type",
+            "_rproc_dt",
+            "_rproc_accumvars",
+            "_rproc_module",
+            "_dmeas_func_name",
+            "_dmeas_module",
+            "_rmeas_func_name",
+            "_rmeas_ydim",
+            "_rmeas_module",
+        ]:
+            if key in self.__dict__:
+                del self.__dict__[key]

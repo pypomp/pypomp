@@ -1,7 +1,7 @@
 import jax
 import unittest
 import numpy as np
-
+import pickle
 import pypomp as pp
 
 
@@ -76,4 +76,28 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(
             traces.iloc[-1, 4:].values.tolist(), traces.iloc[-2, 4:].values.tolist()
         )
-        pass
+
+    def test_pickle(self):
+        # Generate results to pickle
+        self.LG.pfilter(J=self.J, reps=1, key=self.key)
+        # Pickle the object
+        pickled_data = pickle.dumps(self.LG)
+
+        # Unpickle the object
+        unpickled_obj = pickle.loads(pickled_data)
+
+        # Check that the unpickled object has the same attributes
+        self.assertEqual(self.LG.ys.values.tolist(), unpickled_obj.ys.values.tolist())
+        self.assertEqual(self.LG.theta, unpickled_obj.theta)
+        self.assertEqual(self.LG.covars, unpickled_obj.covars)
+        self.assertEqual(self.LG.rinit, unpickled_obj.rinit)
+        self.assertEqual(self.LG.rproc, unpickled_obj.rproc)
+        self.assertEqual(self.LG.dmeas, unpickled_obj.dmeas)
+        self.assertEqual(self.LG.rproc.dt, unpickled_obj.rproc.dt)
+        self.assertEqual(self.LG.results, unpickled_obj.results)
+        self.assertEqual(
+            self.LG.traces().values.tolist(), unpickled_obj.traces().values.tolist()
+        )
+
+        # Check that the unpickled object can still be used for filtering
+        unpickled_obj.pfilter(J=self.J, reps=1)

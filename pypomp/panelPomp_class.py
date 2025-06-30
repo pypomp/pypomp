@@ -303,9 +303,6 @@ class PanelPomp:
             t0=unit_rinit.t0,
             times=jnp.array(unit_ys.index),
             ys=jnp.array(unit_ys),
-            rinitializer=unit_rinit.struct_pf,
-            rprocess=unit_rproc.struct_pf,
-            dmeasure=unit_dmeas.struct_pf,
             rinitializers=unit_rinit.struct_per,
             rprocesses=unit_rproc.struct_per,
             dmeasures=unit_dmeas.struct_per,
@@ -317,9 +314,7 @@ class PanelPomp:
             a=1.0,  # Not used in single iteration
             J=J,
             thresh=thresh,
-            verbose=False,
             key=subkey,
-            particle_thetas=True,
         )
 
         return unit_loglik[1], unit_thetas[1], key
@@ -440,7 +435,6 @@ class PanelPomp:
         shared: pd.DataFrame | None = None,
         unit_specific: pd.DataFrame | None = None,
         thresh: float = 0,
-        verbose: bool = False,
         block: bool = True,
     ) -> None:
         """
@@ -459,8 +453,6 @@ class PanelPomp:
             unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
                 If provided, overrides the unit-specific parameters.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-            verbose (bool, optional): Flag to print log-likelihood and parameter information.
-                Defaults to False.
             block (bool, optional): Whether to block resampling of unit-specific parameters.
                 Defaults to True.
 
@@ -554,29 +546,6 @@ class PanelPomp:
             if unit_specific_thetas is not None:
                 unit_specific_params_history.append(unit_specific_thetas.copy())
             logliks.append(total_loglik)
-
-            # Print verbose information
-            if verbose:
-                print(f"Iteration {m + 1}:")
-                print(f"Total log-likelihood: {total_loglik}")
-                if shared_thetas is not None:
-                    print(
-                        "Shared parameters:",
-                        dict(zip(shared_params, shared_thetas.mean(1))),
-                    )
-                if unit_specific_thetas is not None:
-                    print(
-                        "Unit-specific parameters:",
-                        {
-                            unit: dict(
-                                zip(
-                                    unit_specific_params,
-                                    unit_specific_thetas[:, :, i].mean(1),
-                                )
-                            )
-                            for i, unit in enumerate(unit_names)
-                        },
-                    )
 
         # TODO: update self.theta
         # Create results

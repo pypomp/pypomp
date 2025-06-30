@@ -2,9 +2,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
-from tqdm import tqdm
 from typing import Callable
-from .pfilter import _pfilter_internal
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
@@ -13,93 +11,92 @@ from .internal_functions import _interp_covars
 from .internal_functions import _geometric_cooling
 
 
+@partial(jit, static_argnums=(4, 5, 6, 11, 13))
 def _mif_internal(
     theta: jax.Array,
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    rinitializer: Callable,
-    rprocess: Callable,
-    dmeasure: Callable,
-    rinitializers: Callable,
-    rprocesses: Callable,
-    dmeasures: Callable,
+    rinitializers: Callable,  # static
+    rprocesses: Callable,  # static
+    dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     ctimes: jax.Array | None,
     covars: jax.Array | None,
-    M: int,
+    M: int,  # static
     a: float,
-    J: int,
+    J: int,  # static
     thresh: float,
-    verbose: bool,
     key: jax.Array,
-    particle_thetas: bool,  # set true when theta already contains a row for each particle
 ) -> tuple[jax.Array, jax.Array]:
-    logliks = []
-    params = []
+    logliks = jnp.zeros(M)
+    params = jnp.zeros((M, J, theta.shape[-1]))
 
-    if particle_thetas:
-        ndim = theta.ndim - 1
-        thetas = theta
-    else:
-        ndim = theta.ndim
-        thetas = jnp.tile(theta, (J,) + (1,) * ndim)
-    params.append(thetas)
+    thetas = jnp.tile(theta, (J, 1))
+    # jax.lax.cond(
+    #     theta.shape == (J, theta.shape[-1]),
+    #     lambda _: theta,
+    #     lambda _: jnp.tile(theta, (J, 1)),
+    #     operand=None,
+    # )
+    params = jnp.concatenate([thetas.reshape((1, J, theta.shape[-1])), params], axis=0)
 
-    for m in tqdm(range(M)):
-        key, subkey = jax.random.split(key=key)
-        loglik_ext, thetas = _perfilter_internal(
-            thetas=thetas,
-            t0=t0,
-            times=times,
-            ys=ys,
-            J=J,
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
-            rinitializers=rinitializers,
-            rprocesses=rprocesses,
-            dmeasures=dmeasures,
-            ctimes=ctimes,
-            covars=covars,
-            thresh=thresh,
-            key=subkey,
-            m=m,
-            a=a,
-        )
-        params.append(thetas)
-        logliks.append(loglik_ext)
+    _perfilter_internal_2 = partial(
+        _perfilter_internal,
+        t0=t0,
+        times=times,
+        ys=ys,
+        J=J,
+        sigmas=sigmas,
+        sigmas_init=sigmas_init,
+        rinitializers=rinitializers,
+        rprocesses=rprocesses,
+        dmeasures=dmeasures,
+        ctimes=ctimes,
+        covars=covars,
+        thresh=thresh,
+        a=a,
+    )
 
-        if verbose:
-            print(loglik_ext)
-            print(thetas.mean(0))
-
-    return jnp.array(logliks), jnp.array(params)
+    (params, logliks, key) = jax.lax.fori_loop(
+        lower=0,
+        upper=M,
+        body_fun=_perfilter_internal_2,
+        init_val=(params, logliks, key),
+    )
+    return logliks, params
 
 
-@partial(jit, static_argnums=(4, 7, 8, 9))
+_vmapped_mif_internal = jax.vmap(
+    _mif_internal,
+    in_axes=(0,) + (None,) * 13 + (0,),
+)
+
+
 def _perfilter_internal(
-    thetas: jax.Array,
+    m: int,
+    inputs: tuple[jax.Array, jax.Array, jax.Array],
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    J: int,  # static
-    sigmas: jax.Array,
-    sigmas_init: jax.Array,
-    rinitializers: Callable,  # static
-    rprocesses: Callable,  # static
-    dmeasures: Callable,  # static
+    J: int,
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
+    rinitializers: Callable,
+    rprocesses: Callable,
+    dmeasures: Callable,
     ctimes: jax.Array | None,
     covars: jax.Array | None,
     thresh: float,
-    key: jax.Array,
-    m: int,
     a: float,
 ):
     """
     Internal function for the perturbed particle filtering algorithm, which calls
     function 'perfilter_helper' iteratively.
     """
+    (params, logliks, key) = inputs
+    thetas = params[m]
     loglik = 0
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
@@ -136,7 +133,9 @@ def _perfilter_internal(
         init_val=(particlesF, thetas, loglik, norm_weights, counts, key),
     )
 
-    return -loglik, thetas
+    logliks = logliks.at[m].set(-loglik)
+    params = params.at[m].set(thetas)
+    return params, logliks, key
 
 
 def _perfilter_helper(
@@ -146,7 +145,7 @@ def _perfilter_helper(
     ys: jax.Array,
     rprocesses: Callable,
     dmeasures: Callable,
-    sigmas: jax.Array,
+    sigmas: float | jax.Array,
     ctimes: jax.Array | None,
     covars: jax.Array | None,
     thresh: float,

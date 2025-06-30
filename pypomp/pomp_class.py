@@ -310,7 +310,6 @@ class Pomp:
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         thresh: float = 0,
-        verbose: bool = False,
     ) -> None:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
@@ -329,8 +328,6 @@ class Pomp:
             theta (dict, list[dict], optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-            verbose (bool, optional): Flag to print log-likelihood and parameter
-                information. Defaults to False.
 
         Returns:
             None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods
@@ -356,9 +353,6 @@ class Pomp:
                 t0=self.rinit.t0,
                 times=jnp.array(self.ys.index),
                 ys=jnp.array(self.ys),
-                rinitializer=self.rinit.struct_pf,
-                rprocess=self.rproc.struct_pf,
-                dmeasure=self.dmeas.struct_pf,
                 rinitializers=self.rinit.struct_per,
                 rprocesses=self.rproc.struct_per,
                 dmeasures=self.dmeas.struct_per,
@@ -372,9 +366,7 @@ class Pomp:
                 a=a,
                 J=J,
                 thresh=thresh,
-                verbose=verbose,
                 key=k,
-                particle_thetas=False,
             )
             # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs])

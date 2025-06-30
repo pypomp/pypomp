@@ -16,7 +16,7 @@ from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
-from .pfilter import _pfilter_internal
+from .pfilter import _vmapped_pfilter_internal
 
 
 class Pomp:
@@ -274,29 +274,20 @@ class Pomp:
         logLik_list = []
         for theta_i, k in zip(theta_list, keys):
             rep_keys = jax.random.split(k, reps)
-            results = []
-            for rk in rep_keys:
-                results.append(
-                    _pfilter_internal(
-                        theta=jnp.array(list(theta_i.values())),
-                        t0=self.rinit.t0,
-                        times=jnp.array(self.ys.index),
-                        ys=jnp.array(self.ys),
-                        J=J,
-                        rinitializer=self.rinit.struct_pf,
-                        rprocess=self.rproc.struct_pf,
-                        dmeasure=self.dmeas.struct_pf,
-                        ctimes=jnp.array(self.covars.index)
-                        if self.covars is not None
-                        else None,
-                        covars=jnp.array(self.covars)
-                        if self.covars is not None
-                        else None,
-                        thresh=thresh,
-                        key=rk,
-                    )
-                )
-            results = -jnp.array(results)
+            results = -_vmapped_pfilter_internal(
+                jnp.array(list(theta_i.values())),
+                self.rinit.t0,
+                jnp.array(self.ys.index),
+                jnp.array(self.ys),
+                J,
+                self.rinit.struct_pf,
+                self.rproc.struct_pf,
+                self.dmeas.struct_pf,
+                jnp.array(self.covars.index) if self.covars is not None else None,
+                jnp.array(self.covars) if self.covars is not None else None,
+                thresh,
+                rep_keys,
+            )
             logLik_list.append(xr.DataArray(results, dims=["replicate"]))
         self.results.append(
             {

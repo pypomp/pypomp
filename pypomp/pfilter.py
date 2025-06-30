@@ -57,6 +57,12 @@ def _pfilter_internal(
     return -loglik
 
 
+_vmapped_pfilter_internal = jax.vmap(
+    _pfilter_internal,
+    in_axes=(None,) * 11 + (0,),
+)
+
+
 @partial(jit, static_argnums=(4, 5, 6, 7))
 def _pfilter_internal_mean(
     theta: jax.Array,

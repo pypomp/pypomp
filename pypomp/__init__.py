@@ -9,3 +9,4 @@ from .model_struct import RMeas
 from .util import logmeanexp
 from .util import logmeanexp_se
 from .dacca import dacca
+from .spx import spx

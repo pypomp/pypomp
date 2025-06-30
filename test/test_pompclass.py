@@ -67,9 +67,12 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(theta_order, list(self.LG.theta[0].keys()))
         self.LG.pfilter(J=self.J, reps=2)
         self.assertEqual(list(self.LG.results[-1]["theta"][0].keys()), theta_order)
+        trace_df = self.LG.results[-2]["traces"][0]
+        param_names = [col for col in trace_df.columns if col != "logLik"]
+        last_param_values = trace_df.iloc[-1][param_names].values.tolist()
         self.assertEqual(
             list(self.LG.results[-1]["theta"][0].values()),
-            np.mean(self.LG.results[-2]["thetas_out"][0][-1], axis=0).values.tolist(),
+            last_param_values,
         )
         traces = self.LG.traces()
         # Only compare the parameter values

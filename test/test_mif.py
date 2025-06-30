@@ -28,12 +28,16 @@ class TestFit_LG(unittest.TestCase):
                 key=self.key,
             )
             mif_out1 = self.LG.results[-1]
-            self.assertEqual(mif_out1["logLiks"][0].shape, (M + 1,))
             self.assertEqual(
-                mif_out1["thetas_out"][0].shape, (M + 1, J) + (len(self.LG.theta[0]),)
+                mif_out1["traces"][0].shape, (M + 1, len(self.LG.theta[0]) + 1)
+            )  # +1 for logLik column
+            self.assertTrue("logLik" in mif_out1["traces"][0].columns)
+            self.assertTrue(
+                all(
+                    param in mif_out1["traces"][0].columns
+                    for param in self.LG.theta[0].keys()
+                )
             )
-            self.assertTrue(jnp.issubdtype(mif_out1["logLiks"][0].dtype, jnp.floating))
-            self.assertTrue(jnp.issubdtype(mif_out1["thetas_out"][0], jnp.float32))
 
         # check that sigmas isn't modified by mif
         self.assertEqual(self.sigmas, 0.02)
@@ -55,17 +59,21 @@ class TestFit_LG(unittest.TestCase):
                 == jnp.array([0.02] * (len(self.LG.theta[0]) - 1) + [0])
             ).all()
         )
-        # check that the last parameter is never perturbed
+        # check that the last parameter is never perturbed (assuming it's the 16th parameter)
+        param_names = list(self.LG.theta[0].keys())
+        last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
         self.assertTrue(
             (
-                mif_out2["thetas_out"][0][:, :, 15]
-                == mif_out2["thetas_out"][0][0, 0, 15]
+                mif_out2["traces"][0][last_param]
+                == mif_out2["traces"][0][last_param].iloc[0]
             ).all()
         )
         # check that some other parameter is perturbed
+        first_param = param_names[0]
         self.assertTrue(
             (
-                mif_out2["thetas_out"][0][:, 0, 0] != mif_out2["thetas_out"][0][0, 0, 0]
+                mif_out2["traces"][0][first_param]
+                != mif_out2["traces"][0][first_param].iloc[0]
             ).any()
         )
 

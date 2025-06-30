@@ -342,7 +342,8 @@ class Pomp:
                 information. Defaults to False.
 
         Returns:
-            None. Updates self.results with lists for logLik, thetas_out, and theta.
+            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods
+            and parameter estimates averaged over particles, and theta.
         """
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
@@ -356,8 +357,8 @@ class Pomp:
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list))
-        logLik_list = []
-        thetas_out_list = []
+        traces_list = []
+        final_theta_ests = []
         for theta_i, k in zip(theta_list, keys):
             nLLs, theta_ests = _mif_internal(
                 theta=jnp.array(list(theta_i.values())),
@@ -386,31 +387,29 @@ class Pomp:
             )
             # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs])
-            logLik_list.append(xr.DataArray(logliks_with_nan, dims=["iteration"]))
-            thetas_out_list.append(
-                xr.DataArray(
-                    theta_ests,
-                    dims=["iteration", "particle", "theta"],
-                    coords={
-                        "iteration": range(0, M + 1),
-                        "particle": range(1, J + 1),
-                        "theta": list(theta_i.keys()),
-                    },
-                )
-            )
+
+            # Create trace DataFrame
+            param_names = list(theta_i.keys())
+            trace_data = {}
+            trace_data["logLik"] = logliks_with_nan
+
+            # Average parameter estimates over particles for each iteration
+            for i, param_name in enumerate(param_names):
+                trace_data[param_name] = np.mean(theta_ests[:, :, i], axis=1)
+
+            # Create DataFrame with iteration as index
+            trace_df = pd.DataFrame(trace_data, index=range(0, M + 1))
+            traces_list.append(trace_df)
+            final_theta_ests.append(theta_ests)
+
         self.theta = [
-            dict(
-                zip(
-                    theta_list[0].keys(), np.mean(theta_out[-1], axis=0).values.tolist()
-                )
-            )
-            for theta_out in thetas_out_list
+            dict(zip(theta_list[0].keys(), np.mean(theta_ests[-1], axis=0).tolist()))
+            for theta_ests in final_theta_ests
         ]
         self.results.append(
             {
                 "method": "mif",
-                "logLiks": logLik_list,
-                "thetas_out": thetas_out_list,
+                "traces": traces_list,
                 "theta": theta_list,
                 "M": M,
                 "J": J,
@@ -638,7 +637,28 @@ class Pomp:
 
         for res in self.results:
             method = res.get("method")
-            if method in ("mif", "train"):
+            if method == "mif":
+                traces = res["traces"]
+                for param_idx, trace_df in enumerate(traces):
+                    if param_names is None:
+                        param_names = [
+                            col for col in trace_df.columns if col != "logLik"
+                        ]
+                    if param_idx not in global_iters:
+                        global_iters[param_idx] = 1
+                    for iter_idx, row_data in trace_df.iterrows():
+                        row = {
+                            "replication": param_idx,
+                            "iteration": global_iters[param_idx],
+                            "method": method,
+                            "loglik": float(row_data["logLik"]),
+                        }
+                        row.update(
+                            {param: float(row_data[param]) for param in param_names}
+                        )
+                        trace_rows.append(row)
+                        global_iters[param_idx] += 1
+            elif method == "train":
                 logLiks = res["logLiks"]
                 thetas_out = res["thetas_out"]
                 for param_idx, (logLik_arr, theta_arr) in enumerate(
@@ -655,14 +675,7 @@ class Pomp:
                         global_iters[param_idx] = 1
                     n_iter = logLik_arr.shape[0]
                     for iter_idx in range(n_iter):
-                        if method == "mif":
-                            theta_vals = (
-                                theta_arr.isel(iteration=iter_idx)
-                                .mean(dim="particle")
-                                .values
-                            )
-                        else:  # train
-                            theta_vals = theta_arr.isel(iteration=iter_idx).values
+                        theta_vals = theta_arr.isel(iteration=iter_idx).values
                         row = {
                             "replication": param_idx,
                             "iteration": global_iters[param_idx],

@@ -33,14 +33,7 @@ def _mif_internal(
     logliks = jnp.zeros(M)
     params = jnp.zeros((M, J, theta.shape[-1]))
 
-    thetas = jnp.tile(theta, (J, 1))
-    # jax.lax.cond(
-    #     theta.shape == (J, theta.shape[-1]),
-    #     lambda _: theta,
-    #     lambda _: jnp.tile(theta, (J, 1)),
-    #     operand=None,
-    # )
-    params = jnp.concatenate([thetas.reshape((1, J, theta.shape[-1])), params], axis=0)
+    params = jnp.concatenate([theta.reshape((1, J, theta.shape[-1])), params], axis=0)
 
     _perfilter_internal_2 = partial(
         _perfilter_internal,
@@ -70,7 +63,7 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(0,) + (None,) * 14 + (0,),
+    in_axes=(1,) + (None,) * 14 + (0,),
 )
 
 

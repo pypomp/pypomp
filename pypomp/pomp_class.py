@@ -350,7 +350,7 @@ class Pomp:
         final_theta_ests = []
 
         nLLs, theta_ests = _vmapped_mif_internal(
-            theta_array,
+            jnp.tile(theta_array, (J, 1, 1)),
             self.rinit.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),

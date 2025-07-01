@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
-from .mif import _mif_internal
+from .mif import _vmapped_mif_internal
 from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
@@ -337,6 +337,7 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
+        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -347,29 +348,28 @@ class Pomp:
         keys = jax.random.split(new_key, len(theta_list))
         traces_list = []
         final_theta_ests = []
-        for theta_i, k in zip(theta_list, keys):
-            nLLs, theta_ests = _mif_internal(
-                theta=jnp.array(list(theta_i.values())),
-                t0=self.rinit.t0,
-                times=jnp.array(self.ys.index),
-                ys=jnp.array(self.ys),
-                rinitializers=self.rinit.struct_per,
-                rprocesses=self.rproc.struct_per,
-                dmeasures=self.dmeas.struct_per,
-                sigmas=sigmas,
-                sigmas_init=sigmas_init,
-                ctimes=jnp.array(self.covars.index)
-                if self.covars is not None
-                else None,
-                covars=jnp.array(self.covars) if self.covars is not None else None,
-                M=M,
-                a=a,
-                J=J,
-                thresh=thresh,
-                key=k,
-            )
+
+        nLLs, theta_ests = _vmapped_mif_internal(
+            theta_array,
+            self.rinit.t0,
+            jnp.array(self.ys.index),
+            jnp.array(self.ys),
+            self.rinit.struct_per,
+            self.rproc.struct_per,
+            self.dmeas.struct_per,
+            sigmas,
+            sigmas_init,
+            jnp.array(self.covars.index) if self.covars is not None else None,
+            jnp.array(self.covars) if self.covars is not None else None,
+            M,
+            a,
+            J,
+            thresh,
+            keys,
+        )
+        for i, theta_i in enumerate(theta_list):
             # Prepend nan for the log-likelihood of the initial parameters
-            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs])
+            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
 
             # Create trace DataFrame
             param_names = list(theta_i.keys())
@@ -377,13 +377,13 @@ class Pomp:
             trace_data["logLik"] = logliks_with_nan
 
             # Average parameter estimates over particles for each iteration
-            for i, param_name in enumerate(param_names):
-                trace_data[param_name] = np.mean(theta_ests[:, :, i], axis=1)
+            for j, param_name in enumerate(param_names):
+                trace_data[param_name] = np.mean(theta_ests[i, :, :, j], axis=1)
 
             # Create DataFrame with iteration as index
             trace_df = pd.DataFrame(trace_data, index=range(0, M + 1))
             traces_list.append(trace_df)
-            final_theta_ests.append(theta_ests)
+            final_theta_ests.append(theta_ests[i])
 
         self.theta = [
             dict(zip(theta_list[0].keys(), np.mean(theta_ests[-1], axis=0).tolist()))

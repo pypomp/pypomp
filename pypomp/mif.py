@@ -70,7 +70,7 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(0,) + (None,) * 13 + (0,),
+    in_axes=(0,) + (None,) * 14 + (0,),
 )
 
 
@@ -133,8 +133,8 @@ def _perfilter_internal(
         init_val=(particlesF, thetas, loglik, norm_weights, counts, key),
     )
 
-    logliks = logliks.at[m].set(-loglik)
-    params = params.at[m].set(thetas)
+    logliks = logliks.at[m + 1].set(-loglik)
+    params = params.at[m + 1].set(thetas)
     return params, logliks, key
 
 

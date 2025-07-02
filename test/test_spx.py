@@ -11,8 +11,8 @@ class TestSPX(unittest.TestCase):
 
     def test_spx_pfilter_basic(self):
         self.spx_model.pfilter(J=self.J, key=self.key, reps=1)
-        self.assertIsInstance(self.spx_model.results, list)
-        self.assertGreater(len(self.spx_model.results), 0)
+        self.assertIsInstance(self.spx_model.results_history, list)
+        self.assertGreater(len(self.spx_model.results_history), 0)
 
     def test_spx_mif_basic(self):
         self.spx_model.mif(
@@ -23,5 +23,5 @@ class TestSPX(unittest.TestCase):
             M=1,
             a=0.5,
         )
-        self.assertIsInstance(self.spx_model.results, list)
-        self.assertGreater(len(self.spx_model.results), 0)
+        self.assertIsInstance(self.spx_model.results_history, list)
+        self.assertGreater(len(self.spx_model.results_history), 0)

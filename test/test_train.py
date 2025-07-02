@@ -31,7 +31,7 @@ class TestFit_LG(unittest.TestCase):
                     ls=True,
                     key=self.key,
                 )
-                GD_out = self.LG.results[-1]
+                GD_out = self.LG.results_history[-1]
                 self.assertEqual(GD_out["logLiks"][0].shape, (3,))
                 self.assertEqual(
                     GD_out["thetas_out"][0].shape, (3,) + (len(self.theta[0]),)

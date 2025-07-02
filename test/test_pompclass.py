@@ -37,6 +37,37 @@ class TestPompClass_LG(unittest.TestCase):
                 kwargs[arg] = None
                 pp.Pomp(**kwargs)
 
+    def test_results(self):
+        # Check that results() returns one row per parameter set and correct columns
+        # pfilter: should be one row per parameter set (len(theta))
+        n_paramsets = len(self.LG.theta)
+        self.LG.pfilter(J=self.J, reps=1, key=self.key)
+        res_pfilter = self.LG.results()
+        self.assertEqual(res_pfilter.shape[0], n_paramsets)  # one row per parameter set
+        expected_cols = {"logLik", "se", *self.LG.theta[0].keys()}
+        self.assertEqual(set(res_pfilter.columns), expected_cols)
+
+        # mif: should be one row per parameter set (len(theta))
+        self.LG.mif(
+            J=self.J,
+            sigmas=self.sigmas,
+            sigmas_init=self.sigmas,
+            M=self.M,
+            a=self.a,
+            key=self.key,
+        )
+        res_mif = self.LG.results()
+        n_paramsets = len(self.LG.theta)
+        self.assertEqual(res_mif.shape[0], n_paramsets)  # one row per parameter set
+        self.assertEqual(set(res_mif.columns), expected_cols)
+
+        # train: should be one row per parameter set (len(theta))
+        self.LG.train(J=self.J, Jh=self.J, itns=1, key=self.key)
+        res_train = self.LG.results()
+        n_paramsets = len(self.LG.theta)
+        self.assertEqual(res_train.shape[0], n_paramsets)  # one row per parameter set
+        self.assertEqual(set(res_train.columns), expected_cols)
+
     def test_sample_params(self):
         param_bounds = {
             "R0": (0, 100),
@@ -66,12 +97,14 @@ class TestPompClass_LG(unittest.TestCase):
         )
         self.assertEqual(theta_order, list(self.LG.theta[0].keys()))
         self.LG.pfilter(J=self.J, reps=2)
-        self.assertEqual(list(self.LG.results[-1]["theta"][0].keys()), theta_order)
-        trace_df = self.LG.results[-2]["traces"][0]
+        self.assertEqual(
+            list(self.LG.results_history[-1]["theta"][0].keys()), theta_order
+        )
+        trace_df = self.LG.results_history[-2]["traces"][0]
         param_names = [col for col in trace_df.columns if col != "logLik"]
         last_param_values = trace_df.iloc[-1][param_names].values.tolist()
         self.assertEqual(
-            list(self.LG.results[-1]["theta"][0].values()),
+            list(self.LG.results_history[-1]["theta"][0].values()),
             last_param_values,
         )
         traces = self.LG.traces()
@@ -97,7 +130,7 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(self.LG.rproc, unpickled_obj.rproc)
         self.assertEqual(self.LG.dmeas, unpickled_obj.dmeas)
         self.assertEqual(self.LG.rproc.dt, unpickled_obj.rproc.dt)
-        self.assertEqual(self.LG.results, unpickled_obj.results)
+        self.assertEqual(self.LG.results_history, unpickled_obj.results_history)
         self.assertEqual(
             self.LG.traces().values.tolist(), unpickled_obj.traces().values.tolist()
         )

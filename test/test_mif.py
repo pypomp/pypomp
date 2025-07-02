@@ -27,7 +27,7 @@ class TestFit_LG(unittest.TestCase):
                 a=self.a,
                 key=self.key,
             )
-            mif_out1 = self.LG.results[-1]
+            mif_out1 = self.LG.results_history[-1]
             self.assertEqual(
                 mif_out1["traces"][0].shape, (M + 1, len(self.LG.theta[0]) + 1)
             )  # +1 for logLik column
@@ -51,7 +51,7 @@ class TestFit_LG(unittest.TestCase):
             a=0.9,
             key=self.key,
         )
-        mif_out2 = self.LG.results[-1]
+        mif_out2 = self.LG.results_history[-1]
         # check that sigmas isn't modified by mif when passed as an array
         self.assertTrue(
             (

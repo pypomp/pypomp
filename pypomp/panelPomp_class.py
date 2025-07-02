@@ -58,7 +58,7 @@ class PanelPomp:
         self.unit_objects = Pomp_dict
         self.shared = shared
         self.unit_specific = unit_specific
-        self.results = []
+        self.results_history = []
 
         # Store original parameter order for each unit
         self._unit_param_order = {}
@@ -184,9 +184,9 @@ class PanelPomp:
                 thresh=thresh,
                 reps=reps,
             )
-            results.loc[unit, :] = obj.results[-1]["logLiks"][0]
-            obj.results = []
-        self.results.append(
+            results.loc[unit, :] = obj.results_history[-1]["logLiks"][0]
+            obj.results_history = []
+        self.results_history.append(
             {
                 "logLik": results,
                 "shared": shared,
@@ -549,7 +549,7 @@ class PanelPomp:
 
         # TODO: update self.theta
         # Create results
-        self.results.append(
+        self.results_history.append(
             {
                 **self._create_results(
                     jnp.array(logliks),

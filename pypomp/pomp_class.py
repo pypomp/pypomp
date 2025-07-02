@@ -17,6 +17,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal
+from .util import logmeanexp, logmeanexp_se
 
 
 class Pomp:
@@ -43,7 +44,7 @@ class Pomp:
         dmeas (DMeas | None): Density evaluation for the measurement model
         rmeas (RMeas | None): Measurement simulator
         covars (pd.DataFrame | None): Covariates for the model if applicable
-        results (list | None): History of the results for the pfilter, mif, and train
+        results_history (list | None): History of the results for the pfilter, mif, and train
             methods run on the object. This includes the algorithmic parameters used.
         fresh_key (jax.Array | None): Running a method that takes a key argument will
             store a fresh, unused key in this attribute. Subsequent calls to a method
@@ -129,7 +130,7 @@ class Pomp:
         self.dmeas = dmeas
         self.rmeas = rmeas
         self.covars = covars
-        self.results = []
+        self.results_history = []
         self.fresh_key = None
 
     def _update_fresh_key(
@@ -289,7 +290,7 @@ class Pomp:
                 rep_keys,
             )
             logLik_list.append(xr.DataArray(results, dims=["replicate"]))
-        self.results.append(
+        self.results_history.append(
             {
                 "method": "pfilter",
                 "logLiks": logLik_list,
@@ -389,7 +390,7 @@ class Pomp:
             dict(zip(theta_list[0].keys(), np.mean(theta_ests[-1], axis=0).tolist()))
             for theta_ests in final_theta_ests
         ]
-        self.results.append(
+        self.results_history.append(
             {
                 "method": "mif",
                 "traces": traces_list,
@@ -514,7 +515,7 @@ class Pomp:
                     },
                 )
             )
-        self.results.append(
+        self.results_history.append(
             {
                 "method": "train",
                 "logLiks": logLik_list,
@@ -618,7 +619,7 @@ class Pomp:
         param_names = None
         global_iters = {}  # key: param_idx, value: current iteration (start at 1)
 
-        for res in self.results:
+        for res in self.results_history:
             method = res.get("method")
             if method == "mif":
                 traces = res["traces"]
@@ -683,7 +684,7 @@ class Pomp:
                         param_names = list(theta_dict.keys())
                     # Use the last iteration for this param_idx
                     last_iter = global_iters.get(param_idx, 1) - 1
-                    avg_loglik = float(logLik_arr.mean().values)
+                    avg_loglik = float(logmeanexp(logLik_arr))
                     row = {
                         "replication": param_idx,
                         "iteration": last_iter if last_iter > 0 else 1,
@@ -699,6 +700,66 @@ class Pomp:
         if not df.empty:
             df = df.sort_values(["iteration", "replication"]).reset_index(drop=True)
         return df
+
+    def results(self, index: int = -1) -> pd.DataFrame:
+        """
+        Returns a DataFrame with the results of the method run at the given index.
+
+        Args:
+            index (int): The index of the result to return. Defaults to -1 (the last
+                result).
+
+        Returns:
+            pd.DataFrame: A DataFrame with the results of the method run at the given
+                index.
+        """
+        res = self.results_history[index]
+        method = res.get("method")
+        rows = []
+        param_names = None
+        if method == "pfilter":
+            logLiks = res["logLiks"]
+            thetas = res["theta"]
+            for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
+                if param_names is None:
+                    param_names = list(theta_dict.keys())
+                logLik_arr_np = np.array(logLik_arr)
+                logLik = float(logmeanexp(logLik_arr_np))
+                se = (
+                    float(logmeanexp_se(logLik_arr_np))
+                    if len(logLik_arr_np) > 1
+                    else np.nan
+                )
+                row = {"logLik": logLik, "se": se}
+                row.update({param: float(theta_dict[param]) for param in param_names})
+                rows.append(row)
+        elif method == "mif":
+            traces = res["traces"]
+            for param_idx, trace_df in enumerate(traces):
+                if param_names is None:
+                    param_names = [col for col in trace_df.columns if col != "logLik"]
+                last_row = trace_df.iloc[-1]
+                row = {"logLik": float(last_row["logLik"]), "se": np.nan}
+                row.update({param: float(last_row[param]) for param in param_names})
+                rows.append(row)
+        elif method == "train":
+            logLiks = res["logLiks"]
+            thetas_out = res["thetas_out"]
+            for param_idx, (logLik_arr, theta_arr) in enumerate(
+                zip(logLiks, thetas_out)
+            ):
+                if param_names is None:
+                    param_names = list(theta_arr.coords["theta"].values)
+                last_idx = logLik_arr.shape[0] - 1
+                theta_vals = theta_arr.isel(iteration=last_idx).values
+                row = {"logLik": float(logLik_arr[last_idx].values), "se": np.nan}
+                row.update(
+                    {param: float(val) for param, val in zip(param_names, theta_vals)}
+                )
+                rows.append(row)
+        else:
+            raise ValueError(f"Unknown method in results_history: {method}")
+        return pd.DataFrame(rows)
 
     def plot_traces(self, show: bool = True):
         """

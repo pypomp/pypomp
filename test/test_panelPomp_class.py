@@ -119,7 +119,7 @@ class TestPompClass_LG(unittest.TestCase):
     def test_pfilter(self):
         # Test that pfilter runs to completion
         self.panel.pfilter(J=self.J, key=self.key)
-        pfilter_out = self.panel.results[-1]
+        pfilter_out = self.panel.results_history[-1]
         self.assertIsInstance(pfilter_out, dict)
         self.assertEqual(
             set(pfilter_out.keys()),
@@ -141,7 +141,7 @@ class TestPompClass_LG(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
-        mif_out = self.panel.results[-1]
+        mif_out = self.panel.results_history[-1]
         self.assertIsInstance(mif_out, dict)
         self.assertIn("logLiks", mif_out)
         self.assertIn("shared_thetas", mif_out)
@@ -179,7 +179,7 @@ class TestPompClass_LG(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
-        mif_out = self.panel.results[-1]
+        mif_out = self.panel.results_history[-1]
 
         # Check shared parameters
         shared_initial = jnp.array(self.panel.shared["shared"].values)
@@ -312,7 +312,7 @@ class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
     def test_pfilter(self):
         # Test that pfilter runs to completion
         self.panel.pfilter(J=self.J, key=self.key)
-        pfilter_out = self.panel.results[-1]
+        pfilter_out = self.panel.results_history[-1]
         self.assertIsInstance(pfilter_out, dict)
         self.assertEqual(
             set(pfilter_out.keys()),
@@ -334,7 +334,7 @@ class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
             a=self.a,
             key=self.key,
         )
-        mif_out = self.panel.results[-1]
+        mif_out = self.panel.results_history[-1]
         self.assertIsInstance(mif_out, dict)
         self.assertIn("logLiks", mif_out)
         self.assertNotIn("shared_thetas", mif_out)

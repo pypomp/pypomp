@@ -135,5 +135,9 @@ class TestPompClass_LG(unittest.TestCase):
             self.LG.traces().values.tolist(), unpickled_obj.traces().values.tolist()
         )
 
+        # Check that the unpickled object can be pickled again if rmeas is None
+        unpickled_obj.rmeas = None
+        pickled_data = pickle.dumps(unpickled_obj)
+
         # Check that the unpickled object can still be used for filtering
         unpickled_obj.pfilter(J=self.J, reps=1)

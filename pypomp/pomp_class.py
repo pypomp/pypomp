@@ -929,6 +929,12 @@ class Pomp:
             else:
                 self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
 
+        # Set rmeas or dmeas to None if not set
+        if not hasattr(self, "rmeas"):
+            self.rmeas = None
+        if not hasattr(self, "dmeas"):
+            self.dmeas = None
+
         # Clean up temporary state variables
         for key in [
             "_rinit_func_name",

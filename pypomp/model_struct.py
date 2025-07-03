@@ -13,6 +13,7 @@ def _time_interp(
     rproc: Callable,
     step_type: str,
     dt: float | None,
+    nstep: int | None,
     accumvars: tuple[int, ...] | None,
 ) -> Callable:
     def _interp_helper(
@@ -28,35 +29,37 @@ def _time_interp(
         t = t + dt
         return (X_, theta_, key, t)
 
-    def _num_onestep_steps(t1: float, t2: float, dt: float) -> tuple[int, float]:
-        return 1, t2 - t1
+    def _num_fixedstep_steps(
+        t1: float, t2: float, dt: float, nstep: int
+    ) -> tuple[int, float]:
+        return nstep, (t2 - t1) / nstep
 
     def _num_euler_steps(
-        t1: float, t2: float, dt: float
+        t1: float, t2: float, dt: float, nstep: int
     ) -> tuple[jax.Array, jax.Array]:
         tol = jnp.sqrt(jnp.finfo(float).eps)
 
-        nstep = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
-        dt2 = (t2 - t1) / nstep
+        nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
+        dt2 = (t2 - t1) / nstep2
 
         check1 = t1 + dt >= t2
-        nstep = jnp.where(check1, 1, nstep)
+        nstep2 = jnp.where(check1, 1, nstep2)
         dt2 = jnp.where(check1, t2 - t1, dt2)
 
         check2 = t1 >= t2
-        nstep = jnp.where(check2, 0, nstep)
+        nstep2 = jnp.where(check2, 0, nstep2)
         dt2 = jnp.where(check2, 0.0, dt2)
 
-        return nstep, dt2
+        return nstep2, dt2
 
     num_step_func = None
     match step_type:
-        case "onestep":
-            num_step_func = _num_onestep_steps
+        case "fixedstep":
+            num_step_func = _num_fixedstep_steps
         case "euler":
             num_step_func = _num_euler_steps
     if num_step_func is None:
-        raise ValueError("step_type must be either 'onestep' or 'euler'")
+        raise ValueError("step_type must be either 'fixedstep' or 'euler'")
 
     def _rproc_interp(
         X_: jax.Array,
@@ -67,22 +70,27 @@ def _time_interp(
         t1: float,
         t2: float,
         dt: float | None,
+        nstep: int | None,
         accumvars: tuple[int, ...] | None,
         num_step_func: Callable,
     ) -> jax.Array:
         X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
-        nstep, dt2 = num_step_func(t1, t2, dt=dt)
+        nstep2, dt2 = num_step_func(t1, t2, dt=dt, nstep=nstep)
         interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
         X_, theta_, key, t = jax.lax.fori_loop(
             lower=0,
-            upper=nstep,
+            upper=nstep2,
             body_fun=interp_helper2,
             init_val=(X_, theta_, key, t1),
         )
         return X_
 
     return partial(
-        _rproc_interp, dt=dt, accumvars=accumvars, num_step_func=num_step_func
+        _rproc_interp,
+        dt=dt,
+        nstep=nstep,
+        accumvars=accumvars,
+        num_step_func=num_step_func,
     )
 
 
@@ -93,16 +101,10 @@ class RInit:
         the initial state distribution of a POMP model.
 
         Args:
-            struct (Callable): A function that simulates the initial state distribution.
-                Must have the following signature:
-                struct(theta_: jax.Array, key: jax.Array, covars: jax.Array | None, t0: float) -> jax.Array
-                where:
-                - theta_: Model parameters
-                - key: Random key for reproducibility
-                - covars: Optional covariates
-                - t0: Initial time
-                The function must return a JAX array of shape (dim(X),) where dim(X) is
-                the dimension of the state vector.
+            struct (Callable): A function with a specific structure where the
+                first four arguments must be 'theta_', 'key', 'covars', and 't0',
+                in that order. The function must return a JAX array of shape (dim(X),)
+                where dim(X) is the dimension of the state vector.
             t0 (float): The initial time point for the simulation.
 
         Note:
@@ -114,7 +116,7 @@ class RInit:
             if struct.__code__.co_varnames[i] != arg:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
-        self.t0 = t0
+        self.t0 = float(t0)
         self.struct = struct
         self.struct_pf = jax.vmap(struct, (None, 0, None, None))
         self.struct_per = jax.vmap(struct, (0, 0, None, None))
@@ -125,7 +127,8 @@ class RProc:
     def __init__(
         self,
         struct: Callable,
-        step_type: str = "onestep",
+        step_type: str = "fixedstep",
+        nstep: int | None = None,
         dt: float | None = None,
         accumvars: tuple[int, ...] | None = None,
     ):
@@ -139,31 +142,41 @@ class RProc:
             struct (callable): A function with a specific structure where the
                 first six arguments must be 'X_', 'theta_', 'key', 'covars', 't', and
                 'dt', in that order.
-            step_type (str, optional): Method to describe how the process evolves over time.
+            step_type (str, optional): Method to describe how the process evolves over
+                time. Possible choices are 'fixedstep' and 'euler'.
+            nstep (int, optional): The number of steps used for the fixedstep method.
+                Required if step_type is 'fixedstep'. Must be None if step_type is 'euler'.
             dt (float, optional): The time step used for the time_helper method.
-                Required if time_helper is 'euler'.
+                Required if step_type is 'euler'. Must be None if step_type is 'fixedstep'.
+            accumvars (tuple, optional): A tuple of integers specifying the indices of the state variables that are accumulated.
         """
         for i, arg in enumerate(["X_", "theta_", "key", "covars", "t", "dt"]):
             if struct.__code__.co_varnames[i] != arg:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
         if step_type == "euler" and dt is None:
             raise ValueError("dt must be specified if step_type is 'euler'")
+        if step_type == "fixedstep" and nstep is None:
+            raise ValueError("nstep must be specified if step_type is 'fixedstep'")
+
         self.struct = _time_interp(
-            struct, step_type=step_type, dt=dt, accumvars=accumvars
+            struct, step_type=step_type, nstep=nstep, dt=dt, accumvars=accumvars
         )
         self.struct_pf = _time_interp(
             jax.vmap(struct, (0, None, 0, None, None, None)),
             step_type=step_type,
+            nstep=nstep,
             dt=dt,
             accumvars=accumvars,
         )
         self.struct_per = _time_interp(
             jax.vmap(struct, (0, 0, 0, None, None, None)),
             step_type=step_type,
+            nstep=nstep,
             dt=dt,
             accumvars=accumvars,
         )
-        self.dt = dt
+        self.nstep = int(nstep) if nstep is not None else None
+        self.dt = float(dt) if dt is not None else None
         self.step_type = step_type
         self.accumvars = accumvars
         self.original_func = struct

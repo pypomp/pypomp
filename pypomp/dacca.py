@@ -152,7 +152,6 @@ def rinit(theta_, key, covars, t0=None):
     return jnp.array([S, I, Y, Mn, R1, R2, R3, count])
 
 
-@partial(RProc, dt=1 / 240, step_type="euler", accumvars=(3,))
 def rproc(X_, theta_, key, covars, t, dt):
     S = X_[0]
     I = X_[1]
@@ -268,7 +267,37 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jax.random.normal(key) * v + deaths
 
 
-def dacca():
+def dacca(dt: float | None = 1 / 240, nstep: int | None = None):
+    """
+    Creates a POMP model for the Dacca measles data.
+
+    This function constructs a Partially Observed Markov Process (POMP) model
+    for the Dacca measles dataset. The model includes a stochastic process for
+    the underlying disease dynamics and a measurement model for observed deaths.
+
+    Parameters
+    ----------
+    dt : float, optional
+        Time step size for the process model. Determines the number of sub-steps per observation interval for the process model.
+    nstep : int, optional
+        Number of sub-steps per observation interval for the process model.
+        If None, uses Euler discretization with the specified step size. nstep and dt cannot both be not None.
+
+    Returns
+    -------
+    Pomp
+        A POMP model object representing the Dacca cholera model.
+    """
+    from pypomp.dacca import rproc
+
+    if nstep is not None and dt is not None:
+        raise ValueError("Cannot specify both dt and nstep")
+
+    if nstep is not None:
+        rproc = RProc(rproc, step_type="fixedstep", nstep=nstep)
+    else:
+        rproc = RProc(rproc, step_type="euler", dt=dt, accumvars=(3,))
+
     dacca_obj = Pomp(
         rinit=rinit,
         rproc=rproc,

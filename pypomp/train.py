@@ -21,7 +21,6 @@ def _train_internal(
     ctimes: jax.Array | None,
     covars: jax.Array | None,
     J: int,
-    Jh: int,
     optimizer: str,
     itns: int,
     beta: float,

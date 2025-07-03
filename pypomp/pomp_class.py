@@ -408,7 +408,6 @@ class Pomp:
     def train(
         self,
         J: int,
-        Jh: int,
         itns: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
@@ -428,8 +427,7 @@ class Pomp:
         Instance method for conducting the MOP gradient-based iterative optimization method.
 
         Args:
-            J (int): The number of particles in the MOP objective for obtaining the gradient.
-            Jh (int): The number of particles in the MOP objective for obtaining the Hessian matrix.
+            J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             itns (int): Maximum iteration for the gradient descent optimization.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
@@ -468,8 +466,6 @@ class Pomp:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
             raise ValueError("J should be greater than 0")
-        if Jh < 1:
-            raise ValueError("Jh should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list))
@@ -485,7 +481,6 @@ class Pomp:
                 rprocess=self.rproc.struct_pf,
                 dmeasure=self.dmeas.struct_pf,
                 J=J,
-                Jh=Jh,
                 ctimes=jnp.array(self.covars.index)
                 if self.covars is not None
                 else None,
@@ -522,7 +517,6 @@ class Pomp:
                 "thetas_out": thetas_out_list,
                 "theta": theta_list,
                 "J": J,
-                "Jh": Jh,
                 "optimizer": optimizer,
                 "itns": itns,
                 "beta": beta,

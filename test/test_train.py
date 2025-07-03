@@ -13,7 +13,6 @@ class TestFit_LG(unittest.TestCase):
         self.covars = None
         self.theta = self.LG.theta
         self.J = 5
-        self.Jh = 5
         self.key = jax.random.key(111)
         self.M = 2
         self.itns = 2
@@ -24,7 +23,6 @@ class TestFit_LG(unittest.TestCase):
             with self.subTest(optimizer=optimizer):
                 self.LG.train(
                     J=self.J,
-                    Jh=self.Jh,
                     itns=self.itns,
                     optimizer=optimizer,
                     scale=True,
@@ -41,18 +39,9 @@ class TestFit_LG(unittest.TestCase):
 
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError):
+            # Check that an error is thrown when J is not positive
             self.LG.train(
                 J=0,
-                Jh=self.Jh,
-                itns=self.itns,
-                scale=True,
-                ls=True,
-                key=self.key,
-            )
-        with self.assertRaises(ValueError):
-            self.LG.train(
-                J=self.J,
-                Jh=0,
                 itns=self.itns,
                 scale=True,
                 ls=True,

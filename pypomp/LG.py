@@ -31,14 +31,14 @@ def transform_thetas(A, C, Q, R):
 
 
 # TODO: Add custom starting position.
-@partial(RInit, t0=0)
+@partial(RInit, t0=0.0)
 def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
 
 
-@partial(RProc, step_type="onestep")
+@partial(RProc, step_type="fixedstep", nstep=1)
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)

@@ -20,19 +20,19 @@ class TestModelStruct(unittest.TestCase):
     def test_RProc_value_error(self):
         # Test that an error is thrown with incorrect arguments
         with self.assertRaises(ValueError):
-            pp.RProc(lambda foo, theta_, key, covars, t, dt: jnp.array([0]))
+            pp.RProc(lambda foo, theta_, key, covars, t, dt: jnp.array([0]), nstep=1)
         with self.assertRaises(ValueError):
-            pp.RProc(lambda X_, foo, key, covars, t, dt: jnp.array([0]))
+            pp.RProc(lambda X_, foo, key, covars, t, dt: jnp.array([0]), nstep=1)
         with self.assertRaises(ValueError):
-            pp.RProc(lambda X_, theta_, foo, covars, t, dt: jnp.array([0]))
+            pp.RProc(lambda X_, theta_, foo, covars, t, dt: jnp.array([0]), nstep=1)
         with self.assertRaises(ValueError):
-            pp.RProc(lambda X_, theta_, key, foo, t, dt: jnp.array([0]))
+            pp.RProc(lambda X_, theta_, key, foo, t, dt: jnp.array([0]), nstep=1)
         with self.assertRaises(ValueError):
-            pp.RProc(lambda X_, theta_, key, covars, foo, dt: jnp.array([0]))
+            pp.RProc(lambda X_, theta_, key, covars, foo, dt: jnp.array([0]), nstep=1)
         with self.assertRaises(ValueError):
-            pp.RProc(lambda X_, theta_, key, covars, t, foo: jnp.array([0]))
+            pp.RProc(lambda X_, theta_, key, covars, t, foo: jnp.array([0]), nstep=1)
         # Test that correct arguments run without error
-        pp.RProc(lambda X_, theta_, key, covars, t, dt: jnp.array([0]))
+        pp.RProc(lambda X_, theta_, key, covars, t, dt: jnp.array([0]), nstep=1)
 
     def test_DMeas_value_error(self):
         # Test that an error is thrown with incorrect arguments

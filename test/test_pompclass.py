@@ -62,7 +62,7 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(set(res_mif.columns), expected_cols)
 
         # train: should be one row per parameter set (len(theta))
-        self.LG.train(J=self.J, Jh=self.J, itns=1, key=self.key)
+        self.LG.train(J=self.J, itns=1, key=self.key)
         res_train = self.LG.results()
         n_paramsets = len(self.LG.theta)
         self.assertEqual(res_train.shape[0], n_paramsets)  # one row per parameter set

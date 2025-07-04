@@ -8,7 +8,7 @@ import pandas as pd
 import xarray as xr
 from tqdm import tqdm
 from .pomp_class import Pomp
-from .mif import _mif_internal
+from .mif import _jit_mif_internal
 import numpy as np
 
 
@@ -298,7 +298,7 @@ class PanelPomp:
 
         # Run perturbed particle filter
         key, subkey = jax.random.split(key)
-        unit_loglik, unit_thetas = _mif_internal(
+        unit_loglik, unit_thetas = _jit_mif_internal(
             theta=theta_values,
             t0=unit_rinit.t0,
             times=jnp.array(unit_ys.index),

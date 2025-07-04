@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
-from .mif import _vmapped_mif_internal
+from .mif import _jv_mif_internal
 from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
@@ -350,7 +350,7 @@ class Pomp:
         traces_list = []
         final_theta_ests = []
 
-        nLLs, theta_ests = _vmapped_mif_internal(
+        nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self.rinit.t0,
             jnp.array(self.ys.index),

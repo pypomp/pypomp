@@ -16,19 +16,6 @@ def _time_interp(
     nstep: int | None,
     accumvars: tuple[int, ...] | None,
 ) -> Callable:
-    def _interp_helper(
-        i: int,
-        inputs: tuple[jax.Array, jax.Array, jax.Array, float],
-        ctimes: jax.Array,
-        covars: jax.Array,
-        dt: float,
-    ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
-        X_, theta_, key, t = inputs
-        covars_t = _interp_covars(t, ctimes, covars)
-        X_ = rproc(X_, theta_, key, covars_t, t, dt)
-        t = t + dt
-        return (X_, theta_, key, t)
-
     def _num_fixedstep_steps(
         t1: float, t2: float, dt: float, nstep: int
     ) -> tuple[int, float]:
@@ -60,6 +47,19 @@ def _time_interp(
             num_step_func = _num_euler_steps
     if num_step_func is None:
         raise ValueError("step_type must be either 'fixedstep' or 'euler'")
+
+    def _interp_helper(
+        i: int,
+        inputs: tuple[jax.Array, jax.Array, jax.Array, float],
+        ctimes: jax.Array,
+        covars: jax.Array,
+        dt: float,
+    ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
+        X_, theta_, key, t = inputs
+        covars_t = _interp_covars(t, ctimes, covars)
+        X_ = rproc(X_, theta_, key, covars_t, t, dt)
+        t = t + dt
+        return (X_, theta_, key, t)
 
     def _rproc_interp(
         X_: jax.Array,

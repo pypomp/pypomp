@@ -267,7 +267,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jax.random.normal(key) * v + deaths
 
 
-def dacca(dt: float | None = 1 / 240, nstep: int | None = None):
+def dacca(dt: float | None = 1 / 240, nstep: int | None = None) -> Pomp:
     """
     Creates a POMP model for the Dacca measles data.
 

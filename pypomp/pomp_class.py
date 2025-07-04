@@ -412,15 +412,15 @@ class Pomp:
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         optimizer: str = "Newton",
-        beta: float = 0.9,
         eta: float = 0.0025,
-        c: float = 0.1,
-        max_ls_itn: int = 10,
+        alpha: float = 0.97,
         thresh: int = 0,
-        verbose: bool = False,
         scale: bool = False,
         ls: bool = False,
-        alpha: float = 0.97,
+        beta: float = 0.9,
+        c: float = 0.1,
+        max_ls_itn: int = 10,
+        verbose: bool = False,
         n_monitors: int = 1,
     ) -> None:
         """
@@ -433,27 +433,28 @@ class Pomp:
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
-            optimizer (str, optional): The gradient-based iterative optimization method to use.
-                Options include "Newton", "weighted Newton", "BFGS", "gradient descent".
+            optimizer (str, optional): The gradient-based iterative optimization method
+                to use. Options include "Newton", "WeightedNewton", and "BFGS".
                 Defaults to "Newton".
-            beta (float, optional): Initial step size for the line search algorithm.
-                Defaults to 0.9.
-            eta (float, optional): Initial step size. Defaults to 0.0025.
-            c (float, optional): The user-defined Armijo condition constant.
-                Defaults to 0.1.
-            max_ls_itn (int, optional): The maximum number of iterations for the line search algorithm.
-                Defaults to 10.
-            thresh (int, optional): Threshold value to determine whether to resample particles.
-                Defaults to 0.
-            verbose (bool, optional): Boolean flag controlling whether to print out the
-                log-likelihood and parameter information. Defaults to False.
+            eta (float, optional): Learning rate. Defaults to 0.0025.
+            alpha (float, optional): Discount factor for MOP. Defaults to 0.97.
+            thresh (int, optional): Threshold value to determine whether to resample
+                particles. Defaults to 0.
             scale (bool, optional): Boolean flag controlling whether to normalize the
                 search direction. Defaults to False.
-            ls (bool, optional): Boolean flag controlling whether to use the line search algorithm.
-                Defaults to False.
-            alpha (float, optional): Discount factor. Defaults to 0.97.
-            n_monitors (int, optional): Number of particle filter runs to average for log-likelihood estimation.
-                Defaults to 1.
+            ls (bool, optional): Boolean flag controlling whether to use the line
+                search algorithm. Defaults to False.
+            Line Search Parameters (only used when ls=True):
+                c (float, optional): The Armijo condition constant for line search,
+                    which controls how much the negative log-likelihood needs to
+                    decrease before the line search algorithm continues. Defaults to
+                    0.1.
+                max_ls_itn (int, optional): Maximum number of iterations for the line
+                    search algorithm. Defaults to 10.
+            verbose (bool, optional): Boolean flag controlling whether to print out the
+                log-likelihood and parameter information. Defaults to False.
+            n_monitors (int, optional): Number of particle filter runs to average for
+                log-likelihood estimation. Defaults to 1.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -487,7 +488,6 @@ class Pomp:
                 covars=jnp.array(self.covars) if self.covars is not None else None,
                 optimizer=optimizer,
                 itns=itns,
-                beta=beta,
                 eta=eta,
                 c=c,
                 max_ls_itn=max_ls_itn,
@@ -519,7 +519,6 @@ class Pomp:
                 "J": J,
                 "optimizer": optimizer,
                 "itns": itns,
-                "beta": beta,
                 "eta": eta,
                 "c": c,
                 "max_ls_itn": max_ls_itn,

@@ -226,7 +226,9 @@ class PanelPomp:
 
         # Initialize shared parameters
         shared_thetas = (
-            jnp.tile(shared_values, (J, 1)).T if len(shared_values) > 0 else None
+            jnp.tile(jnp.array(shared_values), (J, 1)).T
+            if len(shared_values) > 0
+            else None
         )
 
         # Initialize unit-specific parameters

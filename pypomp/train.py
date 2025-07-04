@@ -5,8 +5,11 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
 from typing import Callable
-from .pfilter import _pfilter_internal
-from .pfilter import _pfilter_internal_mean
+from .pfilter import (
+    _pfilter_internal,
+    _vmapped_pfilter_internal,
+    _pfilter_internal_mean,
+)
 from .mop import _mop_internal_mean
 
 
@@ -23,7 +26,6 @@ def _train_internal(
     J: int,
     optimizer: str,
     itns: int,
-    beta: float,
     eta: float,
     c: float,
     max_ls_itn: int,
@@ -38,6 +40,7 @@ def _train_internal(
     """
     Internal function for conducting the MOP gradient estimate method.
     """
+    eta2 = eta
     Acopies = []
     grads = []
     hesses = []
@@ -45,8 +48,8 @@ def _train_internal(
     hess = jnp.eye(theta_ests.shape[-1])  # default one
 
     for i in tqdm(range(itns)):
-        # key = jax.random.PRNGKey(np.random.choice(int(1e18)))
         if n_monitors == 1:
+            key, subkey = jax.random.split(key)
             loglik, grad = _jvg_mop(
                 theta_ests=theta_ests,
                 t0=t0,
@@ -59,11 +62,12 @@ def _train_internal(
                 ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
-                key=key,
+                key=subkey,
             )
 
             loglik *= len(ys)
         else:
+            key, subkey = jax.random.split(key)
             grad = _jgrad_mop(
                 theta_ests=theta_ests,
                 t0=t0,
@@ -76,31 +80,29 @@ def _train_internal(
                 ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
-                key=key,
+                key=subkey,
             )
+
+            key, *subkeys = jax.random.split(key, n_monitors + 1)
             loglik = jnp.mean(
-                jnp.array(
-                    [
-                        _pfilter_internal(
-                            theta=theta_ests,
-                            t0=t0,
-                            times=times,
-                            ys=ys,
-                            J=J,
-                            rinitializer=rinitializer,
-                            rprocess=rprocess,
-                            dmeasure=dmeasure,
-                            ctimes=ctimes,
-                            covars=covars,
-                            thresh=-1,
-                            key=key,
-                        )
-                        for i in range(n_monitors)
-                    ]
+                _vmapped_pfilter_internal(
+                    theta_ests,
+                    t0,
+                    times,
+                    ys,
+                    J,
+                    rinitializer,
+                    rprocess,
+                    dmeasure,
+                    ctimes,
+                    covars,
+                    0,
+                    jnp.array(subkeys),
                 )
             )
 
         if optimizer == "Newton":
+            key, subkey = jax.random.split(key)
             hess = _jhess_mop(
                 theta_ests=theta_ests,
                 t0=t0,
@@ -113,7 +115,7 @@ def _train_internal(
                 ctimes=ctimes,
                 covars=covars,
                 alpha=alpha,
-                key=key,
+                key=subkey,
             )
 
             # flatten
@@ -127,6 +129,7 @@ def _train_internal(
             direction = -jnp.linalg.pinv(hess) @ grad
         elif optimizer == "WeightedNewton":
             if i == 0:
+                key, subkey = jax.random.split(key)
                 hess = _jhess_mop(
                     theta_ests=theta_ests,
                     t0=t0,
@@ -139,7 +142,7 @@ def _train_internal(
                     ctimes=ctimes,
                     covars=covars,
                     alpha=alpha,
-                    key=key,
+                    key=subkey,
                 )
                 # theta_flat = theta_ests.flatten()
                 # grad_flat = grad.flatten()
@@ -150,6 +153,7 @@ def _train_internal(
                 direction = -jnp.linalg.pinv(hess) @ grad
 
             else:
+                key, subkey = jax.random.split(key)
                 hess = _jhess_mop(
                     theta_ests=theta_ests,
                     t0=t0,
@@ -162,7 +166,7 @@ def _train_internal(
                     ctimes=ctimes,
                     covars=covars,
                     alpha=alpha,
-                    key=key,
+                    key=subkey,
                 )
                 wt = (i ** np.log(i)) / ((i + 1) ** (np.log(i + 1)))
                 # theta_flat = theta_ests.flatten()
@@ -209,7 +213,7 @@ def _train_internal(
             direction = direction / jnp.linalg.norm(direction)
 
         if ls:
-            eta = _line_search(
+            eta2 = _line_search(
                 partial(
                     _pfilter_internal,
                     t0=t0,
@@ -222,14 +226,14 @@ def _train_internal(
                     ctimes=ctimes,
                     covars=covars,
                     thresh=thresh,
-                    key=key,
+                    key=subkey,
                 ),
-                curr_obj=loglik,
+                curr_obj=float(loglik),
                 pt=theta_ests,
                 grad=grad,
                 direction=direction,
                 k=i + 1,
-                eta=beta,
+                eta=eta,
                 xi=10,
                 tau=max_ls_itn,
                 c=c,
@@ -237,36 +241,27 @@ def _train_internal(
                 stoch=False,
             )
 
-        # try:
-        #     et = eta if len(eta) == 1 else eta[i] # Not entirely sure why this is needed.
-        # except Exception:
-        #     et = eta
-        # if i % 1 == 0 and verbose: # Does the lefthand side not always evaluate to True?
         if verbose:
-            print(theta_ests, eta, logliks[i])
+            print(theta_ests, eta2, logliks[i])
 
-        theta_ests += eta * direction
+        theta_ests += eta2 * direction
 
+    key, *subkeys = jax.random.split(key, n_monitors + 1)
     logliks.append(
         jnp.mean(
-            jnp.array(
-                [
-                    _pfilter_internal(
-                        theta=theta_ests,
-                        t0=t0,
-                        times=times,
-                        ys=ys,
-                        J=J,
-                        rinitializer=rinitializer,
-                        rprocess=rprocess,
-                        dmeasure=dmeasure,
-                        ctimes=ctimes,
-                        covars=covars,
-                        thresh=thresh,
-                        key=key,
-                    )
-                    for i in range(n_monitors)
-                ]
+            _vmapped_pfilter_internal(
+                theta_ests,
+                t0,
+                times,
+                ys,
+                J,
+                rinitializer,
+                rprocess,
+                dmeasure,
+                ctimes,
+                covars,
+                0,
+                jnp.array(subkeys),
             )
         )
     )
@@ -307,7 +302,8 @@ def _line_search(
         xi (int, optional): Reduction limit.
         tau (int, optional): The maximum number of iterations.
         c (float, optional): The user-defined Armijo condition constant.
-        frac (float, optional): The fact.
+        frac (float, optional): The fraction of the step size to reduce by each
+            iteration.
         stoch (bool, optional): Boolean argument controlling whether to adjust
             the initial step size.
 
@@ -315,7 +311,7 @@ def _line_search(
         float: optimal step size
     """
     itn = 0
-    eta = min([eta, xi / k]) if stoch else eta  # if stoch is false, do not change
+    eta = min([eta, xi / k]) if stoch else eta
     next_obj = obj(pt + eta * direction)
     # check whether the new point(new_obj)satisfies the stochastic Armijo condition
     # if not, repeat until the condition is met

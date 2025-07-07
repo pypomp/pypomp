@@ -417,7 +417,6 @@ class Pomp:
         thresh: int = 0,
         scale: bool = False,
         ls: bool = False,
-        beta: float = 0.9,
         c: float = 0.1,
         max_ls_itn: int = 10,
         verbose: bool = False,

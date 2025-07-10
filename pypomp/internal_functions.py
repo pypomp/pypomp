@@ -2,6 +2,7 @@
 This module implements internal functions for POMP models.
 """
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 
@@ -241,20 +242,45 @@ def _interp_covars(
         ).ravel()
 
 
+def _interp_covars_np(
+    t: float | np.ndarray,
+    ctimes: np.ndarray | None,
+    covars: np.ndarray | None,
+    order: str = "linear",
+) -> np.ndarray | None:
+    """
+    Interpolate covariates with numpy.
+    """
+    # TODO: Add constant interpolation
+    if (covars is None) | (ctimes is None):
+        return None
+    else:
+        assert ctimes is not None
+        assert covars is not None
+        upper_index = np.searchsorted(ctimes, t, side="left")
+        lower_index = upper_index - 1
+        return (
+            covars[lower_index]
+            + (covars[upper_index] - covars[lower_index])
+            * (t - ctimes[lower_index])
+            / (ctimes[upper_index] - ctimes[lower_index])
+        ).ravel()
+
+
 def _precompute_interp_covars(
     t0: float,
-    times: jax.Array,
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    times: np.ndarray,
+    ctimes: np.ndarray | None,
+    covars: np.ndarray | None,
     dt: float | None,
     nstep: int | None,
     order: str = "linear",
-) -> jax.Array | None:
+) -> np.ndarray | None:
     """
     Precompute the interpolated covariates for a given set of time points.
 
     Returns:
-        jax.Array | None: The interpolated covariates for a given set of time points.
+        np.ndarray | None: The interpolated covariates for a given set of time points.
             Shape is (ntimes, max_nstep, ncovars). Returns None if covars or ctimes is
             None.
     """
@@ -273,22 +299,25 @@ def _precompute_interp_covars(
     else:
         raise ValueError("Either dt or nstep must be provided")
 
-    times0 = jnp.concatenate((jnp.array([t0]), times))
+    times0 = np.concatenate((np.array([t0]), times))
     nintervals = len(times0) - 1
-    nstep_array = jnp.zeros(nintervals, dtype=int)
-    dt_array = jnp.zeros(nintervals, dtype=float)
+    nstep_array = np.zeros(nintervals, dtype=int)
+    dt_array = np.zeros(nintervals, dtype=float)
     for i in range(nintervals):
         nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
-        nstep_array = nstep_array.at[i].set(nstep)
-        dt_array = dt_array.at[i].set(dt)
-    interp_covars_array = jnp.full(
-        (nintervals, int(jnp.max(nstep_array)), covars.shape[1]),
-        fill_value=jnp.nan,
+        nstep_array[i] = nstep
+        dt_array[i] = dt
+    interp_covars_array = np.full(
+        (nintervals, int(np.max(nstep_array)), covars.shape[1]),
+        fill_value=np.nan,
     )
     for i in range(interp_covars_array.shape[0]):
         for j in range(interp_covars_array.shape[1]):
-            interp_covars_array.at[i, j, :].set(
-                _interp_covars(times0[i] + j * dt_array[i], ctimes, covars, order)
+            interp_covars_array[i, j, :] = _interp_covars_np(
+                times0[i] + j * dt_array[i],
+                ctimes,
+                covars,
+                order,
             )
     return interp_covars_array
 

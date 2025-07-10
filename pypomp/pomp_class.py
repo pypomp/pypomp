@@ -135,9 +135,9 @@ class Pomp:
         self.fresh_key = None
         # self.icovars = _precompute_interp_covars(
         #     t0=self.rinit.t0,
-        #     times=jnp.array(self.ys.index),
-        #     ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
-        #     covars=jnp.array(self.covars) if self.covars is not None else None,
+        #     times=np.array(self.ys.index),
+        #     ctimes=np.array(self.covars.index) if self.covars is not None else None,
+        #     covars=np.array(self.covars) if self.covars is not None else None,
         #     dt=self.rproc.dt,
         #     nstep=self.rproc.nstep,
         #     order="linear",

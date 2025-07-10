@@ -16,7 +16,7 @@ from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
-from .pfilter import _vmapped_pfilter_internal
+from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
 
@@ -281,25 +281,32 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        keys = jax.random.split(new_key, len(theta_list))
+        thetas_repl = jnp.vstack(
+            [
+                jnp.tile(jnp.array(list(theta_i.values())), (reps, 1))
+                for theta_i in theta_list
+            ]
+        )
+        rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
         logLik_list = []
-        for theta_i, k in zip(theta_list, keys):
-            rep_keys = jax.random.split(k, reps)
-            results = -_vmapped_pfilter_internal(
-                jnp.array(list(theta_i.values())),
-                self.rinit.t0,
-                jnp.array(self.ys.index),
-                jnp.array(self.ys),
-                J,
-                self.rinit.struct_pf,
-                self.rproc.struct_pf,
-                self.dmeas.struct_pf,
-                jnp.array(self.covars.index) if self.covars is not None else None,
-                jnp.array(self.covars) if self.covars is not None else None,
-                thresh,
-                rep_keys,
+        results = -_vmapped_pfilter_internal2(
+            thetas_repl,
+            self.rinit.t0,
+            jnp.array(self.ys.index),
+            jnp.array(self.ys),
+            J,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf,
+            self.dmeas.struct_pf,
+            jnp.array(self.covars.index) if self.covars is not None else None,
+            jnp.array(self.covars) if self.covars is not None else None,
+            thresh,
+            rep_keys,
+        )
+        for i in range(len(theta_list)):
+            logLik_list.append(
+                xr.DataArray(results[i * reps : (i + 1) * reps], dims=["replicate"])
             )
-            logLik_list.append(xr.DataArray(results, dims=["replicate"]))
         self.results_history.append(
             {
                 "method": "pfilter",

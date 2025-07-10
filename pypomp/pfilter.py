@@ -57,9 +57,16 @@ def _pfilter_internal(
     return -loglik
 
 
+# Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
     in_axes=(None,) * 11 + (0,),
+)
+
+# Map over theta and key
+_vmapped_pfilter_internal2 = jax.vmap(
+    _pfilter_internal,
+    in_axes=(0,) + (None,) * 10 + (0,),
 )
 
 

@@ -26,7 +26,11 @@ class TestPfilter_LG(unittest.TestCase):
         self.assertEqual(val1.dtype, jnp.float32)
 
     def test_reps(self):
-        self.LG.pfilter(J=self.J, key=self.key, reps=2)
+        theta_list = [
+            self.theta[0],
+            {k: v * 2 for k, v in self.theta[0].items()},
+        ]
+        self.LG.pfilter(J=self.J, key=self.key, reps=2, theta=theta_list)
         val1 = self.LG.results_history[-1]["logLiks"][0]
         self.assertEqual(val1.shape, (2,))
 

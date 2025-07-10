@@ -133,6 +133,15 @@ class Pomp:
         self.covars = covars
         self.results_history = []
         self.fresh_key = None
+        # self.icovars = _precompute_interp_covars(
+        #     t0=self.rinit.t0,
+        #     times=jnp.array(self.ys.index),
+        #     ctimes=jnp.array(self.covars.index) if self.covars is not None else None,
+        #     covars=jnp.array(self.covars) if self.covars is not None else None,
+        #     dt=self.rproc.dt,
+        #     nstep=self.rproc.nstep,
+        #     order="linear",
+        # )
 
     def _update_fresh_key(
         self, key: jax.Array | None = None

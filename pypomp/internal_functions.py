@@ -261,7 +261,7 @@ def _precompute_interp_covars(
     if covars is None or ctimes is None:
         return None
 
-    # TODO: might want to optimize this function
+    # TODO: optimize this function
     if dt is not None and nstep is not None:
         raise ValueError("Only nstep or dt can be provided, not both")
     if dt is not None:
@@ -281,8 +281,9 @@ def _precompute_interp_covars(
         nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
         nstep_array = nstep_array.at[i].set(nstep)
         dt_array = dt_array.at[i].set(dt)
-    interp_covars_array = jnp.zeros(
-        (nintervals, int(jnp.max(nstep_array)), covars.shape[1])
+    interp_covars_array = jnp.full(
+        (nintervals, int(jnp.max(nstep_array)), covars.shape[1]),
+        fill_value=jnp.nan,
     )
     for i in range(interp_covars_array.shape[0]):
         for j in range(interp_covars_array.shape[1]):

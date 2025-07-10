@@ -6,7 +6,11 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Callable
-from pypomp.internal_functions import _interp_covars
+from pypomp.internal_functions import (
+    _interp_covars,
+    _num_fixedstep_steps,
+    _num_euler_steps,
+)
 
 
 def _time_interp(
@@ -16,29 +20,6 @@ def _time_interp(
     nstep: int | None,
     accumvars: tuple[int, ...] | None,
 ) -> Callable:
-    def _num_fixedstep_steps(
-        t1: float, t2: float, dt: float, nstep: int
-    ) -> tuple[int, float]:
-        return nstep, (t2 - t1) / nstep
-
-    def _num_euler_steps(
-        t1: float, t2: float, dt: float, nstep: int
-    ) -> tuple[jax.Array, jax.Array]:
-        tol = jnp.sqrt(jnp.finfo(float).eps)
-
-        nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
-        dt2 = (t2 - t1) / nstep2
-
-        check1 = t1 + dt >= t2
-        nstep2 = jnp.where(check1, 1, nstep2)
-        dt2 = jnp.where(check1, t2 - t1, dt2)
-
-        check2 = t1 >= t2
-        nstep2 = jnp.where(check2, 0, nstep2)
-        dt2 = jnp.where(check2, 0.0, dt2)
-
-        return nstep2, dt2
-
     num_step_func = None
     match step_type:
         case "fixedstep":

@@ -167,6 +167,37 @@ def _no_resampler_thetas(
     return counts, particlesP, norm_weights, thetas
 
 
+def _num_fixedstep_steps(
+    t1: float, t2: float, dt: float | None, nstep: int
+) -> tuple[int, float]:
+    """
+    Calculate the number of steps and the step size for a fixed number of steps.
+    """
+    return nstep, (t2 - t1) / nstep
+
+
+def _num_euler_steps(
+    t1: float, t2: float, dt: float, nstep: int | None
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Calculate the number of steps and the step size for a given time step size.
+    """
+    tol = jnp.sqrt(jnp.finfo(float).eps)
+
+    nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
+    dt2 = (t2 - t1) / nstep2
+
+    check1 = t1 + dt >= t2
+    nstep2 = jnp.where(check1, 1, nstep2)
+    dt2 = jnp.where(check1, t2 - t1, dt2)
+
+    check2 = t1 >= t2
+    nstep2 = jnp.where(check2, 0, nstep2)
+    dt2 = jnp.where(check2, 0.0, dt2)
+
+    return nstep2, dt2
+
+
 def _interp_covars(
     t: float | jax.Array,
     ctimes: jax.Array | None,
@@ -179,17 +210,16 @@ def _interp_covars(
     Args:
         t (float | jax.Array): Time point at which to interpolate the covariates.
             Can be a single float or an array containing one time point.
-        ctimes (jax.Array | None): Array of time points for which covariates are available.
-            Must be sorted in ascending order.
+        ctimes (jax.Array | None): Array of time points for which covariates are
+            available. Must be sorted in ascending order.
         covars (jax.Array | None): Array of covariate values corresponding to ctimes.
             Shape should be (len(ctimes), n_covars) where n_covars is the number of covariates.
-        order (str, optional): Interpolation method. Currently only 'linear' is supported.
-            Defaults to 'linear'.
+        order (str, optional): Interpolation method. Currently only 'linear' is
+            supported. Defaults to 'linear'.
 
     Returns:
         jax.Array | None: The interpolated covariates at time t. Returns None if either
-            ctimes or covars is None. Shape is (n_covars,) for a single time point,
-            or (len(t), n_covars) for multiple time points.
+            ctimes or covars is None. Shape is (n_covars,).
 
     Note:
         This function assumes that ctimes is sorted in ascending order. If t is outside
@@ -209,6 +239,57 @@ def _interp_covars(
             * (t - ctimes[lower_index])
             / (ctimes[upper_index] - ctimes[lower_index])
         ).ravel()
+
+
+def _precompute_interp_covars(
+    t0: float,
+    times: jax.Array,
+    ctimes: jax.Array | None,
+    covars: jax.Array | None,
+    dt: float | None,
+    nstep: int | None,
+    order: str = "linear",
+) -> jax.Array | None:
+    """
+    Precompute the interpolated covariates for a given set of time points.
+
+    Returns:
+        jax.Array | None: The interpolated covariates for a given set of time points.
+            Shape is (ntimes, max_nstep, ncovars). Returns None if covars or ctimes is
+            None.
+    """
+    if covars is None or ctimes is None:
+        return None
+
+    # TODO: might want to optimize this function
+    if dt is not None and nstep is not None:
+        raise ValueError("Only nstep or dt can be provided, not both")
+    if dt is not None:
+        num_step_func = _num_euler_steps
+        dt = float(dt)
+    elif nstep is not None:
+        num_step_func = _num_fixedstep_steps
+        nstep = int(nstep)
+    else:
+        raise ValueError("Either dt or nstep must be provided")
+
+    times0 = jnp.concatenate((jnp.array([t0]), times))
+    nintervals = len(times0) - 1
+    nstep_array = jnp.zeros(nintervals, dtype=int)
+    dt_array = jnp.zeros(nintervals, dtype=float)
+    for i in range(nintervals):
+        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
+        nstep_array = nstep_array.at[i].set(nstep)
+        dt_array = dt_array.at[i].set(dt)
+    interp_covars_array = jnp.zeros(
+        (nintervals, int(jnp.max(nstep_array)), covars.shape[1])
+    )
+    for i in range(interp_covars_array.shape[0]):
+        for j in range(interp_covars_array.shape[1]):
+            interp_covars_array.at[i, j, :].set(
+                _interp_covars(times0[i] + j * dt_array[i], ctimes, covars, order)
+            )
+    return interp_covars_array
 
 
 def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:

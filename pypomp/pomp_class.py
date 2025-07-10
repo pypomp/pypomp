@@ -17,6 +17,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal
+from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
 
 

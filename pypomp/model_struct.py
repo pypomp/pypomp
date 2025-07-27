@@ -14,12 +14,16 @@ from pypomp.internal_functions import (
 
 
 def _time_interp(
-    rproc: Callable,
+    rproc: Callable,  # potentially vmap'd
     step_type: str,
     dt: float | None,
     nstep: int | None,
     accumvars: tuple[int, ...] | None,
 ) -> Callable:
+    vsplit = jax.vmap(
+        jax.random.split, (0, None)
+    )  # handle multiple keys from vmap'd rproc
+
     num_step_func = None
     match step_type:
         case "fixedstep":
@@ -36,16 +40,17 @@ def _time_interp(
         covars: jax.Array,
         dt: float,
     ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
-        X_, theta_, key, t = inputs
+        X_, theta_, keys, t = inputs  # keys is a (J,) array when rproc is vmap'd
         covars_t = _interp_covars(t, ctimes, covars)
-        X_ = rproc(X_, theta_, key, covars_t, t, dt)
+        vkeys = vsplit(keys, 2)
+        X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
-        return (X_, theta_, key, t)
+        return (X_, theta_, vkeys[:, 1], t)
 
     def _rproc_interp(
         X_: jax.Array,
         theta_: jax.Array,
-        key: jax.Array,
+        keys: jax.Array,
         ctimes: jax.Array,
         covars: jax.Array,
         t1: float,
@@ -58,11 +63,11 @@ def _time_interp(
         X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
         nstep2, dt2 = num_step_func(t1, t2, dt=dt, nstep=nstep)
         interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
-        X_, theta_, key, t = jax.lax.fori_loop(
+        X_, theta_, keys, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep2,
             body_fun=interp_helper2,
-            init_val=(X_, theta_, key, t1),
+            init_val=(X_, theta_, keys, t1),
         )
         return X_
 

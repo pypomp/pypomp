@@ -312,7 +312,7 @@ def _precompute_interp_covars(
         fill_value=np.nan,
     )
     for i in range(interp_covars_array.shape[0]):
-        for j in range(interp_covars_array.shape[1]):
+        for j in range(nstep_array[i]):
             interp_covars_array[i, j, :] = _interp_covars_np(
                 times0[i] + j * dt_array[i],
                 ctimes,

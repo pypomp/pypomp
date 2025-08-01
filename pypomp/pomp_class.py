@@ -17,7 +17,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .pfilter_complete2 import _vmapped_pfilter_internal2_complete2
+from .pfilter_complete import _vmapped_pfilter_internal2_complete
 from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
 
@@ -347,10 +347,7 @@ class Pomp:
         )
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        # get the outputs of _vmapped_pfilter_internal2_complete2
-        # results = neg_loglik, mean_loglik, logliks_arr, particles_arr, filter_mean_arr, ess_arr, filt_traj
-        #results = _vmapped_pfilter_internal2_complete2(
-        neg_logliks, mean_logliks, cond_logliks, particles, filter_means, esses, filt_trajs = _vmapped_pfilter_internal2_complete2(
+        neg_logliks, mean_logliks, cond_logliks, particles, filter_means, esses, filt_trajs = _vmapped_pfilter_internal2_complete(
             thetas_repl,
             self.rinit.t0,
             jnp.array(self.ys.index),
@@ -364,40 +361,6 @@ class Pomp:
             thresh,
             rep_keys,
         )
-
-        # create the lists storing the outputs
-        #neg_logLik_list = []
-        #mean_logLik_list = []
-        #cond_logLik_arr_list = []
-        #particles_arr_list = []
-        #filter_mean_arr_list = []
-        #ess_arr_list = []
-        #filt_traj_list = []
-
-        #for i in range(len(theta_list)):
-            # each batch is a list/array of reps tuples 
-            # here reps = rep_per_theta
-            #batch = results[i * reps : (i + 1) * reps]
-            #logLik_list.append(
-                #xr.DataArray(results[i * reps : (i + 1) * reps], dims=["replicate"])
-            #)
-            #for rep_result in batch:
-              #neg_loglik, mean_loglik, cond_logliks_arr, particles_arr, filter_mean_arr, ess_arr, filt_traj = rep_result
-              #neg_logLik_list.append(neg_loglik) # (reps,)
-              #mean_logLik_list.append(mean_loglik) # (reps, )
-              #cond_logLik_arr_list.append(cond_logliks_arr) # (reps, N) N = len(ys)
-              #particles_arr_list.append(particles_arr) # (reps, N, J, particlesF.shape[-1])
-              #filter_mean_arr_list.append(filter_mean_arr) # (reps, N, particlesF.shape[-1])
-              #ess_arr_list.append(ess_arr) # (reps, len(ys))
-              #filt_traj_list.append(filt_traj) # (reps, len(ys), particlesF.shape[-1])
-        
-        #neg_logLik_list = jnp.split(neg_logliks, len(theta_list))
-        #mean_logLik_list = jnp.split(mean_logliks, len(theta_list))
-        #cond_logLik_arr_list = jnp.split(cond_logliks, len(theta_list))
-        #particles_arr_list = jnp.split(particles, len(theta_list))
-        #filter_mean_arr_list = jnp.split(filter_means, len(theta_list))
-        #ess_arr_list = jnp.split(esses, len(theta_list))
-        #filt_traj_list = jnp.split(filt_trajs, len(theta_list))
         
         n_theta = len(theta_list)
         logLik_da = xr.DataArray(neg_logliks.reshape(n_theta, reps), dims=["theta", "replicate"])

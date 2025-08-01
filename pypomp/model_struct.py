@@ -12,18 +12,20 @@ from pypomp.internal_functions import (
     _num_euler_steps,
 )
 
-
+# given the "step_type", "dt", "nstep" and "accumvars", we aim to create a rproc that evolves state over a time interval
 def _time_interp(
     rproc: Callable,  # potentially vmap'd
     step_type: str,
     dt: float | None,
     nstep: int | None,
-    accumvars: tuple[int, ...] | None,
+    accumvars: tuple[int, ...] | None, # Which state variable dimensions should be reset to zero at the start of each time step (e.g., accumulated log-likelihood).
 ) -> Callable:
     vsplit = jax.vmap(
         jax.random.split, (0, None)
     )  # handle multiple keys from vmap'd rproc
-
+    # if keys has shape (J,), vsplit(J,2) splits each key using split(key, 2) and generates a new key array (J, 2).
+    
+    # choose to use euler or fixedstep
     num_step_func = None
     match step_type:
         case "fixedstep":
@@ -33,7 +35,7 @@ def _time_interp(
     if num_step_func is None:
         raise ValueError("step_type must be either 'fixedstep' or 'euler'")
 
-    def _interp_helper(
+    def _interp_helper( # one-step function for rproc() function
         i: int,
         inputs: tuple[jax.Array, jax.Array, jax.Array, float],
         ctimes: jax.Array,
@@ -41,13 +43,13 @@ def _time_interp(
         dt: float,
     ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
         X_, theta_, keys, t = inputs  # keys is a (J,) array when rproc is vmap'd
-        covars_t = _interp_covars(t, ctimes, covars)
-        vkeys = vsplit(keys, 2)
+        covars_t = _interp_covars(t, ctimes, covars) # the interpolated covars at time t
+        vkeys = vsplit(keys, 2) # split the keys to (J, 2)
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
         return (X_, theta_, vkeys[:, 1], t)
 
-    def _rproc_interp(
+    def _rproc_interp( # looping _interp_helper() to move from t1 to t2
         X_: jax.Array,
         theta_: jax.Array,
         keys: jax.Array,
@@ -60,15 +62,15 @@ def _time_interp(
         accumvars: tuple[int, ...] | None,
         num_step_func: Callable,
     ) -> jax.Array:
-        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
+        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_) # set X_[:, accumvars] = 0 for accumulative variables
         nstep2, dt2 = num_step_func(t1, t2, dt=dt, nstep=nstep)
-        interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
+        interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2) # use _interp_helper with ctimes, covars and dt to be fixed
         X_, theta_, keys, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep2,
             body_fun=interp_helper2,
             init_val=(X_, theta_, keys, t1),
-        )
+        ) # fori_loop to run nstep2 times
         return X_
 
     return partial(
@@ -77,7 +79,7 @@ def _time_interp(
         nstep=nstep,
         accumvars=accumvars,
         num_step_func=num_step_func,
-    )
+    )  
 
 
 class RInit:
@@ -103,9 +105,9 @@ class RInit:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
         self.t0 = float(t0)
-        self.struct = struct
-        self.struct_pf = jax.vmap(struct, (None, 0, None, None))
-        self.struct_per = jax.vmap(struct, (0, 0, None, None))
+        self.struct = struct # the initializer functions
+        self.struct_pf = jax.vmap(struct, (None, 0, None, None)) # rinit for _pf
+        self.struct_per = jax.vmap(struct, (0, 0, None, None)) # rinit for _per
         self.original_func = struct
 
 
@@ -148,14 +150,14 @@ class RProc:
             struct, step_type=step_type, nstep=nstep, dt=dt, accumvars=accumvars
         )
         self.struct_pf = _time_interp(
-            jax.vmap(struct, (0, None, 0, None, None, None)),
+            jax.vmap(struct, (0, None, 0, None, None, None)), # struct = rproc(X_, theta_, keys, covars, t, dt), not vectorize theta
             step_type=step_type,
             nstep=nstep,
             dt=dt,
             accumvars=accumvars,
         )
         self.struct_per = _time_interp(
-            jax.vmap(struct, (0, 0, 0, None, None, None)),
+            jax.vmap(struct, (0, 0, 0, None, None, None)), # vectorize theta
             step_type=step_type,
             nstep=nstep,
             dt=dt,

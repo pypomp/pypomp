@@ -252,6 +252,7 @@ class Pomp:
         J: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
+        diagnostics: bool = False,
         thresh: float = 0,
         reps: int = 1,
     ) -> None:
@@ -290,35 +291,77 @@ class Pomp:
         )
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
         logLik_list = []
-        results = -_vmapped_pfilter_internal2(
-            thetas_repl,
-            self.rinit.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
-            J,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf,
-            self.dmeas.struct_pf,
-            jnp.array(self.covars.index) if self.covars is not None else None,
-            jnp.array(self.covars) if self.covars is not None else None,
-            thresh,
-            rep_keys,
-        )
-        for i in range(len(theta_list)):
-            logLik_list.append(
-                xr.DataArray(results[i * reps : (i + 1) * reps], dims=["replicate"])
+
+        if not diagnostics:
+            results = -_vmapped_pfilter_internal2(
+                thetas_repl,
+                self.rinit.t0,
+                jnp.array(self.ys.index),
+                jnp.array(self.ys),
+                J,
+                self.rinit.struct_pf,
+                self.rproc.struct_pf,
+                self.dmeas.struct_pf,
+                diagnostics,
+                jnp.array(self.covars.index) if self.covars is not None else None,
+                jnp.array(self.covars) if self.covars is not None else None,
+                thresh,
+                rep_keys,
             )
-        self.results_history.append(
+            for i in range(len(theta_list)):
+                logLik_list.append(
+                    xr.DataArray(results[i * reps : (i + 1) * reps], dims=["replicate"])
+                )
+            self.results_history.append(
+                {
+                    "method": "pfilter",
+                    "logLiks": logLik_list,
+                    "theta": theta_list,
+                    "J": J,
+                    "thresh": thresh,
+                    "key": old_key,
+                }
+            )
+        
+        else:
+            neg_logliks, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = _vmapped_pfilter_internal2(
+                thetas_repl,
+                self.rinit.t0,
+                jnp.array(self.ys.index),
+                jnp.array(self.ys),
+                J,
+                self.rinit.struct_pf,
+                self.rproc.struct_pf,
+                self.dmeas.struct_pf,
+                diagnostics,
+                jnp.array(self.covars.index) if self.covars is not None else None,
+                jnp.array(self.covars) if self.covars is not None else None,
+                thresh,
+                rep_keys,
+            )
+
+            n_theta = len(theta_list)
+            logLik_da = xr.DataArray((-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"])
+            CLL_da = xr.DataArray(CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
+            ESS_da = xr.DataArray(ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
+            filter_mean_da = xr.DataArray(filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
+            prediction_mean_da = xr.DataArray(prediction_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
+            self.results_history.append(
             {
                 "method": "pfilter",
-                "logLiks": logLik_list,
+                "logLiks": logLik_da,
+                "CLL": CLL_da,
+                "ESS": ESS_da,
+                "filter_mean": filter_mean_da,
+                "prediction_mean": prediction_mean_da,
                 "theta": theta_list,
                 "J": J,
                 "thresh": thresh,
                 "key": old_key,
             }
         )
-
+           
+        
     def pfilter_complete(
         self,
         J: int,

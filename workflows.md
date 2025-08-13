@@ -2,7 +2,13 @@
 
 ## Formatting and linting
 
-AJA recommends using [ruff](https://docs.astral.sh/ruff/). More details to follow.
+It is recommended to use [ruff](https://docs.astral.sh/ruff/). For example,
+```
+pip install ruff
+cd ~/git/pypomp
+ruff check
+ruff format
+```
 
 ## Testing
 

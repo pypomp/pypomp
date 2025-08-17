@@ -17,7 +17,6 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .pfilter_complete import _vmapped_pfilter_internal2_complete
 from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
 
@@ -252,9 +251,12 @@ class Pomp:
         J: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
-        diagnostics: bool = False,
         thresh: float = 0,
         reps: int = 1,
+        CLL: bool = False,
+        ESS: bool = False,
+        filter_mean: bool = False,
+        prediction_mean: bool = False
     ) -> None:
         """
         Instance method for the particle filtering algorithm.
@@ -289,108 +291,11 @@ class Pomp:
                 for theta_i in theta_list
             ]
         )
+
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
         logLik_list = []
 
-        if not diagnostics:
-            results = -_vmapped_pfilter_internal2(
-                thetas_repl,
-                self.rinit.t0,
-                jnp.array(self.ys.index),
-                jnp.array(self.ys),
-                J,
-                self.rinit.struct_pf,
-                self.rproc.struct_pf,
-                self.dmeas.struct_pf,
-                diagnostics,
-                jnp.array(self.covars.index) if self.covars is not None else None,
-                jnp.array(self.covars) if self.covars is not None else None,
-                thresh,
-                rep_keys,
-            )
-            for i in range(len(theta_list)):
-                logLik_list.append(
-                    xr.DataArray(results[i * reps : (i + 1) * reps], dims=["replicate"])
-                )
-            self.results_history.append(
-                {
-                    "method": "pfilter",
-                    "logLiks": logLik_list,
-                    "theta": theta_list,
-                    "J": J,
-                    "thresh": thresh,
-                    "key": old_key,
-                }
-            )
-        
-        else:
-            neg_logliks, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = _vmapped_pfilter_internal2(
-                thetas_repl,
-                self.rinit.t0,
-                jnp.array(self.ys.index),
-                jnp.array(self.ys),
-                J,
-                self.rinit.struct_pf,
-                self.rproc.struct_pf,
-                self.dmeas.struct_pf,
-                diagnostics,
-                jnp.array(self.covars.index) if self.covars is not None else None,
-                jnp.array(self.covars) if self.covars is not None else None,
-                thresh,
-                rep_keys,
-            )
-
-            n_theta = len(theta_list)
-            logLik_da = xr.DataArray((-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"])
-            CLL_da = xr.DataArray(CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-            ESS_da = xr.DataArray(ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-            filter_mean_da = xr.DataArray(filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
-            prediction_mean_da = xr.DataArray(prediction_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
-            self.results_history.append(
-            {
-                "method": "pfilter",
-                "logLiks": logLik_da,
-                "CLL": CLL_da,
-                "ESS": ESS_da,
-                "filter_mean": filter_mean_da,
-                "prediction_mean": prediction_mean_da,
-                "theta": theta_list,
-                "J": J,
-                "thresh": thresh,
-                "key": old_key,
-            }
-        )
-           
-        
-    def pfilter_complete(
-        self,
-        J: int,
-        key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
-        thresh: float = 0,
-        reps: int = 1,
-    ) -> None:
-    
-        theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
-
-        if self.dmeas is None:
-            raise ValueError("self.dmeas cannot be None")
-
-        if J < 1:
-            raise ValueError("J should be greater than 0.")
-
-        thetas_repl = jnp.vstack(
-            [
-                jnp.tile(jnp.array(list(theta_i.values())), (reps, 1))
-                for theta_i in theta_list
-            ]
-        )
-        rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
-
-        neg_logliks, mean_logliks, cond_logliks, particles, filter_means, esses, filt_trajs = _vmapped_pfilter_internal2_complete(
+        results = _vmapped_pfilter_internal2(
             thetas_repl,
             self.rinit.t0,
             jnp.array(self.ys.index),
@@ -403,33 +308,51 @@ class Pomp:
             jnp.array(self.covars) if self.covars is not None else None,
             thresh,
             rep_keys,
+            CLL,
+            ESS,
+            filter_mean,
+            prediction_mean
         )
-        
-        n_theta = len(theta_list)
-        logLik_da = xr.DataArray(neg_logliks.reshape(n_theta, reps), dims=["theta", "replicate"])
-        meanLogLik_da = xr.DataArray(mean_logliks.reshape(n_theta, reps), dims=["theta", "replicate"])
-        condLogLik_da = xr.DataArray(cond_logliks.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-        particles_da = xr.DataArray(particles.reshape(n_theta, reps, *particles.shape[1:]), dims=["theta", "replicate", "time", "particle", "state"])
-        filter_mean_da = xr.DataArray(filter_means.reshape(n_theta, reps, *filter_means.shape[1:]), dims=["theta", "replicate", "time", "state"])
-        ess_da = xr.DataArray(esses.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-        filt_traj_da = xr.DataArray(filt_trajs.reshape(n_theta, reps, *filt_trajs.shape[1:]), dims=["theta", "replicate", "time", "state"])
 
-        self.results_history.append(
-            {
-                "method": "pfilter_complete",
-                "negLogLiks": logLik_da,
-                "meanLogLiks": meanLogLik_da,
-                "condLogLiks": condLogLik_da,
-                "particles": particles_da,
-                "filter_mean": filter_mean_da,
-                "ess": ess_da,
-                "filt_traj": filt_traj_da,
-                "theta": theta_list,
-                "J": J,
-                "thresh": thresh,
-                "key": old_key,
-            }
-        )
+        index = 0
+        n_theta = len(theta_list)
+        any_diagnostics = CLL or ESS or filter_mean or prediction_mean
+        if not any_diagnostics:
+            neg_logliks = results
+        else:
+            neg_logliks = results[index]
+    
+        logLik_da = xr.DataArray((-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"])
+        index += 1
+        result_dict = {
+            "method": "pfilter",
+            "logLiks": logLik_da,
+            "theta": theta_list,
+            "J": J,
+            "thresh": thresh,
+            "key": old_key,
+        }
+
+        if CLL:
+            CLL_arr = results[index]
+            result_dict["CLL"] = xr.DataArray(CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
+            index += 1
+
+        if ESS:
+            ESS_arr = results[index]
+            result_dict["ESS"] = xr.DataArray(ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
+            index += 1
+    
+        if filter_mean:
+            filter_mean_arr = results[index]
+            result_dict["filter_mean"] = xr.DataArray(filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
+            index += 1
+
+        if prediction_mean:
+            prediction_mean_arr = results[index]
+            result_dict["prediction_mean"] = xr.DataArray(prediction_mean_arr.reshape(n_theta, reps, *prediction_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
+        
+        self.results_history.append(result_dict)
 
     def mif(
         self,

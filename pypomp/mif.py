@@ -65,7 +65,7 @@ _jit_mif_internal = jit(_mif_internal, static_argnums=(4, 5, 6, 11, 13))
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
     in_axes=(1,) + (None,) * 14 + (0,),
-) # vectorize the theta and key across axis 0 (by rows) and axis 1 (by columns) respectively
+) 
 
 _jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(4, 5, 6, 11, 13))
 

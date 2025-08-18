@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import pickle
 import pypomp.measles.model_001b as m001b
-from scipy.interpolate import splrep
+from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
 from pypomp.model_struct import RInit
@@ -79,8 +79,8 @@ class UKMeasles:
         times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
         if interp_method == "shifted_splines":
             # TODO fix exploding birthrate below year 1950
-            pop_bspl = splrep(demog["year"], demog["pop"])
-            births_bspl = splrep(demog["year"] + 0.5, demog["births"])
+            pop_bspl = make_splrep(demog["year"], demog["pop"])
+            births_bspl = make_splrep(demog["year"] + 0.5, demog["births"])
             pop_interp = splev(times, pop_bspl)
             births_interp = splev(times - 4, births_bspl)
         elif interp_method == "linear":

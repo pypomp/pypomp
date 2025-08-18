@@ -270,9 +270,23 @@ class Pomp:
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
             reps (int, optional): Number of replicates to run. Defaults to 1.
+            CLL (bool, optional): Boolean flag controlling whether to compute and store
+                the conditional log-likelihoods at each time point. Defaults to False.
+            ESS (bool, optional): Boolean flag controlling whether to compute and store
+                the effective sample size at each time point. Defaults to False.
+            filter_mean (bool, optional): Boolean flag controlling whether to compute and store
+                the filtered mean at each time point. Defaults to False.
+            prediction_mean (bool, optional): Boolean flag controlling whether to compute and store
+                the prediction mean at each time point. Defaults to False.
 
         Returns:
-            None. Updates self.results with lists for logLik and theta.
+            None. Updates self.results with a dictionary containing the log-likelihoods,
+            parameters, and algorithmic parameters used. If CLL is True, also includes
+            the conditional log-likelihoods at each time point. If ESS is True, also includes
+            the effective sample size at each time point. If filter_mean is True, also includes
+            the filtered mean at each time point. If prediction_mean is True, also includes
+            the prediction mean at each time point.
+        
         """
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
@@ -293,7 +307,6 @@ class Pomp:
         )
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
-        logLik_list = []
 
         results = _vmapped_pfilter_internal2(
             thetas_repl,

@@ -1,6 +1,5 @@
 import jax
 import unittest
-import numpy as np
 import pickle
 import pypomp as pp
 

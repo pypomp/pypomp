@@ -28,17 +28,10 @@ def _pfilter_internal(
     ESS: bool = False, # static
     filter_mean: bool = False, #static
     prediction_mean: bool = False # static
-) -> jax.Array | tuple[
-        jax.Array, jax.Array, jax.Array, jax.Array, jax.Array
-    ]:
+) -> jax.Array | dict[str, jax.Array]:
     """
     Internal function for particle the filtering algorithm, which calls the function
     'pfilter_helper' iteratively. 
-    Return the selected diagnostic elements based on the input boolean arguments.
-    CLL: Conditional Log Likelihood
-    ESS: Effective Smaple Size
-    filter_mean: Filtered Mean
-    prediction_mean: Prediction Mean
     If no diagnostics are requested, return the negative log likelihood.
     If diagnostics are requested, return a tuple with the negative log likelihood and the requested diagnostics.
     """
@@ -82,12 +75,22 @@ def _pfilter_internal(
     if not any_diagnostics:
         return -loglik
 
-    outputs = [-loglik]
-    if CLL: outputs.append(CLL_arr)
-    if ESS: outputs.append(ESS_arr)
-    if filter_mean: outputs.append(filter_mean_arr)
-    if prediction_mean: outputs.append(prediction_mean_arr)
-    return tuple(outputs)
+    #outputs = [-loglik]
+    #if CLL: outputs.append(CLL_arr)
+    #if ESS: outputs.append(ESS_arr)
+    #if filter_mean: outputs.append(filter_mean_arr)
+    #if prediction_mean: outputs.append(prediction_mean_arr)
+    output = {"neg_loglik": -loglik}
+    if CLL: 
+        output["CLL"] = CLL_arr
+    if ESS: 
+        output["ESS"] = ESS_arr
+    if filter_mean: 
+        output["filter_mean"] = filter_mean_arr
+    if prediction_mean: 
+        output["prediction_mean"] = prediction_mean_arr
+
+    return output
 
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
@@ -159,7 +162,7 @@ def _pfilter_helper(
     """
     Helper function for the particle filtering algorithm in POMP, which conducts
     filtering for one time-iteration.
-    Only update the diagonistics elements when their corresponding boolean elements are set to be TRUE
+    Only update the diagnostics elements when their corresponding boolean elements are set to be TRUE
     """
     (particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, 
      filter_mean_arr, prediction_mean_arr) = inputs

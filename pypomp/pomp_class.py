@@ -17,7 +17,6 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
 
 
@@ -280,13 +279,10 @@ class Pomp:
                 the prediction mean at each time point. Defaults to False.
 
         Returns:
-            None. Updates self.results with a dictionary containing the log-likelihoods,
-            parameters, and algorithmic parameters used. If CLL is True, also includes
-            the conditional log-likelihoods at each time point. If ESS is True, also includes
-            the effective sample size at each time point. If filter_mean is True, also includes
-            the filtered mean at each time point. If prediction_mean is True, also includes
-            the prediction mean at each time point.
-        
+           None. Updates self.results with a dictionary containing the log-likelihoods,
+           algorithmic parameters used. The conditional log-likelihoods (CLL),
+           effective sample size (ESS), filtered mean, and prediction mean at each time point 
+           are also included if their respective boolean flags are set to True.
         """
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
@@ -327,16 +323,16 @@ class Pomp:
             prediction_mean
         )
 
-        index = 0
+        #index = 0
         n_theta = len(theta_list)
         any_diagnostics = CLL or ESS or filter_mean or prediction_mean
         if not any_diagnostics:
             neg_logliks = results
         else:
-            neg_logliks = results[index]
+            neg_logliks = results["neg_loglik"]
     
         logLik_da = xr.DataArray((-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"])
-        index += 1
+        #index += 1
         result_dict = {
             "method": "pfilter",
             "logLiks": logLik_da,
@@ -345,24 +341,22 @@ class Pomp:
             "thresh": thresh,
             "key": old_key,
         }
-
-        if CLL:
-            CLL_arr = results[index]
+        
+        # obtain diagnostics using names 
+        if CLL and "CLL" in results:
+            CLL_arr = results["CLL"]
             result_dict["CLL"] = xr.DataArray(CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-            index += 1
-
-        if ESS:
-            ESS_arr = results[index]
+        
+        if ESS and "ESS" in results:
+            ESS_arr = results["ESS"]
             result_dict["ESS"] = xr.DataArray(ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-            index += 1
-    
-        if filter_mean:
-            filter_mean_arr = results[index]
+        
+        if filter_mean and "filter_mean" in results:
+            filter_mean_arr = results["filter_mean"]
             result_dict["filter_mean"] = xr.DataArray(filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
-            index += 1
-
-        if prediction_mean:
-            prediction_mean_arr = results[index]
+        
+        if prediction_mean and "prediction_mean" in results:
+            prediction_mean_arr = results["prediction_mean"]
             result_dict["prediction_mean"] = xr.DataArray(prediction_mean_arr.reshape(n_theta, reps, *prediction_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
         
         self.results_history.append(result_dict)

@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
-from .mif import _jv_mif_internal, materialize_partrans, parameter_trans
+from .mif import _jv_mif_internal
 from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
@@ -19,6 +19,7 @@ from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _precompute_interp_covars
 from .util import logmeanexp, logmeanexp_se
+from .parameter_trans import parameter_trans, materialize_partrans
 
 
 class Pomp:
@@ -133,15 +134,6 @@ class Pomp:
         self.covars = covars
         self.results_history = []
         self.fresh_key = None
-        # self.icovars = _precompute_interp_covars(
-        #     t0=self.rinit.t0,
-        #     times=np.array(self.ys.index),
-        #     ctimes=np.array(self.covars.index) if self.covars is not None else None,
-        #     covars=np.array(self.covars) if self.covars is not None else None,
-        #     dt=self.rproc.dt,
-        #     nstep=self.rproc.nstep,
-        #     order="linear",
-        # )
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -365,10 +357,7 @@ class Pomp:
             raise ValueError("J should be greater than 0.")
 
         names = paramnames or list(theta_list[0].keys())
-        if partrans is None:
-            partrans_spec = parameter_trans()
-        else:
-            partrans_spec = partrans
+        partrans_spec = partrans or parameter_trans()
         partrans_struct = materialize_partrans(partrans_spec, names)
 
         new_key, old_key = self._update_fresh_key(key)
@@ -629,7 +618,7 @@ class Pomp:
         """
         trace_rows = []
         param_names = None
-        global_iters = {}  # key: param_idx, value: current iteration (start at 1)
+        global_iters = {}
 
         for res in self.results_history:
             method = res.get("method")

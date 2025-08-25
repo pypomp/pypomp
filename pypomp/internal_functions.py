@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 
 
+# TODO remove this function, as covars should always be dim 2
 def _keys_helper(
     key: jax.Array, J: int, covars: jax.Array | None
 ) -> tuple[jax.Array, jax.Array]:
@@ -279,7 +280,7 @@ def _calc_ys_extended(
     n_obs, n_cols = ys.shape
     total_steps = np.sum(nstep_array)
     ys_extended = np.full((total_steps, n_cols), np.nan, dtype=float)
-    ys_observed = np.full((total_steps, n_cols), False, dtype=bool)
+    ys_observed = np.full((total_steps,), False, dtype=bool)
     idx = 0
     for i in range(n_obs):
         idx += nstep_array[i]
@@ -362,7 +363,7 @@ def _calc_ys_covars(
     dt: float | None,
     nstep: int | None,
     order: str = "linear",
-) -> tuple[jax.Array, jax.Array, jax.Array | None]:
+) -> tuple[jax.Array, jax.Array, jax.Array | None, jax.Array]:
     """
     Construct extended ys and covars arrays.
     """
@@ -376,10 +377,13 @@ def _calc_ys_covars(
 
     ys_extended, ys_observed = _calc_ys_extended(ys, nstep_array)
 
+    dt_array_extended = np.repeat(dt_array, nstep_array)
+
     return (
         jnp.array(ys_extended),
         jnp.array(ys_observed),
         jnp.array(interp_covars_array),
+        jnp.array(dt_array_extended),
     )
 
 

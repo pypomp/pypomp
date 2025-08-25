@@ -133,7 +133,12 @@ class Pomp:
         self.covars = covars
         self.results_history = []
         self.fresh_key = None
-        self._ys_extended, self._ys_observed, self._covars_extended = _calc_ys_covars(
+        (
+            self._ys_extended,
+            self._ys_observed,
+            self._covars_extended,
+            self._dt_array_extended,
+        ) = _calc_ys_covars(
             t0=self.rinit.t0,
             times=np.array(self.ys.index),
             ys=np.array(self.ys),
@@ -292,15 +297,15 @@ class Pomp:
         logLik_list = []
         results = -_vmapped_pfilter_internal2(
             thetas_repl,
+            self._dt_array_extended,
             self.rinit.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            self._ys_extended,
+            self._ys_observed,
             J,
             self.rinit.struct_pf,
             self.rproc.struct_pf,
             self.dmeas.struct_pf,
-            jnp.array(self.covars.index) if self.covars is not None else None,
-            jnp.array(self.covars) if self.covars is not None else None,
+            self._covars_extended,
             thresh,
             rep_keys,
         )

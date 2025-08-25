@@ -20,6 +20,7 @@ def _pfilter_internal(
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
+    accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
@@ -45,6 +46,7 @@ def _pfilter_internal(
         dmeasure=dmeasure,
         covars_extended=covars_extended,
         thresh=thresh,
+        accumvars=accumvars,
     )
     t, particlesF, loglik, norm_weights, counts, key = jax.lax.fori_loop(
         lower=0,
@@ -59,13 +61,13 @@ def _pfilter_internal(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 11 + (0,),
+    in_axes=(None,) * 12 + (0,),
 )
 
 # Map over theta and key
 _vmapped_pfilter_internal2 = jax.vmap(
     _pfilter_internal,
-    in_axes=(0,) + (None,) * 10 + (0,),
+    in_axes=(0,) + (None,) * 11 + (0,),
 )
 
 
@@ -80,6 +82,7 @@ def _pfilter_internal_mean(
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
+    accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
@@ -100,6 +103,7 @@ def _pfilter_internal_mean(
         rprocess=rprocess,
         dmeasure=dmeasure,
         covars_extended=covars_extended,
+        accumvars=accumvars,
         thresh=thresh,
         key=key,
     ) / len(ys_extended)
@@ -117,6 +121,7 @@ def _with_observation(
     ys_extended: jax.Array,
     t: float,
     thresh: float,
+    accumvars: tuple[int, ...] | None,
     dmeasure: Callable,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     covars_t = None if covars_extended is None else covars_extended[i + 1]
@@ -137,6 +142,9 @@ def _with_observation(
         _no_resampler,
         *(counts, particlesP, norm_weights, subkey),
     )
+    particlesF = jnp.where(
+        accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
+    )
     return (particlesF, loglik, norm_weights, counts, key)
 
 
@@ -152,6 +160,7 @@ def _without_observation(
     ys_extended: jax.Array,
     t: float,
     thresh: float,
+    accumvars: tuple[int, ...] | None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     return (particlesP, loglik, norm_weights, counts, key)
 
@@ -167,6 +176,7 @@ def _pfilter_helper(
     dmeasure: Callable,
     covars_extended: jax.Array | None,
     thresh: float,
+    accumvars: tuple[int, ...] | None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper function for the particle filtering algorithm in POMP, which conducts
@@ -198,6 +208,7 @@ def _pfilter_helper(
             ys_extended,
             t,
             thresh,
+            accumvars,
         ),
     )
     return (t, particles, loglik, norm_weights, counts, key)

@@ -23,6 +23,7 @@ def _simulate_internal(
     covars_extended: jax.Array | None,
     nsim: int,
     key: jax.Array,
+    accumvars: jax.Array | None,
 ) -> tuple[jax.Array, jax.Array]:
     covars_t = None if covars_extended is None else covars_extended[0]
     key, keys = _keys_helper(key=key, J=nsim, covars=covars_t)
@@ -40,10 +41,11 @@ def _simulate_internal(
         dt_array_extended=dt_array_extended,
         covars_extended=covars_extended,
         nsim=nsim,
+        accumvars=accumvars,
     )
     t, X_sims, X_array, Y_array, key = jax.lax.fori_loop(
         lower=0,
-        upper=ylen - 1,
+        upper=ylen,
         body_fun=_simulate_helper2,
         init_val=(t0, X_sims, X_array, Y_array, key),
     )
@@ -61,6 +63,7 @@ def _simulate_helper(
     theta: jax.Array,
     covars_extended: jax.Array | None,
     nsim: int,
+    accumvars: jax.Array | None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     (t, X_sims, X_array, Y_array, key) = inputs
 
@@ -70,22 +73,27 @@ def _simulate_helper(
     X_sims = rprocess(X_sims, theta, keys, covars_t, t, dt_array_extended[i])
     t = t + dt_array_extended[i]
 
-    def with_observation(key):
+    def with_observation(X_sims, X_array, Y_array, key):
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         key, *keys = jax.random.split(key, num=nsim + 1)
         keys = jnp.array(keys)
         Y_sims = rmeasure(X_sims, theta, keys, covars_t, t)
-        return Y_array.at[i].set(Y_sims.T), key
+        X_sims = jnp.where(
+            accumvars is not None, X_sims.at[:, accumvars].set(0.0), X_sims
+        )
+        X_array = X_array.at[i + 1].set(X_sims.T)
+        Y_array = Y_array.at[i].set(Y_sims.T)
+        return X_sims, X_array, Y_array, key
 
-    def without_observation(key):
-        return Y_array, key
+    def without_observation(X_sims, X_array, Y_array, key):
+        return X_sims, X_array, Y_array, key
 
-    Y_array, key = jax.lax.cond(
+    Y_array, X_sims, key = jax.lax.cond(
         ys_observed[i + 1],
         with_observation,
         without_observation,
+        X_sims,
         key,
     )
 
-    X_array = X_array.at[i + 1].set(X_sims.T)
     return t, X_sims, X_array, Y_array, key

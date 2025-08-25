@@ -305,6 +305,7 @@ class Pomp:
             self.rinit.struct_pf,
             self.rproc.struct_pf,
             self.dmeas.struct_pf,
+            self.rproc.accumvars,
             self._covars_extended,
             thresh,
             rep_keys,
@@ -602,6 +603,7 @@ class Pomp:
                 ydim=self.rmeas.ydim,
                 covars_extended=self._covars_extended,
                 nsim=nsim,
+                accumvars=self.rproc.accumvars,
                 key=k,
             )
             X_sims = xr.DataArray(

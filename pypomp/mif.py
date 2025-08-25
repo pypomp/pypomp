@@ -26,13 +26,16 @@ def _mif_internal(
     sigmas_init: float | jax.Array,
     ctimes: jax.Array | None,
     covars: jax.Array | None,
-    partrans: ParTrans,
-    M: int,
-    a: float,
-    J: int,
-    thresh: float,
-    key: jax.Array,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
+    M: int = 1,
+    a: float = 1.0,
+    J: int = 1,
+    thresh: float = 0.0,
+    key: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
+    if key is None:
+        raise ValueError("key must be provided")
+
     logliks = jnp.zeros(M + 1)
     params = jnp.zeros((M, J, theta.shape[-1]))
     params = jnp.concatenate([theta.reshape((1, J, theta.shape[-1])), params], axis=0)
@@ -95,7 +98,8 @@ def _perfilter_internal(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars)
     covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
-    particlesF = rinitializers(_pt_inverse(thetas, partrans), keys, covars_t, t0)
+    thetas_nat0 = _pt_inverse(thetas, partrans)
+    particlesF = rinitializers(thetas_nat0, keys, covars_t, t0)
 
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
@@ -122,7 +126,8 @@ def _perfilter_internal(
     )
 
     logliks = logliks.at[m + 1].set(-loglik)
-    params = params.at[m + 1].set(_pt_inverse(thetas, partrans))
+    thetas_nat_end = _pt_inverse(thetas, partrans)
+    params = params.at[m + 1].set(thetas_nat_end)
     return params, logliks, key
 
 
@@ -153,13 +158,12 @@ def _perfilter_helper(
     )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars)
-    particlesP = rprocesses(
-        particlesF, _pt_inverse(thetas, partrans), keys, ctimes, covars, t1, t2
-    )
+    thetas_nat = _pt_inverse(thetas, partrans)
+    particlesP = rprocesses(particlesF, thetas_nat, keys, ctimes, covars, t1, t2)
 
     covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
     measurements = jnp.nan_to_num(
-        dmeasures(ys[i], particlesP, _pt_inverse(thetas, partrans), covars_t, t2).squeeze(),
+        dmeasures(ys[i], particlesP, thetas_nat, covars_t, t2).squeeze(),
         nan=jnp.log(1e-18),
     )
 
@@ -182,37 +186,15 @@ def _perfilter_helper(
     return (particlesF, thetas, loglik, norm_weights, counts, key)
 
 
-# ---- compiled core ----
-_jit_mif_internal_core = jit(_mif_internal, static_argnums=(4, 5, 6, 11, 12, 14))
+_jit_mif_internal = jit(_mif_internal, static_argnums=(4, 5, 6, 11, 12, 14))
 
-_vmapped_mif_internal_core = jax.vmap(
+_vmapped_mif_internal = jax.vmap(
     _mif_internal,
     in_axes=(1,) + (None,) * 15 + (0,),
 )
-_jv_mif_internal_core = jit(_vmapped_mif_internal_core, static_argnums=(4, 5, 6, 11, 12, 14))
-
-
-# ---- public wrappers (auto-insert identity partrans if missing) ----
-def _jit_mif_internal(*args, **kwargs):
-    if kwargs:
-        if kwargs.get("partrans", None) is None:
-            kwargs["partrans"] = _IDENTITY_PARTRANS
-        return _jit_mif_internal_core(**kwargs)
-    else:
-        args_list = list(args)
-        if len(args_list) == 16:
-            args_list.insert(11, _IDENTITY_PARTRANS)
-        return _jit_mif_internal_core(*tuple(args_list))
+_jv_mif_internal_core = jit(_vmapped_mif_internal, static_argnums=(4, 5, 6, 11, 12, 14))
 
 
 def _jv_mif_internal(*args, **kwargs):
-    if kwargs:
-        if kwargs.get("partrans", None) is None:
-            kwargs["partrans"] = _IDENTITY_PARTRANS
-        ll, th = _jv_mif_internal_core(**kwargs)
-    else:
-        args_list = list(args)
-        if len(args_list) == 16:
-            args_list.insert(11, _IDENTITY_PARTRANS)
-        ll, th = _jv_mif_internal_core(*tuple(args_list))
+    ll, th = _jv_mif_internal_core(*args, **kwargs)
     return ll[..., 1:], th

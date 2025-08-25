@@ -382,7 +382,7 @@ def _calc_ys_covars(
     return (
         jnp.array(ys_extended),
         jnp.array(ys_observed),
-        jnp.array(interp_covars_array),
+        None if interp_covars_array is None else jnp.array(interp_covars_array),
         jnp.array(dt_array_extended),
     )
 

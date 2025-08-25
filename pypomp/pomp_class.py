@@ -596,12 +596,11 @@ class Pomp:
                 rmeasure=self.rmeas.struct_pf,
                 theta=jnp.array(list(theta_i.values())),
                 t0=self.rinit.t0,
-                times=jnp.array(times_arr),
+                ylen=int(jnp.sum(self._ys_observed)),
+                ys_observed=self._ys_observed,
+                dt_array_extended=self._dt_array_extended,
                 ydim=self.rmeas.ydim,
-                covars=jnp.array(self.covars) if self.covars is not None else None,
-                ctimes=jnp.array(self.covars.index)
-                if self.covars is not None
-                else None,
+                covars_extended=self._covars_extended,
                 nsim=nsim,
                 key=k,
             )

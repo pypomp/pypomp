@@ -98,6 +98,10 @@ def _train_internal(
                     covars,
                     0,
                     jnp.array(subkeys),
+                    False,
+                    False,
+                    False,
+                    False
                 )
             )
 
@@ -262,6 +266,10 @@ def _train_internal(
                 covars,
                 0,
                 jnp.array(subkeys),
+                False,
+                False,
+                False,
+                False
             )
         )
     )

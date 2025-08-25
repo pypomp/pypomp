@@ -185,7 +185,7 @@ def _num_euler_steps(
     """
     tol = jnp.sqrt(jnp.finfo(float).eps)
 
-    nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
+    nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int) 
     dt2 = (t2 - t1) / nstep2
 
     check1 = t1 + dt >= t2
@@ -232,14 +232,14 @@ def _interp_covars(
     else:
         assert ctimes is not None
         assert covars is not None
-        upper_index = jnp.searchsorted(ctimes, t, side="left")
+        upper_index = jnp.searchsorted(ctimes, t, side="left") 
         lower_index = upper_index - 1
         return (
             covars[lower_index]
             + (covars[upper_index] - covars[lower_index])
             * (t - ctimes[lower_index])
-            / (ctimes[upper_index] - ctimes[lower_index])
-        ).ravel()
+            / (ctimes[upper_index] - ctimes[lower_index]) 
+        ).ravel() 
 
 
 def _interp_covars_np(
@@ -264,7 +264,7 @@ def _interp_covars_np(
             + (covars[upper_index] - covars[lower_index])
             * (t - ctimes[lower_index])
             / (ctimes[upper_index] - ctimes[lower_index])
-        ).ravel()
+        ).ravel() 
 
 
 def _precompute_interp_covars(
@@ -299,22 +299,22 @@ def _precompute_interp_covars(
     else:
         raise ValueError("Either dt or nstep must be provided")
 
-    times0 = np.concatenate((np.array([t0]), times))
+    times0 = np.concatenate((np.array([t0]), times)) 
     nintervals = len(times0) - 1
-    nstep_array = np.zeros(nintervals, dtype=int)
-    dt_array = np.zeros(nintervals, dtype=float)
+    nstep_array = np.zeros(nintervals, dtype=int) 
+    dt_array = np.zeros(nintervals, dtype=float) 
     for i in range(nintervals):
-        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
+        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  
         nstep_array[i] = nstep
         dt_array[i] = dt
     interp_covars_array = np.full(
         (nintervals, int(np.max(nstep_array)), covars.shape[1]),
-        fill_value=np.nan,
-    )
+        fill_value=np.nan, 
+    ) 
     for i in range(interp_covars_array.shape[0]):
         for j in range(nstep_array[i]):
             interp_covars_array[i, j, :] = _interp_covars_np(
-                times0[i] + j * dt_array[i],
+                times0[i] + j * dt_array[i], 
                 ctimes,
                 covars,
                 order,

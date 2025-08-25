@@ -12,18 +12,18 @@ from pypomp.internal_functions import (
     _num_euler_steps,
 )
 
-
 def _time_interp(
     rproc: Callable,  # potentially vmap'd
     step_type: str,
     dt: float | None,
     nstep: int | None,
-    accumvars: tuple[int, ...] | None,
+    accumvars: tuple[int, ...] | None, 
 ) -> Callable:
     vsplit = jax.vmap(
         jax.random.split, (0, None)
-    )  # handle multiple keys from vmap'd rproc
-
+    )  # handle multiple keys from vmap'd rproc,
+    #if keys has shape (J,), vsplit(J,2) splits each key using split(key, 2) and generates a new key array (J, 2).
+    
     num_step_func = None
     match step_type:
         case "fixedstep":
@@ -33,7 +33,7 @@ def _time_interp(
     if num_step_func is None:
         raise ValueError("step_type must be either 'fixedstep' or 'euler'")
 
-    def _interp_helper(
+    def _interp_helper( 
         i: int,
         inputs: tuple[jax.Array, jax.Array, jax.Array, float],
         ctimes: jax.Array,
@@ -41,13 +41,13 @@ def _time_interp(
         dt: float,
     ) -> tuple[jax.Array, jax.Array, jax.Array, float]:
         X_, theta_, keys, t = inputs  # keys is a (J,) array when rproc is vmap'd
-        covars_t = _interp_covars(t, ctimes, covars)
-        vkeys = vsplit(keys, 2)
+        covars_t = _interp_covars(t, ctimes, covars) 
+        vkeys = vsplit(keys, 2) 
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
         return (X_, theta_, vkeys[:, 1], t)
 
-    def _rproc_interp(
+    def _rproc_interp( 
         X_: jax.Array,
         theta_: jax.Array,
         keys: jax.Array,
@@ -60,15 +60,15 @@ def _time_interp(
         accumvars: tuple[int, ...] | None,
         num_step_func: Callable,
     ) -> jax.Array:
-        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
+        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_) 
         nstep2, dt2 = num_step_func(t1, t2, dt=dt, nstep=nstep)
-        interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2)
+        interp_helper2 = partial(_interp_helper, ctimes=ctimes, covars=covars, dt=dt2) 
         X_, theta_, keys, t = jax.lax.fori_loop(
             lower=0,
             upper=nstep2,
             body_fun=interp_helper2,
             init_val=(X_, theta_, keys, t1),
-        )
+        ) 
         return X_
 
     return partial(
@@ -77,7 +77,7 @@ def _time_interp(
         nstep=nstep,
         accumvars=accumvars,
         num_step_func=num_step_func,
-    )
+    )  
 
 
 class RInit:
@@ -103,9 +103,9 @@ class RInit:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
         self.t0 = float(t0)
-        self.struct = struct
-        self.struct_pf = jax.vmap(struct, (None, 0, None, None))
-        self.struct_per = jax.vmap(struct, (0, 0, None, None))
+        self.struct = struct 
+        self.struct_pf = jax.vmap(struct, (None, 0, None, None)) 
+        self.struct_per = jax.vmap(struct, (0, 0, None, None)) 
         self.original_func = struct
 
 
@@ -148,14 +148,14 @@ class RProc:
             struct, step_type=step_type, nstep=nstep, dt=dt, accumvars=accumvars
         )
         self.struct_pf = _time_interp(
-            jax.vmap(struct, (0, None, 0, None, None, None)),
+            jax.vmap(struct, (0, None, 0, None, None, None)), 
             step_type=step_type,
             nstep=nstep,
             dt=dt,
             accumvars=accumvars,
         )
         self.struct_per = _time_interp(
-            jax.vmap(struct, (0, 0, 0, None, None, None)),
+            jax.vmap(struct, (0, 0, 0, None, None, None)), 
             step_type=step_type,
             nstep=nstep,
             dt=dt,

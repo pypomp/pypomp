@@ -17,7 +17,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _precompute_interp_covars
+from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
 
 
@@ -133,15 +133,16 @@ class Pomp:
         self.covars = covars
         self.results_history = []
         self.fresh_key = None
-        # self.icovars = _precompute_interp_covars(
-        #     t0=self.rinit.t0,
-        #     times=np.array(self.ys.index),
-        #     ctimes=np.array(self.covars.index) if self.covars is not None else None,
-        #     covars=np.array(self.covars) if self.covars is not None else None,
-        #     dt=self.rproc.dt,
-        #     nstep=self.rproc.nstep,
-        #     order="linear",
-        # )
+        self._ys_extended, self._ys_observed, self._covars_extended = _calc_ys_covars(
+            t0=self.rinit.t0,
+            times=np.array(self.ys.index),
+            ys=np.array(self.ys),
+            ctimes=np.array(self.covars.index) if self.covars is not None else None,
+            covars=np.array(self.covars) if self.covars is not None else None,
+            dt=self.rproc.dt,
+            nstep=self.rproc.nstep,
+            order="linear",
+        )
 
     def _update_fresh_key(
         self, key: jax.Array | None = None

@@ -12,7 +12,7 @@ from .internal_functions import _normalize_weights
 @partial(jit, static_argnums=(5, 6, 7, 8))
 def _pfilter_internal(
     theta: jax.Array,  # should be first for _line_search in train.py
-    dt_array: jax.Array,
+    dt_array_extended: jax.Array,
     t0: float,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
@@ -38,7 +38,7 @@ def _pfilter_internal(
 
     pfilter_helper_2 = partial(
         _pfilter_helper,
-        dt_array=dt_array,
+        dt_array_extended=dt_array_extended,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         theta=theta,
@@ -112,7 +112,7 @@ def _pfilter_internal_mean(
 def _pfilter_helper(
     i: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
-    dt_array: jax.Array,
+    dt_array_extended: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     theta: jax.Array,
@@ -131,8 +131,8 @@ def _pfilter_helper(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars_t = None if covars_extended is None else covars_extended[i]
-    particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array[i])
-    t = t + dt_array[i]
+    particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array_extended[i])
+    t = t + dt_array_extended[i]
 
     def _with_observation(loglik, norm_weights, counts, key, dmeasure):
         covars_t = None if covars_extended is None else covars_extended[i + 1]

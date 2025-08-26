@@ -9,7 +9,7 @@ from typing import Callable
 from .internal_functions import _keys_helper
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 5, 8, 10))
+@partial(jax.jit, static_argnums=(0, 1, 2, 5, 8, 11))
 def _simulate_internal(
     rinitializer: Callable,
     rprocess: Callable,
@@ -21,9 +21,9 @@ def _simulate_internal(
     dt_array_extended: jax.Array,
     ydim: int,
     covars_extended: jax.Array | None,
+    accumvars: jax.Array | None,
     nsim: int,
     key: jax.Array,
-    accumvars: jax.Array | None,
 ) -> tuple[jax.Array, jax.Array]:
     covars_t = None if covars_extended is None else covars_extended[0]
     key, keys = _keys_helper(key=key, J=nsim, covars=covars_t)
@@ -62,8 +62,8 @@ def _simulate_helper(
     rmeasure: Callable,
     theta: jax.Array,
     covars_extended: jax.Array | None,
-    nsim: int,
     accumvars: jax.Array | None,
+    nsim: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, int]:
     (t, X_sims, X_array, Y_array, key, obs_idx) = inputs
 

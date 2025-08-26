@@ -376,16 +376,18 @@ class Pomp:
 
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
+            self._dt_array_extended,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            self._ys_extended,
+            self._ys_observed,
             self.rinit.struct_per,
             self.rproc.struct_per,
             self.dmeas.struct_per,
             sigmas,
             sigmas_init,
-            jnp.array(self.covars.index) if self.covars is not None else None,
-            jnp.array(self.covars) if self.covars is not None else None,
+            self._covars_extended,
+            self.rproc.accumvars,
             M,
             a,
             J,
@@ -602,8 +604,8 @@ class Pomp:
                 dt_array_extended=self._dt_array_extended,
                 ydim=self.rmeas.ydim,
                 covars_extended=self._covars_extended,
-                nsim=nsim,
                 accumvars=self.rproc.accumvars,
+                nsim=nsim,
                 key=k,
             )
             X_sims = xr.DataArray(

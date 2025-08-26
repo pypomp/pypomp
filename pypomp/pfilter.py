@@ -7,21 +7,21 @@ from .internal_functions import _resampler
 from .internal_functions import _no_resampler
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
-from .internal_functions import _interp_covars
 
 
-@partial(jit, static_argnums=(4, 5, 6, 7))
+@partial(jit, static_argnums=(5, 6, 7, 8))
 def _pfilter_internal(
-    theta: jax.Array,  # should be first for _line_search
+    theta: jax.Array,  # should be first for _line_search in train.py
+    dt_array_extended: jax.Array,
     t0: float,
-    times: jax.Array,
-    ys: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ) -> jax.Array:
@@ -29,29 +29,30 @@ def _pfilter_internal(
     Internal function for particle the filtering algorithm, which calls the function
     'pfilter_helper' iteratively. Returns the negative log-likelihood.
     """
-    key, keys = _keys_helper(key=key, J=J, covars=covars)
-    covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
-    particlesF = rinitializer(theta, keys, covars_t, t0)
+    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    covars0 = None if covars_extended is None else covars_extended[0]
+    particlesF = rinitializer(theta, keys, covars0, t0)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
-    loglik = 0
+    loglik = 0.0
 
     pfilter_helper_2 = partial(
         _pfilter_helper,
-        times0=jnp.concatenate([jnp.array([t0]), times]),
-        ys=ys,
+        dt_array_extended=dt_array_extended,
+        ys_extended=ys_extended,
+        ys_observed=ys_observed,
         theta=theta,
         rprocess=rprocess,
         dmeasure=dmeasure,
-        ctimes=ctimes,
-        covars=covars,
+        covars_extended=covars_extended,
         thresh=thresh,
+        accumvars=accumvars,
     )
-    particlesF, loglik, norm_weights, counts, key = jax.lax.fori_loop(
+    t, particlesF, loglik, norm_weights, counts, key = jax.lax.fori_loop(
         lower=0,
-        upper=len(ys),
+        upper=len(ys_extended),
         body_fun=pfilter_helper_2,
-        init_val=(particlesF, loglik, norm_weights, counts, key),
+        init_val=(t0, particlesF, loglik, norm_weights, counts, key),
     )
 
     return -loglik
@@ -60,28 +61,29 @@ def _pfilter_internal(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 11 + (0,),
+    in_axes=(None,) * 12 + (0,),
 )
 
 # Map over theta and key
 _vmapped_pfilter_internal2 = jax.vmap(
     _pfilter_internal,
-    in_axes=(0,) + (None,) * 10 + (0,),
+    in_axes=(0,) + (None,) * 11 + (0,),
 )
 
 
-@partial(jit, static_argnums=(4, 5, 6, 7))
+@partial(jit, static_argnums=(6, 7, 8, 9))
 def _pfilter_internal_mean(
     theta: jax.Array,
+    dt_array: jax.Array,
     t0: float,
-    times: jax.Array,
-    ys: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
 ) -> jax.Array:
@@ -92,60 +94,79 @@ def _pfilter_internal_mean(
     """
     return _pfilter_internal(
         theta=theta,
+        dt_array=dt_array,
         t0=t0,
-        times=times,
-        ys=ys,
+        ys_extended=ys_extended,
+        ys_observed=ys_observed,
         J=J,
         rinitializer=rinitializer,
         rprocess=rprocess,
         dmeasure=dmeasure,
-        ctimes=ctimes,
-        covars=covars,
+        covars_extended=covars_extended,
+        accumvars=accumvars,
         thresh=thresh,
         key=key,
-    ) / len(ys)
+    ) / jnp.sum(ys_observed)
 
 
 def _pfilter_helper(
     i: int,
-    inputs: tuple[jax.Array, float, jax.Array, jax.Array, jax.Array],
-    times0: jax.Array,
-    ys: jax.Array,
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
+    dt_array_extended: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     theta: jax.Array,
     rprocess: Callable,
     dmeasure: Callable,
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    covars_extended: jax.Array | None,
     thresh: float,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    accumvars: tuple[int, ...] | None,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper function for the particle filtering algorithm in POMP, which conducts
     filtering for one time-iteration.
     """
-    (particlesF, loglik, norm_weights, counts, key) = inputs
+    (t, particlesF, loglik, norm_weights, counts, key) = inputs
     J = len(particlesF)
-    t1 = times0[i]
-    t2 = times0[i + 1]
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars)
-    particlesP = rprocess(particlesF, theta, keys, ctimes, covars, t1, t2)
+    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    covars_t = None if covars_extended is None else covars_extended[i]
+    particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array_extended[i])
+    t = t + dt_array_extended[i]
 
-    covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
-    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t2)
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
+    def _with_observation(loglik, norm_weights, counts, key, dmeasure):
+        covars_t = None if covars_extended is None else covars_extended[i + 1]
+        measurements = dmeasure(ys_extended[i], particlesP, theta, covars_t, t)
 
-    weights = norm_weights + measurements
-    norm_weights, loglik_t = _normalize_weights(weights)
-    loglik += loglik_t
+        if len(measurements.shape) > 1:
+            measurements = measurements.sum(axis=-1)
 
-    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-    key, subkey = jax.random.split(key)
-    counts, particlesF, norm_weights = jax.lax.cond(
-        oddr > thresh,
-        _resampler,
-        _no_resampler,
-        *(counts, particlesP, norm_weights, subkey),
+        weights = norm_weights + measurements
+        norm_weights, loglik_t = _normalize_weights(weights)
+        loglik = loglik + loglik_t
+
+        oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+        key, subkey = jax.random.split(key)
+        counts, particlesF, norm_weights = jax.lax.cond(
+            oddr > thresh,
+            _resampler,
+            _no_resampler,
+            *(counts, particlesP, norm_weights, subkey),
+        )
+        particlesF = jnp.where(
+            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
+        )
+        return (particlesF, loglik, norm_weights, counts, key)
+
+    def _without_observation(loglik, norm_weights, counts, key):
+        return (particlesP, loglik, norm_weights, counts, key)
+
+    _with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
+
+    particles, loglik, norm_weights, counts, key = jax.lax.cond(
+        ys_observed[i],
+        _with_observation_partial,
+        _without_observation,
+        *(loglik, norm_weights, counts, key),
     )
-
-    return (particlesF, loglik, norm_weights, counts, key)
+    return (t, particles, loglik, norm_weights, counts, key)

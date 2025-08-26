@@ -17,7 +17,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _precompute_interp_covars
+from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
 
 
@@ -133,15 +133,21 @@ class Pomp:
         self.covars = covars
         self.results_history = []
         self.fresh_key = None
-        # self.icovars = _precompute_interp_covars(
-        #     t0=self.rinit.t0,
-        #     times=np.array(self.ys.index),
-        #     ctimes=np.array(self.covars.index) if self.covars is not None else None,
-        #     covars=np.array(self.covars) if self.covars is not None else None,
-        #     dt=self.rproc.dt,
-        #     nstep=self.rproc.nstep,
-        #     order="linear",
-        # )
+        (
+            self._ys_extended,
+            self._ys_observed,
+            self._covars_extended,
+            self._dt_array_extended,
+        ) = _calc_ys_covars(
+            t0=self.rinit.t0,
+            times=np.array(self.ys.index),
+            ys=np.array(self.ys),
+            ctimes=np.array(self.covars.index) if self.covars is not None else None,
+            covars=np.array(self.covars) if self.covars is not None else None,
+            dt=self.rproc.dt,
+            nstep=self.rproc.nstep,
+            order="linear",
+        )
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -197,7 +203,7 @@ class Pomp:
         alpha: float = 0.97,
     ) -> list[jax.Array]:
         """
-        Instance method for MOP algorithm.
+        Runs the Measurement Off-Parameter (MOP) differentiable particle filter.
 
         Args:
             J (int): The number of particles.
@@ -229,17 +235,16 @@ class Pomp:
             results.append(
                 -_mop_internal(
                     theta=jnp.array(list(theta_i.values())),
+                    dt_array_extended=self._dt_array_extended,
                     t0=self.rinit.t0,
-                    times=jnp.array(self.ys.index),
-                    ys=jnp.array(self.ys),
+                    ys_extended=self._ys_extended,
+                    ys_observed=self._ys_observed,
                     J=J,
                     rinitializer=self.rinit.struct_pf,
                     rprocess=self.rproc.struct_pf,
                     dmeasure=self.dmeas.struct_pf,
-                    ctimes=jnp.array(self.covars.index)
-                    if self.covars is not None
-                    else None,
-                    covars=jnp.array(self.covars) if self.covars is not None else None,
+                    covars_extended=self._covars_extended,
+                    accumvars=self.rproc.accumvars,
                     alpha=alpha,
                     key=k,
                 )
@@ -291,15 +296,16 @@ class Pomp:
         logLik_list = []
         results = -_vmapped_pfilter_internal2(
             thetas_repl,
+            self._dt_array_extended,
             self.rinit.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            self._ys_extended,
+            self._ys_observed,
             J,
             self.rinit.struct_pf,
             self.rproc.struct_pf,
             self.dmeas.struct_pf,
-            jnp.array(self.covars.index) if self.covars is not None else None,
-            jnp.array(self.covars) if self.covars is not None else None,
+            self.rproc.accumvars,
+            self._covars_extended,
             thresh,
             rep_keys,
         )
@@ -369,16 +375,18 @@ class Pomp:
 
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
+            self._dt_array_extended,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            self._ys_extended,
+            self._ys_observed,
             self.rinit.struct_per,
             self.rproc.struct_per,
             self.dmeas.struct_per,
             sigmas,
             sigmas_init,
-            jnp.array(self.covars.index) if self.covars is not None else None,
-            jnp.array(self.covars) if self.covars is not None else None,
+            self.rproc.accumvars,
+            self._covars_extended,
             M,
             a,
             J,
@@ -491,17 +499,16 @@ class Pomp:
         for theta_i, k in zip(theta_list, keys):
             nLLs, theta_ests = _train_internal(
                 theta_ests=jnp.array(list(theta_i.values())),
+                dt_array_extended=self._dt_array_extended,
                 t0=self.rinit.t0,
-                times=jnp.array(self.ys.index),
-                ys=jnp.array(self.ys),
+                ys_extended=self._ys_extended,
+                ys_observed=self._ys_observed,
                 rinitializer=self.rinit.struct_pf,
                 rprocess=self.rproc.struct_pf,
                 dmeasure=self.dmeas.struct_pf,
+                accumvars=self.rproc.accumvars,
+                covars_extended=self._covars_extended,
                 J=J,
-                ctimes=jnp.array(self.covars.index)
-                if self.covars is not None
-                else None,
-                covars=jnp.array(self.covars) if self.covars is not None else None,
                 optimizer=optimizer,
                 itns=itns,
                 eta=eta,
@@ -590,12 +597,12 @@ class Pomp:
                 rmeasure=self.rmeas.struct_pf,
                 theta=jnp.array(list(theta_i.values())),
                 t0=self.rinit.t0,
-                times=jnp.array(times_arr),
+                ylen=int(jnp.sum(self._ys_observed)),
+                ys_observed=self._ys_observed,
+                dt_array_extended=self._dt_array_extended,
                 ydim=self.rmeas.ydim,
-                covars=jnp.array(self.covars) if self.covars is not None else None,
-                ctimes=jnp.array(self.covars.index)
-                if self.covars is not None
-                else None,
+                covars_extended=self._covars_extended,
+                accumvars=self.rproc.accumvars,
                 nsim=nsim,
                 key=k,
             )

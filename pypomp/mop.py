@@ -10,21 +10,21 @@ from typing import Callable
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
-from .internal_functions import _interp_covars
 
 
-@partial(jit, static_argnums=(4, 5, 6, 7))
+@partial(jit, static_argnums=(5, 6, 7, 8))
 def _mop_internal(
     theta: jax.Array,
+    dt_array_extended: jax.Array,
     t0: float,
-    times: jax.Array,
-    ys: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ) -> jax.Array:
@@ -32,47 +32,49 @@ def _mop_internal(
     Internal function for the MOP algorithm, which calls function 'mop_helper'
     iteratively.
     """
-    key, keys = _keys_helper(key=key, J=J, covars=covars)
-    covars_t = _interp_covars(t0, ctimes=ctimes, covars=covars)
-    particlesF = rinitializer(theta, keys, covars_t, t0)
+    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    covars0 = None if covars_extended is None else covars_extended[0]
+    particlesF = rinitializer(theta, keys, covars0, t0)
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
-    loglik = 0
+    loglik = 0.0
 
     mop_helper_2 = partial(
         _mop_helper,
-        times0=jnp.concatenate([jnp.array([t0]), times]),
-        ys=ys,
+        dt_array_extended=dt_array_extended,
+        ys_extended=ys_extended,
+        ys_observed=ys_observed,
         theta=theta,
         rprocess=rprocess,
         dmeasure=dmeasure,
-        ctimes=ctimes,
-        covars=covars,
+        covars_extended=covars_extended,
         alpha=alpha,
+        accumvars=accumvars,
     )
 
-    particlesF, loglik, weightsF, counts, key = jax.lax.fori_loop(
+    t, particlesF, loglik, weightsF, counts, key = jax.lax.fori_loop(
         lower=0,
-        upper=len(ys),
+        upper=len(ys_extended),
         body_fun=mop_helper_2,
-        init_val=(particlesF, loglik, weightsF, counts, key),
+        init_val=(t0, particlesF, loglik, weightsF, counts, key),
     )
 
     return -loglik
 
 
-@partial(jit, static_argnums=(4, 5, 6, 7))
+@partial(jit, static_argnums=(5, 6, 7, 8))
 def _mop_internal_mean(
     theta: jax.Array,
+    dt_array_extended: jax.Array,
     t0: float,
-    times: jax.Array,
-    ys: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
     dmeasure: Callable,  # static
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
 ) -> jax.Array:
@@ -82,67 +84,90 @@ def _mop_internal_mean(
     """
     return _mop_internal(
         theta=theta,
+        dt_array_extended=dt_array_extended,
         t0=t0,
-        times=times,
-        ys=ys,
+        ys_extended=ys_extended,
+        ys_observed=ys_observed,
         J=J,
         rinitializer=rinitializer,
         rprocess=rprocess,
         dmeasure=dmeasure,
-        ctimes=ctimes,
-        covars=covars,
+        covars_extended=covars_extended,
+        accumvars=accumvars,
         alpha=alpha,
         key=key,
-    ) / len(ys)
+    ) / jnp.sum(ys_observed)
 
 
 def _mop_helper(
     i: int,
-    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
-    times0: jax.Array,
-    ys: jax.Array,
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
+    dt_array_extended: jax.Array,
+    ys_extended: jax.Array,
+    ys_observed: jax.Array,
     theta: jax.Array,
     rprocess: Callable,
     dmeasure: Callable,
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
     alpha: float,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Helper function for the MOP algorithm, which conducts a single iteration of
     filtering and is called in the function 'mop_internal'.
     """
-    particlesF, loglik, weightsF, counts, key = inputs
+    t, particlesF, loglik, weightsF, counts, key = inputs
     J = len(particlesF)
-    t1 = times0[i]
-    t2 = times0[i + 1]
 
     weightsP = alpha * weightsF
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars)
-    particlesP = rprocess(particlesF, theta, keys, ctimes, covars, t1, t2)
+    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    covars_t = None if covars_extended is None else covars_extended[i]
+    particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array_extended[i])
+    t = t + dt_array_extended[i]
 
-    covars_t = _interp_covars(t2, ctimes=ctimes, covars=covars)
-    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t2)
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
+    def _with_observation(loglik, norm_weights, counts, key, dmeasure):
+        covars_t = None if covars_extended is None else covars_extended[i + 1]
+        measurements = dmeasure(ys_extended[i], particlesP, theta, covars_t, t)
+        if len(measurements.shape) > 1:
+            measurements = measurements.sum(axis=-1)
 
-    loglik = (
-        loglik
-        + jax.scipy.special.logsumexp(weightsP + measurements)
-        - jax.scipy.special.logsumexp(weightsP)
+        loglik = (
+            loglik
+            + jax.scipy.special.logsumexp(weightsP + measurements)
+            - jax.scipy.special.logsumexp(weightsP)
+        )
+        # test different, logsumexp - source code (floating point arithmetic issue)
+        # make a little note in the code, discuss it in the quant test about the small difference
+        # logsumexp source code
+
+        norm_weights, loglik_phi_t = _normalize_weights(
+            jax.lax.stop_gradient(measurements)
+        )
+
+        key, subkey = jax.random.split(key)
+        counts, particlesF, norm_weightsF = _resampler(
+            counts, particlesP, norm_weights, subkey=subkey
+        )
+
+        weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[
+            counts
+        ]
+        particlesF = jnp.where(
+            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
+        )
+        return particlesF, loglik, weightsF, counts, key
+
+    def _without_observation(loglik, weightsF, counts, key):
+        return particlesP, loglik, weightsF, counts, key
+
+    _with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
+
+    particles, loglik, weightsF, counts, key = jax.lax.cond(
+        ys_observed[i],
+        _with_observation_partial,
+        _without_observation,
+        *(loglik, weightsF, counts, key),
     )
-    # test different, logsumexp - source code (floating point arithmetic issue)
-    # make a little note in the code, discuss it in the quant test about the small difference
-    # logsumexp source code
 
-    norm_weights, loglik_phi_t = _normalize_weights(jax.lax.stop_gradient(measurements))
-
-    key, subkey = jax.random.split(key)
-    counts, particlesF, norm_weightsF = _resampler(
-        counts, particlesP, norm_weights, subkey=subkey
-    )
-
-    weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[counts]
-
-    return (particlesF, loglik, weightsF, counts, key)
+    return (t, particles, loglik, weightsF, counts, key)

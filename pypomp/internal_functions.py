@@ -338,7 +338,7 @@ def _calc_interp_covars(
     # TODO: optimize this function
     total_steps = np.sum(nstep_array)
     interp_covars_array = np.full(
-        (total_steps, covars.shape[1]),
+        (total_steps + 1, covars.shape[1]),
         fill_value=np.nan,
     )
     idx = 0
@@ -351,6 +351,7 @@ def _calc_interp_covars(
                 order,
             )
             idx += 1
+    interp_covars_array[idx, :] = _interp_covars_np(times0[-1], ctimes, covars, order)
     return interp_covars_array
 
 
@@ -378,6 +379,10 @@ def _calc_ys_covars(
     ys_extended, ys_observed = _calc_ys_extended(ys, nstep_array)
 
     dt_array_extended = np.repeat(dt_array, nstep_array)
+
+    if covars is not None and ctimes is not None:
+        assert interp_covars_array is not None
+        assert interp_covars_array.shape[0] == dt_array_extended.shape[0] + 1
 
     return (
         jnp.array(ys_extended),

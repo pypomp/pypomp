@@ -50,7 +50,7 @@ def _pfilter_internal(
     )
     t, particlesF, loglik, norm_weights, counts, key = jax.lax.fori_loop(
         lower=0,
-        upper=len(ys_extended) - 1,
+        upper=len(ys_extended),
         body_fun=pfilter_helper_2,
         init_val=(t0, particlesF, loglik, norm_weights, counts, key),
     )
@@ -109,62 +109,6 @@ def _pfilter_internal_mean(
     ) / len(ys_extended)
 
 
-def _with_observation(
-    loglik: jax.Array,
-    norm_weights: jax.Array,
-    counts: jax.Array,
-    key: jax.Array,
-    i: int,
-    particlesP: jax.Array,
-    theta: jax.Array,
-    covars_extended: jax.Array | None,
-    ys_extended: jax.Array,
-    t: float,
-    thresh: float,
-    accumvars: tuple[int, ...] | None,
-    dmeasure: Callable,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-    covars_t = None if covars_extended is None else covars_extended[i + 1]
-    measurements = dmeasure(ys_extended[i + 1], particlesP, theta, covars_t, t)
-
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
-
-    weights = norm_weights + measurements
-    norm_weights, loglik_t = _normalize_weights(weights)
-    loglik = loglik + loglik_t
-
-    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-    key, subkey = jax.random.split(key)
-    counts, particlesF, norm_weights = jax.lax.cond(
-        oddr > thresh,
-        _resampler,
-        _no_resampler,
-        *(counts, particlesP, norm_weights, subkey),
-    )
-    particlesF = jnp.where(
-        accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
-    )
-    return (particlesF, loglik, norm_weights, counts, key)
-
-
-def _without_observation(
-    loglik: jax.Array,
-    norm_weights: jax.Array,
-    counts: jax.Array,
-    key: jax.Array,
-    i: int,
-    particlesP: jax.Array,
-    theta: jax.Array,
-    covars_extended: jax.Array | None,
-    ys_extended: jax.Array,
-    t: float,
-    thresh: float,
-    accumvars: tuple[int, ...] | None,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-    return (particlesP, loglik, norm_weights, counts, key)
-
-
 def _pfilter_helper(
     i: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
@@ -190,25 +134,39 @@ def _pfilter_helper(
     particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array[i])
     t = t + dt_array[i]
 
+    def _with_observation(loglik, norm_weights, counts, key, dmeasure):
+        covars_t = None if covars_extended is None else covars_extended[i + 1]
+        measurements = dmeasure(ys_extended[i], particlesP, theta, covars_t, t)
+
+        if len(measurements.shape) > 1:
+            measurements = measurements.sum(axis=-1)
+
+        weights = norm_weights + measurements
+        norm_weights, loglik_t = _normalize_weights(weights)
+        loglik = loglik + loglik_t
+
+        oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+        key, subkey = jax.random.split(key)
+        counts, particlesF, norm_weights = jax.lax.cond(
+            oddr > thresh,
+            _resampler,
+            _no_resampler,
+            *(counts, particlesP, norm_weights, subkey),
+        )
+        particlesF = jnp.where(
+            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
+        )
+        return (particlesF, loglik, norm_weights, counts, key)
+
+    def _without_observation(loglik, norm_weights, counts, key):
+        return (particlesP, loglik, norm_weights, counts, key)
+
     _with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
 
     particles, loglik, norm_weights, counts, key = jax.lax.cond(
-        ys_observed[i + 1],
+        ys_observed[i],
         _with_observation_partial,
         _without_observation,
-        *(
-            loglik,
-            norm_weights,
-            counts,
-            key,
-            i,
-            particlesP,
-            theta,
-            covars_extended,
-            ys_extended,
-            t,
-            thresh,
-            accumvars,
-        ),
+        *(loglik, norm_weights, counts, key),
     )
     return (t, particles, loglik, norm_weights, counts, key)

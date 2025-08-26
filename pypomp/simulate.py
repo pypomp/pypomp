@@ -43,11 +43,11 @@ def _simulate_internal(
         nsim=nsim,
         accumvars=accumvars,
     )
-    t, X_sims, X_array, Y_array, key = jax.lax.fori_loop(
+    t, X_sims, X_array, Y_array, key, _ = jax.lax.fori_loop(
         lower=0,
-        upper=ylen,
+        upper=ys_observed.shape[0],
         body_fun=_simulate_helper2,
-        init_val=(t0, X_sims, X_array, Y_array, key),
+        init_val=(t0, X_sims, X_array, Y_array, key, 0),
     )
 
     return X_array, Y_array
@@ -55,7 +55,7 @@ def _simulate_internal(
 
 def _simulate_helper(
     i: int,
-    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
+    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, int],
     ys_observed: jax.Array,
     dt_array_extended: jax.Array,
     rprocess: Callable,
@@ -64,8 +64,8 @@ def _simulate_helper(
     covars_extended: jax.Array | None,
     nsim: int,
     accumvars: jax.Array | None,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-    (t, X_sims, X_array, Y_array, key) = inputs
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, int]:
+    (t, X_sims, X_array, Y_array, key, obs_idx) = inputs
 
     key, *keys = jax.random.split(key, num=nsim + 1)
     keys = jnp.array(keys)
@@ -73,7 +73,7 @@ def _simulate_helper(
     X_sims = rprocess(X_sims, theta, keys, covars_t, t, dt_array_extended[i])
     t = t + dt_array_extended[i]
 
-    def with_observation(X_sims, X_array, Y_array, key):
+    def with_observation(X_sims, X_array, Y_array, key, obs_idx):
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         key, *keys = jax.random.split(key, num=nsim + 1)
         keys = jnp.array(keys)
@@ -81,19 +81,18 @@ def _simulate_helper(
         X_sims = jnp.where(
             accumvars is not None, X_sims.at[:, accumvars].set(0.0), X_sims
         )
-        X_array = X_array.at[i + 1].set(X_sims.T)
-        Y_array = Y_array.at[i].set(Y_sims.T)
-        return X_sims, X_array, Y_array, key
+        X_array = X_array.at[obs_idx + 1].set(X_sims.T)
+        Y_array = Y_array.at[obs_idx].set(Y_sims.T)
+        return X_sims, X_array, Y_array, key, obs_idx + 1
 
-    def without_observation(X_sims, X_array, Y_array, key):
-        return X_sims, X_array, Y_array, key
+    def without_observation(X_sims, X_array, Y_array, key, obs_idx):
+        return X_sims, X_array, Y_array, key, obs_idx
 
-    Y_array, X_sims, key = jax.lax.cond(
-        ys_observed[i + 1],
+    X_sims, X_array, Y_array, key, obs_idx = jax.lax.cond(
+        ys_observed[i],
         with_observation,
         without_observation,
-        X_sims,
-        key,
+        *(X_sims, X_array, Y_array, key, obs_idx),
     )
 
-    return t, X_sims, X_array, Y_array, key
+    return t, X_sims, X_array, Y_array, key, obs_idx

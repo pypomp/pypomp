@@ -106,7 +106,7 @@ def _pfilter_internal_mean(
         accumvars=accumvars,
         thresh=thresh,
         key=key,
-    ) / len(ys_extended)
+    ) / jnp.sum(ys_observed)
 
 
 def _pfilter_helper(

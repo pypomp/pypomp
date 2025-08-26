@@ -22,8 +22,8 @@ def _mif_internal(
     dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
-    covars_extended: jax.Array | None,
     accumvars: jax.Array | None,
+    covars_extended: jax.Array | None,
     M: int,  # static
     a: float,
     J: int,  # static
@@ -48,8 +48,8 @@ def _mif_internal(
         rinitializers=rinitializers,
         rprocesses=rprocesses,
         dmeasures=dmeasures,
-        covars_extended=covars_extended,
         accumvars=accumvars,
+        covars_extended=covars_extended,
         thresh=thresh,
         a=a,
     )
@@ -87,8 +87,8 @@ def _perfilter_internal(
     rinitializers: Callable,
     rprocesses: Callable,
     dmeasures: Callable,
-    covars_extended: jax.Array | None,
     accumvars: jax.Array | None,
+    covars_extended: jax.Array | None,
     thresh: float,
     a: float,
 ):
@@ -123,8 +123,8 @@ def _perfilter_internal(
         rprocesses=rprocesses,
         dmeasures=dmeasures,
         sigmas=sigmas,
-        covars_extended=covars_extended,
         accumvars=accumvars,
+        covars_extended=covars_extended,
         thresh=thresh,
         m=m,
         a=a,
@@ -153,8 +153,8 @@ def _perfilter_helper(
     rprocesses: Callable,
     dmeasures: Callable,
     sigmas: float | jax.Array,
-    covars_extended: jax.Array | None,
     accumvars: jax.Array | None,
+    covars_extended: jax.Array | None,
     thresh: float,
     m: int,
     a: float,

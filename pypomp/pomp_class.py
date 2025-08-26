@@ -203,7 +203,7 @@ class Pomp:
         alpha: float = 0.97,
     ) -> list[jax.Array]:
         """
-        Instance method for MOP algorithm.
+        Runs the Measurement Off-Parameter (MOP) differentiable particle filter.
 
         Args:
             J (int): The number of particles.
@@ -235,17 +235,16 @@ class Pomp:
             results.append(
                 -_mop_internal(
                     theta=jnp.array(list(theta_i.values())),
+                    dt_array_extended=self._dt_array_extended,
                     t0=self.rinit.t0,
-                    times=jnp.array(self.ys.index),
-                    ys=jnp.array(self.ys),
+                    ys_extended=self._ys_extended,
+                    ys_observed=self._ys_observed,
                     J=J,
                     rinitializer=self.rinit.struct_pf,
                     rprocess=self.rproc.struct_pf,
                     dmeasure=self.dmeas.struct_pf,
-                    ctimes=jnp.array(self.covars.index)
-                    if self.covars is not None
-                    else None,
-                    covars=jnp.array(self.covars) if self.covars is not None else None,
+                    covars_extended=self._covars_extended,
+                    accumvars=self.rproc.accumvars,
                     alpha=alpha,
                     key=k,
                 )
@@ -386,8 +385,8 @@ class Pomp:
             self.dmeas.struct_per,
             sigmas,
             sigmas_init,
-            self._covars_extended,
             self.rproc.accumvars,
+            self._covars_extended,
             M,
             a,
             J,
@@ -500,17 +499,16 @@ class Pomp:
         for theta_i, k in zip(theta_list, keys):
             nLLs, theta_ests = _train_internal(
                 theta_ests=jnp.array(list(theta_i.values())),
+                dt_array_extended=self._dt_array_extended,
                 t0=self.rinit.t0,
-                times=jnp.array(self.ys.index),
-                ys=jnp.array(self.ys),
+                ys_extended=self._ys_extended,
+                ys_observed=self._ys_observed,
                 rinitializer=self.rinit.struct_pf,
                 rprocess=self.rproc.struct_pf,
                 dmeasure=self.dmeas.struct_pf,
+                accumvars=self.rproc.accumvars,
+                covars_extended=self._covars_extended,
                 J=J,
-                ctimes=jnp.array(self.covars.index)
-                if self.covars is not None
-                else None,
-                covars=jnp.array(self.covars) if self.covars is not None else None,
                 optimizer=optimizer,
                 itns=itns,
                 eta=eta,

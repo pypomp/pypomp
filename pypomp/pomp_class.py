@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
 from .mif import _jv_mif_internal
-from .train import _train_internal
+from .train import _train_internal, _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
@@ -493,39 +493,45 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
-        keys = jax.random.split(new_key, len(theta_list))
+        keys = jnp.array(jax.random.split(new_key, len(theta_list)))
+
+        # Convert theta_list to array format for vmapping
+        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
+
+        # Use vmapped version instead of for loop
+        nLLs, theta_ests = _vmapped_train_internal(
+            theta_array,
+            self._dt_array_extended,
+            self.rinit.t0,
+            self._ys_extended,
+            self._ys_observed,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf,
+            self.dmeas.struct_pf,
+            self.rproc.accumvars,
+            self._covars_extended,
+            J,
+            optimizer,
+            itns,
+            eta,
+            c,
+            max_ls_itn,
+            thresh,
+            scale,
+            ls,
+            alpha,
+            keys,
+            n_monitors,
+        )
+
+        # Process results for each theta set
         logLik_list = []
         thetas_out_list = []
-        for theta_i, k in zip(theta_list, keys):
-            nLLs, theta_ests = _train_internal(
-                theta_ests=jnp.array(list(theta_i.values())),
-                dt_array_extended=self._dt_array_extended,
-                t0=self.rinit.t0,
-                ys_extended=self._ys_extended,
-                ys_observed=self._ys_observed,
-                rinitializer=self.rinit.struct_pf,
-                rprocess=self.rproc.struct_pf,
-                dmeasure=self.dmeas.struct_pf,
-                accumvars=self.rproc.accumvars,
-                covars_extended=self._covars_extended,
-                J=J,
-                optimizer=optimizer,
-                itns=itns,
-                eta=eta,
-                c=c,
-                max_ls_itn=max_ls_itn,
-                thresh=thresh,
-                verbose=verbose,
-                scale=scale,
-                ls=ls,
-                alpha=alpha,
-                key=k,
-                n_monitors=n_monitors,
-            )
-            logLik_list.append(xr.DataArray(-nLLs, dims=["iteration"]))
+        for i, theta_i in enumerate(theta_list):
+            logLik_list.append(xr.DataArray(-nLLs[i], dims=["iteration"]))
             thetas_out_list.append(
                 xr.DataArray(
-                    theta_ests,
+                    theta_ests[i],
                     dims=["iteration", "theta"],
                     coords={
                         "iteration": range(0, itns + 1),

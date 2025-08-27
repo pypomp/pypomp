@@ -739,7 +739,9 @@ class Pomp:
             for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
                 if param_names is None:
                     param_names = list(theta_dict.keys())
-                logLik_arr_np = np.array(logLik_arr)
+                # Use underlying NumPy array if available to avoid copies
+                arr = getattr(logLik_arr, "values", logLik_arr)
+                logLik_arr_np = np.asarray(arr)
                 logLik = float(logmeanexp(logLik_arr_np))
                 se = (
                     float(logmeanexp_se(logLik_arr_np))

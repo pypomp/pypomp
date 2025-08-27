@@ -28,7 +28,7 @@ def _pfilter_internal(
     ESS: bool = False, # static
     filter_mean: bool = False, #static
     prediction_mean: bool = False # static
-) -> jax.Array | dict[str, jax.Array]:
+) -> dict[str, jax.Array]:
     """
     Internal function for particle the filtering algorithm, which calls the function
     'pfilter_helper' iteratively. 
@@ -70,17 +70,9 @@ def _pfilter_internal(
         body_fun=pfilter_helper_2,
         init_val=(particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr),
     )
-    
-    any_diagnostics = CLL or ESS or filter_mean or prediction_mean
-    if not any_diagnostics:
-        return -loglik
 
-    #outputs = [-loglik]
-    #if CLL: outputs.append(CLL_arr)
-    #if ESS: outputs.append(ESS_arr)
-    #if filter_mean: outputs.append(filter_mean_arr)
-    #if prediction_mean: outputs.append(prediction_mean_arr)
     output = {"neg_loglik": -loglik}
+
     if CLL: 
         output["CLL"] = CLL_arr
     if ESS: 

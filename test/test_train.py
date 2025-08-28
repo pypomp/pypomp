@@ -27,6 +27,7 @@ class TestFit_LG(unittest.TestCase):
                     optimizer=optimizer,
                     scale=True,
                     ls=True,
+                    n_monitors=1,
                     key=self.key,
                 )
                 GD_out = self.LG.results_history[-1]

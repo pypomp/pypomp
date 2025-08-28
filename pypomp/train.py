@@ -40,8 +40,9 @@ def _train_internal(
     Internal function for conducting the MOP gradient estimate method.
     """
     ylen = jnp.sum(ys_observed)
+    if n_monitors < 1 and ls:
+        raise ValueError("Line search requires at least one monitor")
 
-    # Define the body function for fori_loop
     def train_step(i, carry):
         theta_ests, key, hess, Acopies, logliks, grads, hesses = carry
 
@@ -80,25 +81,27 @@ def _train_internal(
                 alpha=alpha,
                 key=subkey,
             )
-
-            key, *subkeys = jax.random.split(key, n_monitors + 1)
-            loglik = jnp.mean(
-                _vmapped_pfilter_internal(
-                    theta_ests,
-                    dt_array_extended,
-                    t0,
-                    ys_extended,
-                    ys_observed,
-                    J,
-                    rinitializer,
-                    rprocess,
-                    dmeasure,
-                    covars_extended,
-                    accumvars,
-                    0,
-                    jnp.array(subkeys),
+            if n_monitors > 0:
+                key, *subkeys = jax.random.split(key, n_monitors + 1)
+                loglik = jnp.mean(
+                    _vmapped_pfilter_internal(
+                        theta_ests,
+                        dt_array_extended,
+                        t0,
+                        ys_extended,
+                        ys_observed,
+                        J,
+                        rinitializer,
+                        rprocess,
+                        dmeasure,
+                        covars_extended,
+                        accumvars,
+                        0,
+                        jnp.array(subkeys),
+                    )
                 )
-            )
+            else:
+                loglik = jnp.array(jnp.nan)
 
         if optimizer == "Newton":
             key, subkey = jax.random.split(key)
@@ -120,61 +123,59 @@ def _train_internal(
             direction = -jnp.linalg.pinv(hess) @ grad
 
         elif optimizer == "WeightedNewton":
-            if i == 0:
-                key, subkey = jax.random.split(key)
-                hess = _jhess_mop(
-                    theta_ests=theta_ests,
-                    dt_array_extended=dt_array_extended,
-                    t0=t0,
-                    ys_extended=ys_extended,
-                    ys_observed=ys_observed,
-                    J=J,
-                    rinitializer=rinitializer,
-                    rprocess=rprocess,
-                    dmeasure=dmeasure,
-                    accumvars=accumvars,
-                    covars_extended=covars_extended,
-                    alpha=alpha,
-                    key=subkey,
-                )
-                direction = -jnp.linalg.pinv(hess) @ grad
-            else:
-                key, subkey = jax.random.split(key)
-                hess = _jhess_mop(
-                    theta_ests=theta_ests,
-                    dt_array_extended=dt_array_extended,
-                    t0=t0,
-                    ys_extended=ys_extended,
-                    ys_observed=ys_observed,
-                    J=J,
-                    rinitializer=rinitializer,
-                    rprocess=rprocess,
-                    dmeasure=dmeasure,
-                    accumvars=accumvars,
-                    covars_extended=covars_extended,
-                    alpha=alpha,
-                    key=subkey,
-                )
-                wt = (i ** jnp.log(i)) / ((i + 1) ** jnp.log(i + 1))
-                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
-                direction = -jnp.linalg.pinv(weighted_hess) @ grad
-
-        elif optimizer == "BFGS" and i > 1:
-            # Get the previous direction from grads array
-            prev_direction = -grads[i - 1] if i > 0 else -grad
-            s_k = eta * prev_direction
-            # not grad but grads
-            y_k = grad - grads[i - 1]
-            rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
-            sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
-            w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
-            # H_(k+1) = W_k^T@H_k@W_k + pho_k@s_k@s_k^T
-            hess = (
-                jnp.einsum("ij,jk,lk", w, hess, w)
-                + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
+            key, subkey = jax.random.split(key)
+            hess = _jhess_mop(
+                theta_ests=theta_ests,
+                dt_array_extended=dt_array_extended,
+                t0=t0,
+                ys_extended=ys_extended,
+                ys_observed=ys_observed,
+                J=J,
+                rinitializer=rinitializer,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                accumvars=accumvars,
+                covars_extended=covars_extended,
+                alpha=alpha,
+                key=subkey,
             )
-            hess = jnp.where(jnp.isfinite(rho_k), hess, hess)
-            direction = -hess @ grad
+
+            def dir_weighted(_):
+                i_f = i.astype(theta_ests.dtype)
+                wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
+                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
+                return -jnp.linalg.pinv(weighted_hess) @ grad
+
+            direction = jax.lax.cond(
+                i == 0, lambda _: -jnp.linalg.pinv(hess) @ grad, dir_weighted, None
+            )
+
+        elif optimizer == "BFGS":
+
+            def bfgs_true(_):
+                prev_direction = jax.lax.cond(
+                    i > 0,
+                    lambda __: -grads[i - 1],
+                    lambda __: -grad,
+                    operand=None,
+                )
+                s_k = eta * prev_direction
+                y_k = grad - grads[i - 1]
+                rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
+                sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
+                w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
+                new_hess = (
+                    jnp.einsum("ij,jk,lk", w, hess, w)
+                    + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
+                )
+                new_hess = jnp.where(jnp.isfinite(rho_k), new_hess, hess)
+                new_direction = -new_hess @ grad
+                return new_hess, new_direction
+
+            def bfgs_false(_):
+                return hess, -grad
+
+            hess, direction = jax.lax.cond(i > 1, bfgs_true, bfgs_false, operand=None)
 
         else:
             # For BFGS when i <= 1, or other optimizers, use gradient descent
@@ -246,24 +247,27 @@ def _train_internal(
     )
 
     # Final evaluation
-    final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
-    final_loglik = jnp.mean(
-        _vmapped_pfilter_internal(
-            final_theta,
-            dt_array_extended,
-            t0,
-            ys_extended,
-            ys_observed,
-            J,
-            rinitializer,
-            rprocess,
-            dmeasure,
-            covars_extended,
-            accumvars,
-            0,
-            jnp.array(subkeys),
+    if n_monitors > 0:
+        final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
+        final_loglik = jnp.mean(
+            _vmapped_pfilter_internal(
+                final_theta,
+                dt_array_extended,
+                t0,
+                ys_extended,
+                ys_observed,
+                J,
+                rinitializer,
+                rprocess,
+                dmeasure,
+                covars_extended,
+                accumvars,
+                0,
+                jnp.array(subkeys),
+            )
         )
-    )
+    else:
+        final_loglik = jnp.array(jnp.nan)
 
     # Update final results
     logliks = logliks.at[-1].set(final_loglik)

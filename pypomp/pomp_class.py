@@ -445,7 +445,7 @@ class Pomp:
         c: float = 0.1,
         max_ls_itn: int = 10,
         verbose: bool = False,
-        n_monitors: int = 1,
+        n_monitors: int = 0,
     ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.

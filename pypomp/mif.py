@@ -8,7 +8,6 @@ from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
-from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
 
 
 def _mif_internal(
@@ -18,22 +17,22 @@ def _mif_internal(
     times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
-    rinitializers: Callable,
-    rprocesses: Callable,
-    dmeasures: Callable,
+    rinitializers: Callable,  # static
+    rprocesses: Callable,  # static
+    dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    partrans: ParTrans,
-    M: int,
+    M: int,  # static
     a: float,
-    J: int,
+    J: int,  # static
     thresh: float,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     logliks = jnp.zeros(M)
     params = jnp.zeros((M, J, theta.shape[-1]))
+
     params = jnp.concatenate([theta.reshape((1, J, theta.shape[-1])), params], axis=0)
 
     _perfilter_internal_2 = partial(
@@ -51,7 +50,6 @@ def _mif_internal(
         dmeasures=dmeasures,
         accumvars=accumvars,
         covars_extended=covars_extended,
-        partrans=partrans,
         thresh=thresh,
         a=a,
     )
@@ -65,14 +63,14 @@ def _mif_internal(
     return logliks, params
 
 
-_jit_mif_internal = jit(_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16))
+_jit_mif_internal = jit(_mif_internal, static_argnums=(6, 7, 8, 13, 15))
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 17 + (0,),
+    in_axes=(1,) + (None,) * 16 + (0,),
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16))
+_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
 
 
 def _perfilter_internal(
@@ -91,12 +89,15 @@ def _perfilter_internal(
     dmeasures: Callable,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    partrans: ParTrans,
     thresh: float,
     a: float,
 ):
+    """
+    Internal function for the perturbed particle filtering algorithm, which calls
+    function 'perfilter_helper' iteratively.
+    """
     (params, logliks, key) = inputs
-    thetas = _pt_forward(params[m], partrans)
+    thetas = params[m]
     loglik = 0.0
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
@@ -108,8 +109,7 @@ def _perfilter_internal(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    thetas_nat0 = _pt_inverse(thetas, partrans)
-    particlesF = rinitializers(thetas_nat0, keys, covars0, t0)
+    particlesF = rinitializers(thetas, keys, covars0, t0)
 
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
@@ -125,7 +125,6 @@ def _perfilter_internal(
         sigmas=sigmas,
         accumvars=accumvars,
         covars_extended=covars_extended,
-        partrans=partrans,
         thresh=thresh,
         m=m,
         a=a,
@@ -138,8 +137,7 @@ def _perfilter_internal(
     )
 
     logliks = logliks.at[m + 1].set(-loglik)
-    thetas_nat_end = _pt_inverse(thetas, partrans)
-    params = params.at[m + 1].set(thetas_nat_end)
+    params = params.at[m + 1].set(thetas)
     return params, logliks, key
 
 
@@ -157,11 +155,15 @@ def _perfilter_helper(
     sigmas: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    partrans: ParTrans,
     thresh: float,
     m: int,
     a: float,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    """
+    Helper functions for perturbed particle filtering algorithm, which conducts
+    a single iteration of filtering and is called in function
+    'perfilter_internal'.
+    """
     (t, particlesF, thetas, loglik, norm_weights, counts, key) = inputs
     J = len(particlesF)
 
@@ -175,16 +177,15 @@ def _perfilter_helper(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars_t = None if covars_extended is None else covars_extended[i]
-    thetas_nat = _pt_inverse(thetas, partrans)
-    particlesP = rprocesses(particlesF, thetas_nat, keys, covars_t, t, dt_array_extended[i])
+    particlesP = rprocesses(particlesF, thetas, keys, covars_t, t, dt_array_extended[i])
     t = t + dt_array_extended[i]
 
     def _with_observation(loglik, norm_weights, counts, thetas, key, dmeasures):
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         measurements = jnp.nan_to_num(
-            dmeasures(ys_extended[i], particlesP, thetas_nat, covars_t, t).squeeze(),
+            dmeasures(ys_extended[i], particlesP, thetas, covars_t, t).squeeze(),
             nan=jnp.log(1e-18),
-        )
+        )  # shape (Np,)
 
         if len(measurements.shape) > 1:
             measurements = measurements.sum(axis=-1)
@@ -195,16 +196,16 @@ def _perfilter_helper(
         loglik = loglik + loglik_t
         oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
         key, subkey = jax.random.split(key)
-        counts, particlesF2, norm_weights, thetas2 = jax.lax.cond(
+        counts, particlesF, norm_weights, thetas = jax.lax.cond(
             oddr > thresh,
             _resampler_thetas,
             _no_resampler_thetas,
             *(counts, particlesP, norm_weights, thetas, subkey),
         )
-        particlesF2 = jnp.where(
-            accumvars is not None, particlesF2.at[:, accumvars].set(0.0), particlesF2
+        particlesF = jnp.where(
+            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
         )
-        return (particlesF2, loglik, norm_weights, counts, thetas2, key)
+        return (particlesF, loglik, norm_weights, counts, thetas, key)
 
     def _without_observation(loglik, norm_weights, counts, thetas, key):
         return (particlesP, loglik, norm_weights, counts, thetas, key)
@@ -219,4 +220,3 @@ def _perfilter_helper(
     )
 
     return (t, particles, thetas, loglik, norm_weights, counts, key)
-

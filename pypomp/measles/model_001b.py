@@ -81,16 +81,21 @@ def rproc(X_, theta_, key, covars, t, dt):
     # Poisson births
     births = jax.random.poisson(keys[1], br * dt)
 
-    # transitions between classes - vectorized
+    # transitions between classes
+    rt_final = jnp.zeros((3, 3))
+
     rate_pairs = jnp.array([[rate[0], rate[1]], [rate[2], rate[3]], [rate[4], rate[5]]])
     populations = jnp.array([S, E, I])
 
     rate_sums = jnp.sum(rate_pairs, axis=1)
     p0_values = jnp.exp(-rate_sums * dt)
 
-    rt_values = rate_pairs / rate_sums[:, None] * (1 - p0_values)[:, None]
-
-    rt_final = jnp.concatenate([rt_values, p0_values.reshape(-1, 1)], axis=1)
+    rt_final = (
+        rt_final.at[:, 0:2]
+        .set(rate_pairs / rate_sums[:, None] * (1 - p0_values)[:, None])
+        .at[:, 2]
+        .set(p0_values)
+    )
 
     transitions = jax.random.multinomial(keys[2], populations, rt_final)
 

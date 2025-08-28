@@ -25,7 +25,7 @@ def _train_internal(
     covars_extended: jax.Array | None,
     J: int,
     optimizer: str,
-    itns: int,
+    M: int,
     eta: float,
     c: float,
     max_ls_itn: int,
@@ -227,10 +227,10 @@ def _train_internal(
         return (theta_ests, key, hess, Acopies, logliks, grads, hesses)
 
     # Initialize arrays for storing results
-    Acopies = jnp.zeros((itns + 1, *theta_ests.shape))
-    logliks = jnp.zeros(itns + 1)
-    grads = jnp.zeros((itns + 1, *theta_ests.shape))
-    hesses = jnp.zeros((itns + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
+    Acopies = jnp.zeros((M + 1, *theta_ests.shape))
+    logliks = jnp.zeros(M + 1)
+    grads = jnp.zeros((M + 1, *theta_ests.shape))
+    hesses = jnp.zeros((M + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
 
     # Set initial values
     Acopies = Acopies.at[0].set(theta_ests)
@@ -240,7 +240,7 @@ def _train_internal(
     final_theta, final_key, final_hess, Acopies, logliks, grads, hesses = (
         jax.lax.fori_loop(
             0,
-            itns,
+            M,
             train_step,
             (theta_ests, key, hess, Acopies, logliks, grads, hesses),
         )

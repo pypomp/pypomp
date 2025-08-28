@@ -91,4 +91,4 @@ class Test_Measles(unittest.TestCase):
         self.measles.mop(J=self.J, key=self.key)
 
     def test_measles_train(self):
-        self.measles.train(itns=2, J=self.J, key=self.key)
+        self.measles.train(M=1, J=self.J, key=self.key)

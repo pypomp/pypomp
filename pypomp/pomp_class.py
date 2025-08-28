@@ -433,7 +433,7 @@ class Pomp:
     def train(
         self,
         J: int,
-        itns: int,
+        M: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         optimizer: str = "Newton",
@@ -452,7 +452,7 @@ class Pomp:
 
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
-            itns (int): Maximum iteration for the gradient descent optimization.
+            M (int): Maximum iteration for the gradient descent optimization.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
@@ -512,7 +512,7 @@ class Pomp:
             self._covars_extended,
             J,
             optimizer,
-            itns,
+            M,
             eta,
             c,
             max_ls_itn,
@@ -534,7 +534,7 @@ class Pomp:
                     theta_ests[i],
                     dims=["iteration", "theta"],
                     coords={
-                        "iteration": range(0, itns + 1),
+                        "iteration": range(0, M + 1),
                         "theta": list(theta_i.keys()),
                     },
                 )
@@ -547,7 +547,7 @@ class Pomp:
                 "theta": theta_list,
                 "J": J,
                 "optimizer": optimizer,
-                "itns": itns,
+                "M": M,
                 "eta": eta,
                 "c": c,
                 "max_ls_itn": max_ls_itn,

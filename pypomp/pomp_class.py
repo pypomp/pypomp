@@ -460,25 +460,24 @@ class Pomp:
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "Newton", "WeightedNewton", and "BFGS".
                 Defaults to "Newton".
-            eta (float, optional): Learning rate. Defaults to 0.0025.
-            alpha (float, optional): Discount factor for MOP. Defaults to 0.97.
+            eta (float, optional): Learning rate.
+            alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
-                particles. Defaults to 0.
+                particles.
             scale (bool, optional): Boolean flag controlling whether to normalize the
-                search direction. Defaults to False.
+                search direction.
             ls (bool, optional): Boolean flag controlling whether to use the line
-                search algorithm. Defaults to False.
+                search algorithm.
             Line Search Parameters (only used when ls=True):
                 c (float, optional): The Armijo condition constant for line search,
                     which controls how much the negative log-likelihood needs to
-                    decrease before the line search algorithm continues. Defaults to
-                    0.1.
+                    decrease before the line search algorithm continues.
                 max_ls_itn (int, optional): Maximum number of iterations for the line
-                    search algorithm. Defaults to 10.
+                    search algorithm.
             verbose (bool, optional): Boolean flag controlling whether to print out the
-                log-likelihood and parameter information. Defaults to False.
+                log-likelihood and parameter information.
             n_monitors (int, optional): Number of particle filter runs to average for
-                log-likelihood estimation. Defaults to 1.
+                log-likelihood estimation.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.

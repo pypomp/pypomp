@@ -92,7 +92,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     rt_final = (
         rt_final.at[:, 0:2]
-        .set(rate_pairs / rate_sums[:, None] * (1 - p0_values)[:, None])
+        .set(jnp.einsum("ij,i,i->ij", rate_pairs, 1 / rate_sums, 1 - p0_values))
         .at[:, 2]
         .set(p0_values)
     )

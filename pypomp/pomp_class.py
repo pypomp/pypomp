@@ -12,13 +12,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
 from .mif import _jv_mif_internal
-from .train import _train_internal, _vmapped_train_internal
+from .train import _train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
+from .parameter_trans import parameter_trans, materialize_partrans
 
 
 class Pomp:
@@ -82,6 +83,8 @@ class Pomp:
         dmeas: DMeas | None = None,
         rmeas: RMeas | None = None,
         covars: pd.DataFrame | None = None,
+        partrans=None,
+        paramnames=None,
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -148,6 +151,9 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
+        names = paramnames or list(self.theta[0].keys())
+        partrans_spec = partrans or parameter_trans()
+        self.partrans = materialize_partrans(partrans_spec, names)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -387,6 +393,7 @@ class Pomp:
             sigmas_init,
             self.rproc.accumvars,
             self._covars_extended,
+            self.partrans,
             M,
             a,
             J,
@@ -394,19 +401,12 @@ class Pomp:
             keys,
         )
         for i, theta_i in enumerate(theta_list):
-            # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
-
-            # Create trace DataFrame
             param_names = list(theta_i.keys())
             trace_data = {}
             trace_data["logLik"] = logliks_with_nan
-
-            # Average parameter estimates over particles for each iteration
             for j, param_name in enumerate(param_names):
                 trace_data[param_name] = np.mean(theta_ests[i, :, :, j], axis=1)
-
-            # Create DataFrame with iteration as index
             trace_df = pd.DataFrame(trace_data, index=range(0, M + 1))
             traces_list.append(trace_df)
             final_theta_ests.append(theta_ests[i])
@@ -433,7 +433,7 @@ class Pomp:
     def train(
         self,
         J: int,
-        M: int,
+        itns: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         optimizer: str = "Newton",
@@ -445,14 +445,14 @@ class Pomp:
         c: float = 0.1,
         max_ls_itn: int = 10,
         verbose: bool = False,
-        n_monitors: int = 0,
+        n_monitors: int = 1,
     ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
 
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
-            M (int): Maximum iteration for the gradient descent optimization.
+            itns (int): Maximum iteration for the gradient descent optimization.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
@@ -460,24 +460,25 @@ class Pomp:
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "Newton", "WeightedNewton", and "BFGS".
                 Defaults to "Newton".
-            eta (float, optional): Learning rate.
-            alpha (float, optional): Discount factor for MOP.
+            eta (float, optional): Learning rate. Defaults to 0.0025.
+            alpha (float, optional): Discount factor for MOP. Defaults to 0.97.
             thresh (int, optional): Threshold value to determine whether to resample
-                particles.
+                particles. Defaults to 0.
             scale (bool, optional): Boolean flag controlling whether to normalize the
-                search direction.
+                search direction. Defaults to False.
             ls (bool, optional): Boolean flag controlling whether to use the line
-                search algorithm.
+                search algorithm. Defaults to False.
             Line Search Parameters (only used when ls=True):
                 c (float, optional): The Armijo condition constant for line search,
                     which controls how much the negative log-likelihood needs to
-                    decrease before the line search algorithm continues.
+                    decrease before the line search algorithm continues. Defaults to
+                    0.1.
                 max_ls_itn (int, optional): Maximum number of iterations for the line
-                    search algorithm.
+                    search algorithm. Defaults to 10.
             verbose (bool, optional): Boolean flag controlling whether to print out the
-                log-likelihood and parameter information.
+                log-likelihood and parameter information. Defaults to False.
             n_monitors (int, optional): Number of particle filter runs to average for
-                log-likelihood estimation.
+                log-likelihood estimation. Defaults to 1.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -492,48 +493,42 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
-        keys = jnp.array(jax.random.split(new_key, len(theta_list)))
-
-        # Convert theta_list to array format for vmapping
-        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
-
-        # Use vmapped version instead of for loop
-        nLLs, theta_ests = _vmapped_train_internal(
-            theta_array,
-            self._dt_array_extended,
-            self.rinit.t0,
-            self._ys_extended,
-            self._ys_observed,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf,
-            self.dmeas.struct_pf,
-            self.rproc.accumvars,
-            self._covars_extended,
-            J,
-            optimizer,
-            M,
-            eta,
-            c,
-            max_ls_itn,
-            thresh,
-            scale,
-            ls,
-            alpha,
-            keys,
-            n_monitors,
-        )
-
-        # Process results for each theta set
+        keys = jax.random.split(new_key, len(theta_list))
         logLik_list = []
         thetas_out_list = []
-        for i, theta_i in enumerate(theta_list):
-            logLik_list.append(xr.DataArray(-nLLs[i], dims=["iteration"]))
+        for theta_i, k in zip(theta_list, keys):
+            nLLs, theta_ests = _train_internal(
+                theta_ests=jnp.array(list(theta_i.values())),
+                dt_array_extended=self._dt_array_extended,
+                t0=self.rinit.t0,
+                ys_extended=self._ys_extended,
+                ys_observed=self._ys_observed,
+                rinitializer=self.rinit.struct_pf,
+                rprocess=self.rproc.struct_pf,
+                dmeasure=self.dmeas.struct_pf,
+                accumvars=self.rproc.accumvars,
+                covars_extended=self._covars_extended,
+                J=J,
+                optimizer=optimizer,
+                itns=itns,
+                eta=eta,
+                c=c,
+                max_ls_itn=max_ls_itn,
+                thresh=thresh,
+                verbose=verbose,
+                scale=scale,
+                ls=ls,
+                alpha=alpha,
+                key=k,
+                n_monitors=n_monitors,
+            )
+            logLik_list.append(xr.DataArray(-nLLs, dims=["iteration"]))
             thetas_out_list.append(
                 xr.DataArray(
-                    theta_ests[i],
+                    theta_ests,
                     dims=["iteration", "theta"],
                     coords={
-                        "iteration": range(0, M + 1),
+                        "iteration": range(0, itns + 1),
                         "theta": list(theta_i.keys()),
                     },
                 )
@@ -546,7 +541,7 @@ class Pomp:
                 "theta": theta_list,
                 "J": J,
                 "optimizer": optimizer,
-                "M": M,
+                "itns": itns,
                 "eta": eta,
                 "c": c,
                 "max_ls_itn": max_ls_itn,
@@ -638,7 +633,7 @@ class Pomp:
         """
         trace_rows = []
         param_names = None
-        global_iters = {}  # key: param_idx, value: current iteration (start at 1)
+        global_iters = {}
 
         for res in self.results_history:
             method = res.get("method")
@@ -703,7 +698,6 @@ class Pomp:
                 ):
                     if param_names is None:
                         param_names = list(theta_dict.keys())
-                    # Use the last iteration for this param_idx
                     last_iter = global_iters.get(param_idx, 1) - 1
                     avg_loglik = float(logmeanexp(logLik_arr))
                     row = {
@@ -716,7 +710,6 @@ class Pomp:
                         {param: float(theta_dict[param]) for param in param_names}
                     )
                     trace_rows.append(row)
-            # else: ignore other methods for now
         df = pd.DataFrame(trace_rows)
         if not df.empty:
             df = df.sort_values(["iteration", "replication"]).reset_index(drop=True)
@@ -744,7 +737,6 @@ class Pomp:
             for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
                 if param_names is None:
                     param_names = list(theta_dict.keys())
-                # Use underlying NumPy array if available to avoid copies
                 arr = getattr(logLik_arr, "values", logLik_arr)
                 logLik_arr_np = np.asarray(arr)
                 logLik = float(logmeanexp(logLik_arr_np))
@@ -798,7 +790,6 @@ class Pomp:
         if traces.empty:
             print("No trace data to plot.")
             return
-        # Melt the DataFrame to long format for FacetGrid
         value_vars = [
             col
             for col in traces.columns
@@ -810,7 +801,6 @@ class Pomp:
             var_name="variable",
             value_name="value",
         )
-        # Set up FacetGrid
         g = sns.FacetGrid(
             df_long,
             col="variable",
@@ -823,9 +813,7 @@ class Pomp:
             palette="tab10",
         )
 
-        # Plot lines for mif/train, dots for pfilter
         def facet_plot(data, color, **kwargs):
-            # Lines for mif/train
             for rep, group in data.groupby("replication"):
                 for method in ["mif", "train"]:
                     sub = group[group["method"] == method]
@@ -841,7 +829,6 @@ class Pomp:
                             marker="o",
                             alpha=0.8,
                         )
-                # Dots for pfilter
                 sub = group[group["method"] == "pfilter"]
                 if not sub.empty:
                     plt.scatter(
@@ -869,7 +856,6 @@ class Pomp:
         """
         state = self.__dict__.copy()
 
-        # Store function names and parameters instead of the wrapped objects
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
             state["_rinit_func_name"] = original_func.__name__
@@ -895,7 +881,6 @@ class Pomp:
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
 
-        # Remove the wrapped objects from state
         state.pop("rinit", None)
         state.pop("rproc", None)
         state.pop("dmeas", None)
@@ -908,10 +893,8 @@ class Pomp:
         Custom unpickling method to reconstruct wrapped function objects. This is
         necessary because the JAX-wrapped functions are not picklable.
         """
-        # Restore basic attributes
         self.__dict__.update(state)
 
-        # Reconstruct rinit
         if "_rinit_func_name" in state:
             module = importlib.import_module(state["_rinit_module"])
             obj = getattr(module, state["_rinit_func_name"])
@@ -920,7 +903,6 @@ class Pomp:
             else:
                 self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
 
-        # Reconstruct rproc
         if "_rproc_func_name" in state:
             module = importlib.import_module(state["_rproc_module"])
             obj = getattr(module, state["_rproc_func_name"])
@@ -934,7 +916,6 @@ class Pomp:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = partial(RProc, **kwargs)(obj)
 
-        # Reconstruct dmeas
         if "_dmeas_func_name" in state:
             module = importlib.import_module(state["_dmeas_module"])
             obj = getattr(module, state["_dmeas_func_name"])
@@ -943,7 +924,6 @@ class Pomp:
             else:
                 self.dmeas = DMeas(obj)
 
-        # Reconstruct rmeas
         if "_rmeas_func_name" in state:
             module = importlib.import_module(state["_rmeas_module"])
             obj = getattr(module, state["_rmeas_func_name"])
@@ -952,13 +932,11 @@ class Pomp:
             else:
                 self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
 
-        # Set rmeas or dmeas to None if not set
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
             self.dmeas = None
 
-        # Clean up temporary state variables
         for key in [
             "_rinit_func_name",
             "_rinit_t0",

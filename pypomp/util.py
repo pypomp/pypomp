@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def logmeanexp(x):
+def logmeanexp(x) -> float:
     """
     Calculates the mean likelihood for an array of log-likelihoods,
     and returns the corresponding log-likelihood. This is appropriate
@@ -16,7 +16,7 @@ def logmeanexp(x):
     return log_mean_exp
 
 
-def logmeanexp_se(x):
+def logmeanexp_se(x) -> float:
     """
     A jack-knife standard error for the log-likelihood estimate
     calculated via logmeanexp(). For comparison with R-pomp::logmeanexp,
@@ -29,7 +29,7 @@ def logmeanexp_se(x):
     """
 
     x_array = np.asarray(x, dtype=float)
-    n = x_array.shape[0]
+    n = x_array.size
     if n <= 1:
         return np.nan
 

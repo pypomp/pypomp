@@ -6,7 +6,6 @@ from .model_struct import RInit
 from .model_struct import RProc
 from .model_struct import DMeas
 from .model_struct import RMeas
-from .util import logmeanexp
-from .util import logmeanexp_se
+from .util import expit, logit, logmeanexp, logmeanexp_se
 from .dacca import dacca
 from .spx import spx

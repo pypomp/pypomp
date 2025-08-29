@@ -2,6 +2,7 @@
 
 import jax.numpy as jnp
 import jax
+from pypomp.util import expit
 
 
 param_names = (
@@ -42,8 +43,8 @@ def rproc(X_, theta_, key, covars, t, dt):
     gamma = exp_theta[2]
     iota = exp_theta[3]
     sigmaSE = exp_theta[4]
-    cohort = theta_[7]
-    amplitude = theta_[8]
+    cohort = expit(theta_[7])
+    amplitude = expit(theta_[8])
     pop = covars[0]
     birthrate = covars[1]
     mu = 0.02
@@ -113,7 +114,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    rho = theta_[4]
+    rho = expit(theta_[4])
     psi = jnp.exp(theta_[6])
     C = X_[5]
     tol = 1.0e-18
@@ -140,7 +141,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
-    rho = theta_[4]
+    rho = expit(theta_[4])
     psi = jnp.exp(theta_[6])
     C = X_[5]
     m = rho * C

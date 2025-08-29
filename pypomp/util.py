@@ -1,4 +1,6 @@
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 
 def logmeanexp(x) -> float:
@@ -42,3 +44,11 @@ def logmeanexp_se(x) -> float:
         jack = np.log(loo_mean) + x_max
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)
     return se
+
+
+def logit(x: jax.Array | float) -> jax.Array:
+    return jnp.log(x / (1 - x))
+
+
+def expit(x: jax.Array | float) -> jax.Array:
+    return 1 / (1 + jnp.exp(-x))

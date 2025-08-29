@@ -129,11 +129,13 @@ def _perfilter_internal(
         m=m,
         a=a,
     )
-    (t, particlesF, thetas, loglik, norm_weights, counts, key) = jax.lax.fori_loop(
-        lower=0,
-        upper=len(ys_extended),
-        body_fun=perfilter_helper_2,
-        init_val=(t0, particlesF, thetas, loglik, norm_weights, counts, key),
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = (
+        jax.lax.fori_loop(
+            lower=0,
+            upper=len(ys_extended),
+            body_fun=perfilter_helper_2,
+            init_val=(t0, particlesF, thetas, loglik, norm_weights, counts, key, 0),
+        )
     )
 
     logliks = logliks.at[m + 1].set(-loglik)
@@ -144,7 +146,14 @@ def _perfilter_internal(
 def _perfilter_helper(
     i: int,
     inputs: tuple[
-        jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        int,
     ],
     dt_array_extended: jax.Array,
     times0: jax.Array,
@@ -158,21 +167,39 @@ def _perfilter_helper(
     thresh: float,
     m: int,
     a: float,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    int,
+]:
     """
     Helper functions for perturbed particle filtering algorithm, which conducts
     a single iteration of filtering and is called in function
     'perfilter_internal'.
     """
-    (t, particlesF, thetas, loglik, norm_weights, counts, key) = inputs
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = inputs
     J = len(particlesF)
 
-    sigmas_cooled = (
-        _geometric_cooling(nt=i + 1, m=m, ntimes=len(times0) - 1, a=a) * sigmas
-    )
-    key, subkey = jax.random.split(key)
-    thetas = thetas + sigmas_cooled * jnp.array(
-        jax.random.normal(shape=thetas.shape, key=subkey)
+    def _perturb_thetas(thetas, key):
+        sigmas_cooled = (
+            _geometric_cooling(nt=obs_idx, m=m, ntimes=len(times0) - 1, a=a) * sigmas
+        )
+        key, subkey = jax.random.split(key)
+        thetas = thetas + sigmas_cooled * jnp.array(
+            jax.random.normal(shape=thetas.shape, key=subkey)
+        )
+        return thetas, key
+
+    thetas, key = jax.lax.cond(
+        jnp.logical_or(i == 0, ys_observed[i - 1]),
+        _perturb_thetas,
+        lambda thetas, key: (thetas, key),
+        *(thetas, key),
     )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
@@ -180,7 +207,9 @@ def _perfilter_helper(
     particlesP = rprocesses(particlesF, thetas, keys, covars_t, t, dt_array_extended[i])
     t = t + dt_array_extended[i]
 
-    def _with_observation(loglik, norm_weights, counts, thetas, key, dmeasures):
+    def _with_observation(
+        loglik, norm_weights, counts, thetas, key, obs_idx, dmeasures
+    ):
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         measurements = jnp.nan_to_num(
             dmeasures(ys_extended[i], particlesP, thetas, covars_t, t).squeeze(),
@@ -205,18 +234,19 @@ def _perfilter_helper(
         particlesF = jnp.where(
             accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
         )
-        return (particlesF, loglik, norm_weights, counts, thetas, key)
+        obs_idx = obs_idx + 1
+        return (particlesF, loglik, norm_weights, counts, thetas, key, obs_idx)
 
-    def _without_observation(loglik, norm_weights, counts, thetas, key):
-        return (particlesP, loglik, norm_weights, counts, thetas, key)
+    def _without_observation(loglik, norm_weights, counts, thetas, key, obs_idx):
+        return (particlesP, loglik, norm_weights, counts, thetas, key, obs_idx)
 
     _with_observation_partial = partial(_with_observation, dmeasures=dmeasures)
 
-    particles, loglik, norm_weights, counts, thetas, key = jax.lax.cond(
+    particles, loglik, norm_weights, counts, thetas, key, obs_idx = jax.lax.cond(
         ys_observed[i],
         _with_observation_partial,
         _without_observation,
-        *(loglik, norm_weights, counts, thetas, key),
+        *(loglik, norm_weights, counts, thetas, key, obs_idx),
     )
 
-    return (t, particles, thetas, loglik, norm_weights, counts, key)
+    return (t, particles, thetas, loglik, norm_weights, counts, key, obs_idx)

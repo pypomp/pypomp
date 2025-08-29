@@ -195,8 +195,9 @@ def _perfilter_helper(
         )
         return thetas, key
 
+    time_interval_begins = jnp.logical_or(i == 0, ys_observed[i - 1])
     thetas, key = jax.lax.cond(
-        jnp.logical_or(i == 0, ys_observed[i - 1]),
+        time_interval_begins,
         _perturb_thetas,
         lambda thetas, key: (thetas, key),
         *(thetas, key),

@@ -9,6 +9,11 @@ from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
 from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
+<<<<<<< Updated upstream
+=======
+
+_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
+>>>>>>> Stashed changes
 
 
 def _mif_internal(
@@ -25,12 +30,21 @@ def _mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
+<<<<<<< Updated upstream
     partrans: ParTrans,
     M: int,
     a: float,
     J: int,
     thresh: float,
     key: jax.Array,
+=======
+    partrans: ParTrans = _IDENTITY_PARTRANS,
+    M: int = 1,
+    a: float = 1.0,
+    J: int = 1,
+    thresh: float = 0.0,
+    key: jax.Array | None = None,
+>>>>>>> Stashed changes
 ) -> tuple[jax.Array, jax.Array]:
     logliks = jnp.zeros(M)
     params = jnp.zeros((M, J, theta.shape[-1]))
@@ -54,6 +68,7 @@ def _mif_internal(
         partrans=partrans,
         thresh=thresh,
         a=a,
+        partrans=partrans,
     )
 
     (params, logliks, key) = jax.lax.fori_loop(
@@ -94,6 +109,7 @@ def _perfilter_internal(
     partrans: ParTrans,
     thresh: float,
     a: float,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
 ):
     (params, logliks, key) = inputs
     thetas = _pt_forward(params[m], partrans)
@@ -133,7 +149,11 @@ def _perfilter_internal(
         thresh=thresh,
         m=m,
         a=a,
+<<<<<<< Updated upstream
         n_obs=n_obs,  # >>> FIX: pass the observation-step count to helper for cooling
+=======
+        partrans=partrans,
+>>>>>>> Stashed changes
     )
 
     # >>> FIX: carry obs_count and prev_obs in loop state
@@ -172,6 +192,7 @@ def _perfilter_helper(
     thresh: float,
     m: int,
     a: float,
+<<<<<<< Updated upstream
     n_obs: int,   # number of observation steps
 ) -> tuple[
         jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array,
@@ -179,6 +200,20 @@ def _perfilter_helper(
     ]:
     (t, particlesF, thetas, loglik, norm_weights, counts, key,
      obs_count, prev_obs) = inputs
+=======
+    partrans: ParTrans = _IDENTITY_PARTRANS,
+) -> tuple[
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    int,
+]:
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = inputs
+>>>>>>> Stashed changes
     J = len(particlesF)
 
     # >>> FIX 1: perturb only at the first extended step of each observation interval; cooling is counted by observation steps
@@ -193,13 +228,17 @@ def _perfilter_helper(
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars_t = None if covars_extended is None else covars_extended[i]
     thetas_nat = _pt_inverse(thetas, partrans)
+<<<<<<< Updated upstream
 
     # Propagate one step (Euler substep)
+=======
+>>>>>>> Stashed changes
     particlesP = rprocesses(
         particlesF, thetas_nat, keys, covars_t, t, dt_array_extended[i]
     )
     t = t + dt_array_extended[i]
 
+<<<<<<< Updated upstream
     # At the end of the step: if this step is an observation point, do measurement, normalization, and (optional) resampling
     def _with_observation(body_inputs):
         loglik, norm_weights, counts, thetas, key = body_inputs
@@ -208,6 +247,18 @@ def _perfilter_helper(
             dmeasures(ys_extended[i], particlesP, thetas_nat, covars_tt, t).squeeze(),
             nan=jnp.log(1e-18),
         )
+=======
+    def _with_observation(
+        loglik, norm_weights, counts, thetas, key, obs_idx, dmeasures
+    ):
+        covars_t = None if covars_extended is None else covars_extended[i + 1]
+        thetas_nat = _pt_inverse(thetas, partrans)
+        measurements = jnp.nan_to_num(
+            dmeasures(ys_extended[i], particlesP, thetas_nat, covars_t, t).squeeze(),
+            nan=jnp.log(1e-18),
+        )
+
+>>>>>>> Stashed changes
         if len(measurements.shape) > 1:
             measurements = measurements.sum(axis=-1)
 
@@ -241,8 +292,12 @@ def _perfilter_helper(
         operand=(loglik, norm_weights, counts, thetas, key),
     )
 
+<<<<<<< Updated upstream
     # Update the 'is start of a new interval' flag and the observation counter
     prev_obs = ys_observed[i]
     obs_count = obs_count + jnp.where(is_obs_start, jnp.int32(1), jnp.int32(0))
 
     return (t, particles, thetas, loglik, norm_weights, counts, key, obs_count, prev_obs)
+=======
+    return (t, particles, thetas, loglik, norm_weights, counts, key, obs_idx)
+>>>>>>> Stashed changes

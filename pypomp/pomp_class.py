@@ -493,7 +493,39 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
+<<<<<<< Updated upstream
         keys = jax.random.split(new_key, len(theta_list))
+=======
+        keys = jnp.array(jax.random.split(new_key, len(theta_list)))
+
+        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
+
+        nLLs, theta_ests = _vmapped_train_internal(
+            theta_array,
+            self._dt_array_extended,
+            self.rinit.t0,
+            self._ys_extended,
+            self._ys_observed,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf,
+            self.dmeas.struct_pf,
+            self.rproc.accumvars,
+            self._covars_extended,
+            J,
+            optimizer,
+            M,
+            eta,
+            c,
+            max_ls_itn,
+            thresh,
+            scale,
+            ls,
+            alpha,
+            keys,
+            n_monitors,
+        )
+
+>>>>>>> Stashed changes
         logLik_list = []
         thetas_out_list = []
         for theta_i, k in zip(theta_list, keys):

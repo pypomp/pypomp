@@ -401,12 +401,16 @@ class Pomp:
             keys,
         )
         for i, theta_i in enumerate(theta_list):
+            # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
+            # Create trace DataFrame
             param_names = list(theta_i.keys())
             trace_data = {}
             trace_data["logLik"] = logliks_with_nan
+            # Average parameter estimates over particles for each iteration
             for j, param_name in enumerate(param_names):
                 trace_data[param_name] = np.mean(theta_ests[i, :, :, j], axis=1)
+            # Create DataFrame with iteration as index
             trace_df = pd.DataFrame(trace_data, index=range(0, M + 1))
             traces_list.append(trace_df)
             final_theta_ests.append(theta_ests[i])
@@ -494,8 +498,9 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
+        # Convert theta_list to array format for vmapping
         theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
-
+        # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
             self._dt_array_extended,
@@ -520,7 +525,8 @@ class Pomp:
             keys,
             n_monitors,
         )
-
+        
+        # Process results for each theta set
         logLik_list = []
         thetas_out_list = []
         for i, theta_i in enumerate(theta_list):
@@ -700,6 +706,7 @@ class Pomp:
                 ):
                     if param_names is None:
                         param_names = list(theta_dict.keys())
+                    # Use the last iteration for this param_idx
                     last_iter = global_iters.get(param_idx, 1) - 1
                     avg_loglik = float(logmeanexp(logLik_arr))
                     row = {
@@ -712,6 +719,7 @@ class Pomp:
                         {param: float(theta_dict[param]) for param in param_names}
                     )
                     trace_rows.append(row)
+        # else: ignore other methods for now
         df = pd.DataFrame(trace_rows)
         if not df.empty:
             df = df.sort_values(["iteration", "replication"]).reset_index(drop=True)
@@ -739,6 +747,7 @@ class Pomp:
             for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
                 if param_names is None:
                     param_names = list(theta_dict.keys())
+                # Use underlying NumPy array if available to avoid copies
                 arr = getattr(logLik_arr, "values", logLik_arr)
                 logLik_arr_np = np.asarray(arr)
                 logLik = float(logmeanexp(logLik_arr_np))
@@ -792,6 +801,7 @@ class Pomp:
         if traces.empty:
             print("No trace data to plot.")
             return
+        # Melt the DataFrame to long format for FacetGrid
         value_vars = [
             col
             for col in traces.columns
@@ -803,6 +813,7 @@ class Pomp:
             var_name="variable",
             value_name="value",
         )
+        # Set up FacetGrid
         g = sns.FacetGrid(
             df_long,
             col="variable",
@@ -814,10 +825,12 @@ class Pomp:
             aspect=1.2,
             palette="tab10",
         )
-
+        # Plot lines for mif/train, dots for pfilter
         def facet_plot(data, color, **kwargs):
+            # Lines for mif/train
             for rep, group in data.groupby("replication"):
                 for method in ["mif", "train"]:
+                    # Dots for pfilter
                     sub = group[group["method"] == method]
                     if len(sub) > 1:
                         plt.plot(
@@ -857,7 +870,7 @@ class Pomp:
         necessary because the JAX-wrapped functions are not picklable.
         """
         state = self.__dict__.copy()
-
+        # Store function names and parameters instead of the wrapped objects
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
             state["_rinit_func_name"] = original_func.__name__
@@ -882,7 +895,7 @@ class Pomp:
             state["_rmeas_func_name"] = original_func.__name__
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
-
+        # Remove the wrapped objects from state
         state.pop("rinit", None)
         state.pop("rproc", None)
         state.pop("dmeas", None)
@@ -895,8 +908,9 @@ class Pomp:
         Custom unpickling method to reconstruct wrapped function objects. This is
         necessary because the JAX-wrapped functions are not picklable.
         """
+        # Restore basic attributes
         self.__dict__.update(state)
-
+        # Reconstruct rinit
         if "_rinit_func_name" in state:
             module = importlib.import_module(state["_rinit_module"])
             obj = getattr(module, state["_rinit_func_name"])
@@ -904,7 +918,7 @@ class Pomp:
                 self.rinit = obj
             else:
                 self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
-
+        # Reconstruct rproc
         if "_rproc_func_name" in state:
             module = importlib.import_module(state["_rproc_module"])
             obj = getattr(module, state["_rproc_func_name"])
@@ -917,7 +931,7 @@ class Pomp:
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = partial(RProc, **kwargs)(obj)
-
+        # Reconstruct dmeas
         if "_dmeas_func_name" in state:
             module = importlib.import_module(state["_dmeas_module"])
             obj = getattr(module, state["_dmeas_func_name"])
@@ -925,7 +939,7 @@ class Pomp:
                 self.dmeas = obj
             else:
                 self.dmeas = DMeas(obj)
-
+        # Reconstruct rmeas
         if "_rmeas_func_name" in state:
             module = importlib.import_module(state["_rmeas_module"])
             obj = getattr(module, state["_rmeas_func_name"])
@@ -933,12 +947,12 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
-
+        # Set rmeas or dmeas to None if not set
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
             self.dmeas = None
-
+        # Clean up temporary state variables
         for key in [
             "_rinit_func_name",
             "_rinit_t0",

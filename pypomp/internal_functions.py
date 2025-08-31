@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 
 
+# TODO remove this function, as covars should always be dim 2
 def _keys_helper(
     key: jax.Array, J: int, covars: jax.Array | None
 ) -> tuple[jax.Array, jax.Array]:
@@ -242,6 +243,53 @@ def _interp_covars(
         ).ravel() 
 
 
+def _calc_steps(
+    times0: np.ndarray, dt: float | None, nstep: int | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate the number of steps and the step size for each time interval.
+    """
+    if dt is not None and nstep is not None:
+        raise ValueError("Only nstep or dt can be provided, not both")
+    if dt is not None:
+        num_step_func = _num_euler_steps
+        dt = float(dt)
+    elif nstep is not None:
+        num_step_func = _num_fixedstep_steps
+        nstep = int(nstep)
+    else:
+        raise ValueError("Either dt or nstep must be provided")
+
+    nintervals = len(times0) - 1
+    nstep_array = np.zeros(nintervals, dtype=int)
+    dt_array = np.zeros(nintervals, dtype=float)
+    for i in range(nintervals):
+        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
+        nstep_array[i] = nstep
+        dt_array[i] = dt
+    return nstep_array, dt_array
+
+
+def _calc_ys_extended(
+    ys: np.ndarray,
+    nstep_array: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate the exact values of the observations at the given time points.
+    """
+    n_obs, n_cols = ys.shape
+    total_steps = np.sum(nstep_array)
+    ys_extended = np.full((total_steps, n_cols), np.nan, dtype=float)
+    ys_observed = np.full((total_steps,), False, dtype=bool)
+    idx = 0
+    for i in range(n_obs):
+        idx += nstep_array[i]
+        ys_extended[idx - 1] = ys[i]
+        ys_observed[idx - 1] = True
+
+    return ys_extended, ys_observed
+
+
 def _interp_covars_np(
     t: float | np.ndarray,
     ctimes: np.ndarray | None,
@@ -267,13 +315,13 @@ def _interp_covars_np(
         ).ravel() 
 
 
-def _precompute_interp_covars(
-    t0: float,
-    times: np.ndarray,
+def _calc_interp_covars(
+    times0: np.ndarray,
     ctimes: np.ndarray | None,
     covars: np.ndarray | None,
-    dt: float | None,
-    nstep: int | None,
+    nstep_array: np.ndarray,
+    dt_array: np.ndarray,
+    nintervals: int,
     order: str = "linear",
 ) -> np.ndarray | None:
     """
@@ -281,45 +329,67 @@ def _precompute_interp_covars(
 
     Returns:
         np.ndarray | None: The interpolated covariates for a given set of time points.
-            Shape is (ntimes, max_nstep, ncovars). Returns None if covars or ctimes is
+            Shape is (times, max_nstep, ncovars). Returns None if covars or ctimes is
             None.
     """
     if covars is None or ctimes is None:
         return None
 
     # TODO: optimize this function
-    if dt is not None and nstep is not None:
-        raise ValueError("Only nstep or dt can be provided, not both")
-    if dt is not None:
-        num_step_func = _num_euler_steps
-        dt = float(dt)
-    elif nstep is not None:
-        num_step_func = _num_fixedstep_steps
-        nstep = int(nstep)
-    else:
-        raise ValueError("Either dt or nstep must be provided")
-
-    times0 = np.concatenate((np.array([t0]), times)) 
-    nintervals = len(times0) - 1
-    nstep_array = np.zeros(nintervals, dtype=int) 
-    dt_array = np.zeros(nintervals, dtype=float) 
-    for i in range(nintervals):
-        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  
-        nstep_array[i] = nstep
-        dt_array[i] = dt
+    total_steps = np.sum(nstep_array)
     interp_covars_array = np.full(
-        (nintervals, int(np.max(nstep_array)), covars.shape[1]),
-        fill_value=np.nan, 
-    ) 
-    for i in range(interp_covars_array.shape[0]):
+        (total_steps + 1, covars.shape[1]),
+        fill_value=np.nan,
+    )
+    idx = 0
+    for i in range(nintervals):
         for j in range(nstep_array[i]):
-            interp_covars_array[i, j, :] = _interp_covars_np(
-                times0[i] + j * dt_array[i], 
+            interp_covars_array[idx, :] = _interp_covars_np(
+                times0[i] + j * dt_array[i],
                 ctimes,
                 covars,
                 order,
             )
+            idx += 1
+    interp_covars_array[idx, :] = _interp_covars_np(times0[-1], ctimes, covars, order)
     return interp_covars_array
+
+
+def _calc_ys_covars(
+    t0: float,
+    times: np.ndarray,
+    ys: np.ndarray,
+    ctimes: np.ndarray | None,
+    covars: np.ndarray | None,
+    dt: float | None,
+    nstep: int | None,
+    order: str = "linear",
+) -> tuple[jax.Array, jax.Array, jax.Array | None, jax.Array]:
+    """
+    Construct extended ys and covars arrays.
+    """
+    times0 = np.concatenate((np.array([t0]), times))
+    nstep_array, dt_array = _calc_steps(times0, dt, nstep)
+    nintervals = len(nstep_array)
+
+    interp_covars_array = _calc_interp_covars(
+        times0, ctimes, covars, nstep_array, dt_array, nintervals, order
+    )
+
+    ys_extended, ys_observed = _calc_ys_extended(ys, nstep_array)
+
+    dt_array_extended = np.repeat(dt_array, nstep_array)
+
+    if covars is not None and ctimes is not None:
+        assert interp_covars_array is not None
+        assert interp_covars_array.shape[0] == dt_array_extended.shape[0] + 1
+
+    return (
+        jnp.array(ys_extended),
+        jnp.array(ys_observed),
+        None if interp_covars_array is None else jnp.array(interp_covars_array),
+        jnp.array(dt_array_extended),
+    )
 
 
 def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:

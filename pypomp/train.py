@@ -11,7 +11,7 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21))
+@partial(jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22))
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -35,6 +35,7 @@ def _train_internal(
     alpha: float,
     key: jax.Array,
     n_monitors: int,
+    n_obs: int
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -98,7 +99,8 @@ def _train_internal(
                         accumvars,
                         0,
                         jnp.array(subkeys),
-                    )
+                        n_obs
+                    )["neg_loglik"]
                 )
             else:
                 loglik = jnp.array(jnp.nan)
@@ -185,9 +187,9 @@ def _train_internal(
             direction = direction / jnp.linalg.norm(direction)
 
         if ls:
-            eta2 = _line_search(
-                partial(
-                    _pfilter_internal,
+            def _obj_neg_loglik(theta):
+                neg_loglik = _pfilter_internal(
+                    theta,
                     dt_array_extended=dt_array_extended,
                     t0=t0,
                     ys_extended=ys_extended,
@@ -200,7 +202,17 @@ def _train_internal(
                     covars_extended=covars_extended,
                     thresh=thresh,
                     key=subkey,
-                ),
+                    n_obs=n_obs,
+                    CLL=False,
+                    ESS=False,
+                    filter_mean=False,
+                    prediction_mean=False   
+                )["neg_loglik"]
+
+                return jnp.squeeze(neg_loglik)
+            
+            eta2 = _line_search(
+                _obj_neg_loglik,
                 curr_obj=loglik,
                 pt=theta_ests,
                 grad=grad,
@@ -211,8 +223,9 @@ def _train_internal(
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
-                stoch=False,
+                stoch=False
             )
+
         else:
             eta2 = eta
 
@@ -264,7 +277,12 @@ def _train_internal(
                 accumvars,
                 0,
                 jnp.array(subkeys),
-            )
+                n_obs,
+                False,
+                False,
+                False,
+                False
+            )["neg_loglik"]
         )
     else:
         final_loglik = jnp.array(jnp.nan)
@@ -279,7 +297,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 19 + (0,) + (None,),
+    in_axes=(0,) + (None,) * 19 + (0,) + (None,) * 2,
 )
 
 
@@ -359,6 +377,7 @@ def _jgrad(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     calculates the gradient of a mean particle filter objective (function
@@ -383,6 +402,7 @@ def _jgrad(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 
@@ -401,6 +421,7 @@ def _jvg(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     Calculates the both the value and gradient of a mean particle filter
@@ -440,6 +461,7 @@ def _jvg(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 
@@ -545,6 +567,7 @@ def _jhess(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
@@ -569,6 +592,7 @@ def _jhess(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 

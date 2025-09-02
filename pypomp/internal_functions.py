@@ -269,7 +269,7 @@ def _interp_covars(
             + (covars[upper_index] - covars[lower_index])
             * (t - ctimes[lower_index])
             / (ctimes[upper_index] - ctimes[lower_index])
-        ).ravel()
+        ).ravel() 
 
 
 def _calc_interp_covars(

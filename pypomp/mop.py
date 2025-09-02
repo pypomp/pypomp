@@ -39,7 +39,7 @@ def _mop_internal(
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
 
-    mop_helper_2 = partial(
+    mop_helper_2 = partial( 
         _mop_helper,
         dt_array_extended=dt_array_extended,
         ys_extended=ys_extended,

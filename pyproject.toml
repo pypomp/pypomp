@@ -36,5 +36,5 @@ Issues = "https://github.com/pypomp/pypomp/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.ruff]
+[tool.ruff.lint]
 ignore = ["E741"]

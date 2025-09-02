@@ -261,7 +261,7 @@ class Pomp:
         CLL: bool = False,
         ESS: bool = False,
         filter_mean: bool = False,
-        prediction_mean: bool = False
+        prediction_mean: bool = False,
     ) -> None:
         """
         Instance method for the particle filtering algorithm.
@@ -287,7 +287,7 @@ class Pomp:
         Returns:
            None. Updates self.results with a dictionary containing the log-likelihoods,
            algorithmic parameters used. The conditional log-likelihoods (CLL),
-           effective sample size (ESS), filtered mean, and prediction mean at each time point 
+           effective sample size (ESS), filtered mean, and prediction mean at each time point
            are also included if their respective boolean flags are set to True.
         """
         theta = theta or self.theta
@@ -310,9 +310,9 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        ys_observed_np = np.array(self._ys_observed)  
+        ys_observed_np = np.array(self._ys_observed)
         n_obs = int(np.sum(ys_observed_np))
-        #n_obs = int(np.sum(np.array(self._ys_observed))) 
+        # n_obs = int(np.sum(np.array(self._ys_observed)))
 
         results = _vmapped_pfilter_internal2(
             thetas_repl,
@@ -332,16 +332,18 @@ class Pomp:
             CLL,
             ESS,
             filter_mean,
-            prediction_mean
+            prediction_mean,
         )
 
-        #index = 0
+        # index = 0
         n_theta = len(theta_list)
-        #any_diagnostics = CLL or ESS or filter_mean or prediction_mean
+        # any_diagnostics = CLL or ESS or filter_mean or prediction_mean
         neg_logliks = results["neg_loglik"]
-    
-        logLik_da = xr.DataArray((-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"])
-        #index += 1
+
+        logLik_da = xr.DataArray(
+            (-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"]
+        )
+        # index += 1
         result_dict = {
             "method": "pfilter",
             "logLiks": logLik_da,
@@ -350,24 +352,36 @@ class Pomp:
             "thresh": thresh,
             "key": old_key,
         }
-        
-        # obtain diagnostics using names 
+
+        # obtain diagnostics using names
         if CLL and "CLL" in results:
             CLL_arr = results["CLL"]
-            result_dict["CLL"] = xr.DataArray(CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-        
+            result_dict["CLL"] = xr.DataArray(
+                CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"]
+            )
+
         if ESS and "ESS" in results:
             ESS_arr = results["ESS"]
-            result_dict["ESS"] = xr.DataArray(ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"])
-        
+            result_dict["ESS"] = xr.DataArray(
+                ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"]
+            )
+
         if filter_mean and "filter_mean" in results:
             filter_mean_arr = results["filter_mean"]
-            result_dict["filter_mean"] = xr.DataArray(filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
-        
+            result_dict["filter_mean"] = xr.DataArray(
+                filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]),
+                dims=["theta", "replicate", "time", "state"],
+            )
+
         if prediction_mean and "prediction_mean" in results:
             prediction_mean_arr = results["prediction_mean"]
-            result_dict["prediction_mean"] = xr.DataArray(prediction_mean_arr.reshape(n_theta, reps, *prediction_mean_arr.shape[1:]), dims=["theta", "replicate", "time", "state"])
-        
+            result_dict["prediction_mean"] = xr.DataArray(
+                prediction_mean_arr.reshape(
+                    n_theta, reps, *prediction_mean_arr.shape[1:]
+                ),
+                dims=["theta", "replicate", "time", "state"],
+            )
+
         self.results_history.append(result_dict)
 
     def mif(
@@ -542,9 +556,9 @@ class Pomp:
 
         # Convert theta_list to array format for vmapping
         theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
-        
+
         # Calculate n_obs from ys_observed
-        ys_observed_np = np.array(self._ys_observed)  
+        ys_observed_np = np.array(self._ys_observed)
         n_obs = int(np.sum(ys_observed_np))
 
         # Use vmapped version instead of for loop

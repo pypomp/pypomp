@@ -11,7 +11,9 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22))
+@partial(
+    jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22)
+)
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -35,7 +37,7 @@ def _train_internal(
     alpha: float,
     key: jax.Array,
     n_monitors: int,
-    n_obs: int
+    n_obs: int,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -99,7 +101,7 @@ def _train_internal(
                         accumvars,
                         0,
                         jnp.array(subkeys),
-                        n_obs
+                        n_obs,
                     )["neg_loglik"]
                 )
             else:
@@ -187,6 +189,7 @@ def _train_internal(
             direction = direction / jnp.linalg.norm(direction)
 
         if ls:
+
             def _obj_neg_loglik(theta):
                 neg_loglik = _pfilter_internal(
                     theta,
@@ -206,11 +209,11 @@ def _train_internal(
                     CLL=False,
                     ESS=False,
                     filter_mean=False,
-                    prediction_mean=False   
+                    prediction_mean=False,
                 )["neg_loglik"]
 
                 return jnp.squeeze(neg_loglik)
-            
+
             eta2 = _line_search(
                 _obj_neg_loglik,
                 curr_obj=loglik,
@@ -223,7 +226,7 @@ def _train_internal(
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
-                stoch=False
+                stoch=False,
             )
 
         else:
@@ -281,7 +284,7 @@ def _train_internal(
                 False,
                 False,
                 False,
-                False
+                False,
             )["neg_loglik"]
         )
     else:
@@ -377,7 +380,7 @@ def _jgrad(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
-    n_obs: int
+    n_obs: int,
 ):
     """
     calculates the gradient of a mean particle filter objective (function
@@ -402,7 +405,7 @@ def _jgrad(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
-        n_obs=n_obs
+        n_obs=n_obs,
     )
 
 
@@ -421,7 +424,7 @@ def _jvg(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
-    n_obs: int
+    n_obs: int,
 ):
     """
     Calculates the both the value and gradient of a mean particle filter
@@ -461,7 +464,7 @@ def _jvg(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
-        n_obs=n_obs
+        n_obs=n_obs,
     )
 
 
@@ -567,7 +570,7 @@ def _jhess(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
-    n_obs: int
+    n_obs: int,
 ):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
@@ -592,7 +595,7 @@ def _jhess(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
-        n_obs=n_obs
+        n_obs=n_obs,
     )
 
 

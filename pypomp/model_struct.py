@@ -29,9 +29,9 @@ class RInit:
                 raise ValueError(f"Argument {i + 1} of struct must be '{arg}'")
 
         self.t0 = float(t0)
-        self.struct = struct 
-        self.struct_pf = jax.vmap(struct, (None, 0, None, None)) 
-        self.struct_per = jax.vmap(struct, (0, 0, None, None)) 
+        self.struct = struct
+        self.struct_pf = jax.vmap(struct, (None, 0, None, None))
+        self.struct_per = jax.vmap(struct, (0, 0, None, None))
         self.original_func = struct
 
 

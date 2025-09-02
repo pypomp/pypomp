@@ -8,8 +8,7 @@ from .internal_functions import _no_resampler
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 
-
-@partial(jit, static_argnums=(5, 6, 7, 8, 13, 14, 15, 16))
+@partial(jit, static_argnums=(5, 6, 7, 8, 13, 14, 15, 16, 17))
 def _pfilter_internal(
     theta: jax.Array,  # should be first for _line_search in train.py
     dt_array_extended: jax.Array,
@@ -24,6 +23,7 @@ def _pfilter_internal(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int, # static, number of observed values in ys_observed
     CLL: bool = False, # static
     ESS: bool = False, # static
     filter_mean: bool = False, #static
@@ -42,12 +42,11 @@ def _pfilter_internal(
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
     # prepare arrays to store diagnostics if requested
-    #n_obs = jnp.sum(ys_observed).astype(int)
-    CLL_arr = jnp.zeros(len(ys_extended)) if CLL else jnp.zeros(0)
-    ESS_arr = jnp.zeros(len(ys_extended)) if ESS else jnp.zeros(0)
-    filter_mean_arr = (jnp.zeros((len(ys_extended), particlesF.shape[-1]))
+    CLL_arr = jnp.zeros(n_obs) if CLL else jnp.zeros(0)
+    ESS_arr = jnp.zeros(n_obs) if ESS else jnp.zeros(0)
+    filter_mean_arr = (jnp.zeros((n_obs, particlesF.shape[-1]))
                        if filter_mean else jnp.zeros((0, particlesF.shape[-1])))
-    prediction_mean_arr = (jnp.zeros((len(ys_extended), particlesF.shape[-1]))
+    prediction_mean_arr = (jnp.zeros((n_obs, particlesF.shape[-1]))
                        if prediction_mean else jnp.zeros((0, particlesF.shape[-1])))
 
     pfilter_helper_2 = partial(
@@ -66,26 +65,22 @@ def _pfilter_internal(
         filter_mean=filter_mean,
         prediction_mean=prediction_mean,
     )
-    t, particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = jax.lax.fori_loop(
+    t, particlesF, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = jax.lax.fori_loop(
         lower=0,
         upper=len(ys_extended),
         body_fun=pfilter_helper_2,
-        init_val=(t0, particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr),
+        init_val=(t0, particlesF, loglik, norm_weights, counts, key, 0, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr),
     )
-
+    
     output = {"neg_loglik": -loglik}
 
     if CLL: 
-        #CLL_arr = CLL_arr[ys_observed]  # only keep entries corresponding to observed data
         output["CLL"] = CLL_arr
     if ESS: 
-        #ESS_arr = ESS_arr[ys_observed]  # only keep entries corresponding to observed data
         output["ESS"] = ESS_arr
     if filter_mean: 
-        #filter_mean_arr = filter_mean_arr[ys_observed]  # only keep entries corresponding to observed data  
         output["filter_mean"] = filter_mean_arr
     if prediction_mean: 
-        #prediction_mean_arr = prediction_mean_arr[ys_observed]  # only keep entries corresponding to observed data
         output["prediction_mean"] = prediction_mean_arr
 
     return output
@@ -93,17 +88,17 @@ def _pfilter_internal(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 12 + (0,) + (None,) * 4,
+    in_axes=(None,) * 12 + (0,) + (None,) * 5,
 )
 
 # Map over theta and key
 _vmapped_pfilter_internal2 = jax.vmap(
     _pfilter_internal,
-    in_axes=(0,) + (None,) * 11 + (0,) + (None,) * 4,
+    in_axes=(0,) + (None,) * 11 + (0,) + (None,) * 5,
 )
 
 
-@partial(jit, static_argnums=(6, 7, 8, 9))
+@partial(jit, static_argnums=(5, 6, 7, 8))
 def _pfilter_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
@@ -118,6 +113,7 @@ def _pfilter_internal_mean(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ) -> jax.Array:
     """
     Internal function for calculating the particle filter estimate of the negative log
@@ -138,6 +134,7 @@ def _pfilter_internal_mean(
         accumvars=accumvars,
         thresh=thresh,
         key=key,
+        n_obs=n_obs,
         CLL=False,
         ESS=False,
         filter_mean=False,
@@ -147,8 +144,17 @@ def _pfilter_internal_mean(
 
 def _pfilter_helper(
     i: int,
-    inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array,
-                  jax.Array, jax.Array, jax.Array, jax.Array],
+    inputs: tuple[jax.Array, 
+                  jax.Array, 
+                  jax.Array, 
+                  jax.Array, 
+                  jax.Array, 
+                  jax.Array,
+                  int,
+                  jax.Array, 
+                  jax.Array, 
+                  jax.Array, 
+                  jax.Array],
     dt_array_extended: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
@@ -162,14 +168,23 @@ def _pfilter_helper(
     filter_mean: bool,
     prediction_mean: bool,
     accumvars: tuple[int, ...] | None,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array,
-           jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, 
+           jax.Array, 
+           jax.Array, 
+           jax.Array, 
+           jax.Array, 
+           jax.Array,
+           int,
+           jax.Array, 
+           jax.Array, 
+           jax.Array, 
+           jax.Array]:
     """
     Helper function for the particle filtering algorithm in POMP, which conducts
     filtering for one time-iteration.
     Only update the diagnostics elements when their corresponding boolean elements are set to be TRUE
     """
-    (t, particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr) = inputs
+    (t, particlesF, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr) = inputs
     J = len(particlesF)
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
@@ -177,7 +192,7 @@ def _pfilter_helper(
     particlesP = rprocess(particlesF, theta, keys, covars_t, t, dt_array_extended[i])
     t = t + dt_array_extended[i]
 
-    def _with_observation(loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr):
+    def _with_observation(loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr, dmeasure):
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         measurements = dmeasure(ys_extended[i], particlesP, theta, covars_t, t)
 
@@ -195,19 +210,19 @@ def _pfilter_helper(
 
         if CLL:
             #CLL_arr = CLL_arr * (~mask_diagnostics) + loglik_t * mask_diagnostics
-            CLL_arr = CLL_arr.at[i].set(loglik_t)
+            CLL_arr = CLL_arr.at[obs_idx].set(loglik_t)
         if ESS:
             ess_t = 1.0 / jnp.sum(jnp.exp(2.0 * norm_weights))
             #ESS_arr = ESS_arr * (~mask_diagnostics) + ess_t * mask_diagnostics
-            ESS_arr = ESS_arr.at[i].set(ess_t)
+            ESS_arr = ESS_arr.at[obs_idx].set(ess_t)
         if filter_mean:
             filter_mean_t = (particlesP * jnp.exp(norm_weights[:, None])).sum(axis=0)
             #filter_mean_arr = filter_mean_arr * (~mask_diag_vec) + filter_mean_t * mask_diag_vec
-            filter_mean_arr = filter_mean_arr.at[i].set(filter_mean_t)
+            filter_mean_arr = filter_mean_arr.at[obs_idx].set(filter_mean_t)
         if prediction_mean:
             prediction_mean_t = particlesP.mean(axis=0)
             #prediction_mean_arr = prediction_mean_arr * (~mask_diag_vec) + prediction_mean_t * mask_diag_vec
-            prediction_mean_arr = prediction_mean_arr.at[i].set(prediction_mean_t)
+            prediction_mean_arr = prediction_mean_arr.at[obs_idx].set(prediction_mean_t)
 
         oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
         key, subkey = jax.random.split(key)
@@ -220,17 +235,18 @@ def _pfilter_helper(
         particlesF = jnp.where(
             accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
         )
-        return (particlesF, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)
+        obs_idx = obs_idx + 1
+        return (particlesF, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)
 
-    def _without_observation(loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr):
-        return (particlesP, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)
+    def _without_observation(loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr):
+        return (particlesP, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)
 
-    #_with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
+    _with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
 
-    particles, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = jax.lax.cond(
+    particles, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr = jax.lax.cond(
         ys_observed[i],
-        _with_observation,
+        _with_observation_partial,
         _without_observation,
-        *(loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr),
+        *(loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr),
     )
-    return (t, particles, loglik, norm_weights, counts, key, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)
+    return (t, particles, loglik, norm_weights, counts, key, obs_idx, CLL_arr, ESS_arr, filter_mean_arr, prediction_mean_arr)

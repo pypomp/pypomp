@@ -2,6 +2,7 @@
 
 import jax.numpy as jnp
 import jax
+from pypomp.util import expit
 
 
 param_names = (
@@ -22,7 +23,8 @@ param_names = (
 
 
 def rinit(theta_, key, covars, t0=None):
-    S_0, E_0, I_0, R_0 = jnp.exp(theta_[9:]) / jnp.sum(jnp.exp(theta_[9:]))
+    exp_theta_9_13 = jnp.exp(theta_[9:])
+    S_0, E_0, I_0, R_0 = exp_theta_9_13 / jnp.sum(exp_theta_9_13)
     m = covars[0] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
     E = jnp.round(m * E_0)
@@ -35,38 +37,35 @@ def rinit(theta_, key, covars, t0=None):
 
 def rproc(X_, theta_, key, covars, t, dt):
     S, E, I, R, W, C = X_
-    R0 = jnp.exp(theta_[0])
-    sigma = jnp.exp(theta_[1])
-    gamma = jnp.exp(theta_[2])
-    iota = jnp.exp(theta_[3])
-    sigmaSE = jnp.exp(theta_[5])
-    cohort = theta_[7]
-    amplitude = theta_[8]
+    exp_theta = jnp.exp(theta_[jnp.array([0, 1, 2, 3, 5])])
+    R0 = exp_theta[0]
+    sigma = exp_theta[1]
+    gamma = exp_theta[2]
+    iota = exp_theta[3]
+    sigmaSE = exp_theta[4]
+    cohort = expit(theta_[7])
+    amplitude = expit(theta_[8])
     pop = covars[0]
     birthrate = covars[1]
     mu = 0.02
-    br = jax.lax.cond(
-        jnp.squeeze(jnp.abs(t - jnp.floor(t) - 251.0 / 365.0)) < 0.5 * dt,
-        lambda cohort, birthrate, dt: (
-            cohort * birthrate / dt + (1 - cohort) * birthrate
-        ),
-        lambda cohort, birthrate, dt: (1 - cohort) * birthrate,
-        *(cohort, birthrate, dt),
+
+    t_mod = t - jnp.floor(t)
+    is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
+    br = jnp.where(
+        is_cohort_time,
+        cohort * birthrate / dt + (1 - cohort) * birthrate,
+        (1 - cohort) * birthrate,
     )
 
     # term-time seasonality
-    t = (t - jnp.floor(t)) * 365.25
-    seas = jax.lax.cond(
-        jnp.squeeze(
-            ((t >= 7) & (t <= 100))
-            | ((t >= 115) & (t <= 199))
-            | ((t >= 252) & (t <= 300))
-            | ((t >= 308) & (t <= 356))
-        ),
-        lambda amplitude: 1.0 + amplitude * 0.2411 / 0.7589,
-        lambda amplitude: 1 - amplitude,
-        amplitude,
+    t_days = t_mod * 365.25
+    in_term_time = (
+        ((t_days >= 7) & (t_days <= 100))
+        | ((t_days >= 115) & (t_days <= 199))
+        | ((t_days >= 252) & (t_days <= 300))
+        | ((t_days >= 308) & (t_days <= 356))
     )
+    seas = jnp.where(in_term_time, 1.0 + amplitude * 0.2411 / 0.7589, 1 - amplitude)
 
     # transmission rate
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
@@ -75,39 +74,35 @@ def rproc(X_, theta_, key, covars, t, dt):
     foi = beta * (I + iota) / pop
 
     # white noise (extrademographic stochasticity)
-    key, subkey = jax.random.split(key)
-    dw = jax.random.gamma(subkey, dt / sigmaSE**2) * sigmaSE**2
-    # dw = jnp.exp(
-    #     jax.random.loggamma(subkey, jnp.exp(jnp.log(dt) - 2 * jnp.log(sigmaSE)))
-    #     + 2 * jnp.log(sigmaSE)
-    # )
+    keys = jax.random.split(key, 3)
+    dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
-    # ir = jnp.exp(jnp.log(foi) + jnp.log(dw) - jnp.log(dt))
-    # rate = jnp.array([ir, mu, sigma, mu, gamma, mu])
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
-    key, subkey = jax.random.split(key)
-    births = jax.random.poisson(subkey, br * dt)
+    births = jax.random.poisson(keys[1], br * dt)
 
     # transitions between classes
-    # TODO use a loop for this
-    key, subkey = jax.random.split(key)
-    p0 = jnp.exp(-(rate[0] + rate[1]) * dt)
-    rt = (rate[0:2]) / (rate[0] + rate[1]) * (1 - p0)
-    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
-    trans_S = jax.random.multinomial(subkey, S, rt)
+    rt_final = jnp.zeros((3, 3))
 
-    lastkey, subkey = jax.random.split(key)
-    p0 = jnp.exp(-(rate[2] + rate[3]) * dt)
-    rt = (rate[2:4]) / (rate[2] + rate[3]) * (1 - p0)
-    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
-    trans_E = jax.random.multinomial(subkey, E, rt)
+    rate_pairs = jnp.array([[rate[0], rate[1]], [rate[2], rate[3]], [rate[4], rate[5]]])
+    populations = jnp.array([S, E, I])
 
-    p0 = jnp.exp(-(rate[4] + rate[5]) * dt)
-    rt = (rate[4:6]) / (rate[4] + rate[5]) * (1 - p0)
-    rt = jnp.concatenate([rt.reshape((2,)), p0.reshape((1,))])
-    trans_I = jax.random.multinomial(lastkey, I, rt)
+    rate_sums = jnp.sum(rate_pairs, axis=1)
+    p0_values = jnp.exp(-rate_sums * dt)
+
+    rt_final = (
+        rt_final.at[:, 0:2]
+        .set(jnp.einsum("ij,i,i->ij", rate_pairs, 1 / rate_sums, 1 - p0_values))
+        .at[:, 2]
+        .set(p0_values)
+    )
+
+    transitions = jax.random.multinomial(keys[2], populations, rt_final)
+
+    trans_S = transitions[0]
+    trans_E = transitions[1]
+    trans_I = transitions[2]
 
     S = S + births - trans_S[0] - trans_S[1]
     E = E + trans_S[0] - trans_E[0] - trans_E[1]
@@ -115,16 +110,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
     C = C + trans_I[0]
-    # jax.debug.print("dt: {x}", x=dt)
-    # jax.debug.print("dw: {x}", x=dw)
-    # jax.debug.print("foi: {x}", x=foi)
-    # jax.debug.print("dw/dt: {x}", x=dw / dt)
-    # jax.debug.print("rate[0]: {x}", x=rate[0])
     return jnp.array([S, E, I, R, W, C])
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    rho = theta_[4]
+    rho = expit(theta_[4])
     psi = jnp.exp(theta_[6])
     C = X_[5]
     tol = 1.0e-18
@@ -134,11 +124,12 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     sqrt_v_tol = jnp.sqrt(v) + tol
 
     upper_cdf = jax.scipy.stats.norm.cdf(Y_ + 0.5, m, sqrt_v_tol)
+    lower_cdf = jax.scipy.stats.norm.cdf(Y_ - 0.5, m, sqrt_v_tol)
 
     lik = (
         jnp.where(
             Y_ > tol,
-            upper_cdf - jax.scipy.stats.norm.cdf(Y_ - 0.5, m, sqrt_v_tol),
+            upper_cdf - lower_cdf,
             upper_cdf,
         )
         + tol
@@ -150,7 +141,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
-    rho = theta_[4]
+    rho = expit(theta_[4])
     psi = jnp.exp(theta_[6])
     C = X_[5]
     m = rho * C

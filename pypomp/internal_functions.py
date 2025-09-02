@@ -180,67 +180,24 @@ def _num_fixedstep_steps(
 
 def _num_euler_steps(
     t1: float, t2: float, dt: float, nstep: int | None
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculate the number of steps and the step size for a given time step size.
     """
-    tol = jnp.sqrt(jnp.finfo(float).eps)
+    tol = np.sqrt(np.finfo(float).eps)
 
-    nstep2 = jnp.ceil((t2 - t1) / dt / (1 + tol)).astype(int) 
+    nstep2 = np.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
     dt2 = (t2 - t1) / nstep2
 
     check1 = t1 + dt >= t2
-    nstep2 = jnp.where(check1, 1, nstep2)
-    dt2 = jnp.where(check1, t2 - t1, dt2)
+    nstep2 = np.where(check1, 1, nstep2)
+    dt2 = np.where(check1, t2 - t1, dt2)
 
     check2 = t1 >= t2
-    nstep2 = jnp.where(check2, 0, nstep2)
-    dt2 = jnp.where(check2, 0.0, dt2)
+    nstep2 = np.where(check2, 0, nstep2)
+    dt2 = np.where(check2, 0.0, dt2)
 
     return nstep2, dt2
-
-
-def _interp_covars(
-    t: float | jax.Array,
-    ctimes: jax.Array | None,
-    covars: jax.Array | None,
-    order: str = "linear",
-) -> jax.Array | None:
-    """
-    Interpolate covariates.
-
-    Args:
-        t (float | jax.Array): Time point at which to interpolate the covariates.
-            Can be a single float or an array containing one time point.
-        ctimes (jax.Array | None): Array of time points for which covariates are
-            available. Must be sorted in ascending order.
-        covars (jax.Array | None): Array of covariate values corresponding to ctimes.
-            Shape should be (len(ctimes), n_covars) where n_covars is the number of covariates.
-        order (str, optional): Interpolation method. Currently only 'linear' is
-            supported. Defaults to 'linear'.
-
-    Returns:
-        jax.Array | None: The interpolated covariates at time t. Returns None if either
-            ctimes or covars is None. Shape is (n_covars,).
-
-    Note:
-        This function assumes that ctimes is sorted in ascending order. If t is outside
-        the range of ctimes, the nearest available covariate value will be used.
-    """
-    # TODO: Add constant interpolation
-    if (covars is None) | (ctimes is None):
-        return None
-    else:
-        assert ctimes is not None
-        assert covars is not None
-        upper_index = jnp.searchsorted(ctimes, t, side="left") 
-        lower_index = upper_index - 1
-        return (
-            covars[lower_index]
-            + (covars[upper_index] - covars[lower_index])
-            * (t - ctimes[lower_index])
-            / (ctimes[upper_index] - ctimes[lower_index]) 
-        ).ravel() 
 
 
 def _calc_steps(
@@ -290,7 +247,7 @@ def _calc_ys_extended(
     return ys_extended, ys_observed
 
 
-def _interp_covars_np(
+def _interp_covars(
     t: float | np.ndarray,
     ctimes: np.ndarray | None,
     covars: np.ndarray | None,
@@ -344,14 +301,14 @@ def _calc_interp_covars(
     idx = 0
     for i in range(nintervals):
         for j in range(nstep_array[i]):
-            interp_covars_array[idx, :] = _interp_covars_np(
+            interp_covars_array[idx, :] = _interp_covars(
                 times0[i] + j * dt_array[i],
                 ctimes,
                 covars,
                 order,
             )
             idx += 1
-    interp_covars_array[idx, :] = _interp_covars_np(times0[-1], ctimes, covars, order)
+    interp_covars_array[idx, :] = _interp_covars(times0[-1], ctimes, covars, order)
     return interp_covars_array
 
 

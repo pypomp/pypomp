@@ -1,7 +1,9 @@
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 
-def logmeanexp(x):
+def logmeanexp(x) -> float:
     """
     Calculates the mean likelihood for an array of log-likelihoods,
     and returns the corresponding log-likelihood. This is appropriate
@@ -16,7 +18,7 @@ def logmeanexp(x):
     return log_mean_exp
 
 
-def logmeanexp_se(x):
+def logmeanexp_se(x) -> float:
     """
     A jack-knife standard error for the log-likelihood estimate
     calculated via logmeanexp(). For comparison with R-pomp::logmeanexp,
@@ -29,7 +31,7 @@ def logmeanexp_se(x):
     """
 
     x_array = np.asarray(x, dtype=float)
-    n = x_array.shape[0]
+    n = x_array.size
     if n <= 1:
         return np.nan
 
@@ -42,3 +44,11 @@ def logmeanexp_se(x):
         jack = np.log(loo_mean) + x_max
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)
     return se
+
+
+def logit(x: jax.Array | float) -> jax.Array:
+    return jnp.log(x / (1 - x))
+
+
+def expit(x: jax.Array | float) -> jax.Array:
+    return 1 / (1 + jnp.exp(-x))

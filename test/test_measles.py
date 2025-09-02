@@ -18,11 +18,11 @@ class Test_Measles(unittest.TestCase):
                 "sigma": float(jnp.log(28.9)),
                 "gamma": float(jnp.log(30.4)),
                 "iota": float(jnp.log(2.9)),
-                "rho": 0.488,
+                "rho": float(pp.logit(0.488)),
                 "sigmaSE": float(jnp.log(0.0878)),
                 "psi": float(jnp.log(0.116)),
-                "cohort": 0.557,
-                "amplitude": 0.554,
+                "cohort": float(pp.logit(0.557)),
+                "amplitude": float(pp.logit(0.554)),
                 "S_0": float(init_params_T[0]),
                 "E_0": float(init_params_T[1]),
                 "I_0": float(init_params_T[2]),
@@ -91,4 +91,4 @@ class Test_Measles(unittest.TestCase):
         self.measles.mop(J=self.J, key=self.key)
 
     def test_measles_train(self):
-        self.measles.train(itns=2, J=self.J, key=self.key)
+        self.measles.train(M=1, J=self.J, key=self.key)

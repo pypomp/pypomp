@@ -119,7 +119,13 @@ def _mop_helper(
     t, particlesF, loglik, weightsF, counts, key = inputs
     J = len(particlesF)
 
-    weightsP = alpha * weightsF
+    time_interval_begins = jnp.logical_or(i == 0, ys_observed[i - 1])
+    weightsP = jax.lax.cond(
+        time_interval_begins,
+        lambda weightsF: weightsF,
+        lambda weightsF: alpha * weightsF,
+        weightsF,
+    )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars_t = None if covars_extended is None else covars_extended[i]

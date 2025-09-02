@@ -78,11 +78,11 @@ def _simulate_helper(
         key, *keys = jax.random.split(key, num=nsim + 1)
         keys = jnp.array(keys)
         Y_sims = rmeasure(X_sims, theta, keys, covars_t, t)
+        X_array = X_array.at[obs_idx + 1].set(X_sims.T)
+        Y_array = Y_array.at[obs_idx].set(Y_sims.T)
         X_sims = jnp.where(
             accumvars is not None, X_sims.at[:, accumvars].set(0.0), X_sims
         )
-        X_array = X_array.at[obs_idx + 1].set(X_sims.T)
-        Y_array = Y_array.at[obs_idx].set(Y_sims.T)
         return X_sims, X_array, Y_array, key, obs_idx + 1
 
     def without_observation(X_sims, X_array, Y_array, key, obs_idx):

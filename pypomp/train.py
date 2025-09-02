@@ -2,8 +2,6 @@ from functools import partial
 import jax
 from jax import jit
 import jax.numpy as jnp
-import numpy as np
-from tqdm import tqdm
 from typing import Callable
 from .pfilter import (
     _pfilter_internal,
@@ -13,6 +11,7 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
+@partial(jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22))
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -26,30 +25,28 @@ def _train_internal(
     covars_extended: jax.Array | None,
     J: int,
     optimizer: str,
-    itns: int,
+    M: int,
     eta: float,
     c: float,
     max_ls_itn: int,
     thresh: float,
-    verbose: bool,
     scale: bool,
     ls: bool,
     alpha: float,
     key: jax.Array,
     n_monitors: int,
+    n_obs: int
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
     """
-    eta2 = eta
-    Acopies = []
-    grads = []
-    hesses = []
-    logliks = []
-    hess = jnp.eye(theta_ests.shape[-1])  # default one
     ylen = jnp.sum(ys_observed)
+    if n_monitors < 1 and ls:
+        raise ValueError("Line search requires at least one monitor")
 
-    for i in tqdm(range(itns)):
+    def train_step(i, carry):
+        theta_ests, key, hess, Acopies, logliks, grads, hesses = carry
+
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
             loglik, grad = _jvg_mop(
@@ -67,7 +64,6 @@ def _train_internal(
                 alpha=alpha,
                 key=subkey,
             )
-
             loglik *= ylen
         else:
             key, subkey = jax.random.split(key)
@@ -86,29 +82,28 @@ def _train_internal(
                 alpha=alpha,
                 key=subkey,
             )
-
-            key, *subkeys = jax.random.split(key, n_monitors + 1)
-            loglik = jnp.mean(
-                _vmapped_pfilter_internal(
-                    theta_ests,
-                    dt_array_extended,
-                    t0,
-                    ys_extended,
-                    ys_observed,
-                    J,
-                    rinitializer,
-                    rprocess,
-                    dmeasure,
-                    covars_extended,
-                    accumvars,
-                    0,
-                    jnp.array(subkeys),
-                    False,
-                    False,
-                    False,
-                    False
+            if n_monitors > 0:
+                key, *subkeys = jax.random.split(key, n_monitors + 1)
+                loglik = jnp.mean(
+                    _vmapped_pfilter_internal(
+                        theta_ests,
+                        dt_array_extended,
+                        t0,
+                        ys_extended,
+                        ys_observed,
+                        J,
+                        rinitializer,
+                        rprocess,
+                        dmeasure,
+                        covars_extended,
+                        accumvars,
+                        0,
+                        jnp.array(subkeys),
+                        n_obs
+                    )["neg_loglik"]
                 )
-            )
+            else:
+                loglik = jnp.array(jnp.nan)
 
         if optimizer == "Newton":
             key, subkey = jax.random.split(key)
@@ -127,107 +122,74 @@ def _train_internal(
                 alpha=alpha,
                 key=subkey,
             )
-
-            # flatten
-            # theta_flat = theta_ests.flatten()
-            # grad_flat = grad.flatten()
-            # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
-            # hess_flat_pinv = np.linalg.pinv(hess_flat)
-            # direction_flat = -hess_flat_pinv @ grad_flat
-            # direction = direction_flat.reshape(theta_ests.shape)
-
             direction = -jnp.linalg.pinv(hess) @ grad
+
         elif optimizer == "WeightedNewton":
-            if i == 0:
-                key, subkey = jax.random.split(key)
-                hess = _jhess_mop(
-                    theta_ests=theta_ests,
-                    dt_array_extended=dt_array_extended,
-                    t0=t0,
-                    ys_extended=ys_extended,
-                    ys_observed=ys_observed,
-                    J=J,
-                    rinitializer=rinitializer,
-                    rprocess=rprocess,
-                    dmeasure=dmeasure,
-                    accumvars=accumvars,
-                    covars_extended=covars_extended,
-                    alpha=alpha,
-                    key=subkey,
-                )
-                # theta_flat = theta_ests.flatten()
-                # grad_flat = grad.flatten()
-                # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
-                # hess_flat_pinv = np.linalg.pinv(hess_flat)
-                # direction_flat = -hess_flat_pinv @ grad_flat
-                # direction = direction_flat.reshape(theta_ests.shape)
-                direction = -jnp.linalg.pinv(hess) @ grad
-
-            else:
-                key, subkey = jax.random.split(key)
-                hess = _jhess_mop(
-                    theta_ests=theta_ests,
-                    dt_array_extended=dt_array_extended,
-                    t0=t0,
-                    ys_extended=ys_extended,
-                    ys_observed=ys_observed,
-                    J=J,
-                    rinitializer=rinitializer,
-                    rprocess=rprocess,
-                    dmeasure=dmeasure,
-                    accumvars=accumvars,
-                    covars_extended=covars_extended,
-                    alpha=alpha,
-                    key=subkey,
-                )
-                wt = (i ** np.log(i)) / ((i + 1) ** (np.log(i + 1)))
-                # theta_flat = theta_ests.flatten()
-                # grad_flat = grad.flatten()
-                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
-                # weighted_hess_flat = weighted_hess.reshape(theta_flat.size, theta_flat.size)
-                # weighted_hess_flat_pinv = np.linalg.pinv(weighted_hess_flat)
-                # direction_flat = -weighted_hess_flat_pinv @ grad_flat
-                # direction = direction_flat.reshape(theta_ests.shape)
-                direction = -jnp.linalg.pinv(weighted_hess) @ grad
-
-        elif optimizer == "BFGS" and i > 1:
-            s_k = eta * direction
-            # not grad but grads
-            y_k = grad - grads[-1]
-            rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
-            sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
-            w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
-            # H_(k+1) = W_k^T@H_k@W_k + pho_k@s_k@s_k^T
-            hess = (
-                jnp.einsum("ij,jk,lk", w, hess, w)
-                + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
+            key, subkey = jax.random.split(key)
+            hess = _jhess_mop(
+                theta_ests=theta_ests,
+                dt_array_extended=dt_array_extended,
+                t0=t0,
+                ys_extended=ys_extended,
+                ys_observed=ys_observed,
+                J=J,
+                rinitializer=rinitializer,
+                rprocess=rprocess,
+                dmeasure=dmeasure,
+                accumvars=accumvars,
+                covars_extended=covars_extended,
+                alpha=alpha,
+                key=subkey,
             )
-            hess = jnp.where(jnp.isfinite(rho_k), hess, hess)
 
-            # theta_flat = theta_ests.flatten()
-            # grad_flat = grad.flatten()
-            # hess_flat = hess.reshape(theta_flat.size, theta_flat.size)
+            def dir_weighted(_):
+                i_f = i.astype(theta_ests.dtype)
+                wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
+                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
+                return -jnp.linalg.pinv(weighted_hess) @ grad
 
-            # direction_flat = -hess_flat @ grad_flat
-            # direction = direction_flat.reshape(theta_ests.shape)
+            direction = jax.lax.cond(
+                i == 0, lambda _: -jnp.linalg.pinv(hess) @ grad, dir_weighted, None
+            )
 
-            direction = -hess @ grad
+        elif optimizer == "BFGS":
+
+            def bfgs_true(_):
+                prev_direction = jax.lax.cond(
+                    i > 0,
+                    lambda __: -grads[i - 1],
+                    lambda __: -grad,
+                    operand=None,
+                )
+                s_k = eta * prev_direction
+                y_k = grad - grads[i - 1]
+                rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
+                sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
+                w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
+                new_hess = (
+                    jnp.einsum("ij,jk,lk", w, hess, w)
+                    + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
+                )
+                new_hess = jnp.where(jnp.isfinite(rho_k), new_hess, hess)
+                new_direction = -new_hess @ grad
+                return new_hess, new_direction
+
+            def bfgs_false(_):
+                return hess, -grad
+
+            hess, direction = jax.lax.cond(i > 1, bfgs_true, bfgs_false, operand=None)
 
         else:
+            # For BFGS when i <= 1, or other optimizers, use gradient descent
             direction = -grad
-
-        Acopies.append(theta_ests)
-        logliks.append(loglik)
-        grads.append(grad)
-        hesses.append(hess)
 
         if scale:
             direction = direction / jnp.linalg.norm(direction)
 
         if ls:
-            eta2 = _line_search(
-                partial(
-                    _pfilter_internal,
+            def _obj_neg_loglik(theta):
+                neg_loglik = _pfilter_internal(
+                    theta,
                     dt_array_extended=dt_array_extended,
                     t0=t0,
                     ys_extended=ys_extended,
@@ -240,30 +202,69 @@ def _train_internal(
                     covars_extended=covars_extended,
                     thresh=thresh,
                     key=subkey,
-                ),
-                curr_obj=float(loglik),
+                    n_obs=n_obs,
+                    CLL=False,
+                    ESS=False,
+                    filter_mean=False,
+                    prediction_mean=False   
+                )["neg_loglik"]
+
+                return jnp.squeeze(neg_loglik)
+            
+            eta2 = _line_search(
+                _obj_neg_loglik,
+                curr_obj=loglik,
                 pt=theta_ests,
                 grad=grad,
                 direction=direction,
                 k=i + 1,
-                eta=eta,
+                eta=jnp.array(eta),
                 xi=10,
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
-                stoch=False,
+                stoch=False
             )
 
-        if verbose:
-            print(theta_ests, eta2, logliks[i])
+        else:
+            eta2 = eta
 
-        theta_ests += eta2 * direction
+        theta_ests = theta_ests + eta2 * direction
 
-    key, *subkeys = jax.random.split(key, n_monitors + 1)
-    logliks.append(
-        jnp.mean(
+        # Update carry state
+        Acopies = Acopies.at[i].set(theta_ests)
+        logliks = logliks.at[i].set(loglik)
+        grads = grads.at[i].set(grad)
+        hesses = hesses.at[i].set(hess)
+
+        return (theta_ests, key, hess, Acopies, logliks, grads, hesses)
+
+    # Initialize arrays for storing results
+    Acopies = jnp.zeros((M + 1, *theta_ests.shape))
+    logliks = jnp.zeros(M + 1)
+    grads = jnp.zeros((M + 1, *theta_ests.shape))
+    hesses = jnp.zeros((M + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
+
+    # Set initial values
+    Acopies = Acopies.at[0].set(theta_ests)
+    hess = jnp.eye(theta_ests.shape[-1])  # default one
+
+    # Run the optimization loop
+    final_theta, final_key, final_hess, Acopies, logliks, grads, hesses = (
+        jax.lax.fori_loop(
+            0,
+            M,
+            train_step,
+            (theta_ests, key, hess, Acopies, logliks, grads, hesses),
+        )
+    )
+
+    # Final evaluation
+    if n_monitors > 0:
+        final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
+        final_loglik = jnp.mean(
             _vmapped_pfilter_internal(
-                theta_ests,
+                final_theta,
                 dt_array_extended,
                 t0,
                 ys_extended,
@@ -272,36 +273,48 @@ def _train_internal(
                 rinitializer,
                 rprocess,
                 dmeasure,
-                accumvars,
                 covars_extended,
+                accumvars,
                 0,
                 jnp.array(subkeys),
+                n_obs,
                 False,
                 False,
                 False,
                 False
-            )
+            )["neg_loglik"]
         )
-    )
-    Acopies.append(theta_ests)
+    else:
+        final_loglik = jnp.array(jnp.nan)
 
-    return jnp.array(logliks), jnp.array(Acopies)
+    # Update final results
+    logliks = logliks.at[-1].set(final_loglik)
+    Acopies = Acopies.at[-1].set(final_theta)
+
+    return logliks, Acopies
+
+
+# Map over theta and key
+_vmapped_train_internal = jax.vmap(
+    _train_internal,
+    in_axes=(0,) + (None,) * 19 + (0,) + (None,) * 2,
+)
 
 
 def _line_search(
     obj: Callable,
-    curr_obj: float,
+    curr_obj: jax.Array,
     pt: jax.Array,
     grad: jax.Array,
     direction: jax.Array,
     k: int,
-    eta: float,
+    eta: jax.Array,
     xi: int,
     tau: int,
     c: float,
     frac: float,
     stoch: bool,
-) -> float:
+) -> jax.Array:
     """
     Conducts line search algorithm to determine the step size under stochastic
     Quasi-Newton methods. The implentation of the algorithm refers to
@@ -309,12 +322,12 @@ def _line_search(
 
     Args:
         obj (function): The objective function aiming to minimize
-        curr_obj (float): The value of the objective function at the current
+        curr_obj (jax.Array): The value of the objective function at the current
             point.
-        pt (array-like): The array containing current parameter values.
-        grad (array-like): The gradient of the objective function at the current
+        pt (jax.Array): The array containing current parameter values.
+        grad (jax.Array): The gradient of the objective function at the current
             point.
-        direction (array-like): The direction to update the parameters.
+        direction (jax.Array): The direction to update the parameters.
         k (int, optional): Iteration index.
         eta (float, optional): Initial step size.
         xi (int, optional): Reduction limit.
@@ -326,22 +339,27 @@ def _line_search(
             the initial step size.
 
     Returns:
-        float: optimal step size
+        jax.Array: optimal step size
     """
-    itn = 0
-    eta = min([eta, xi / k]) if stoch else eta
-    next_obj = obj(pt + eta * direction)
+    eta = jnp.where(stoch, jnp.minimum(eta, xi / k), eta)
     # check whether the new point(new_obj)satisfies the stochastic Armijo condition
     # if not, repeat until the condition is met
     # previous: grad.T @ direction
-    while next_obj > curr_obj + eta * c * jnp.sum(grad * direction) or jnp.isnan(
-        next_obj
-    ):
-        eta *= frac
-        itn += 1
-        if itn > tau:
-            break
-    return eta
+
+    def line_search_body(carry):
+        eta_val, itn, should_continue = carry
+        next_obj = obj(pt + eta_val * direction)
+        should_continue = (
+            next_obj > curr_obj + eta_val * c * jnp.sum(grad * direction)
+        ) | jnp.isnan(next_obj)
+        eta_new = jnp.where(should_continue & (itn < tau), eta_val * frac, eta_val)
+        itn_new = itn + 1
+        return eta_new, itn_new, should_continue & (itn < tau)
+
+    eta_final, _, _ = jax.lax.while_loop(
+        lambda carry: carry[2], line_search_body, (eta, 0, False)
+    )
+    return eta_final
 
 
 @partial(jit, static_argnums=(5, 6, 7, 8))
@@ -359,6 +377,7 @@ def _jgrad(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     calculates the gradient of a mean particle filter objective (function
@@ -383,6 +402,7 @@ def _jgrad(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 
@@ -401,6 +421,7 @@ def _jvg(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     Calculates the both the value and gradient of a mean particle filter
@@ -440,6 +461,7 @@ def _jvg(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 
@@ -545,6 +567,7 @@ def _jhess(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int
 ):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
@@ -569,6 +592,7 @@ def _jhess(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs
     )
 
 

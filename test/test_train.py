@@ -15,7 +15,6 @@ class TestFit_LG(unittest.TestCase):
         self.J = 5
         self.key = jax.random.key(111)
         self.M = 2
-        self.itns = 2
 
     def test_class_GD_basic(self):
         optimizers = ["SGD", "Newton", "WeightedNewton", "BFGS"]
@@ -23,10 +22,11 @@ class TestFit_LG(unittest.TestCase):
             with self.subTest(optimizer=optimizer):
                 self.LG.train(
                     J=self.J,
-                    itns=self.itns,
+                    M=self.M,
                     optimizer=optimizer,
                     scale=True,
                     ls=True,
+                    n_monitors=1,
                     key=self.key,
                 )
                 GD_out = self.LG.results_history[-1]
@@ -42,7 +42,7 @@ class TestFit_LG(unittest.TestCase):
             # Check that an error is thrown when J is not positive
             self.LG.train(
                 J=0,
-                itns=self.itns,
+                M=self.M,
                 scale=True,
                 ls=True,
                 key=self.key,

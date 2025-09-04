@@ -365,7 +365,6 @@ def _line_search(
     return eta_final
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jgrad(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -409,7 +408,6 @@ def _jgrad(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jvg(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -468,7 +466,6 @@ def _jvg(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jgrad_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -510,7 +507,6 @@ def _jgrad_mop(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jvg_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -555,7 +551,6 @@ def _jvg_mop(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jhess(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -600,7 +595,6 @@ def _jhess(
 
 
 # get the hessian matrix from mop
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jhess_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,

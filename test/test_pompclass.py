@@ -83,7 +83,7 @@ class TestPompClass_LG(unittest.TestCase):
             for param_name, value in params.items():
                 self.assertIsInstance(value, float)
 
-    def test_theta_carryover(self):
+    def test_theta_carryover_mif(self):
         # Check that theta estimate from mif is correctly carried over to attribute and traces
         theta_order = list(self.LG.theta[0].keys())
         self.LG.mif(
@@ -99,9 +99,46 @@ class TestPompClass_LG(unittest.TestCase):
         self.assertEqual(
             list(self.LG.results_history[-1]["theta"][0].keys()), theta_order
         )
-        trace_df = self.LG.results_history[-2]["traces"][0]
-        param_names = [col for col in trace_df.columns if col != "logLik"]
-        last_param_values = trace_df.iloc[-1][param_names].values.tolist()
+        traces_da = self.LG.results_history[-2]["traces"]
+        param_names = traces_da.coords["variable"].values[1:]
+        last_row = traces_da.sel(
+            replicate=0, iteration=traces_da.sizes["iteration"] - 1
+        )
+        last_param_values = [
+            float(last_row.sel(variable=param).values) for param in param_names
+        ]
+        self.assertEqual(
+            list(self.LG.results_history[-1]["theta"][0].values()),
+            last_param_values,
+        )
+        traces = self.LG.traces()
+        # Only compare the parameter values
+        self.assertEqual(
+            traces.iloc[-1, 4:].values.tolist(), traces.iloc[-2, 4:].values.tolist()
+        )
+
+    # TODO: merge mif and train tests
+    def test_theta_carryover_train(self):
+        # Check that theta estimate from train is correctly carried over to attribute and traces
+        theta_order = list(self.LG.theta[0].keys())
+        self.LG.train(
+            J=self.J,
+            M=1,
+            key=self.key,
+        )
+        self.assertEqual(theta_order, list(self.LG.theta[0].keys()))
+        self.LG.pfilter(J=self.J, reps=2)
+        self.assertEqual(
+            list(self.LG.results_history[-1]["theta"][0].keys()), theta_order
+        )
+        traces_da = self.LG.results_history[-2]["traces"]
+        param_names = traces_da.coords["variable"].values[1:]
+        last_row = traces_da.sel(
+            replicate=0, iteration=traces_da.sizes["iteration"] - 1
+        )
+        last_param_values = [
+            float(last_row.sel(variable=param).values) for param in param_names
+        ]
         self.assertEqual(
             list(self.LG.results_history[-1]["theta"][0].values()),
             last_param_values,

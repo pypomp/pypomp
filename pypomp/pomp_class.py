@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
 from .mif import _jv_mif_internal
-from .train import _train_internal, _vmapped_train_internal
+from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
@@ -826,6 +826,36 @@ class Pomp:
         else:
             raise ValueError(f"Unknown method in results_history: {method}")
         return pd.DataFrame(rows)
+
+    def prune(self, n: int = 1, index: int = -1, refill: bool = True):
+        """
+        Replace self.theta with a list of the top n thetas based on the most recent available log-likelihood estimates.
+        Optionally, refill the list to the previous length by repeating the top n thetas.
+
+        Args:
+            n (int): Number of top thetas to keep.
+            index (int): The index of the result to use for pruning. Defaults to -1 (the last result).
+            refill (bool): If True, repeat the top n thetas to match the previous number of theta sets.
+        """
+        df = self.results(index)
+        if df.empty or "logLik" not in df.columns:
+            raise ValueError("No log-likelihoods found in results(index).")
+
+        top_indices = df["logLik"].to_numpy().argsort()[-n:][::-1]
+        # Extract the corresponding thetas as dicts
+        param_names = [col for col in df.columns if col not in ("logLik", "se")]
+        top_thetas = [
+            {param: df.iloc[i][param] for param in param_names} for i in top_indices
+        ]
+
+        if refill:
+            prev_len = len(self.theta) if isinstance(self.theta, list) else 1
+            repeats = (prev_len + n - 1) // n  # Ceiling division
+            new_theta = (top_thetas * repeats)[:prev_len]
+        else:
+            new_theta = top_thetas
+
+        self.theta = new_theta
 
     def plot_traces(self, show: bool = True):
         """

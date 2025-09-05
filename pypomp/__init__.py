@@ -1,11 +1,7 @@
 from .pomp_class import Pomp
-from .panelPomp_class import PanelPomp
 from .LG import LG
 from .measles.measlesPomp import UKMeasles
-from .model_struct import RInit
-from .model_struct import RProc
-from .model_struct import DMeas
-from .model_struct import RMeas
+from .model_struct import RInit, RProc, DMeas, RMeas
 from .util import expit, logit, logmeanexp, logmeanexp_se
 from .dacca import dacca
 from .spx import spx

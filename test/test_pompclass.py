@@ -177,3 +177,37 @@ class TestPompClass_LG(unittest.TestCase):
 
         # Check that the unpickled object can still be used for filtering
         unpickled_obj.pfilter(J=self.J, reps=1)
+
+    def test_prune(self):
+        # Run pfilter with multiple replicates to generate results
+        self.LG.pfilter(J=self.J, reps=5, key=self.key)
+        # Save the original theta list length
+        orig_theta = self.LG.theta.copy()
+        orig_len = len(orig_theta)
+        # Prune to top 2 thetas, refill to original length
+        self.LG.prune(n=2, refill=True)
+        self.assertIsInstance(self.LG.theta, list)
+        self.assertEqual(len(self.LG.theta), orig_len)
+        # The unique thetas should be at most 2
+        unique_thetas = [tuple(sorted(d.items())) for d in self.LG.theta]
+        self.assertLessEqual(len(set(unique_thetas)), 2)
+        # Prune to top 1 theta, do not refill
+        self.LG.prune(n=1, refill=False)
+        self.assertIsInstance(self.LG.theta, list)
+        self.assertEqual(len(self.LG.theta), 1)
+        # The theta should be a dict
+        self.assertIsInstance(self.LG.theta[0], dict)
+        # Prune with n greater than available thetas (should not error, just return all)
+        self.LG.theta = orig_theta.copy()
+        self.LG.prune(n=10, refill=False)
+        self.assertEqual(len(self.LG.theta), min(10, len(orig_theta)))
+        # Test error if results are empty
+        LG2 = self.LG.__class__(
+            ys=self.LG.ys.copy(),
+            theta=self.LG.theta[0].copy(),
+            rinit=self.LG.rinit,
+            rproc=self.LG.rproc,
+            dmeas=self.LG.dmeas,
+        )
+        with self.assertRaises(IndexError):
+            LG2.prune(n=1)

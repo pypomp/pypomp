@@ -3,6 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 import importlib
+import time
 from functools import partial
 import numpy as np
 import jax
@@ -290,6 +291,8 @@ class Pomp:
            effective sample size (ESS), filtered mean, and prediction mean at each time point
            are also included if their respective boolean flags are set to True.
         """
+        start_time = time.time()
+
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
@@ -343,7 +346,9 @@ class Pomp:
         logLik_da = xr.DataArray(
             (-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"]
         )
-        # index += 1
+
+        execution_time = time.time() - start_time
+
         result_dict = {
             "method": "pfilter",
             "logLiks": logLik_da,
@@ -351,6 +356,7 @@ class Pomp:
             "J": J,
             "thresh": thresh,
             "key": old_key,
+            "execution_time": execution_time,
         }
 
         # obtain diagnostics using names
@@ -417,6 +423,8 @@ class Pomp:
             None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods
             and parameter estimates averaged over particles, and theta.
         """
+        start_time = time.time()
+
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
@@ -487,6 +495,9 @@ class Pomp:
             dict(zip(theta_list[0].keys(), np.mean(theta_ests[-1], axis=0).tolist()))
             for theta_ests in final_theta_ests
         ]
+
+        execution_time = time.time() - start_time
+
         self.results_history.append(
             {
                 "method": "mif",
@@ -499,6 +510,7 @@ class Pomp:
                 "a": a,
                 "thresh": thresh,
                 "key": old_key,
+                "execution_time": execution_time,
             }
         )
 
@@ -551,6 +563,8 @@ class Pomp:
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
         """
+        start_time = time.time()
+
         theta = theta or self.theta
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
@@ -617,6 +631,9 @@ class Pomp:
             dict(zip(theta_list[0].keys(), theta_ests[i, -1, :].tolist()))
             for i in range(len(theta_list))
         ]
+
+        execution_time = time.time() - start_time
+
         self.results_history.append(
             {
                 "method": "train",
@@ -632,6 +649,7 @@ class Pomp:
                 "ls": ls,
                 "alpha": alpha,
                 "key": old_key,
+                "execution_time": execution_time,
             }
         )
 
@@ -825,6 +843,23 @@ class Pomp:
                 rows.append(row)
         else:
             raise ValueError(f"Unknown method in results_history: {method}")
+        return pd.DataFrame(rows)
+
+    def time(self):
+        """
+        Return a DataFrame summarizing the execution times of methods run.
+
+        Returns:
+            pd.DataFrame: A DataFrame where each row contains:
+                - 'index': The index of the result in results_history.
+                - 'method': The name of the method run.
+                - 'time': The execution time in seconds.
+        """
+        rows = []
+        for idx, res in enumerate(self.results_history):
+            method = res.get("method", None)
+            exec_time = res.get("execution_time", None)
+            rows.append({"index": idx, "method": method, "time": exec_time})
         return pd.DataFrame(rows)
 
     def prune(self, n: int = 1, index: int = -1, refill: bool = True):

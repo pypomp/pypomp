@@ -7,7 +7,7 @@ import pypomp as pp
 class TestPompClass_LG(unittest.TestCase):
     def setUp(self):
         self.LG = pp.LG()
-        self.J = 3
+        self.J = 2
         self.ys = self.LG.ys
         self.theta = self.LG.theta
         self.covars = self.LG.covars
@@ -211,3 +211,20 @@ class TestPompClass_LG(unittest.TestCase):
         )
         with self.assertRaises(IndexError):
             LG2.prune(n=1)
+
+    def test_time(self):
+        self.LG.pfilter(J=self.J, reps=1, key=self.key)
+        self.LG.mif(
+            J=self.J,
+            sigmas=self.sigmas,
+            sigmas_init=self.sigmas,
+            M=self.M,
+            a=self.a,
+            key=self.key,
+        )
+        self.LG.train(J=self.J, M=1, key=self.key)
+        time_df = self.LG.time()
+        self.assertEqual(len(time_df), 3)
+        self.assertEqual(time_df["method"].tolist(), ["pfilter", "mif", "train"])
+        self.assertIsInstance(time_df["time"].tolist(), list)
+        self.assertIsInstance(time_df["index"].tolist(), list)

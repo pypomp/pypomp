@@ -12,12 +12,13 @@ from .mop import _mop_internal_mean
 
 
 @partial(
-    jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22)
+    jit, static_argnums=(6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
 )
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     rinitializer: Callable,
@@ -42,6 +43,7 @@ def _train_internal(
     """
     Internal function for conducting the MOP gradient estimate method.
     """
+    times = times.astype(float)
     ylen = jnp.sum(ys_observed)
     if n_monitors < 1 and ls:
         raise ValueError("Line search requires at least one monitor")
@@ -55,6 +57,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -73,6 +76,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -91,6 +95,7 @@ def _train_internal(
                         theta_ests,
                         dt_array_extended,
                         t0,
+                        times,
                         ys_extended,
                         ys_observed,
                         J,
@@ -113,6 +118,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -132,6 +138,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -195,6 +202,7 @@ def _train_internal(
                     theta,
                     dt_array_extended=dt_array_extended,
                     t0=t0,
+                    times=times,
                     ys_extended=ys_extended,
                     ys_observed=ys_observed,
                     J=J,
@@ -270,6 +278,7 @@ def _train_internal(
                 final_theta,
                 dt_array_extended,
                 t0,
+                times,
                 ys_extended,
                 ys_observed,
                 J,
@@ -300,7 +309,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 19 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
 )
 
 
@@ -369,6 +378,7 @@ def _jgrad(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -394,6 +404,7 @@ def _jgrad(
         theta_ests,  # for some reason this needs to be given as a positional argument
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -412,6 +423,7 @@ def _jvg(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -452,6 +464,7 @@ def _jvg(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -470,6 +483,7 @@ def _jgrad_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -494,6 +508,7 @@ def _jgrad_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -511,6 +526,7 @@ def _jvg_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -538,6 +554,7 @@ def _jvg_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -555,6 +572,7 @@ def _jhess(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -580,6 +598,7 @@ def _jhess(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -599,6 +618,7 @@ def _jhess_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -623,6 +643,7 @@ def _jhess_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,

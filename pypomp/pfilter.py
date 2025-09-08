@@ -9,11 +9,12 @@ from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 13, 14, 15, 16, 17))
+@partial(jit, static_argnums=(6, 7, 8, 9, 14, 15, 16, 17, 18))
 def _pfilter_internal(
     theta: jax.Array,  # should be first for _line_search in train.py
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -36,6 +37,7 @@ def _pfilter_internal(
     If no diagnostics are requested, return the negative log likelihood.
     If diagnostics are requested, return a tuple with the negative log likelihood and the requested diagnostics.
     """
+    times = times.astype(float)
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF = rinitializer(theta, keys, covars0, t0)
@@ -61,6 +63,7 @@ def _pfilter_internal(
         dt_array_extended=dt_array_extended,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
+        times=times,
         theta=theta,
         rprocess=rprocess,
         dmeasure=dmeasure,
@@ -120,21 +123,22 @@ def _pfilter_internal(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 12 + (0,) + (None,) * 5,
+    in_axes=(None,) * 13 + (0,) + (None,) * 5,
 )
 
 # Map over theta and key
 _vmapped_pfilter_internal2 = jax.vmap(
     _pfilter_internal,
-    in_axes=(0,) + (None,) * 11 + (0,) + (None,) * 5,
+    in_axes=(0,) + (None,) * 12 + (0,) + (None,) * 5,
 )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
+@partial(jit, static_argnums=(6, 7, 8, 9))
 def _pfilter_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -156,6 +160,7 @@ def _pfilter_internal_mean(
         theta=theta,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -192,6 +197,7 @@ def _pfilter_helper(
     dt_array_extended: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
+    times: jax.Array,
     theta: jax.Array,
     rprocess: Callable,
     dmeasure: Callable,
@@ -250,8 +256,10 @@ def _pfilter_helper(
         ESS_arr,
         filter_mean_arr,
         prediction_mean_arr,
+        t,
         dmeasure,
     ):
+        t = times[obs_idx]
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         measurements = dmeasure(ys_extended[i], particlesP, theta, covars_t, t)
 
@@ -306,6 +314,7 @@ def _pfilter_helper(
             ESS_arr,
             filter_mean_arr,
             prediction_mean_arr,
+            t,
         )
 
     def _without_observation(
@@ -318,6 +327,7 @@ def _pfilter_helper(
         ESS_arr,
         filter_mean_arr,
         prediction_mean_arr,
+        t,
     ):
         return (
             particlesP,
@@ -330,6 +340,7 @@ def _pfilter_helper(
             ESS_arr,
             filter_mean_arr,
             prediction_mean_arr,
+            t,
         )
 
     _with_observation_partial = partial(_with_observation, dmeasure=dmeasure)
@@ -345,6 +356,7 @@ def _pfilter_helper(
         ESS_arr,
         filter_mean_arr,
         prediction_mean_arr,
+        t,
     ) = jax.lax.cond(
         ys_observed[i],
         _with_observation_partial,
@@ -359,6 +371,7 @@ def _pfilter_helper(
             ESS_arr,
             filter_mean_arr,
             prediction_mean_arr,
+            t,
         ),
     )
     return (

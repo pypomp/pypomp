@@ -1016,7 +1016,7 @@ class Pomp:
             "alpha",
         ]
         print("Basics:")
-        print("------")
+        print("-------")
         print(f"Number of observations: {len(self.ys)}")
         print(f"Number of time steps: {len(self._dt_array_extended)}")
         print(f"Number of parameters: {len(self.theta[0])}")

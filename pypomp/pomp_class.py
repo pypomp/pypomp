@@ -736,61 +736,89 @@ class Pomp:
             - loglik: The log-likelihood estimate (averaged over reps for pfilter)
             - <param>: One column for each parameter
         """
-        trace_rows = []
-        param_names = None
-        global_iters = {}  # key: param_idx, value: current iteration (start at 1)
+        if not self.results_history:
+            return pd.DataFrame()
+
+        replicate_list: list[int] = []
+        iteration_list: list[int] = []
+        method_list: list[str] = []
+        loglik_list: list[float] = []
+        param_columns: dict[str, list[float]] = {}
+
+        param_names = list(self.theta[0].keys())
+        for p in param_names:
+            param_columns[p] = []
+
+        # tracks the current iteration for each replicate across rounds
+        global_iters: dict[
+            int, int
+        ] = {}  # key: replicate index, value: current iteration (start at 1)
 
         for res in self.results_history:
             method = res.get("method")
             if method in ("mif", "train"):
-                traces = res["traces"]
+                traces = res[
+                    "traces"
+                ]  # xarray.DataArray (replicate, iteration, variable)
                 n_rep = traces.sizes["replicate"]
                 n_iter = traces.sizes["iteration"]
                 variable_names = list(traces.coords["variable"].values)
-                if param_names is None:
-                    param_names = [v for v in variable_names if v != "logLik"]
+
+                traces_array = traces.values  # shape: (n_rep, n_iter, n_vars)
+                loglik_idx = variable_names.index("logLik")
+                param_indices = [variable_names.index(p) for p in param_names]
+
                 for rep_idx in range(n_rep):
                     if rep_idx not in global_iters:
-                        global_iters[rep_idx] = 1
+                        global_iters[rep_idx] = 0
                     for iter_idx in range(n_iter):
-                        vals = traces.sel({"replicate": rep_idx, "iteration": iter_idx})
-                        row = {
-                            "replicate": rep_idx,
-                            "iteration": global_iters[rep_idx],
-                            "method": method,
-                            "loglik": float(vals.sel(variable="logLik").values),
-                        }
-                        row.update(
-                            {
-                                param: float(vals.sel(variable=param).values)
-                                for param in param_names
-                            }
-                        )
-                        trace_rows.append(row)
-                        global_iters[rep_idx] += 1
+                        if (
+                            global_iters[rep_idx] == 0 or iter_idx > 0
+                        ):  # skip starting parameters beyond the the first round
+                            replicate_list.append(rep_idx)
+                            iteration_list.append(global_iters[rep_idx])
+                            method_list.append("mif" if method == "mif" else "train")
+                            loglik_list.append(
+                                float(traces_array[rep_idx, iter_idx, loglik_idx])
+                            )
+                            for i, p in enumerate(param_names):
+                                param_columns[p].append(
+                                    float(
+                                        traces_array[
+                                            rep_idx, iter_idx, param_indices[i]
+                                        ]
+                                    )
+                                )
+                            global_iters[rep_idx] += 1
             elif method == "pfilter":
                 logLiks = res["logLiks"]
                 thetas = res["theta"]
                 for rep_idx, (logLik_arr, theta_dict) in enumerate(
                     zip(logLiks, thetas)
                 ):
-                    if param_names is None:
-                        param_names = list(theta_dict.keys())
-                    # Use the last iteration for this rep_idx
                     last_iter = global_iters.get(rep_idx, 1) - 1
                     avg_loglik = float(logmeanexp(logLik_arr))
-                    row = {
-                        "replicate": rep_idx,
-                        "iteration": last_iter if last_iter > 0 else 1,
-                        "method": method,
-                        "loglik": avg_loglik,
-                    }
-                    row.update(
-                        {param: float(theta_dict[param]) for param in param_names}
-                    )
-                    trace_rows.append(row)
-            # else: ignore other methods for now
-        df = pd.DataFrame(trace_rows)
+
+                    replicate_list.append(rep_idx)
+                    iteration_list.append(last_iter if last_iter > 0 else 1)
+                    method_list.append("pfilter")
+                    loglik_list.append(avg_loglik)
+                    for p in param_names:
+                        param_columns[p].append(float(theta_dict[p]))
+            # else: ignore unknown methods
+
+        if not replicate_list:
+            return pd.DataFrame()
+
+        data = {
+            "replicate": replicate_list,
+            "iteration": iteration_list,
+            "method": method_list,
+            "loglik": loglik_list,
+        }
+        data.update(param_columns)
+
+        df = pd.DataFrame(data)
         if not df.empty:
             df = df.sort_values(["iteration", "replicate"]).reset_index(drop=True)
         return df
@@ -810,13 +838,11 @@ class Pomp:
         res = self.results_history[index]
         method = res.get("method")
         rows = []
-        param_names = None
+        param_names = list(self.theta[0].keys())
         if method == "pfilter":
             logLiks = res["logLiks"]
             thetas = res["theta"]
             for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
-                if param_names is None:
-                    param_names = list(theta_dict.keys())
                 # Use underlying NumPy array if available to avoid copies
                 arr = getattr(logLik_arr, "values", logLik_arr)
                 logLik_arr_np = np.asarray(arr)
@@ -834,10 +860,6 @@ class Pomp:
             # traces is an xarray.DataArray with dims: (replicate, iteration, variable)
             n_reps = traces.sizes["replicate"]
             last_idx = traces.sizes["iteration"] - 1
-            if param_names is None:
-                param_names = [
-                    v for v in traces.coords["variable"].values if v != "logLik"
-                ]
             for rep in range(n_reps):
                 last_row = traces.sel(replicate=rep, iteration=last_idx)
                 logLik_val = float(last_row.sel(variable="logLik").values)

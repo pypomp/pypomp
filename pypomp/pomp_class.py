@@ -356,6 +356,7 @@ class Pomp:
             "logLiks": logLik_da,
             "theta": theta_list,
             "J": J,
+            "reps": reps,
             "thresh": thresh,
             "key": old_key,
             "execution_time": execution_time,
@@ -505,8 +506,8 @@ class Pomp:
                 "method": "mif",
                 "traces": traces_da,
                 "theta": theta_list,
-                "M": M,
                 "J": J,
+                "M": M,
                 "sigmas": sigmas,
                 "sigmas_init": sigmas_init,
                 "a": a,
@@ -642,15 +643,15 @@ class Pomp:
                 "method": "train",
                 "traces": joined_array,
                 "theta": theta_list,
-                "J": J,
                 "optimizer": optimizer,
+                "J": J,
                 "M": M,
                 "eta": eta,
-                "c": c,
-                "max_ls_itn": max_ls_itn,
+                "alpha": alpha,
                 "thresh": thresh,
                 "ls": ls,
-                "alpha": alpha,
+                "c": c,
+                "max_ls_itn": max_ls_itn,
                 "key": old_key,
                 "execution_time": execution_time,
             }
@@ -995,6 +996,43 @@ class Pomp:
         if show:
             plt.show()
         return g
+
+    def print_summary(self):
+        """
+        Print a summary of the Pomp object.
+        """
+        allow_list = [
+            "J",
+            "reps",
+            "thresh",
+            "execution_time",
+            "M",
+            "a",
+            "optimizer",
+            "eta",
+            "c",
+            "max_ls_itn",
+            "ls",
+            "alpha",
+        ]
+        print("Basics:")
+        print("------")
+        print(f"Number of observations: {len(self.ys)}")
+        print(f"Number of time steps: {len(self._dt_array_extended)}")
+        print(f"Number of parameters: {len(self.theta[0])}")
+        print()
+        if len(self.results_history) > 0:
+            print("Results history:")
+            print("----------------")
+            for idx, entry in enumerate(self.results_history, 1):
+                print(f"Results entry {idx}:")
+                method = entry.get("method", None)
+                if method is not None:
+                    print(f"- method: {method}")
+                for k, v in entry.items():
+                    if k in allow_list:
+                        print(f"- {k}: {v}")
+                print()
 
     def __getstate__(self):
         """

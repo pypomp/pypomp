@@ -8,30 +8,33 @@ class TestPompClass_LG(unittest.TestCase):
     def setUp(self):
         self.LG = pp.LG()
         self.J = 2
-        self.ys = self.LG.ys
-        self.theta = self.LG.theta
-        self.covars = self.LG.covars
         self.sigmas = 0.02
         self.a = 0.5
         self.M = 2
         self.key = jax.random.key(111)
 
-        self.rinit = self.LG.rinit
-        self.rproc = self.LG.rproc
-        self.dmeas = self.LG.dmeas
+        self.LG_neapolitan = pp.LG()
 
-    def test_basic_initialization(self):
-        self.assertEqual(self.LG.covars, self.covars)
+        self.LG_neapolitan.pfilter(J=self.J, reps=1, key=self.key)
+        self.LG_neapolitan.mif(
+            J=self.J,
+            sigmas=self.sigmas,
+            sigmas_init=self.sigmas,
+            M=self.M,
+            a=self.a,
+            key=self.key,
+        )
+        self.LG_neapolitan.train(J=self.J, M=1, key=self.key)
 
     def test_invalid_initialization(self):
         for arg in ["ys", "theta", "rinit", "rproc", "dmeas"]:
             with self.assertRaises(Exception):
                 kwargs = {
-                    "ys": self.ys,
-                    "theta": self.theta,
-                    "rinit": self.rinit,
-                    "rproc": self.rproc,
-                    "dmeas": self.dmeas,
+                    "ys": self.LG.ys,
+                    "theta": self.LG.theta,
+                    "rinit": self.LG.rinit,
+                    "rproc": self.LG.rproc,
+                    "dmeas": self.LG.dmeas,
                 }
                 kwargs[arg] = None
                 pp.Pomp(**kwargs)
@@ -213,18 +216,12 @@ class TestPompClass_LG(unittest.TestCase):
             LG2.prune(n=1)
 
     def test_time(self):
-        self.LG.pfilter(J=self.J, reps=1, key=self.key)
-        self.LG.mif(
-            J=self.J,
-            sigmas=self.sigmas,
-            sigmas_init=self.sigmas,
-            M=self.M,
-            a=self.a,
-            key=self.key,
-        )
-        self.LG.train(J=self.J, M=1, key=self.key)
-        time_df = self.LG.time()
+        time_df = self.LG_neapolitan.time()
         self.assertEqual(len(time_df), 3)
         self.assertEqual(time_df["method"].tolist(), ["pfilter", "mif", "train"])
         self.assertIsInstance(time_df["time"].tolist(), list)
         self.assertIsInstance(time_df["index"].tolist(), list)
+
+    def test_print_summary(self):
+        # Should not error
+        self.LG_neapolitan.print_summary()

@@ -40,13 +40,7 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     J = norm_weights.shape[-1]
     unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J
     csum = jnp.cumsum(jnp.exp(norm_weights))
-    counts = jnp.repeat(
-        jnp.arange(J),
-        jnp.histogram(
-            unifs, bins=jnp.pad(csum / csum[-1], pad_width=(1, 0)), density=False
-        )[0].astype(int),
-        total_repeat_length=J,
-    )
+    counts = jnp.searchsorted(csum, unifs)
     return counts
 
 

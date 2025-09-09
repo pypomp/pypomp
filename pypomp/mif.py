@@ -31,10 +31,11 @@ def _mif_internal(
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     times = times.astype(float)
+    n_theta = theta.shape[-1]
     logliks = jnp.zeros(M)
-    params = jnp.zeros((M, J, theta.shape[-1]))
+    params = jnp.zeros((M, J, n_theta))
 
-    params = jnp.concatenate([theta.reshape((1, J, theta.shape[-1])), params], axis=0)
+    params = jnp.concatenate([theta.reshape((1, J, n_theta)), params], axis=0)
 
     _perfilter_internal_2 = partial(
         _perfilter_internal,
@@ -139,7 +140,7 @@ def _perfilter_internal(
         )
     )
 
-    logliks = logliks.at[m + 1].set(-loglik)
+    logliks = logliks.at[m].set(-loglik)
     params = params.at[m + 1].set(thetas)
     return params, logliks, key
 

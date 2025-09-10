@@ -21,12 +21,11 @@ sp500["y"] = np.log(sp500["Close"] / sp500["Close"].shift(1))
 sp500 = sp500.dropna(subset=["y"])[["time", "y"]]
 sp500.set_index("time", inplace=True)
 
-
-first_time = sp500.index[0] - 1  # noqa
-covars = pd.DataFrame(sp500["y"].values, index=sp500.index)  # noqa
+first_time = float(np.asarray(sp500.index)[0]) - 1.0
+covars = pd.DataFrame(sp500["y"], index=sp500.index)
 covars.loc[first_time] = 0
 covars = covars.sort_index()
-covars = covars.rename(columns={0: "y_prev"})
+covars = covars.rename(columns={"y": "y_prev"})
 
 
 def _rho_transform(x):

@@ -30,12 +30,17 @@ class TestFit_LG(unittest.TestCase):
                     key=self.key,
                 )
                 GD_out = self.LG.results_history[-1]
-                self.assertEqual(GD_out["logLiks"][0].shape, (3,))
+                traces = GD_out["traces"]
+                # Check shape for first replicate
                 self.assertEqual(
-                    GD_out["thetas_out"][0].shape, (3,) + (len(self.theta[0]),)
-                )
-                self.assertTrue(jnp.issubdtype(GD_out["logLiks"][0], jnp.float32))
-                self.assertTrue(jnp.issubdtype(GD_out["thetas_out"][0], jnp.float32))
+                    traces.sel(replicate=0).shape,
+                    (self.M + 1, len(self.LG.theta[0]) + 1),
+                )  # +1 for logLik column
+                # Check that "logLik" is in variable coordinate
+                self.assertIn("logLik", list(traces.coords["variable"].values))
+                # Check that all parameter names are in variable coordinate
+                for param in self.LG.theta[0].keys():
+                    self.assertIn(param, list(traces.coords["variable"].values))
 
     def test_invalid_GD_input(self):
         with self.assertRaises(ValueError):

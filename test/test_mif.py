@@ -28,16 +28,18 @@ class TestFit_LG(unittest.TestCase):
                 key=self.key,
             )
             mif_out1 = self.LG.results_history[-1]
+            traces = mif_out1["traces"]
+            # traces is an xarray.DataArray with dims: (replicate, iteration, variable)
+            # Check shape for first replicate
             self.assertEqual(
-                mif_out1["traces"][0].shape, (M + 1, len(self.LG.theta[0]) + 1)
+                traces.sel(replicate=0).shape,
+                (M + 1, len(self.LG.theta[0]) + 1),
             )  # +1 for logLik column
-            self.assertTrue("logLik" in mif_out1["traces"][0].columns)
-            self.assertTrue(
-                all(
-                    param in mif_out1["traces"][0].columns
-                    for param in self.LG.theta[0].keys()
-                )
-            )
+            # Check that "logLik" is in variable coordinate
+            self.assertIn("logLik", list(traces.coords["variable"].values))
+            # Check that all parameter names are in variable coordinate
+            for param in self.LG.theta[0].keys():
+                self.assertIn(param, list(traces.coords["variable"].values))
 
         # check that sigmas isn't modified by mif
         self.assertEqual(self.sigmas, 0.02)
@@ -52,6 +54,7 @@ class TestFit_LG(unittest.TestCase):
             key=self.key,
         )
         mif_out2 = self.LG.results_history[-1]
+        traces2 = mif_out2["traces"]
         # check that sigmas isn't modified by mif when passed as an array
         self.assertTrue(
             (
@@ -62,20 +65,12 @@ class TestFit_LG(unittest.TestCase):
         # check that the last parameter is never perturbed (assuming it's the 16th parameter)
         param_names = list(self.LG.theta[0].keys())
         last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
-        self.assertTrue(
-            (
-                mif_out2["traces"][0][last_param]
-                == mif_out2["traces"][0][last_param].iloc[0]
-            ).all()
-        )
+        last_param_trace = traces2.sel(replicate=0, variable=last_param).values
+        self.assertTrue((last_param_trace == last_param_trace[0]).all())
         # check that some other parameter is perturbed
         first_param = param_names[0]
-        self.assertTrue(
-            (
-                mif_out2["traces"][0][first_param]
-                != mif_out2["traces"][0][first_param].iloc[0]
-            ).any()
-        )
+        first_param_trace = traces2.sel(replicate=0, variable=first_param).values
+        self.assertTrue((first_param_trace != first_param_trace[0]).any())
 
     def test_invalid_mif_input(self):
         with self.assertRaises(ValueError):

@@ -1,7 +1,7 @@
 [project]
 name = "pypomp"
 
-version = "0.2.1"
+version = "0.2.2"
 
 authors = [
     { name = "The pypomp core developer team", email = "pypomp-org@umich.edu" }
@@ -36,5 +36,5 @@ Issues = "https://github.com/pypomp/pypomp/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.ruff]
+[tool.ruff.lint]
 ignore = ["E741"]

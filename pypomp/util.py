@@ -1,6 +1,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
+import warnings
 
 
 def logmeanexp(x) -> float:
@@ -13,6 +14,9 @@ def logmeanexp(x) -> float:
         x (array-like): collection of log-likelihoods
     """
     x_array = np.asarray(x)
+    if x_array.size == 0:
+        warnings.warn("x is an empty array, returning nan")
+        return np.nan
     x_max = np.max(x_array)
     log_mean_exp = np.log(np.mean(np.exp(x_array - x_max))) + x_max
     return log_mean_exp
@@ -35,13 +39,10 @@ def logmeanexp_se(x) -> float:
     if n <= 1:
         return np.nan
 
-    x_max = np.max(x_array)
-    exps = np.exp(x_array - x_max)
-    sum_exp = np.sum(exps)
-    loo_sum = sum_exp - exps  # leave-one-out sums
-    loo_mean = loo_sum / (n - 1)
-    with np.errstate(divide="ignore"):
-        jack = np.log(loo_mean) + x_max
+    jack = np.asarray(
+        [logmeanexp(np.delete(x_array, i)) for i in range(n)],
+        dtype=float,
+    )
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)
     return se
 

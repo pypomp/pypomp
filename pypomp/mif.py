@@ -34,10 +34,12 @@ def _mif_internal(
     thresh: float = 0.0,
     key: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
+    times = times.astype(float)
+    n_theta = theta.shape[-1]
     logliks = jnp.zeros(M)
-    params = jnp.zeros((M, J, theta.shape[-1]))
+    params = jnp.zeros((M, J, n_theta))
 
-    params = jnp.concatenate([theta.reshape((1, J, theta.shape[-1])), params], axis=0)
+    params = jnp.concatenate([theta.reshape((1, J, n_theta)), params], axis=0)
 
     _perfilter_internal_2 = partial(
         _perfilter_internal,
@@ -120,7 +122,7 @@ def _perfilter_internal(
     perfilter_helper_2 = partial(
         _perfilter_helper,
         dt_array_extended=dt_array_extended,
-        times0=jnp.concatenate([jnp.array([t0]), times]),
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         rprocesses=rprocesses,
@@ -142,7 +144,7 @@ def _perfilter_internal(
         )
     )
 
-    logliks = logliks.at[m + 1].set(-loglik)
+    logliks = logliks.at[m].set(-loglik)
     thetas_nat_end = _pt_inverse(thetas, partrans)
     params = params.at[m + 1].set(thetas_nat_end)
     return params, logliks, key
@@ -161,7 +163,7 @@ def _perfilter_helper(
         int,
     ],
     dt_array_extended: jax.Array,
-    times0: jax.Array,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     rprocesses: Callable,
@@ -188,7 +190,7 @@ def _perfilter_helper(
 
     def _perturb_thetas(thetas, key):
         sigmas_cooled = (
-            _geometric_cooling(nt=obs_idx, m=m, ntimes=len(times0) - 1, a=a) * sigmas
+            _geometric_cooling(nt=obs_idx, m=m, ntimes=len(times), a=a) * sigmas
         )
         key, subkey = jax.random.split(key)
         thetas = thetas + sigmas_cooled * jnp.array(
@@ -213,8 +215,9 @@ def _perfilter_helper(
     t = t + dt_array_extended[i]
 
     def _with_observation(
-        loglik, norm_weights, counts, thetas, key, obs_idx, dmeasures
+        loglik, norm_weights, counts, thetas, key, obs_idx, t, dmeasures
     ):
+        t = times[obs_idx]
         covars_t = None if covars_extended is None else covars_extended[i + 1]
         thetas_nat = _pt_inverse(thetas, partrans)
         measurements = jnp.nan_to_num(
@@ -241,18 +244,18 @@ def _perfilter_helper(
             accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
         )
         obs_idx = obs_idx + 1
-        return (particlesF, loglik, norm_weights, counts, thetas, key, obs_idx)
+        return (particlesF, loglik, norm_weights, counts, thetas, key, obs_idx, t)
 
-    def _without_observation(loglik, norm_weights, counts, thetas, key, obs_idx):
-        return (particlesP, loglik, norm_weights, counts, thetas, key, obs_idx)
+    def _without_observation(loglik, norm_weights, counts, thetas, key, obs_idx, t):
+        return (particlesP, loglik, norm_weights, counts, thetas, key, obs_idx, t)
 
     _with_observation_partial = partial(_with_observation, dmeasures=dmeasures)
 
-    particles, loglik, norm_weights, counts, thetas, key, obs_idx = jax.lax.cond(
+    particles, loglik, norm_weights, counts, thetas, key, obs_idx, t = jax.lax.cond(
         ys_observed[i],
         _with_observation_partial,
         _without_observation,
-        *(loglik, norm_weights, counts, thetas, key, obs_idx),
+        *(loglik, norm_weights, counts, thetas, key, obs_idx, t),
     )
 
     return (t, particles, thetas, loglik, norm_weights, counts, key, obs_idx)

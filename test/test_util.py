@@ -1,9 +1,11 @@
 import unittest
-import jax.numpy as jnp
+import numpy as np
 import pypomp as pp
+import pytest
+import warnings
+import time
 
-# The test here is based on a
-# direct test against R-pomp::logmeanexp
+# test_val is based on a direct test against R-pomp::logmeanexp
 #
 # library(pomp)
 # x = c(100,101,102,103,104)
@@ -26,13 +28,88 @@ class TestUtil(unittest.TestCase):
     def setUp(self):
         self.logmeanexp = pp.logmeanexp
         self.logmeanexp_se = pp.logmeanexp_se
-        self.x = jnp.array([100, 101, 102, 103, 104])
+        self.x = np.array([100.0, 101.0, 102.0, 103.0, 104.0])
 
     def test_val(self):
         lme = self.logmeanexp(self.x)
         lme_se = self.logmeanexp_se(self.x)
-        self.assertEqual(jnp.round(lme, 2), 102.84)
-        self.assertEqual(jnp.round(lme_se, 2), 0.75)
+        self.assertEqual(np.round(lme, 2), 102.84)
+        self.assertEqual(np.round(lme_se, 2), 0.75)
+
+    def test_nan(self):
+        self.assertTrue(np.isnan(self.logmeanexp_se(self.x[:1])))
+
+    def test_empty_array(self):
+        # logmeanexp and logmeanexp_se should return nan for empty input
+        empty = np.array([])
+        with pytest.warns(UserWarning):
+            lme = self.logmeanexp(empty)
+        lme_se = self.logmeanexp_se(empty)
+        self.assertTrue(np.isnan(lme))
+        self.assertTrue(np.isnan(lme_se))
+
+    def test_all_nan(self):
+        # All NaN input should return nan
+        arr = np.array([np.nan, np.nan])
+        lme = self.logmeanexp(arr)
+        lme_se = self.logmeanexp_se(arr)
+        self.assertTrue(np.isnan(lme))
+        self.assertTrue(np.isnan(lme_se))
+
+    def test_inf_values(self):
+        # Array with finite values and -inf
+        arr = np.array([100, 101, -np.inf])
+        lme = self.logmeanexp(arr)
+        lme_se = self.logmeanexp_se(arr)
+        # Both should be finite, non nan
+        self.assertFalse(np.isnan(lme))
+        self.assertFalse(np.isinf(lme))
+        self.assertFalse(np.isnan(lme_se))
+        self.assertFalse(np.isinf(lme_se))
+
+    def test_mixed_nan_inf(self):
+        # Array with finite, nan, and -inf
+        arr = np.array([1, np.nan, -np.inf])
+        lme = self.logmeanexp(arr)
+        lme_se = self.logmeanexp_se(arr)
+        self.assertTrue(np.isnan(lme))
+        self.assertTrue(np.isnan(lme_se))
+
+    def test_single_value(self):
+        # Single value: logmeanexp should be the value, se should be nan
+        arr = np.array([42.0])
+        lme = self.logmeanexp(arr)
+        lme_se = self.logmeanexp_se(arr)
+        self.assertEqual(lme, 42.0)
+        self.assertTrue(np.isnan(lme_se))
+
+    def test_large_values(self):
+        # Large values should not cause overflow
+        arr = np.array([1e10, 1e10 + 1, 1e10 + 2])
+        lme = self.logmeanexp(arr)
+        lme_se = self.logmeanexp_se(arr)
+        # Should be close to 1e10 + logmeanexp([0,1,2])
+        expected = 1e10 + self.logmeanexp(np.array([0, 1, 2]))
+        self.assertAlmostEqual(lme, expected, places=5)
+        self.assertFalse(np.isnan(lme_se))
+
+    def test_large_dominant_value(self):
+        # One very large value should not print a warning
+        arr = np.array([100, 101, 1e10 + 2])
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.logmeanexp(arr)
+            self.assertTrue(all("empty array" not in str(warn.message) for warn in w))
+        lme_se = self.logmeanexp_se(arr)
+        self.assertFalse(np.isnan(lme_se))
+
+    def test_speed(self):
+        # Test that logmeanexp_se runs in under 1 second with 10000 values
+        arr = np.random.randn(10000)
+        start = time.time()
+        self.logmeanexp_se(arr)
+        duration = time.time() - start
+        self.assertTrue(duration < 1)
 
 
 if __name__ == "__main__":

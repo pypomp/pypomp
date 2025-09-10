@@ -11,11 +11,14 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21))
+@partial(
+    jit, static_argnums=(6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
+)
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     rinitializer: Callable,
@@ -35,10 +38,12 @@ def _train_internal(
     alpha: float,
     key: jax.Array,
     n_monitors: int,
+    n_obs: int,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
     """
+    times = times.astype(float)
     ylen = jnp.sum(ys_observed)
     if n_monitors < 1 and ls:
         raise ValueError("Line search requires at least one monitor")
@@ -52,6 +57,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -70,6 +76,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -88,6 +95,7 @@ def _train_internal(
                         theta_ests,
                         dt_array_extended,
                         t0,
+                        times,
                         ys_extended,
                         ys_observed,
                         J,
@@ -98,7 +106,8 @@ def _train_internal(
                         accumvars,
                         0,
                         jnp.array(subkeys),
-                    )
+                        n_obs,
+                    )["neg_loglik"]
                 )
             else:
                 loglik = jnp.array(jnp.nan)
@@ -109,6 +118,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -128,6 +138,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
+                times=times,
                 ys_extended=ys_extended,
                 ys_observed=ys_observed,
                 J=J,
@@ -185,11 +196,13 @@ def _train_internal(
             direction = direction / jnp.linalg.norm(direction)
 
         if ls:
-            eta2 = _line_search(
-                partial(
-                    _pfilter_internal,
+
+            def _obj_neg_loglik(theta):
+                neg_loglik = _pfilter_internal(
+                    theta,
                     dt_array_extended=dt_array_extended,
                     t0=t0,
+                    times=times,
                     ys_extended=ys_extended,
                     ys_observed=ys_observed,
                     J=J,
@@ -200,7 +213,17 @@ def _train_internal(
                     covars_extended=covars_extended,
                     thresh=thresh,
                     key=subkey,
-                ),
+                    n_obs=n_obs,
+                    CLL=False,
+                    ESS=False,
+                    filter_mean=False,
+                    prediction_mean=False,
+                )["neg_loglik"]
+
+                return jnp.squeeze(neg_loglik)
+
+            eta2 = _line_search(
+                _obj_neg_loglik,
                 curr_obj=loglik,
                 pt=theta_ests,
                 grad=grad,
@@ -213,6 +236,7 @@ def _train_internal(
                 frac=0.5,
                 stoch=False,
             )
+
         else:
             eta2 = eta
 
@@ -254,6 +278,7 @@ def _train_internal(
                 final_theta,
                 dt_array_extended,
                 t0,
+                times,
                 ys_extended,
                 ys_observed,
                 J,
@@ -264,7 +289,12 @@ def _train_internal(
                 accumvars,
                 0,
                 jnp.array(subkeys),
-            )
+                n_obs,
+                False,
+                False,
+                False,
+                False,
+            )["neg_loglik"]
         )
     else:
         final_loglik = jnp.array(jnp.nan)
@@ -279,7 +309,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 19 + (0,) + (None,),
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
 )
 
 
@@ -344,11 +374,11 @@ def _line_search(
     return eta_final
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jgrad(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -359,6 +389,7 @@ def _jgrad(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int,
 ):
     """
     calculates the gradient of a mean particle filter objective (function
@@ -373,6 +404,7 @@ def _jgrad(
         theta_ests,  # for some reason this needs to be given as a positional argument
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -383,14 +415,15 @@ def _jgrad(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs,
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jvg(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -401,6 +434,7 @@ def _jvg(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int,
 ):
     """
     Calculates the both the value and gradient of a mean particle filter
@@ -430,6 +464,7 @@ def _jvg(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -440,14 +475,15 @@ def _jvg(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs,
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jgrad_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -472,6 +508,7 @@ def _jgrad_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -485,11 +522,11 @@ def _jgrad_mop(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jvg_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -517,6 +554,7 @@ def _jvg_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -530,11 +568,11 @@ def _jvg_mop(
     )
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jhess(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -545,6 +583,7 @@ def _jhess(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    n_obs: int,
 ):
     """
     calculates the Hessian matrix of a mean particle filter objective (function
@@ -559,6 +598,7 @@ def _jhess(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,
@@ -569,15 +609,16 @@ def _jhess(
         covars_extended=covars_extended,
         thresh=thresh,
         key=key,
+        n_obs=n_obs,
     )
 
 
 # get the hessian matrix from mop
-@partial(jit, static_argnums=(5, 6, 7, 8))
 def _jhess_mop(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
+    times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
     J: int,  # static
@@ -602,6 +643,7 @@ def _jhess_mop(
         theta_ests,
         dt_array_extended=dt_array_extended,
         t0=t0,
+        times=times,
         ys_extended=ys_extended,
         ys_observed=ys_observed,
         J=J,

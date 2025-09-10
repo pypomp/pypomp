@@ -12,7 +12,6 @@ from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
 
-@partial(jit, static_argnums=(6, 7, 8, 9))
 def _mop_internal(
     theta: jax.Array,
     dt_array_extended: jax.Array,
@@ -65,7 +64,9 @@ def _mop_internal(
     return -loglik
 
 
-@partial(jit, static_argnums=(6, 7, 8, 9))
+_mop_internal_jit = jit(_mop_internal, static_argnums=(6, 7, 8, 9))
+
+
 def _mop_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
@@ -104,6 +105,9 @@ def _mop_internal_mean(
     ) / jnp.sum(ys_observed)
 
 
+_mop_internal_mean_jit = jit(_mop_internal_mean, static_argnums=(6, 7, 8, 9))
+
+
 def _mop_helper(
     i: int,
     inputs: tuple[
@@ -128,12 +132,7 @@ def _mop_helper(
     J = len(particlesF)
 
     time_interval_begins = jnp.logical_or(i == 0, ys_observed[i - 1])
-    weightsP = jax.lax.cond(
-        time_interval_begins,
-        lambda weightsF: weightsF,
-        lambda weightsF: alpha * weightsF,
-        weightsF,
-    )
+    weightsP = jnp.where(time_interval_begins, weightsF, alpha * weightsF)
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars_t = None if covars_extended is None else covars_extended[i]

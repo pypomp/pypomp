@@ -11,9 +11,6 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
-@partial(
-    jit, static_argnums=(6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
-)
 def _train_internal(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
@@ -44,12 +41,14 @@ def _train_internal(
     Internal function for conducting the MOP gradient estimate method.
     """
     times = times.astype(float)
+    n_theta = theta_ests.shape[-1]
     ylen = jnp.sum(ys_observed)
     if n_monitors < 1 and ls:
         raise ValueError("Line search requires at least one monitor")
 
     def train_step(i, carry):
-        theta_ests, key, hess, Acopies, logliks, grads, hesses = carry
+        theta_ests, key, Acopies, logliks, last_grad, last_hess = carry
+        hess = last_hess
 
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
@@ -154,7 +153,7 @@ def _train_internal(
             def dir_weighted(_):
                 i_f = i.astype(theta_ests.dtype)
                 wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
-                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
+                weighted_hess = wt * last_hess + (1 - wt) * hess
                 return -jnp.linalg.pinv(weighted_hess) @ grad
 
             direction = jax.lax.cond(
@@ -166,15 +165,15 @@ def _train_internal(
             def bfgs_true(_):
                 prev_direction = jax.lax.cond(
                     i > 0,
-                    lambda __: -grads[i - 1],
+                    lambda __: -last_grad,
                     lambda __: -grad,
                     operand=None,
                 )
                 s_k = eta * prev_direction
-                y_k = grad - grads[i - 1]
+                y_k = grad - last_grad
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
                 sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
-                w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
+                w = jnp.eye(n_theta, dtype=rho_k.dtype) - rho_k * sy_k
                 new_hess = (
                     jnp.einsum("ij,jk,lk", w, hess, w)
                     + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
@@ -245,29 +244,26 @@ def _train_internal(
         # Update carry state
         Acopies = Acopies.at[i].set(theta_ests)
         logliks = logliks.at[i].set(loglik)
-        grads = grads.at[i].set(grad)
-        hesses = hesses.at[i].set(hess)
+        last_grad = grad
+        last_hess = hess
 
-        return (theta_ests, key, hess, Acopies, logliks, grads, hesses)
+        return (theta_ests, key, Acopies, logliks, last_grad, last_hess)
 
     # Initialize arrays for storing results
     Acopies = jnp.zeros((M + 1, *theta_ests.shape))
     logliks = jnp.zeros(M + 1)
-    grads = jnp.zeros((M + 1, *theta_ests.shape))
-    hesses = jnp.zeros((M + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
 
     # Set initial values
     Acopies = Acopies.at[0].set(theta_ests)
-    hess = jnp.eye(theta_ests.shape[-1])  # default one
+    hess = jnp.eye(n_theta)  # default one
+    grad = jnp.zeros(n_theta)
 
     # Run the optimization loop
-    final_theta, final_key, final_hess, Acopies, logliks, grads, hesses = (
-        jax.lax.fori_loop(
-            0,
-            M,
-            train_step,
-            (theta_ests, key, hess, Acopies, logliks, grads, hesses),
-        )
+    final_theta, final_key, Acopies, logliks, grad, hess = jax.lax.fori_loop(
+        0,
+        M,
+        train_step,
+        (theta_ests, key, Acopies, logliks, grad, hess),
     )
 
     # Final evaluation
@@ -310,6 +306,11 @@ def _train_internal(
 _vmapped_train_internal = jax.vmap(
     _train_internal,
     in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
+)
+
+_jv_train_internal = jit(
+    _vmapped_train_internal,
+    static_argnums=(6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23),
 )
 
 

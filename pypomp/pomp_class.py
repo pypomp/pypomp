@@ -11,9 +11,9 @@ import jax.numpy as jnp
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from .mop import _mop_internal
+from .mop import _mop_internal_jit
 from .mif import _jv_mif_internal
-from .train import _vmapped_train_internal
+from .train import _jv_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _simulate_internal
@@ -234,7 +234,7 @@ class Pomp:
         results = []
         for theta_i, k in zip(theta_list, keys):
             results.append(
-                -_mop_internal(
+                -_mop_internal_jit(
                     theta=jnp.array(list(theta_i.values())),
                     dt_array_extended=self._dt_array_extended,
                     t0=self.rinit.t0,
@@ -588,7 +588,7 @@ class Pomp:
         n_obs = int(np.sum(ys_observed_np))
 
         # Use vmapped version instead of for loop
-        nLLs, theta_ests = _vmapped_train_internal(
+        nLLs, theta_ests = _jv_train_internal(
             theta_array,
             self._dt_array_extended,
             self.rinit.t0,

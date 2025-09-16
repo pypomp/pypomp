@@ -3,6 +3,8 @@
 import jax.numpy as jnp
 import jax
 from pypomp.util import expit
+from pypomp.multinom import simple_multinomial
+# from tensorflow_probability.substrates.jax.distributions import Multinomial
 
 
 param_names = (
@@ -98,7 +100,9 @@ def rproc(X_, theta_, key, covars, t, dt):
         .set(p0_values)
     )
 
-    transitions = jax.random.multinomial(keys[2], populations, rt_final)
+    # transitions = jax.random.multinomial(keys[2], populations, rt_final)
+
+    transitions = simple_multinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

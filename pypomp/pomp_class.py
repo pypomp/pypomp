@@ -824,13 +824,14 @@ class Pomp:
             df = df.sort_values(["iteration", "replicate"]).reset_index(drop=True)
         return df
 
-    def results(self, index: int = -1) -> pd.DataFrame:
+    def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """
         Returns a DataFrame with the results of the method run at the given index.
 
         Args:
             index (int): The index of the result to return. Defaults to -1 (the last
                 result).
+            ignore_nan (bool): If True, ignore NaNs when computing the log-likelihood.
 
         Returns:
             pd.DataFrame: A DataFrame with the results of the method run at the given
@@ -847,9 +848,9 @@ class Pomp:
                 # Use underlying NumPy array if available to avoid copies
                 arr = getattr(logLik_arr, "values", logLik_arr)
                 logLik_arr_np = np.asarray(arr)
-                logLik = float(logmeanexp(logLik_arr_np))
+                logLik = float(logmeanexp(logLik_arr_np, ignore_nan=ignore_nan))
                 se = (
-                    float(logmeanexp_se(logLik_arr_np))
+                    float(logmeanexp_se(logLik_arr_np, ignore_nan=ignore_nan))
                     if len(logLik_arr_np) > 1
                     else np.nan
                 )

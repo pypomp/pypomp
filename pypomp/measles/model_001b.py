@@ -3,8 +3,7 @@
 import jax.numpy as jnp
 import jax
 from pypomp.util import expit
-from pypomp.multinom import simple_multinomial
-# from tensorflow_probability.substrates.jax.distributions import Multinomial
+from pypomp.fast_random import simple_multinomial, truncated_poisson
 
 
 param_names = (
@@ -82,7 +81,8 @@ def rproc(X_, theta_, key, covars, t, dt):
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
-    births = jax.random.poisson(keys[1], br * dt)
+    # births = jax.random.poisson(keys[1], br * dt)
+    births = truncated_poisson(keys[1], br * dt, max_k=8)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))

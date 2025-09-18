@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import jax
 from pypomp.util import expit
-from pypomp.fast_random import simple_multinomial, truncated_poisson
+from pypomp.fast_random import fast_multinomial, fast_poisson
 
 
 param_names = (
@@ -82,7 +82,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = truncated_poisson(keys[1], br * dt, max_k=8)
+    births = fast_poisson(keys[1], br * dt, max_k=800)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))
@@ -101,8 +101,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-
-    transitions = simple_multinomial(keys[2], populations, rt_final)
+    transitions = fast_multinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

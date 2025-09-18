@@ -14,7 +14,7 @@ def normal_approx(
     return jnp.maximum(draws, 0)
 
 
-def simple_multinomial(
+def fast_multinomial(
     key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple | None = None
 ) -> jax.Array:
     r"""
@@ -74,26 +74,37 @@ def simple_multinomial(
     return counts
 
 
-def truncated_poisson(
+def fast_poisson(
     key: jax.Array,
     lam: jax.Array,
     shape: tuple | None = None,
     *,
     max_k: int | None = None,
     percentile: float | None = None,
+    normal_threshold: float = 10.0,
 ) -> jax.Array:
     """
-    Sample from a right-truncated Poisson(lambda) via inverse CDF.
+    Draw samples from either a discretized Normal or a right-truncated
+    Poisson(lambda), selected via a JAX-compatible conditional.
 
-    Exactly one of ``max_k`` or ``percentile`` must be provided.
+    - If ``lam >= normal_threshold``: sample from a Normal(lambda, lambda),
+      discretized by rounding to the nearest nonnegative integer (no upper
+      truncation).
+    - Otherwise: sample from a right-truncated Poisson(lambda) on
+      {0, 1, ..., K} via inverse CDF. Exactly one of ``max_k`` or
+      ``percentile`` must be provided to determine K.
 
     Args:
         key: PRNG key.
-        lam: Poisson rate (scalar).
+        lam: Poisson rate (scalar JAX array).
         shape: Optional batch shape for the returned samples. Default None → ().
-        max_k: If provided, truncate support to {0, 1, ..., max_k}.
-        percentile: If provided, choose the smallest K such that
-            CDF_Poisson(K; lam) >= percentile, then truncate to {0, ..., K}.
+        max_k: Truncate Poisson support to {0, 1, ..., max_k} when using the
+            truncated-Poisson path.
+        percentile: When using the truncated-Poisson path and ``max_k`` is not
+            provided, choose the smallest K such that CDF_Poisson(K; lam) >=
+            ``percentile`` and truncate to {0, ..., K}.
+        normal_threshold: Threshold at which to switch to the Normal
+            approximation. Default 10.0.
 
     Returns:
         Integer array of samples with shape ``shape`` (or scalar if None).
@@ -106,62 +117,71 @@ def truncated_poisson(
 
     lam_scalar = lam.astype(jnp.float32)
 
-    # Determine truncation K
-    if max_k is not None:
-        K = int(max_k)
-    else:
-        # Find smallest K with CDF >= percentile using stable pmf recursion
-        assert percentile is not None
-        target = float(percentile)
+    # Decide using a JAX-compatible conditional BEFORE any Poisson-specific work
+    use_normal = lam_scalar >= jnp.asarray(normal_threshold, dtype=jnp.float32)
 
-        def cond_fun(state):
-            k, pmf, cdf = state
-            return jnp.logical_and(cdf < target, k < 100000)
+    def sample_normal(_):
+        normal_samples = (
+            jax.random.normal(key, shape=shape) * jnp.sqrt(lam_scalar) + lam_scalar
+        )
+        samples = jnp.maximum(jnp.round(normal_samples), 0.0)
+        return samples.astype(jnp.int32)
 
-        def body_fun(state):
-            k, pmf, cdf = state
-            next_k = k + 1
-            next_pmf = pmf * lam_scalar / next_k
-            next_cdf = cdf + next_pmf
-            return (next_k, next_pmf, next_cdf)
+    def sample_exact(_):
+        # Determine truncation K
+        if max_k is not None:
+            K = int(max_k)
+        else:
+            # Find smallest K with CDF >= percentile using stable pmf recursion
+            assert percentile is not None
+            target = float(percentile)
+
+            def cond_fun(state):
+                k, pmf, cdf = state
+                return jnp.logical_and(cdf < target, k < 100000)
+
+            def body_fun(state):
+                k, pmf, cdf = state
+                next_k = k + 1
+                next_pmf = pmf * lam_scalar / next_k
+                next_cdf = cdf + next_pmf
+                return (next_k, next_pmf, next_cdf)
+
+            p0 = jnp.exp(-lam_scalar)
+            k0, pmf0, cdf0 = (0, p0, p0)
+            kf, _, _ = jax.lax.while_loop(cond_fun, body_fun, (k0, pmf0, cdf0))
+            # If p0 already >= target, kf will be 0; otherwise it is smallest k s.t. CDF>=target
+            K = int(kf)
+
+        # Build pmf for k=0..K using stable recursion
+        def scan_body(p_k, k_idx):
+            next_p = p_k * lam_scalar / (k_idx + 1)
+            return next_p, next_p
 
         p0 = jnp.exp(-lam_scalar)
-        k0, pmf0, cdf0 = (0, p0, p0)
-        kf, _, cdf_f = jax.lax.while_loop(cond_fun, body_fun, (k0, pmf0, cdf0))
-        # If p0 already >= target, kf will be 0; otherwise it is smallest k s.t. CDF>=target
-        K = int(kf)
+        if K == 0:
+            pmfs = jnp.array([p0])
+        else:
+            ks = jnp.arange(K)
+            _, tail_pmfs = jax.lax.scan(scan_body, p0, ks)
+            pmfs = jnp.concatenate([jnp.array([p0]), tail_pmfs])
 
-    # Build pmf for k=0..K using stable recursion
-    def scan_body(p_k, k_idx):
-        # p_{k+1} = p_k * lam / (k+1)
-        next_p = p_k * lam_scalar / (k_idx + 1)
-        return next_p, next_p
+        cdf = jnp.cumsum(pmfs)
+        total_mass = cdf[-1]
 
-    p0 = jnp.exp(-lam_scalar)
-    if K == 0:
-        pmfs = jnp.array([p0])
-    else:
-        ks = jnp.arange(K)
-        _, tail_pmfs = jax.lax.scan(scan_body, p0, ks)
-        pmfs = jnp.concatenate([jnp.array([p0]), tail_pmfs])
+        u = jax.random.uniform(key, shape=shape)
+        thresh = u * total_mass
 
-    cdf = jnp.cumsum(pmfs)
-    total_mass = cdf[-1]
+        def search_one(t):
+            return jnp.searchsorted(cdf, t, side="left")
 
-    # Draw uniforms and perform inverse CDF on the truncated support
-    u = jax.random.uniform(key, shape=shape)
-    thresh = u * total_mass
+        idx = (
+            jax.vmap(search_one)(thresh.ravel())
+            if thresh.size
+            else jnp.array([], dtype=jnp.int32)
+        )
+        idx = idx.reshape(thresh.shape)
+        idx = jnp.minimum(idx, K)
+        return idx.astype(jnp.int32)
 
-    # Vectorized searchsorted over the final axis of cdf (1D)
-    def search_one(t):
-        return jnp.searchsorted(cdf, t, side="left")
-
-    idx = (
-        jax.vmap(search_one)(thresh.ravel())
-        if thresh.size
-        else jnp.array([], dtype=jnp.int32)
-    )
-    idx = idx.reshape(thresh.shape)
-    idx = jnp.minimum(idx, K)
-
-    return idx.astype(jnp.int32)
+    return jax.lax.cond(use_normal, sample_normal, sample_exact, operand=None)

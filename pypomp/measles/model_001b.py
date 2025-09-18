@@ -82,7 +82,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_poisson(keys[1], br * dt, max_k=800)
+    births = fast_poisson(keys[1], br * dt, max_k=30)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))

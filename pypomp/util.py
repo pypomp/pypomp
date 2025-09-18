@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import warnings
 
 
-def logmeanexp(x) -> float:
+def logmeanexp(x, ignore_nan: bool = False) -> float:
     """
     Calculates the mean likelihood for an array of log-likelihoods,
     and returns the corresponding log-likelihood. This is appropriate
@@ -12,17 +12,25 @@ def logmeanexp(x) -> float:
 
     Args:
         x (array-like): collection of log-likelihoods
+        ignore_nan (bool): if True, drop NaNs before computing. If all
+            values are NaN or x is empty, returns np.nan.
     """
-    x_array = np.asarray(x)
+    x_array = np.asarray(x, dtype=float)
+    if ignore_nan:
+        x_array = x_array[~np.isnan(x_array)]
     if x_array.size == 0:
-        warnings.warn("x is an empty array, returning nan")
+        warnings.warn(
+            "x is an empty array (after dropping NaNs), returning nan"
+            if ignore_nan
+            else "x is an empty array, returning nan"
+        )
         return np.nan
     x_max = np.max(x_array)
     log_mean_exp = np.log(np.mean(np.exp(x_array - x_max))) + x_max
     return log_mean_exp
 
 
-def logmeanexp_se(x) -> float:
+def logmeanexp_se(x, ignore_nan: bool = False) -> float:
     """
     A jack-knife standard error for the log-likelihood estimate
     calculated via logmeanexp(). For comparison with R-pomp::logmeanexp,
@@ -32,15 +40,19 @@ def logmeanexp_se(x) -> float:
 
     Args:
         x (array-like): collection of log-likelihoods
+        ignore_nan (bool): if True, drop NaNs before computing. If fewer
+            than 2 finite values remain, returns np.nan.
     """
 
     x_array = np.asarray(x, dtype=float)
+    if ignore_nan:
+        x_array = x_array[~np.isnan(x_array)]
     n = x_array.size
     if n <= 1:
         return np.nan
 
     jack = np.asarray(
-        [logmeanexp(np.delete(x_array, i)) for i in range(n)],
+        [logmeanexp(np.delete(x_array, i), ignore_nan=False) for i in range(n)],
         dtype=float,
     )
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)

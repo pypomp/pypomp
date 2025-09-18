@@ -111,6 +111,26 @@ class TestUtil(unittest.TestCase):
         duration = time.time() - start
         self.assertTrue(duration < 1)
 
+    def test_ignore_nan_true(self):
+        # Array with some nans: ignore_nan=True should drop them
+        arr = np.array([1.0, np.nan, 2.0, 3.0])
+        lme = self.logmeanexp(arr, ignore_nan=True)
+        lme_se = self.logmeanexp_se(arr, ignore_nan=True)
+        # Should be equal to logmeanexp([1,2,3])
+        arr_no_nan = np.array([1.0, 2.0, 3.0])
+        expected_lme = self.logmeanexp(arr_no_nan)
+        expected_lme_se = self.logmeanexp_se(arr_no_nan)
+        self.assertAlmostEqual(lme, expected_lme, places=7)
+        self.assertAlmostEqual(lme_se, expected_lme_se, places=7)
+
+        # If all values are nan, should return nan
+        arr_all_nan = np.array([np.nan, np.nan])
+        with warnings.catch_warnings(record=True) as w:
+            lme_nan = self.logmeanexp(arr_all_nan, ignore_nan=True)
+            lme_se_nan = self.logmeanexp_se(arr_all_nan, ignore_nan=True)
+        self.assertTrue(np.isnan(lme_nan))
+        self.assertTrue(np.isnan(lme_se_nan))
+
 
 if __name__ == "__main__":
     unittest.main(argv=[""], verbosity=2, exit=False)

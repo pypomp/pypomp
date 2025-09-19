@@ -3,7 +3,12 @@
 import jax.numpy as jnp
 import jax
 from pypomp.util import expit
-from pypomp.fast_random import fast_multinomial, fast_poisson
+from pypomp.fast_random import (
+    fast_approx_multinomial,
+    fast_approx_poisson,
+    fast_approx_gamma,
+    fast_approx_loggamma,
+)
 
 
 param_names = (
@@ -76,13 +81,14 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
-    dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=2) * sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_poisson(keys[1], br * dt, max_k=30)
+    births = fast_approx_poisson(keys[1], br * dt, max_k=30)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))
@@ -101,7 +107,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_multinomial(keys[2], populations, rt_final)
+    transitions = fast_approx_multinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

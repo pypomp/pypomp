@@ -43,9 +43,11 @@ class Test_Measles(unittest.TestCase):
         out2 = x.simulate(
             key=jax.random.key(1),
             nsim=1,  # times=self.measles.ys.index[0:1]
-        )
+        )[0]
 
-        # if False:  # Process and obs plots
+        # if True:  # Process and obs plots
+        #     import matplotlib.pyplot as plt
+
         #     fig, axs = plt.subplots(7, 1, sharex=True)
         #     sim_n = 0
         #     for i in range(6):

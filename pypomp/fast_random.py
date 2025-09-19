@@ -1,10 +1,10 @@
+import jax
 import jax.numpy as jnp
+import typing
 from functools import partial
 import math
 from collections.abc import Sequence
 
-import jax
-import jax.random
 from jax._src.lax import lax
 from jax.random import normal, uniform, exponential
 from jax._src import core
@@ -20,8 +20,9 @@ from jax._src.interpreters import mlir
 from jax._src.lax import control_flow as lax_control_flow
 from jax._src.lax import special as lax_special
 from jax._src.typing import Array, ArrayLike, DTypeLike
-from jax._src.random import _check_shape, _check_prng_key, _split, _key_impl
+from jax._src.random import _check_shape, _check_prng_key, _split, _key_impl, split
 from jax._src import config
+from jax._src.numpy.util import check_arraylike, promote_dtypes_inexact
 
 RealArray = ArrayLike
 IntegerArray = ArrayLike
@@ -43,7 +44,7 @@ def normal_approx(
     return jnp.maximum(draws, 0)
 
 
-def fast_approx_multinomial(
+def faster_approx_multinomial(
     key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple | None = None
 ) -> jax.Array:
     r"""
@@ -103,7 +104,7 @@ def fast_approx_multinomial(
     return counts
 
 
-def fast_approx_poisson(
+def faster_approx_poisson(
     key: jax.Array,
     lam: jax.Array,
     shape: tuple | None = None,
@@ -214,6 +215,426 @@ def fast_approx_poisson(
         return idx.astype(jnp.int32)
 
     return jax.lax.cond(use_normal, sample_normal, sample_exact, operand=None)
+
+
+def _isnan(x: ArrayLike) -> Array:
+    return lax.ne(x, x)
+
+
+def _stirling_approx_tail(k):
+    stirling_tail_vals = jnp.array(
+        [
+            0.0810614667953272,
+            0.0413406959554092,
+            0.0276779256849983,
+            0.02079067210376509,
+            0.0166446911898211,
+            0.0138761288230707,
+            0.0118967099458917,
+            0.0104112652619720,
+            0.00925546218271273,
+            0.00833056343336287,
+        ],
+        dtype=k.dtype,
+    )
+    use_tail_values = k <= 9
+    k = lax.clamp(lax._const(k, 0.0), k, lax._const(k, 9.0))
+    kp1sq = (k + 1) * (k + 1)
+    approx = (1.0 / 12 - (1.0 / 360 - 1.0 / 1260 / kp1sq) / kp1sq) / (k + 1)
+    k = jnp.floor(k)
+    return lax.select(
+        use_tail_values, stirling_tail_vals[jnp.asarray(k, dtype="int32")], approx
+    )
+
+
+@partial(jit, static_argnums=(3, 4, 5), inline=True)
+def _binomial_inversion(key, count, prob, shape, dtype, max_iters):
+    if config.enable_checks.value:
+        assert dtypes.issubdtype(prob.dtype, np.floating)
+
+    log1minusprob = jnp.log1p(-prob)
+
+    def body_fn(carry):
+        i, num_geom, geom_sum, key = carry
+        subkey, key = split(key)
+        num_geom_out = lax.select(geom_sum <= count, num_geom + 1, num_geom)
+        u = uniform(subkey, shape, prob.dtype)
+        geom = jnp.ceil(jnp.log(u) / log1minusprob)
+        geom_sum = geom_sum + geom
+        return i + 1, num_geom_out, geom_sum, key
+
+    def cond_fn(carry):
+        i, geom_sum = carry[0], carry[2]
+        return (geom_sum <= count).any() & (i < max_iters)
+
+    num_geom_init = lax.full_like(prob, 0, prob.dtype, shape)
+    geom_sum_init = lax.full_like(prob, 0, prob.dtype, shape)
+    carry = (0, num_geom_init, geom_sum_init, key)
+    k = lax_control_flow.while_loop(cond_fn, body_fn, carry)[1]
+    return (k - 1).astype(dtype)
+
+
+@partial(jit, static_argnums=(3, 4, 5), inline=True)
+def _btrs(key, count, prob, shape, dtype, max_iters):
+    # transforman-rejection algorithm
+    # https://www.tandfonline.com/doi/abs/10.1080/00949659308811496
+    stddev = jnp.sqrt(count * prob * (1 - prob))
+    b = 1.15 + 2.53 * stddev
+    a = -0.0873 + 0.0248 * b + 0.01 * prob
+    c = count * prob + 0.5
+    v_r = 0.92 - 4.2 / b
+    r = prob / (1 - prob)
+    alpha = (2.83 + 5.1 / b) * stddev
+    m = jnp.floor((count + 1) * prob)
+
+    def body_fn(carry):
+        i, k_out, accepted, key = carry
+        key, subkey_0, subkey_1 = split(key, 3)
+        u = uniform(subkey_0, shape, prob.dtype)
+        v = uniform(subkey_1, shape, prob.dtype)
+        u = u - 0.5
+        us = 0.5 - jnp.abs(u)
+        accept1 = (us >= 0.07) & (v <= v_r)
+        k = jnp.floor((2 * a / us + b) * u + c)
+        reject = (k < 0) | (k > count)
+        v = jnp.log(v * alpha / (a / (us * us) + b))
+        ub = (
+            (m + 0.5) * jnp.log((m + 1) / (r * (count - m + 1)))
+            + (count + 1) * jnp.log((count - m + 1) / (count - k + 1))
+            + (k + 0.5) * jnp.log(r * (count - k + 1) / (k + 1))
+            + _stirling_approx_tail(m)
+            + _stirling_approx_tail(count - m)
+            - _stirling_approx_tail(k)
+            - _stirling_approx_tail(count - k)
+        )
+        accept2 = v <= ub
+        accept = accept1 | (~reject & accept2)
+        k_out = lax.select(accept, k, k_out)
+        accepted |= accept
+        return i + 1, k_out, accepted, key
+
+    def cond_fn(carry):
+        i, accepted = carry[0], carry[2]
+        return (~accepted).any() & (i < max_iters)
+
+    k_init = lax.full_like(prob, -1, prob.dtype, shape)
+    carry = (0, k_init, jnp.full(shape, False, bool), key)
+    return lax_control_flow.while_loop(cond_fn, body_fn, carry)[1].astype(dtype)
+
+
+@partial(jit, static_argnums=(3, 4, 5), inline=True)
+def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
+    # The implementation matches TensorFlow and TensorFlow Probability:
+    # https://github.com/tensorflow/tensorflow/blob/v2.2.0-rc3/tensorflow/core/kernels/random_binomial_op.cc
+    # and tensorflow_probability.substrates.jax.distributions.Binomial
+    # For n * p < 10, we use the binomial inverse algorithm; otherwise btrs.
+    if shape is None:
+        shape = jnp.broadcast_shapes(np.shape(count), np.shape(prob))
+    else:
+        _check_shape("binomial", shape, np.shape(count), np.shape(prob))
+    (prob,) = promote_dtypes_inexact(prob)
+    count = lax.convert_element_type(count, prob.dtype)
+    count = jnp.broadcast_to(count, shape)
+    prob = jnp.broadcast_to(prob, shape)
+    p_lt_half = prob < 0.5
+    q = lax.select(p_lt_half, prob, 1.0 - prob)
+    count_nan_or_neg = _isnan(count) | (count < 0.0)
+    count_inf = jnp.isinf(count)
+    q_is_nan = _isnan(q)
+    q_l_0 = q < 0.0
+    q = lax.select(q_is_nan | q_l_0, lax.full_like(q, 0.01), q)
+    use_inversion = count_nan_or_neg | (count * q <= 10.0)
+
+    # consistent with np.random.binomial behavior for float count input
+    count = jnp.floor(count)
+
+    count_inv = lax.select(use_inversion, count, lax.full_like(count, 0.0))
+    count_btrs = lax.select(use_inversion, lax.full_like(count, 1e4), count)
+    q_btrs = lax.select(use_inversion, lax.full_like(q, 0.5), q)
+    samples = lax.select(
+        use_inversion,
+        _binomial_inversion(key, count_inv, q, shape, dtype, max_rejections),
+        _btrs(key, count_btrs, q_btrs, shape, dtype, max_rejections),
+    )
+    # ensure nan q always leads to nan output and nan or neg count leads to nan
+    # as discussed in https://github.com/jax-ml/jax/pull/16134#pullrequestreview-1446642709
+    invalid = q_l_0 | q_is_nan | count_nan_or_neg
+    samples = lax.select(
+        invalid,
+        jnp.full_like(samples, np.nan, dtype),
+        samples,
+    )
+
+    # +inf count leads to inf
+    samples = lax.select(
+        count_inf & (~invalid),
+        jnp.full_like(samples, np.inf, dtype),
+        samples,
+    )
+
+    samples = lax.select(
+        p_lt_half | count_nan_or_neg | q_is_nan | count_inf,
+        samples,
+        count.astype(dtype) - samples,
+    )
+    return samples
+
+
+def fast_approx_binomial(
+    key: Array,
+    n: RealArray,
+    p: RealArray,
+    shape: Shape | None = None,
+    dtype: DTypeLikeFloat | None = None,
+    max_rejections: int = 2,
+) -> Array:
+    r"""Sample Binomial random values with given shape and float dtype.
+
+    The values are returned according to the probability mass function:
+
+    .. math::
+        f(k;n,p) = \binom{n}{k}p^k(1-p)^{n-k}
+
+    on the domain :math:`0 < p < 1`, and where :math:`n` is a nonnegative integer
+    representing the number of trials and :math:`p` is a float representing the
+    probability of success of an individual trial.
+
+    Args:
+      key: a PRNG key used as the random key.
+      n: a float or array of floats broadcast-compatible with ``shape``
+        representing the number of trials.
+      p: a float or array of floats broadcast-compatible with ``shape``
+        representing the probability of success of an individual trial.
+      shape: optional, a tuple of nonnegative integers specifying the result
+        shape. Must be broadcast-compatible with ``n`` and ``p``.
+        The default (None) produces a result shape equal to ``np.broadcast(n, p).shape``.
+      dtype: optional, a float dtype for the returned values (default float64 if
+        jax_enable_x64 is true, otherwise float32).
+
+    Returns:
+      A random array with the specified dtype and with shape given by
+      ``np.broadcast(n, p).shape``.
+    """
+    key, _ = _check_prng_key("binomial", key)
+    check_arraylike("binomial", n, p)
+    dtype = dtypes.check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    if not dtypes.issubdtype(dtype, np.floating):
+        raise ValueError(
+            f"dtype argument to `binomial` must be a float dtype, got {dtype}"
+        )
+    if shape is not None:
+        shape = core.canonicalize_shape(shape)
+    return _binomial(key, n, p, shape, dtype, max_rejections)
+
+
+# Functions related to key reuse checking
+# random_clone_p = core.Primitive("random_clone")
+# dispatch.simple_impl(random_clone_p)
+# random_clone_p.def_abstract_eval(lambda x: x)
+# batching.defvectorized(random_clone_p)
+# mlir.register_lowering(random_clone_p, lambda _, k: [k])
+
+
+def fast_approx_multinomial(
+    key: Array,
+    n: RealArray,
+    p: RealArray,
+    *,
+    shape: Shape | None = None,
+    dtype: DTypeLikeFloat | None = None,
+    unroll: int | bool = 1,
+    max_rejections: int = 2,
+):
+    r"""Sample from a multinomial distribution.
+
+    The probability mass function is
+
+    .. math::
+        f(x;n,p) = \frac{n!}{x_1! \ldots x_k!} p_1^{x_1} \ldots p_k^{x_k}
+
+    Args:
+      key: PRNG key.
+      n: number of trials. Should have shape broadcastable to ``p.shape[:-1]``.
+      p: probability of each outcome, with outcomes along the last axis.
+      shape: optional, a tuple of nonnegative integers specifying the result batch
+        shape, that is, the prefix of the result shape excluding the last axis.
+        Must be broadcast-compatible with ``p.shape[:-1]``. The default (None)
+        produces a result shape equal to ``p.shape``.
+      dtype: optional, a float dtype for the returned values (default float64 if
+        jax_enable_x64 is true, otherwise float32).
+      unroll: optional, unroll parameter passed to :func:`jax.lax.scan` inside the
+        implementation of this function.
+
+    Returns:
+      An array of counts for each outcome with the specified dtype and with shape
+        ``p.shape`` if ``shape`` is None, otherwise ``shape + (p.shape[-1],)``.
+    """
+
+    key, _ = _check_prng_key("multinomial", key)
+    check_arraylike("multinomial", n, p)
+    n, p = promote_dtypes_inexact(n, p)
+
+    if shape is None:
+        shape = p.shape
+    n = jnp.broadcast_to(n, shape[:-1])
+    p = jnp.broadcast_to(p, shape)
+
+    def f(remainder, ratio_key):
+        ratio, key = ratio_key
+        count = fast_approx_binomial(
+            key,
+            remainder,
+            ratio.clip(0, 1),
+            dtype=remainder.dtype,
+            max_rejections=max_rejections,
+        )
+        return remainder - count, count
+
+    p = jnp.moveaxis(p, -1, 0)
+
+    remaining_probs = lax_control_flow.cumsum(p, 0, reverse=True)
+    ratios = p / jnp.where(remaining_probs == 0, 1, remaining_probs)
+
+    keys = split(key, ratios.shape[0])
+    remainder, counts = lax_control_flow.scan(f, n, (ratios, keys), unroll=unroll)
+    # final remainder should be zero
+
+    return jnp.moveaxis(counts, 0, -1).astype(dtype)
+
+
+@partial(jit, static_argnums=(2, 3, 4))
+def _poisson_knuth(key, lam, shape, dtype, max_iters) -> Array:
+    # Knuth's algorithm for generating Poisson random variates.
+    # Reference:
+    # https://en.wikipedia.org/wiki/Poisson_distribution#Generating_Poisson-distributed_random_variables
+
+    def body_fn(carry):
+        i, k, rng, log_prod = carry
+        rng, subkey = split(rng)
+        k = lax.select(log_prod > -lam, k + 1, k)
+        u = uniform(subkey, shape, np.float32)
+        return i + 1, k, rng, log_prod + jnp.log(u)
+
+    def cond_fn(carry):
+        i, log_prod = carry[0], carry[3]
+        return (log_prod > -lam).any() & (i < max_iters)
+
+    k_init = lax.full_like(lam, 0, dtype, shape)
+    log_rate_init = lax.full_like(lam, 0, np.float32, shape)
+    k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, key, log_rate_init))[
+        1
+    ]
+    return (k - 1).astype(dtype)
+
+
+@partial(jit, static_argnums=(2, 3, 4))
+def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
+    # Transformed rejection due to Hormann.
+    # Reference:
+    # http://citeseer.ist.psu.edu/viewdoc/citations;jsessionid=1BEB35946CC807879F55D42512E5490C?doi=10.1.1.48.3054.
+    log_lam = lax.log(lam)
+    b = 0.931 + 2.53 * lax.sqrt(lam)
+    a = -0.059 + 0.02483 * b
+    inv_alpha = 1.1239 + 1.1328 / (b - 3.4)
+    v_r = 0.9277 - 3.6224 / (b - 2)
+
+    def body_fn(carry):
+        i, k_out, accepted, key = carry
+        key, subkey_0, subkey_1 = _split(key, 3)
+
+        u = uniform(subkey_0, shape, lam.dtype) - 0.5
+        v = uniform(subkey_1, shape, lam.dtype)
+        u_shifted = 0.5 - abs(u)
+
+        k = lax.floor((2 * a / u_shifted + b) * u + lam + 0.43)
+        s = lax.log(v * inv_alpha / (a / (u_shifted * u_shifted) + b))
+        t = -lam + k * log_lam - lax_special.lgamma(k + 1)
+
+        accept1 = (u_shifted >= 0.07) & (v <= v_r)
+        reject = (k < 0) | ((u_shifted < 0.013) & (v > u_shifted))
+        accept2 = s <= t
+        accept = accept1 | (~reject & accept2)
+
+        k_out = lax.select(accept, k, k_out)
+        accepted |= accept
+
+        return i + 1, k_out, accepted, key
+
+    def cond_fn(carry):
+        i, k_out, accepted, key = carry
+        return (~accepted).any() & (i < max_iters)
+
+    k_init = lax.full_like(lam, -1, lam.dtype, shape)
+    accepted = lax.full_like(lam, False, np.dtype("bool"), shape)
+    k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, accepted, key))[1]
+    return k.astype(dtype)
+
+
+@partial(jit, static_argnums=(2, 3, 4))
+def _poisson(key, lam, shape, dtype, max_rejections) -> Array:
+    # The implementation matches TensorFlow and NumPy:
+    # https://github.com/tensorflow/tensorflow/blob/v2.2.0-rc3/tensorflow/core/kernels/random_poisson_op.cc
+    # https://github.com/numpy/numpy/blob/v1.18.3/numpy/random/src/distributions/distributions.c#L574
+    # For lambda < 10, we use the Knuth algorithm; otherwise, we use transformed
+    # rejection sampling.
+    use_knuth = _isnan(lam) | (lam < 10)
+    lam_knuth = lax.select(use_knuth, lam, lax.full_like(lam, 0.0))
+    # The acceptance probability for rejection sampling maxes out at 89% as
+    # λ -> ∞, so pick some arbitrary large value.
+    lam_rejection = lax.select(use_knuth, lax.full_like(lam, 1e5), lam)
+    result = lax.select(
+        use_knuth,
+        _poisson_knuth(key, lam_knuth, shape, dtype, max_rejections),
+        _poisson_rejection(key, lam_rejection, shape, dtype, max_rejections),
+    )
+    return lax.select(lam == 0, jnp.zeros_like(result), result)
+
+
+def fast_approx_poisson(
+    key: ArrayLike,
+    lam: RealArray,
+    shape: Shape | None = None,
+    dtype: DTypeLikeInt | None = None,
+    max_rejections: int = 2,
+) -> Array:
+    r"""Sample Poisson random values with given shape and integer dtype.
+
+    The values are distributed according to the probability mass function:
+
+    .. math::
+       f(k; \lambda) = \frac{\lambda^k e^{-\lambda}}{k!}
+
+    Where `k` is a non-negative integer and :math:`\lambda > 0`.
+
+    Args:
+      key: a PRNG key used as the random key.
+      lam: rate parameter (mean of the distribution), must be >= 0. Must be broadcast-compatible with ``shape``
+      shape: optional, a tuple of nonnegative integers representing the result
+        shape. Default (None) produces a result shape equal to ``lam.shape``.
+      dtype: optional, a integer dtype for the returned values (default int64 if
+        jax_enable_x64 is true, otherwise int32).
+
+    Returns:
+      A random array with the specified dtype and with shape given by ``shape`` if
+      ``shape is not None, or else by ``lam.shape``.
+    """
+    key, _ = _check_prng_key("poisson", key)
+    dtype = dtypes.check_and_canonicalize_user_dtype(int if dtype is None else dtype)
+    # TODO(frostig): generalize underlying poisson implementation and
+    # remove this check
+    keys_dtype = typing.cast(prng.KeyTy, key.dtype)
+    key_impl = keys_dtype._impl
+    if key_impl is not prng.threefry_prng_impl:
+        raise NotImplementedError(
+            f"`poisson` is only implemented for the threefry2x32 RNG, not {key_impl}"
+        )
+    if shape is not None:
+        shape = core.canonicalize_shape(shape)
+    else:
+        shape = np.shape(lam)
+    lam = jnp.broadcast_to(lam, shape)
+    lam = lax.convert_element_type(lam, np.float32)
+    return _poisson(key, lam, shape, dtype, max_rejections)
 
 
 ### JAX code follows
@@ -401,7 +822,7 @@ batching.primitive_batchers[random_gamma_p] = _gamma_batching_rule
 def fast_approx_gamma(
     key: ArrayLike,
     a: RealArray,
-    max_rejections: int = 1,
+    max_rejections: int = 2,
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
 ) -> Array:
@@ -451,7 +872,7 @@ def fast_approx_gamma(
 def fast_approx_loggamma(
     key: ArrayLike,
     a: RealArray,
-    max_rejections: int = 1,
+    max_rejections: int = 2,
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
 ) -> Array:

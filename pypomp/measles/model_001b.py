@@ -7,7 +7,6 @@ from pypomp.fast_random import (
     fast_approx_multinomial,
     fast_approx_poisson,
     fast_approx_gamma,
-    fast_approx_loggamma,
 )
 
 
@@ -88,7 +87,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_approx_poisson(keys[1], br * dt, max_k=30)
+    births = fast_approx_poisson(keys[1], br * dt, max_rejections=2)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))
@@ -107,7 +106,9 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_approx_multinomial(keys[2], populations, rt_final)
+    transitions = fast_approx_multinomial(
+        keys[2], populations, rt_final, max_rejections=10
+    )
 
     trans_S = transitions[0]
     trans_E = transitions[1]

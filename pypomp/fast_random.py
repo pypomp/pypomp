@@ -10,7 +10,6 @@ from jax.random import normal, uniform, exponential
 from jax._src import core
 import numpy as np
 from jax._src import dtypes
-from jax._src.dtypes import check_and_canonicalize_user_dtype
 from jax._src import prng
 from jax._src import xla_bridge
 from jax._src.api import jit, vmap
@@ -24,10 +23,31 @@ from jax._src.random import _check_shape, _check_prng_key, _split, _key_impl, sp
 from jax._src import config
 from jax._src.numpy.util import check_arraylike, promote_dtypes_inexact
 
+# ------------------------------------------------------------------------------
+# JAX compatibility shim: older JAX versions may not expose
+# dtypes.check_and_canonicalize_user_dtype. Define a fallback when missing.
+# ------------------------------------------------------------------------------
+if not hasattr(dtypes, "check_and_canonicalize_user_dtype"):
+    try:
+        _canonicalize = dtypes.canonicalize_dtype  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - extremely old JAX; best-effort fallback
+
+        def _canonicalize(x):
+            return x
+
+    def check_and_canonicalize_user_dtype(dtype):
+        # Older JAX separated "check" and "canonicalize"; for our usage where we
+        # pass builtins like int/float or numpy dtypes, canonicalizing is
+        # sufficient. If dtype is None, mirror JAX behavior of passing it through.
+        return None if dtype is None else _canonicalize(dtype)
+
+else:
+    check_and_canonicalize_user_dtype = dtypes.check_and_canonicalize_user_dtype  # type: ignore[attr-defined]
+
+
 RealArray = ArrayLike
 IntegerArray = ArrayLike
-# TODO: Import or define these to match
-# https://github.com/numpy/numpy/blob/main/numpy/typing/_dtype_like.py.
+
 DTypeLikeInt = DTypeLike
 DTypeLikeUInt = DTypeLike
 DTypeLikeFloat = DTypeLike
@@ -410,6 +430,7 @@ def fast_approx_binomial(
         The default (None) produces a result shape equal to ``np.broadcast(n, p).shape``.
       dtype: optional, a float dtype for the returned values (default float64 if
         jax_enable_x64 is true, otherwise float32).
+      max_rejections: the maximum number of rejections allowed.
 
     Returns:
       A random array with the specified dtype and with shape given by
@@ -417,7 +438,7 @@ def fast_approx_binomial(
     """
     key, _ = _check_prng_key("binomial", key)
     check_arraylike("binomial", n, p)
-    dtype = dtypes.check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     if not dtypes.issubdtype(dtype, np.floating):
         raise ValueError(
             f"dtype argument to `binomial` must be a float dtype, got {dtype}"
@@ -464,6 +485,7 @@ def fast_approx_multinomial(
         jax_enable_x64 is true, otherwise float32).
       unroll: optional, unroll parameter passed to :func:`jax.lax.scan` inside the
         implementation of this function.
+      max_rejections: the maximum number of rejections allowed.
 
     Returns:
       An array of counts for each outcome with the specified dtype and with shape
@@ -613,15 +635,15 @@ def fast_approx_poisson(
         shape. Default (None) produces a result shape equal to ``lam.shape``.
       dtype: optional, a integer dtype for the returned values (default int64 if
         jax_enable_x64 is true, otherwise int32).
+      max_rejections: the maximum number of rejections allowed.
 
     Returns:
       A random array with the specified dtype and with shape given by ``shape`` if
       ``shape is not None, or else by ``lam.shape``.
     """
     key, _ = _check_prng_key("poisson", key)
-    dtype = dtypes.check_and_canonicalize_user_dtype(int if dtype is None else dtype)
-    # TODO(frostig): generalize underlying poisson implementation and
-    # remove this check
+    dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
+
     keys_dtype = typing.cast(prng.KeyTy, key.dtype)
     key_impl = keys_dtype._impl
     if key_impl is not prng.threefry_prng_impl:
@@ -653,10 +675,10 @@ def _gamma_one(key: Array, alpha, max_rejections, log_space) -> Array:
     squeeze_const = lax._const(alpha, 0.0331)
     dtype = lax.dtype(alpha)
 
-    zero = core.pvary(zero, tuple(core.typeof(alpha).vma))
-    one = core.pvary(one, tuple(core.typeof(alpha).vma))
-    minus_one = core.pvary(minus_one, tuple(core.typeof(alpha).vma))
-    two = core.pvary(two, tuple(core.typeof(alpha).vma))
+    zero = core.pvary(zero, tuple(core.typeof(alpha).vma))  # type: ignore[attr-defined]
+    one = core.pvary(one, tuple(core.typeof(alpha).vma))  # type: ignore[attr-defined]
+    minus_one = core.pvary(minus_one, tuple(core.typeof(alpha).vma))  # type: ignore[attr-defined]
+    two = core.pvary(two, tuple(core.typeof(alpha).vma))  # type: ignore[attr-defined]
 
     # for alpha < 1, we boost alpha to alpha + 1 and get a sample according to
     #   Gamma(alpha) ~ Gamma(alpha+1) * Uniform()^(1 / alpha)
@@ -742,10 +764,16 @@ def _gamma_grad(sample, a, *, max_rejections, log_space):
         tiny = lax.full_like(samples, dtypes.finfo(samples.dtype).tiny)
         samples = lax.select(lax.eq(samples, zero), tiny, samples)
 
-        def gamma_grad(alpha, sample):
-            return lax_special.random_gamma_grad(alpha, sample) / sample
+        def gamma_grad(alpha, sample):  # pyright: ignore[reportRedeclaration]  # noqa: F811
+            return (
+                lax_special.random_gamma_grad(alpha, sample, dtype=sample.dtype)
+                / sample
+            )
     else:
-        gamma_grad = lax_special.random_gamma_grad
+
+        def gamma_grad(alpha, sample):
+            return lax_special.random_gamma_grad(alpha, sample, dtype=sample.dtype)
+
     if xla_bridge.get_backend().platform == "cpu":
         grads = lax_control_flow.map(lambda args: gamma_grad(*args), (alphas, samples))
     else:
@@ -849,6 +877,7 @@ def fast_approx_gamma(
         produces a result shape equal to ``a.shape``.
       dtype: optional, a float dtype for the returned values (default float64 if
         jax_enable_x64 is true, otherwise float32).
+      max_rejections: the maximum number of rejections allowed.
 
     Returns:
       A random array with the specified dtype and with shape given by ``shape`` if
@@ -859,7 +888,7 @@ def fast_approx_gamma(
         accuracy for small values of ``a``.
     """
     key, _ = _check_prng_key("gamma", key)
-    dtype = dtypes.check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     if not dtypes.issubdtype(dtype, np.floating):
         raise ValueError(
             f"dtype argument to `gamma` must be a float dtype, got {dtype}"
@@ -904,7 +933,7 @@ def fast_approx_loggamma(
       gamma : standard gamma sampler.
     """
     key, _ = _check_prng_key("loggamma", key)
-    dtype = dtypes.check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     if not dtypes.issubdtype(dtype, np.floating):
         raise ValueError(
             f"dtype argument to `gamma` must be a float dtype, got {dtype}"
@@ -938,11 +967,18 @@ def _gamma(key, a, max_rejections, shape, dtype, log_space=False) -> Array:
 
 
 def random_insert_pvary(name, key, *args):
-    if not config._check_vma.value:
+    # Older JAX versions may not define config._check_vma or may not expose a
+    # .value attribute. Treat missing/falsey as disabled.
+    _flag = getattr(config, "_check_vma", None)
+    try:
+        _enabled = bool(_flag.value)  # type: ignore[attr-defined]
+    except Exception:
+        _enabled = bool(_flag)
+    if not _enabled:
         return key, args
     if not args:
         return key, args
-    key_vma = core.typeof(key).vma
+    key_vma = core.typeof(key).vma  # type: ignore[attr-defined]
     out = []
     for a in args:
         arg_vma = (
@@ -956,7 +992,7 @@ def random_insert_pvary(name, key, *args):
         # getting correctly varying keys. But JAX shouldn't auto-pvary the key.
         if key_vma - arg_vma:
             a = core.pvary(a, tuple(k for k in key_vma if k not in arg_vma))
-        if key_vma != core.typeof(a).vma:
+        if key_vma != core.typeof(a).vma:  # type: ignore[attr-defined]
             raise TypeError(
                 f"{name} requires all arguments to have matching type. Got key type:"
                 f" {core.typeof(key)} vs arg type: {core.typeof(a)}. Use"

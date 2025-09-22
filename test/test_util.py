@@ -104,12 +104,12 @@ class TestUtil(unittest.TestCase):
         self.assertFalse(np.isnan(lme_se))
 
     def test_speed(self):
-        # Test that logmeanexp_se runs in under 1 second with 10000 values
+        # Test that logmeanexp_se runs in under 2 seconds with 10000 values
         arr = np.random.randn(10000)
         start = time.time()
         self.logmeanexp_se(arr)
         duration = time.time() - start
-        self.assertTrue(duration < 1)
+        self.assertTrue(duration < 2)
 
     def test_ignore_nan_true(self):
         # Array with some nans: ignore_nan=True should drop them

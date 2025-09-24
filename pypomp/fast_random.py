@@ -268,6 +268,101 @@ def _stirling_approx_tail(k):
 
 
 @partial(jit, static_argnums=(3, 4, 5), inline=True)
+def _binomial_inverse_cdf(key, count, prob, shape, dtype, max_iters):
+    """
+    Sample from binomial distribution using the inverse CDF method.
+    This version computes the CDF incrementally, stopping as soon as the CDF exceeds the uniform sample.
+    """
+    if config.enable_checks.value:
+        assert dtypes.issubdtype(prob.dtype, np.floating)
+
+    def sample_one(key_single, count_single, prob_single):
+        """Sample one binomial random variable using inverse CDF, step by step."""
+        n_int = jnp.asarray(count_single, dtype=jnp.int32)
+
+        # Handle edge cases
+        edge_result = jnp.where(
+            prob_single <= 0.0,
+            0,
+            jnp.where(prob_single >= 1.0, n_int, -1),  # -1 indicates no edge case
+        )
+
+        def compute_inverse_cdf():
+            # Generate uniform random variable
+            u = uniform(key_single, (), dtype=prob_single.dtype)
+
+            # Compute PMF values using stable recursion
+            log_1_minus_p = jnp.log1p(-prob_single)
+
+            # Initial PMF: P(0) = (1-p)^n
+            log_pmf_0 = count_single * log_1_minus_p
+            pmf_0 = jnp.exp(log_pmf_0)
+
+            def cond_fun(state):
+                k, pmf, cdf, found, result = state
+                # Continue if not found and k <= n
+                return (~found) & (k <= n_int)
+
+            def body_fun(state):
+                k, pmf, cdf, found, result = state
+                # For k=0, pmf is pmf_0, already set
+                # For k>0, update pmf using recurrence
+                next_pmf = jnp.where(
+                    k == 0,
+                    pmf,
+                    pmf
+                    * (
+                        (count_single - k + 1)
+                        / k
+                        * prob_single
+                        / (1 - prob_single + 1e-15)
+                    ),
+                )
+                next_cdf = cdf + next_pmf
+                # If not found and next_cdf >= u, set result to k
+                this_found = (next_cdf >= u) & (~found)
+                next_result = jnp.where(this_found, k, result)
+                return (k + 1, next_pmf, next_cdf, found | this_found, next_result)
+
+            # Initial state: k=0, pmf=pmf_0, cdf=pmf_0, found=False, result=0
+            init_state = (
+                jnp.array(0, dtype=jnp.int32),
+                pmf_0,
+                pmf_0,
+                False,
+                jnp.array(0, dtype=jnp.int32),
+            )
+
+            # Run the loop up to n_int+1 times (to cover all possible k)
+            # Use while_loop for efficiency
+            final_state = lax_control_flow.while_loop(cond_fun, body_fun, init_state)
+            _, _, _, found, result = final_state
+
+            # If not found after all, return n_int (should be rare, only if u > CDF(n))
+            result = jnp.where(found, result, n_int)
+            return result
+
+        # Use edge case result if applicable, otherwise compute inverse CDF
+        return jax.lax.cond(edge_result >= 0, lambda: edge_result, compute_inverse_cdf)
+
+    # Vectorize the sampling function
+    sample_fn = jax.vmap(sample_one, in_axes=(0, 0, 0))
+
+    # Split keys and flatten arrays for vmap
+    keys = split(key, count.size)
+    keys_flat = keys.reshape(count.shape)
+    count_flat = count.ravel()
+    prob_flat = prob.ravel()
+    keys_flat = keys_flat.ravel()
+
+    # Sample and reshape
+    samples_flat = sample_fn(keys_flat, count_flat, prob_flat)
+    samples = samples_flat.reshape(count.shape)
+
+    return samples.astype(dtype)
+
+
+@partial(jit, static_argnums=(3, 4, 5), inline=True)
 def _binomial_inversion(key, count, prob, shape, dtype, max_iters):
     if config.enable_checks.value:
         assert dtypes.issubdtype(prob.dtype, np.floating)
@@ -373,7 +468,7 @@ def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
     q_btrs = lax.select(use_inversion, lax.full_like(q, 0.5), q)
     samples = lax.select(
         use_inversion,
-        _binomial_inversion(key, count_inv, q, shape, dtype, max_rejections),
+        _binomial_inverse_cdf(key, count_inv, q, shape, dtype, max_rejections),
         _btrs(key, count_btrs, q_btrs, shape, dtype, max_rejections),
     )
     # ensure nan q always leads to nan output and nan or neg count leads to nan

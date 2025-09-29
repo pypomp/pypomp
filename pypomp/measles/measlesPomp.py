@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import pickle
 import pypomp.measles.model_001b as m001b
+import pypomp.measles.model_001c as m001c
 from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
@@ -50,6 +51,7 @@ class UKMeasles:
     def Pomp(
         unit,
         theta,
+        model="001b",
         interp_method="shifted_splines",
         first_year=1950,
         last_year=1963,
@@ -95,13 +97,18 @@ class UKMeasles:
         covar_df.set_index("time", inplace=True)
 
         # ----pomp-construction-----------------------------------------------
+
+        mod = {
+            "001b": m001b,
+            "001c": m001c,
+        }[model]
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(
             ys=dat_filtered,
             theta=theta,
             covars=covar_df,
-            rinit=RInit(m001b.rinit, t0=t0),
-            rproc=RProc(m001b.rproc, step_type="euler", dt=dt, accumvars=(4, 5)),
-            dmeas=DMeas(m001b.dmeas),
-            rmeas=RMeas(m001b.rmeas, ydim=1),
+            rinit=RInit(mod.rinit, t0=t0),
+            rproc=RProc(mod.rproc, step_type="euler", dt=dt, accumvars=(4, 5)),
+            dmeas=DMeas(mod.dmeas),
+            rmeas=RMeas(mod.rmeas, ydim=1),
         )

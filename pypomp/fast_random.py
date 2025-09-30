@@ -424,7 +424,7 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
         )
         accept2 = v <= ub
         accept = accept1 | (~reject & accept2)
-        k_out = lax.select(accept, k, k_out)
+        k_out = lax.select(~accepted & ~reject, k, k_out)
         accepted |= accept
         return i + 1, k_out, accepted, key
 
@@ -434,7 +434,9 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
 
     k_init = lax.full_like(prob, -1, prob.dtype, shape)
     carry = (0, k_init, jnp.full(shape, False, bool), key)
-    return lax_control_flow.while_loop(cond_fn, body_fn, carry)[1].astype(dtype)
+    return jnp.clip(
+        lax_control_flow.while_loop(cond_fn, body_fn, carry)[1].astype(dtype), 0, count
+    )
 
 
 @partial(jit, static_argnums=(3, 4, 5), inline=True)
@@ -458,7 +460,9 @@ def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
     q_is_nan = _isnan(q)
     q_l_0 = q < 0.0
     q = lax.select(q_is_nan | q_l_0, lax.full_like(q, 0.01), q)
-    use_inversion = count_nan_or_neg | (count * q <= 10.0)
+    # use_inversion = count_nan_or_neg | (count * q <= 10.0)
+    # TODO: might want to add an argument to choose which method to use
+    use_inversion = False
 
     # consistent with np.random.binomial behavior for float count input
     count = jnp.floor(count)

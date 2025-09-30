@@ -22,7 +22,7 @@ class UKMeasles:
         data = pickle.load(f)
 
     @staticmethod
-    def subset(units=None):
+    def subset(units=None, clean=False):
         """
         Return a subset of the UKMeasles data, filtered by the given units.
 
@@ -32,32 +32,121 @@ class UKMeasles:
             A list of unit names to subset the data by. If None, the entire
             dataset is returned.
 
+        clean : bool, optional
+            If True, returns a copy of the data with suspicious values set to np.nan.
+
         Returns
         -------
         A dictionary with the same structure as UKMeasles.data, but with the
         data subsetted to only include the given units.
         """
+        data = UKMeasles.data
+
+        if clean:
+            # London 1955-08-12   124
+            # London 1955-08-19    82
+            # London 1955-08-26     0
+            # London 1955-09-02    58
+            # London 1955-09-09    38
+            data["measles"].loc[
+                (data["measles"]["unit"] == "London")
+                & (data["measles"]["date"] == "1955-08-26"),
+                "cases",
+            ] = np.nan
+            # The value 76 was used in He10.
+
+            # 13770 Liverpool 1955-11-04    10
+            # 13771 Liverpool 1955-11-11    25
+            # 13772 Liverpool 1955-11-18   116
+            # 13773 Liverpool 1955-11-25    17
+            # 13774 Liverpool 1955-12-02    18
+            data["measles"].loc[
+                (data["measles"]["unit"] == "Liverpool")
+                & (data["measles"]["date"] == "1955-11-18"),
+                "cases",
+            ] = np.nan
+
+            # 13950 Liverpool 1959-04-17   143
+            # 13951 Liverpool 1959-04-24   115
+            # 13952 Liverpool 1959-05-01   450
+            # 13953 Liverpool 1959-05-08    96
+            # 13954 Liverpool 1959-05-15   157
+            data["measles"].loc[
+                (data["measles"]["unit"] == "Liverpool")
+                & (data["measles"]["date"] == "1959-05-01"),
+                "cases",
+            ] = np.nan
+
+            # 19552 Nottingham 1961-08-18     6
+            # 19553 Nottingham 1961-08-25     7
+            # 19554 Nottingham 1961-09-01    66
+            # 19555 Nottingham 1961-09-08     8
+            # 19556 Nottingham 1961-09-15     7
+            data["measles"].loc[
+                (data["measles"]["unit"] == "Nottingham")
+                & (data["measles"]["date"] == "1961-09-01"),
+                "cases",
+            ] = np.nan
+
+            # Sheffield 1961-05-05   266
+            # Sheffield 1961-05-12   346
+            # Sheffield 1961-05-19     0
+            # Sheffield 1961-05-26   314
+            # Sheffield 1961-06-02   297
+            data["measles"].loc[
+                (data["measles"]["unit"] == "Sheffield")
+                & (data["measles"]["date"] == "1961-05-19"),
+                "cases",
+            ] = np.nan
+
         if units is None:
-            return UKMeasles.data
+            return data
         else:
             return {
                 k: v[v["unit"].isin(units)].reset_index(drop=True)
-                for k, v in UKMeasles.data.items()
+                for k, v in data.items()
             }
-
-    # TODO: add method or argument to return the cleaned copy of the data
 
     @staticmethod
     def Pomp(
-        unit,
-        theta,
-        model="001b",
-        interp_method="shifted_splines",
-        first_year=1950,
-        last_year=1963,
-        dt=1 / 365.25,
+        unit: list[str],
+        theta: dict | list[dict],
+        model: str = "001b",
+        interp_method: str = "shifted_splines",
+        first_year: int = 1950,
+        last_year: int = 1963,
+        dt: float = 1 / 365.25,
+        clean=False,
     ):
-        data = UKMeasles.subset(unit)
+        """
+        Returns a Pomp object for the UK Measles data.
+
+        Parameters
+        ----------
+        unit : list[str]
+            Which unit to use. Currently only supports one unit.
+        theta : dict | list[dict]
+            Parameters for the model. Can be a single dict or a list of dicts.
+        model : str
+            The model to use. Can be "001b" or "001c", currently.
+        interp_method : str
+            The method to use to interpolate the covariates. Can be "shifted_splines" or "linear".
+        first_year : int
+            The first year of the data to use.
+        last_year : int
+            The last year of the data to use.
+        dt : float
+            The time step size to use for the model.
+        clean : bool
+            If True, uses a copy of the data with suspicious values set to np.nan.
+
+        Returns
+        -------
+        Pomp:
+            A Pomp object for the UK Measles data.
+        """
+
+        data = UKMeasles.subset(unit, clean)
         measles = data["measles"]
         demog = data["demog"]
 

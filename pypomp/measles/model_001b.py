@@ -87,7 +87,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_approx_poisson(keys[1], br * dt, max_rejections=2)
+    births = fast_approx_poisson(keys[1], br * dt, max_rejections=1)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))
@@ -107,7 +107,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
     transitions = fast_approx_multinomial(
-        keys[2], populations, rt_final, max_rejections=2
+        keys[2], populations, rt_final, max_rejections=1
     )
 
     trans_S = transitions[0]

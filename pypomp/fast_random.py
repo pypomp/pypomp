@@ -470,10 +470,11 @@ def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
     count_inv = lax.select(use_inversion, count, lax.full_like(count, 0.0))
     count_btrs = lax.select(use_inversion, lax.full_like(count, 1e4), count)
     q_btrs = lax.select(use_inversion, lax.full_like(q, 0.5), q)
+    max_iters = max_rejections + 1
     samples = lax.select(
         use_inversion,
-        _binomial_inverse_cdf(key, count_inv, q, shape, dtype, max_rejections),
-        _btrs(key, count_btrs, q_btrs, shape, dtype, max_rejections),
+        _binomial_inverse_cdf(key, count_inv, q, shape, dtype, max_iters),
+        _btrs(key, count_btrs, q_btrs, shape, dtype, max_iters),
     )
     # ensure nan q always leads to nan output and nan or neg count leads to nan
     # as discussed in https://github.com/jax-ml/jax/pull/16134#pullrequestreview-1446642709
@@ -676,7 +677,8 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
         accept2 = s <= t
         accept = accept1 | (~reject & accept2)
 
-        k_out = lax.select(accept, k, k_out)
+        k_out = lax.select(~accepted & ~reject, k, k_out)
+        # k_out = lax.select(accept, k, k_out)
         accepted |= accept
 
         return i + 1, k_out, accepted, key
@@ -698,16 +700,21 @@ def _poisson(key, lam, shape, dtype, max_rejections) -> Array:
     # https://github.com/numpy/numpy/blob/v1.18.3/numpy/random/src/distributions/distributions.c#L574
     # For lambda < 10, we use the Knuth algorithm; otherwise, we use transformed
     # rejection sampling.
-    use_knuth = _isnan(lam) | (lam < 10)
+    # use_knuth = _isnan(lam) | (lam < 10)
+    use_knuth = False
+    # TODO: might want to add an argument to choose which method to use
+    # use_knuth = False
     lam_knuth = lax.select(use_knuth, lam, lax.full_like(lam, 0.0))
     # The acceptance probability for rejection sampling maxes out at 89% as
     # λ -> ∞, so pick some arbitrary large value.
     lam_rejection = lax.select(use_knuth, lax.full_like(lam, 1e5), lam)
+    max_iters = max_rejections + 1
     result = lax.select(
         use_knuth,
-        _poisson_knuth(key, lam_knuth, shape, dtype, max_rejections),
-        _poisson_rejection(key, lam_rejection, shape, dtype, max_rejections),
+        _poisson_knuth(key, lam_knuth, shape, dtype, max_iters),
+        _poisson_rejection(key, lam_rejection, shape, dtype, max_iters),
     )
+    result = jnp.clip(result, 0, jnp.inf)
     return lax.select(lam == 0, jnp.zeros_like(result), result)
 
 
@@ -796,7 +803,7 @@ def _gamma_one(key: Array, alpha, max_rejections, log_space) -> Array:
     c = lax.div(one_over_three, lax.sqrt(d))
 
     def _cond_fn(state):
-        count, _, X, V, U = state
+        n_rejections, _, X, V, U = state
         cond_reject = lax.bitwise_and(
             lax.ge(U, lax.sub(one, lax.mul(squeeze_const, lax.mul(X, X)))),
             lax.ge(
@@ -807,10 +814,10 @@ def _gamma_one(key: Array, alpha, max_rejections, log_space) -> Array:
                 ),
             ),
         )
-        return lax.bitwise_and(cond_reject, count < max_rejections)
+        return lax.bitwise_and(cond_reject, n_rejections < max_rejections)
 
     def _body_fn(state):
-        count, key, _, _, _ = state
+        n_rejections, key, _, _, _ = state
 
         def _next_kxv(kxv):
             key = kxv[0]
@@ -826,9 +833,9 @@ def _gamma_one(key: Array, alpha, max_rejections, log_space) -> Array:
         X = lax.mul(x, x)
         V = lax.mul(lax.mul(v, v), v)
         U = uniform(U_key, (), dtype=dtype)
-        return (count + 1, key, X, V, U)
+        return (n_rejections + 1, key, X, V, U)
 
-    # initial state: count=0, key, X=zero, V=one, U=two (arbitrary, will be replaced)
+    # initial state: n_rejections=0, key, X=zero, V=one, U=two
     key, subkey = _split(key)
     init_state = (0, key, zero, one, two)
     final_state = lax_control_flow.while_loop(_cond_fn, _body_fn, init_state)

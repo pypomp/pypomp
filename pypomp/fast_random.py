@@ -54,18 +54,29 @@ DTypeLikeFloat = DTypeLike
 Shape = Sequence[int]
 
 
-def normal_approx(
-    key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple
+def normal_approx_binomial(
+    key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple, dtype: jax.Array
 ) -> jax.Array:
     ntimesp = n * p
     draws = jnp.round(
         jnp.sqrt(ntimesp * (1 - p)) * jax.random.normal(key, shape) + ntimesp + 1 / 2
     )
-    return jnp.maximum(draws, 0)
+    return lax.clamp(0, draws, n).astype(dtype)
+
+
+def normal_approx_poisson(
+    key: jax.Array, lam: jax.Array, shape: tuple, dtype: jax.Array
+) -> jax.Array:
+    draws = jnp.round(jnp.sqrt(lam) * jax.random.normal(key, shape) + lam + 1 / 2)
+    return jnp.maximum(draws, 0).astype(dtype)
 
 
 def faster_approx_multinomial(
-    key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple | None = None
+    key: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
+    shape: tuple | None = None,
+    dtype: jax.Array = jnp.float32,
 ) -> jax.Array:
     r"""
     Sample from a multinomial distribution.
@@ -94,7 +105,7 @@ def faster_approx_multinomial(
     def f(remainder, ratio_key):
         ratio, key = ratio_key
         # normal approximation when |1-2p|/sqrt(np(1-p)) < 0.3 by berry-esseen."
-        count = normal_approx(key, remainder, ratio, shape or ())
+        count = normal_approx_binomial(key, remainder, ratio, shape or (), dtype)
         # count = jax.lax.cond(np.abs(1-2*ratio)/np.sqrt(remainder * ratio * (1-ratio)) < 0.3,
         #              normal_approx,
         #              jax.random.binomial,
@@ -432,7 +443,10 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
         i, accepted = carry[0], carry[2]
         return (~accepted).any() & (i < max_iters)
 
-    k_init = lax.full_like(prob, -1, prob.dtype, shape)
+    # k_init = lax.full_like(prob, -1, prob.dtype, shape)
+    k_init = jnp.round(count * prob).astype(prob.dtype).reshape(shape)
+    # key1, key2 = split(key)
+    # k_init = normal_approx_binomial(key1, count, prob, shape, prob.dtype)
     carry = (0, k_init, jnp.full(shape, False, bool), key)
     return jnp.clip(
         lax_control_flow.while_loop(cond_fn, body_fn, carry)[1].astype(dtype), 0, count
@@ -687,9 +701,11 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
         i, k_out, accepted, key = carry
         return (~accepted).any() & (i < max_iters)
 
-    k_init = lax.full_like(lam, -1, lam.dtype, shape)
+    # k_init = lax.full_like(lam, -1, lam.dtype, shape)
+    key1, key2 = split(key)
+    k_init = normal_approx_poisson(key1, lam, shape, lam.dtype)
     accepted = lax.full_like(lam, False, np.dtype("bool"), shape)
-    k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, accepted, key))[1]
+    k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, accepted, key2))[1]
     return k.astype(dtype)
 
 

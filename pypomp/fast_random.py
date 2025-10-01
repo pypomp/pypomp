@@ -703,8 +703,8 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
 
     # k_init = lax.full_like(lam, -1, lam.dtype, shape)
     key1, key2 = split(key)
-    # k_init = normal_approx_poisson(key1, lam, shape, lam.dtype)
-    k_init = jnp.round(lam).astype(lam.dtype).reshape(shape)
+    k_init = normal_approx_poisson(key1, lam, shape, lam.dtype)
+    # k_init = jnp.round(lam).astype(lam.dtype).reshape(shape)
     accepted = lax.full_like(lam, False, np.dtype("bool"), shape)
     k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, accepted, key2))[1]
     return k.astype(dtype)

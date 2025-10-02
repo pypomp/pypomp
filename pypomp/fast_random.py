@@ -630,11 +630,15 @@ def fast_approx_multinomial(
 
     remaining_probs = lax_control_flow.cumsum(p, 0, reverse=True)
     ratios = p / jnp.where(remaining_probs == 0, 1, remaining_probs)
+    ratios = ratios[:-1]
 
     keys = split(key, ratios.shape[0])
     remainder, counts = lax_control_flow.scan(f, n, (ratios, keys), unroll=unroll)
     # final remainder should be zero
-
+    # Last set of counts is deterministic.
+    # Not sure why JAX code normally draws a binomial for the last set of counts,
+    # which I have confirmed is slower.
+    counts = jnp.vstack([counts, remainder.reshape(1, -1)])
     return jnp.moveaxis(counts, 0, -1).astype(dtype)
 
 

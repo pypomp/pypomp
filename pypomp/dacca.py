@@ -226,7 +226,6 @@ def rproc(X_, theta_, key, covars, t, dt):
     return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([count])])
 
 
-
 def rproc_gamma(X_, theta_, key, covars, t, dt):
     S = X_[0]
     I = X_[1]
@@ -279,7 +278,7 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     rdeaths = pts * delta
     passages = passages.at[1:].set(pts * neps)
 
-    '''
+    """
     # old code: perturb = sd_beta * dw / dt, where dw is a standard normal
         rproc does the above
     # this function draws from a gamma white noise process 
@@ -287,11 +286,11 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     # with gamma noise, want the mean to be dt, 
             and the variance to be sd_beta**2 * dt,
             before dividing by dt to yield multiplicative noise by 1
-    '''
-    
-    perturb = jax.random.gamma(subkey, dt/sd_beta**2) * sd_beta**2 / dt
+    """
+
+    perturb = jax.random.gamma(subkey, dt / sd_beta**2) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
-    
+
     sdeaths = delta * S
 
     S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
@@ -354,7 +353,9 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jax.random.normal(key) * v + deaths
 
 
-def dacca(dt: float | None = 1 / 240, nstep: int | None = None, gamma : bool = False) -> Pomp:
+def dacca(
+    dt: float | None = 1 / 240, nstep: int | None = None, gamma: bool = False
+) -> Pomp:
     """
     Creates a POMP model for the Dacca measles data.
 
@@ -380,18 +381,20 @@ def dacca(dt: float | None = 1 / 240, nstep: int | None = None, gamma : bool = F
     """
     from pypomp.dacca import rproc
     from pypomp.dacca import rproc_gamma
-    
+
     if gamma:
         rproc = rproc_gamma
-        print('Warning: Using overdispersed gamma white noise. Ensure this is intended behavior.')
+        print(
+            "Warning: Using overdispersed gamma white noise. Ensure this is intended behavior."
+        )
 
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")
 
     if nstep is not None:
-        rproc = RProc(rproc_gamma, step_type="fixedstep", nstep=nstep, accumvars=(3,))
+        rproc = RProc(rproc, step_type="fixedstep", nstep=nstep, accumvars=(3,))
     else:
-        rproc = RProc(rproc_gamma, step_type="euler", dt=dt, accumvars=(3,))
+        rproc = RProc(rproc, step_type="euler", dt=dt, accumvars=(3,))
 
     dacca_obj = Pomp(
         rinit=rinit,

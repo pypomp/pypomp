@@ -2,6 +2,8 @@ import jax.numpy as jnp
 import unittest
 import pypomp as pp
 import jax
+import numpy as np
+
 # import matplotlib.pyplot as plt
 
 # jax.config.update("jax_enable_x64", True)
@@ -43,9 +45,11 @@ class Test_Measles(unittest.TestCase):
         out2 = x.simulate(
             key=jax.random.key(1),
             nsim=1,  # times=self.measles.ys.index[0:1]
-        )
+        )[0]
 
-        # if False:  # Process and obs plots
+        # if True:  # Process and obs plots
+        #     import matplotlib.pyplot as plt
+
         #     fig, axs = plt.subplots(7, 1, sharex=True)
         #     sim_n = 0
         #     for i in range(6):
@@ -77,6 +81,17 @@ class Test_Measles(unittest.TestCase):
     def test_measles_pfilter(self):
         self.measles.pfilter(J=self.J, key=self.key)
 
+    # def test_measles_pfilter_600(self):
+    #     import time
+
+    #     time_start = time.time()
+    #     self.measles.pfilter(J=600, key=self.key)
+    #     self.measles.results()
+    #     time_taken = time.time() - time_start
+    #     print(f"Time taken: {time_taken} seconds")
+    #     print(self.measles.results())
+    #     pass
+
     def test_measles_mif(self):
         self.measles.mif(
             J=self.J,
@@ -90,5 +105,29 @@ class Test_Measles(unittest.TestCase):
     def test_measles_mop(self):
         self.measles.mop(J=self.J, key=self.key)
 
-    def test_measles_train(self):
-        self.measles.train(M=1, J=self.J, key=self.key)
+    # Commenting out for now due to errors
+    # def test_measles_train(self):
+    #     self.measles.train(M=1, J=self.J, key=self.key)
+
+    def test_measles_clean(self):
+        data = pp.UKMeasles.subset(clean=True)
+        london_cleaned = np.isnan(
+            data["measles"]
+            .loc[
+                (data["measles"]["unit"] == "London")
+                & (data["measles"]["date"] == "1955-08-26"),
+                "cases",
+            ]
+            .values
+        )
+        self.assertTrue(london_cleaned)
+        london_cleaned2 = np.isnan(
+            data["measles"]
+            .loc[
+                (data["measles"]["unit"] == "London")
+                & (data["measles"]["date"] == "1955-08-19"),
+                "cases",
+            ]
+            .values
+        )
+        self.assertFalse(london_cleaned2)

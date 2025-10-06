@@ -1,4 +1,4 @@
-"""He10 model without alpha or mu parameters"""
+"""He10 model without alpha or deaths"""
 
 import jax.numpy as jnp
 import jax
@@ -7,6 +7,7 @@ from pypomp.fast_random import (
     fast_approx_multinomial,
     fast_approx_poisson,
     fast_approx_gamma,
+    fast_approx_binomial,
 )
 
 
@@ -52,7 +53,6 @@ def rproc(X_, theta_, key, covars, t, dt):
     amplitude = expit(theta_[8])
     pop = covars[0]
     birthrate = covars[1]
-    mu = 0.02
 
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
@@ -73,7 +73,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     seas = jnp.where(in_term_time, 1.0 + amplitude * 0.2411 / 0.7589, 1 - amplitude)
 
     # transmission rate
-    beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
+    beta = R0 * seas * (1.0 - jnp.exp(-(gamma) * dt)) / dt
 
     # expected force of infection
     foi = beta * (I + iota) / pop
@@ -83,43 +83,36 @@ def rproc(X_, theta_, key, covars, t, dt):
     # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
     dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=1) * sigmaSE**2
 
-    rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
+    rate = jnp.array([foi * dw / dt, sigma, gamma])
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
     births = fast_approx_poisson(keys[1], br * dt, max_rejections=1)
 
     # transitions between classes
-    rt_final = jnp.zeros((3, 3))
+    # rt_final = jnp.zeros((3, 2))
 
-    rate_pairs = jnp.array([[rate[0], rate[1]], [rate[2], rate[3]], [rate[4], rate[5]]])
     populations = jnp.array([S, E, I])
 
-    rate_sums = jnp.sum(rate_pairs, axis=1)
-    p0_values = jnp.exp(-rate_sums * dt)
+    p0_values = jnp.exp(-rate * dt)
 
-    rt_final = (
-        rt_final.at[:, 0:2]
-        .set(jnp.einsum("ij,i,i->ij", rate_pairs, 1 / rate_sums, 1 - p0_values))
-        .at[:, 2]
-        .set(p0_values)
-    )
+    # rt_final = rt_final.at[:, 0].set(1 - p0_values).at[:, 1].set(p0_values)
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_approx_multinomial(
-        keys[2], populations, rt_final, max_rejections=1
+    transitions = fast_approx_binomial(
+        keys[2], populations, 1 - p0_values, max_rejections=1
     )
 
     trans_S = transitions[0]
     trans_E = transitions[1]
     trans_I = transitions[2]
 
-    S = S + births - trans_S[0] - trans_S[1]
-    E = E + trans_S[0] - trans_E[0] - trans_E[1]
-    I = I + trans_E[0] - trans_I[0] - trans_I[1]
+    S = S + births - trans_S
+    E = E + trans_S - trans_E
+    I = I + trans_E - trans_I
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
-    C = C + trans_I[0]
+    C = C + trans_I
     return jnp.array([S, E, I, R, W, C])
 
 

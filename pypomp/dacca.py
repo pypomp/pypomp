@@ -226,6 +226,93 @@ def rproc(X_, theta_, key, covars, t, dt):
     return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([count])])
 
 
+
+def rproc_gamma(X_, theta_, key, covars, t, dt):
+    S = X_[0]
+    I = X_[1]
+    Y = X_[2]
+    deaths = X_[3]
+    pts = X_[4:-1]
+    count = X_[-1]
+    trend = covars[0]
+    dpopdt = covars[1]
+    pop = covars[2]
+    seas = covars[3:]
+    (
+        gamma,
+        deltaI,
+        rho,
+        eps,
+        omega,
+        clin,
+        beta_trend,
+        sd_beta,
+        tau,
+        bs,
+        omegas,
+        nrstage,
+        delta,
+    ) = get_thetas(theta_)
+    nrstage = 3
+    clin = 1  # HARDCODED SEIR
+    rho = 0  # HARDCODED INAPPARENT INFECTIONS
+    std = jnp.sqrt(dt)
+
+    neps = eps * nrstage  # rate
+    passages = jnp.zeros(nrstage + 1)
+
+    # Get current time step values
+    beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
+    omega = jnp.exp(jnp.dot(omegas, seas))
+
+    subkey, key = jax.random.split(key)
+    dw = jax.random.normal(subkey) * std
+
+    effI = I / pop
+    births = dpopdt + delta * pop
+    passages = passages.at[0].set(gamma * I)
+    ideaths = delta * I
+    disease = deltaI * I
+    ydeaths = delta * Y
+    wanings = rho * Y
+
+    rdeaths = pts * delta
+    passages = passages.at[1:].set(pts * neps)
+
+    '''
+    # old code: perturb = sd_beta * dw / dt, where dw is a standard normal
+        rproc does the above
+    # this function draws from a gamma white noise process 
+            Gamma(shape=dt/sigma**2, scale=sigma**2)
+    # with gamma noise, want the mean to be dt, 
+            and the variance to be sd_beta**2 * dt,
+            before dividing by dt to yield multiplicative noise by 1
+    '''
+    
+    perturb = jax.random.gamma(subkey, dt/sd_beta**2) * sd_beta**2 / dt
+    infections = (omega + beta * perturb * effI) * S
+    
+    sdeaths = delta * S
+
+    S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
+    I += (clin * infections - disease - ideaths - passages[0]) * dt
+    Y += ((1 - clin) * infections - ydeaths - wanings) * dt
+
+    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+
+    deaths = deaths + disease * dt
+
+    count = count + jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
+
+    S = jnp.clip(S, 0)
+    I = jnp.clip(I, 0)
+    Y = jnp.clip(Y, 0)
+    pts = jnp.clip(pts, 0)
+    deaths = jnp.clip(deaths, 0)
+
+    return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([count])])
+
+
 def dmeas_helper(y, deaths, v, tol, ltol):
     return jnp.logaddexp(
         jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v + tol), ltol
@@ -267,7 +354,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jax.random.normal(key) * v + deaths
 
 
-def dacca(dt: float | None = 1 / 240, nstep: int | None = None) -> Pomp:
+def dacca(dt: float | None = 1 / 240, nstep: int | None = None, gamma : bool = False) -> Pomp:
     """
     Creates a POMP model for the Dacca measles data.
 
@@ -282,6 +369,9 @@ def dacca(dt: float | None = 1 / 240, nstep: int | None = None) -> Pomp:
     nstep : int, optional
         Number of sub-steps per observation interval for the process model.
         If None, uses Euler discretization with the specified step size. nstep and dt cannot both be not None.
+    gamma : bool, optional
+        Indicator for whether gamma white noise should be used in place of Gaussian noise.
+        This corresponds to a large-population approximation of an overdispersed death process.
 
     Returns
     -------
@@ -289,14 +379,19 @@ def dacca(dt: float | None = 1 / 240, nstep: int | None = None) -> Pomp:
         A POMP model object representing the Dacca cholera model.
     """
     from pypomp.dacca import rproc
+    from pypomp.dacca import rproc_gamma
+    
+    if gamma:
+        rproc = rproc_gamma
+        print('Warning: Using overdispersed gamma white noise. Ensure this is intended behavior.')
 
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")
 
     if nstep is not None:
-        rproc = RProc(rproc, step_type="fixedstep", nstep=nstep, accumvars=(3,))
+        rproc = RProc(rproc_gamma, step_type="fixedstep", nstep=nstep, accumvars=(3,))
     else:
-        rproc = RProc(rproc, step_type="euler", dt=dt, accumvars=(3,))
+        rproc = RProc(rproc_gamma, step_type="euler", dt=dt, accumvars=(3,))
 
     dacca_obj = Pomp(
         rinit=rinit,

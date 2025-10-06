@@ -236,14 +236,13 @@ class Pomp:
             results.append(
                 -_mop_internal(
                     theta=jnp.array(list(theta_i.values())),
+                    ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     t0=self.rinit.t0,
                     times=jnp.array(self.ys.index),
-                    ys_extended=self._ys_extended,
-                    ys_observed=self._ys_observed,
                     J=J,
                     rinitializer=self.rinit.struct_pf,
-                    rprocess=self.rproc.struct_pf,
+                    rprocess_interp=self.rproc.struct_pf_interp,
                     dmeasure=self.dmeas.struct_pf,
                     covars_extended=self._covars_extended,
                     accumvars=self.rproc.accumvars,
@@ -590,6 +589,7 @@ class Pomp:
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
+            jnp.array(self.ys),
             self._dt_array_extended,
             self.rinit.t0,
             jnp.array(self.ys.index),
@@ -597,6 +597,7 @@ class Pomp:
             self._ys_observed,
             self.rinit.struct_pf,
             self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
@@ -1052,7 +1053,6 @@ class Pomp:
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
             state["_rproc_func_name"] = original_func.__name__
-            state["_rproc_step_type"] = getattr(self.rproc, "step_type", "onestep")
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
             state["_rproc_module"] = original_func.__module__
@@ -1100,7 +1100,7 @@ class Pomp:
             if isinstance(obj, RProc):
                 self.rproc = obj
             else:
-                kwargs = {"step_type": state["_rproc_step_type"]}
+                kwargs = {}
                 if state["_rproc_dt"] is not None:
                     kwargs["dt"] = state["_rproc_dt"]
                 if state["_rproc_accumvars"] is not None:
@@ -1137,7 +1137,6 @@ class Pomp:
             "_rinit_t0",
             "_rinit_module",
             "_rproc_func_name",
-            "_rproc_step_type",
             "_rproc_dt",
             "_rproc_accumvars",
             "_rproc_module",

@@ -12,33 +12,36 @@ from .mop import _mop_internal_mean
 
 
 @partial(
-    jit, static_argnums=(6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
+    jit,
+    static_argnums=(7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25),
 )
 def _train_internal(
     theta_ests: jax.Array,
+    ys: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
     ys_extended: jax.Array,
     ys_observed: jax.Array,
-    rinitializer: Callable,
-    rprocess: Callable,
-    dmeasure: Callable,
+    rinitializer: Callable,  # static
+    rprocess: Callable,  # static
+    rprocess_interp: Callable,  # static
+    dmeasure: Callable,  # static
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
-    J: int,
-    optimizer: str,
-    M: int,
-    eta: float,
-    c: float,
-    max_ls_itn: int,
-    thresh: float,
-    scale: bool,
-    ls: bool,
-    alpha: float,
+    J: int,  # static
+    optimizer: str,  # static
+    M: int,  # static
+    eta: float,  # static
+    c: float,  # static
+    max_ls_itn: int,  # static
+    thresh: float,  # static
+    scale: bool,  # static
+    ls: bool,  # static
+    alpha: float,  # static
     key: jax.Array,
-    n_monitors: int,
-    n_obs: int,
+    n_monitors: int,  # static
+    n_obs: int,  # static
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -55,14 +58,13 @@ def _train_internal(
             key, subkey = jax.random.split(key)
             loglik, grad = _jvg_mop(
                 theta_ests=theta_ests,
+                ys=ys,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
                 times=times,
-                ys_extended=ys_extended,
-                ys_observed=ys_observed,
                 J=J,
                 rinitializer=rinitializer,
-                rprocess=rprocess,
+                rprocess=rprocess_interp,
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
@@ -74,14 +76,13 @@ def _train_internal(
             key, subkey = jax.random.split(key)
             grad = _jgrad_mop(
                 theta_ests=theta_ests,
+                ys=ys,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
                 times=times,
-                ys_extended=ys_extended,
-                ys_observed=ys_observed,
                 J=J,
                 rinitializer=rinitializer,
-                rprocess=rprocess,
+                rprocess=rprocess_interp,
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
@@ -116,14 +117,13 @@ def _train_internal(
             key, subkey = jax.random.split(key)
             hess = _jhess_mop(
                 theta_ests=theta_ests,
+                ys=ys,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
                 times=times,
-                ys_extended=ys_extended,
-                ys_observed=ys_observed,
                 J=J,
                 rinitializer=rinitializer,
-                rprocess=rprocess,
+                rprocess=rprocess_interp,
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
@@ -136,14 +136,13 @@ def _train_internal(
             key, subkey = jax.random.split(key)
             hess = _jhess_mop(
                 theta_ests=theta_ests,
+                ys=ys,
                 dt_array_extended=dt_array_extended,
                 t0=t0,
                 times=times,
-                ys_extended=ys_extended,
-                ys_observed=ys_observed,
                 J=J,
                 rinitializer=rinitializer,
-                rprocess=rprocess,
+                rprocess=rprocess_interp,
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
@@ -309,7 +308,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 22 + (0,) + (None,) * 2,
 )
 
 
@@ -481,11 +480,10 @@ def _jvg(
 
 def _jgrad_mop(
     theta_ests: jax.Array,
+    ys: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
@@ -506,14 +504,13 @@ def _jgrad_mop(
     """
     return jax.grad(_mop_internal_mean)(
         theta_ests,
+        ys=ys,
         dt_array_extended=dt_array_extended,
         t0=t0,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
         J=J,
         rinitializer=rinitializer,
-        rprocess=rprocess,
+        rprocess_interp=rprocess,
         dmeasure=dmeasure,
         accumvars=accumvars,
         covars_extended=covars_extended,
@@ -524,11 +521,10 @@ def _jgrad_mop(
 
 def _jvg_mop(
     theta_ests: jax.Array,
+    ys: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
@@ -552,14 +548,13 @@ def _jvg_mop(
     """
     return jax.value_and_grad(_mop_internal_mean)(
         theta_ests,
+        ys=ys,
         dt_array_extended=dt_array_extended,
         t0=t0,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
         J=J,
         rinitializer=rinitializer,
-        rprocess=rprocess,
+        rprocess_interp=rprocess,
         dmeasure=dmeasure,
         covars_extended=covars_extended,
         accumvars=accumvars,
@@ -616,11 +611,10 @@ def _jhess(
 # get the hessian matrix from mop
 def _jhess_mop(
     theta_ests: jax.Array,
+    ys: jax.Array,
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
     J: int,  # static
     rinitializer: Callable,  # static
     rprocess: Callable,  # static
@@ -641,14 +635,13 @@ def _jhess_mop(
     """
     return jax.hessian(_mop_internal_mean)(
         theta_ests,
+        ys=ys,
         dt_array_extended=dt_array_extended,
         t0=t0,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
         J=J,
         rinitializer=rinitializer,
-        rprocess=rprocess,
+        rprocess_interp=rprocess,
         dmeasure=dmeasure,
         accumvars=accumvars,
         covars_extended=covars_extended,

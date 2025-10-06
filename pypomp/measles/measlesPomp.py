@@ -197,7 +197,7 @@ class UKMeasles:
             theta=theta,
             covars=covar_df,
             rinit=RInit(mod.rinit, t0=t0),
-            rproc=RProc(mod.rproc, step_type="euler", dt=dt, accumvars=(4, 5)),
+            rproc=RProc(mod.rproc, dt=dt, accumvars=(4, 5)),
             dmeas=DMeas(mod.dmeas),
             rmeas=RMeas(mod.rmeas, ydim=1),
         )

@@ -264,6 +264,7 @@ class Pomp:
         ESS: bool = False,
         filter_mean: bool = False,
         prediction_mean: bool = False,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for the particle filtering algorithm.
@@ -278,19 +279,20 @@ class Pomp:
                 resample particles. Defaults to 0.
             reps (int, optional): Number of replicates to run. Defaults to 1.
             CLL (bool, optional): Boolean flag controlling whether to compute and store
-                the conditional log-likelihoods at each time point. Defaults to False.
+                the conditional log-likelihoods at each time point.
             ESS (bool, optional): Boolean flag controlling whether to compute and store
-                the effective sample size at each time point. Defaults to False.
-            filter_mean (bool, optional): Boolean flag controlling whether to compute and store
-                the filtered mean at each time point. Defaults to False.
-            prediction_mean (bool, optional): Boolean flag controlling whether to compute and store
-                the prediction mean at each time point. Defaults to False.
-
+                the effective sample size at each time point.
+            filter_mean (bool, optional): Boolean flag controlling whether to compute
+                and store the filtered mean at each time point.
+            prediction_mean (bool, optional): Boolean flag controlling whether to
+                compute and store the prediction mean at each time point.
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
         Returns:
            None. Updates self.results with a dictionary containing the log-likelihoods,
            algorithmic parameters used. The conditional log-likelihoods (CLL),
-           effective sample size (ESS), filtered mean, and prediction mean at each time point
-           are also included if their respective boolean flags are set to True.
+           effective sample size (ESS), filtered mean, and prediction mean at each time
+           point are also included if their respective boolean flags are set to True.
         """
         start_time = time.time()
 
@@ -349,7 +351,11 @@ class Pomp:
             (-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"]
         )
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            neg_logliks.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         result_dict = {
             "method": "pfilter",
@@ -403,6 +409,7 @@ class Pomp:
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         thresh: float = 0,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
@@ -421,10 +428,10 @@ class Pomp:
             theta (dict, list[dict], optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
         Returns:
-            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods
-            and parameter estimates averaged over particles, and theta.
+            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods and parameter estimates averaged over particles, and theta.
         """
         start_time = time.time()
 
@@ -499,7 +506,11 @@ class Pomp:
             for theta_ests in final_theta_ests
         ]
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            nLLs.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         self.results_history.append(
             {
@@ -532,6 +543,7 @@ class Pomp:
         c: float = 0.1,
         max_ls_itn: int = 10,
         n_monitors: int = 0,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
@@ -562,6 +574,8 @@ class Pomp:
                     search algorithm.
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -636,7 +650,11 @@ class Pomp:
             for i in range(len(theta_list))
         ]
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            nLLs.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         self.results_history.append(
             {

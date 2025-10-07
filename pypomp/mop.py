@@ -41,18 +41,21 @@ def _mop_internal(
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
 
-    mop_helper_2 = partial(
-        _mop_helper,
-        dt_array_extended=dt_array_extended,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        times=times,
-        theta=theta,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        covars_extended=covars_extended,
-        alpha=alpha,
-        accumvars=accumvars,
+    # My linter thinks jax.checkpoint isn't exported from jax, but it is.
+    mop_helper_2 = jax.checkpoint(  # type: ignore[reportAttributeAccessIssue]
+        partial(
+            _mop_helper,
+            dt_array_extended=dt_array_extended,
+            ys_extended=ys_extended,
+            ys_observed=ys_observed,
+            times=times,
+            theta=theta,
+            rprocess=rprocess,
+            dmeasure=dmeasure,
+            covars_extended=covars_extended,
+            alpha=alpha,
+            accumvars=accumvars,
+        )
     )
 
     t, particlesF, loglik, weightsF, counts, key, obs_idx = jax.lax.fori_loop(

@@ -47,7 +47,7 @@ def _train_internal(
     Internal function for conducting the MOP gradient estimate method.
     """
     times = times.astype(float)
-    ylen = jnp.sum(ys_observed)
+    ylen = ys.shape[0]
     if n_monitors < 1 and ls:
         raise ValueError("Line search requires at least one monitor")
 
@@ -97,17 +97,19 @@ def _train_internal(
                         dt_array_extended,
                         t0,
                         times,
-                        ys_extended,
-                        ys_observed,
+                        ys,
                         J,
                         rinitializer,
-                        rprocess,
+                        rprocess_interp,
                         dmeasure,
-                        covars_extended,
                         accumvars,
+                        covars_extended,
                         0,
                         jnp.array(subkeys),
-                        n_obs,
+                        False,
+                        False,
+                        False,
+                        False,
                     )["neg_loglik"]
                 )
             else:
@@ -202,17 +204,15 @@ def _train_internal(
                     dt_array_extended=dt_array_extended,
                     t0=t0,
                     times=times,
-                    ys_extended=ys_extended,
-                    ys_observed=ys_observed,
+                    ys=ys,
                     J=J,
                     rinitializer=rinitializer,
-                    rprocess=rprocess,
+                    rprocess_interp=rprocess_interp,
                     dmeasure=dmeasure,
                     accumvars=accumvars,
                     covars_extended=covars_extended,
                     thresh=thresh,
                     key=subkey,
-                    n_obs=n_obs,
                     CLL=False,
                     ESS=False,
                     filter_mean=False,
@@ -278,17 +278,15 @@ def _train_internal(
                 dt_array_extended,
                 t0,
                 times,
-                ys_extended,
-                ys_observed,
+                ys,
                 J,
                 rinitializer,
-                rprocess,
+                rprocess_interp,
                 dmeasure,
-                covars_extended,
                 accumvars,
+                covars_extended,
                 0,
                 jnp.array(subkeys),
-                n_obs,
                 False,
                 False,
                 False,

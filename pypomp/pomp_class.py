@@ -315,26 +315,20 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
-        # n_obs = int(np.sum(np.array(self._ys_observed)))
-
         results = _vmapped_pfilter_internal2(
             thetas_repl,
             self._dt_array_extended,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
+            jnp.array(self.ys),
             J,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
             thresh,
             rep_keys,
-            n_obs,
             CLL,
             ESS,
             filter_mean,

@@ -1,6 +1,7 @@
 **.DS_Store
 .vscode
 *~
+scratch/
 scratch.py
 test/test_scratch.py
 

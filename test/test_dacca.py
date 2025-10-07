@@ -29,6 +29,11 @@ class Test_Dacca(unittest.TestCase):
         dacca_nstep = pp.dacca(nstep=10, dt=None)
         dacca_nstep.train(J=self.J, M=1, key=self.key)
 
+    def test_dacca_dt(self):
+        # Check that dacca.train() runs without error when dt is specified.
+        dacca_dt = pp.dacca(nstep=None, dt=1 / 240)
+        dacca_dt.train(J=self.J, M=1, key=self.key)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[""], verbosity=2, exit=False)

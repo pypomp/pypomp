@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Callable
+from equinox.internal import while_loop
 
 
 def _time_interp(
@@ -17,20 +18,20 @@ def _time_interp(
         jax.random.split, (0, None)
     )  # handle multiple keys from vmap'd rproc
 
-    def _interp_helper(
-        i: int,
-        inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, int],
+    def _interp_body(
+        inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, int, int],
         covars_extended: jax.Array,
         dt_array_extended: jax.Array,
-    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, int]:
-        X_, theta_, keys, t, t_idx = inputs  # keys is a (J,) array when rproc is vmap'd
+    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, int, int]:
+        # keys is a (J,) array when rproc is vmap'd
+        X_, theta_, keys, t, t_idx, i = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
-        dt = dt_fixed if dt_fixed is not None else dt_array_extended[t_idx]
+        dt = jnp.asarray(dt_fixed) if dt_fixed is not None else dt_array_extended[t_idx]
         vkeys = vsplit(keys, 2)
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
         t_idx = t_idx + 1
-        return (X_, theta_, vkeys[:, 1], t, t_idx)
+        return (X_, theta_, vkeys[:, 1], t, t_idx, i + 1)
 
     def _rproc_interp(
         X_: jax.Array,
@@ -38,24 +39,27 @@ def _time_interp(
         keys: jax.Array,
         covars_extended: jax.Array,
         dt_array_extended: jax.Array,
-        t: float,
+        t: jax.Array,
         t_idx: int,
         nstep_dynamic: int,
         accumvars: tuple[int, ...] | None,
     ) -> tuple[jax.Array, int]:
-        X_ = jnp.where(accumvars is not None, X_.at[:, accumvars].set(0), X_)
+        # Reset accumulated variables at the start of each observation interval
+        if accumvars is not None:
+            X_ = X_.at[:, accumvars].set(0)
 
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
-        interp_helper2 = partial(
-            _interp_helper,
+        interp_body2 = partial(
+            _interp_body,
             covars_extended=covars_extended,
             dt_array_extended=dt_array_extended,
         )
-        X_, theta_, keys, t, t_idx = jax.lax.fori_loop(
-            lower=0,
-            upper=nstep,
-            body_fun=interp_helper2,
-            init_val=(X_, theta_, keys, t, t_idx),
+        X_, theta_, keys, t, t_idx, i = while_loop(
+            cond_fun=lambda inputs: inputs[5] < nstep,
+            body_fun=interp_body2,
+            init_val=(X_, theta_, keys, t, t_idx, 0),
+            kind="bounded",
+            max_steps=20,  # TODO add an argument for this
         )
         return X_, t_idx
 

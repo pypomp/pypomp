@@ -15,10 +15,10 @@ def _mif_internal(
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
+    ys: jax.Array,
     rinitializers: Callable,  # static
     rprocesses: Callable,  # static
+    rprocesses_interp: Callable,  # static
     dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
@@ -42,13 +42,13 @@ def _mif_internal(
         dt_array_extended=dt_array_extended,
         t0=t0,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
+        ys=ys,
         J=J,
         sigmas=sigmas,
         sigmas_init=sigmas_init,
         rinitializers=rinitializers,
         rprocesses=rprocesses,
+        rprocesses_interp=rprocesses_interp,
         dmeasures=dmeasures,
         accumvars=accumvars,
         covars_extended=covars_extended,
@@ -65,14 +65,14 @@ def _mif_internal(
     return logliks, params
 
 
-_jit_mif_internal = jit(_mif_internal, static_argnums=(6, 7, 8, 13, 15))
+_jit_mif_internal = jit(_mif_internal, static_argnums=(5, 6, 7, 8, 13, 15))
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
     in_axes=(1,) + (None,) * 16 + (0,),
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
+_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(5, 6, 7, 8, 13, 15))
 
 
 def _perfilter_internal(
@@ -81,13 +81,13 @@ def _perfilter_internal(
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
+    ys: jax.Array,
     J: int,
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     rinitializers: Callable,
     rprocesses: Callable,
+    rprocesses_interp: Callable,
     dmeasures: Callable,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
@@ -117,12 +117,11 @@ def _perfilter_internal(
     counts = jnp.ones(J).astype(int)
 
     perfilter_helper_2 = partial(
-        _perfilter_helper,
+        _perfilter_helper_obs,
         dt_array_extended=dt_array_extended,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        rprocesses=rprocesses,
+        ys=ys,
+        rprocesses_interp=rprocesses_interp,
         dmeasures=dmeasures,
         sigmas=sigmas,
         accumvars=accumvars,
@@ -131,10 +130,10 @@ def _perfilter_internal(
         m=m,
         a=a,
     )
-    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = (
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = (
         jax.lax.fori_loop(
             lower=0,
-            upper=len(ys_extended),
+            upper=len(ys),
             body_fun=perfilter_helper_2,
             init_val=(t0, particlesF, thetas, loglik, norm_weights, counts, key, 0),
         )
@@ -145,7 +144,7 @@ def _perfilter_internal(
     return params, logliks, key
 
 
-def _perfilter_helper(
+def _perfilter_helper_obs(
     i: int,
     inputs: tuple[
         jax.Array,
@@ -159,9 +158,8 @@ def _perfilter_helper(
     ],
     dt_array_extended: jax.Array,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    rprocesses: Callable,
+    ys: jax.Array,
+    rprocesses_interp: Callable,
     dmeasures: Callable,
     sigmas: float | jax.Array,
     accumvars: jax.Array | None,
@@ -180,77 +178,59 @@ def _perfilter_helper(
     int,
 ]:
     """
-    Helper functions for perturbed particle filtering algorithm, which conducts
-    a single iteration of filtering and is called in function
-    'perfilter_internal'.
+    Observation-indexed helper for perturbed particle filtering using time interpolation
+    between observations.
     """
-    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = inputs
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = inputs
     J = len(particlesF)
 
-    def _perturb_thetas(thetas, key):
-        sigmas_cooled = (
-            _geometric_cooling(nt=obs_idx, m=m, ntimes=len(times), a=a) * sigmas
-        )
-        key, subkey = jax.random.split(key)
-        thetas = thetas + sigmas_cooled * jnp.array(
-            jax.random.normal(shape=thetas.shape, key=subkey)
-        )
-        return thetas, key
-
-    time_interval_begins = jnp.logical_or(i == 0, ys_observed[i - 1])
-    thetas, key = jax.lax.cond(
-        time_interval_begins,
-        _perturb_thetas,
-        lambda thetas, key: (thetas, key),
-        *(thetas, key),
+    # Perturb parameters at the start of each observation interval
+    sigmas_cooled = _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a) * sigmas
+    key, subkey = jax.random.split(key)
+    thetas = thetas + sigmas_cooled * jnp.array(
+        jax.random.normal(shape=thetas.shape, key=subkey)
     )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
-    covars_t = None if covars_extended is None else covars_extended[i]
-    particlesP = rprocesses(particlesF, thetas, keys, covars_t, t, dt_array_extended[i])
-    t = t + dt_array_extended[i]
 
-    def _with_observation(
-        loglik, norm_weights, counts, thetas, key, obs_idx, t, dmeasures
-    ):
-        t = times[obs_idx]
-        covars_t = None if covars_extended is None else covars_extended[i + 1]
-        measurements = jnp.nan_to_num(
-            dmeasures(ys_extended[i], particlesP, thetas, covars_t, t).squeeze(),
-            nan=jnp.log(1e-18),
-        )  # shape (Np,)
+    tol = jnp.sqrt(jnp.finfo(float).eps)
+    nstep_dynamic = jnp.ceil(
+        (times[i + 1] - times[i]) / dt_array_extended[t_idx] / (1 + tol)
+    ).astype(int)
 
-        if len(measurements.shape) > 1:
-            measurements = measurements.sum(axis=-1)
+    particlesP, t_idx = rprocesses_interp(
+        particlesF,
+        thetas,
+        keys,
+        covars_extended,
+        dt_array_extended,
+        t,
+        t_idx,
+        nstep_dynamic,
+        accumvars,
+    )
+    t = times[i + 1]
 
-        weights = norm_weights + measurements
-        norm_weights, loglik_t = _normalize_weights(weights)
+    covars_t = None if covars_extended is None else covars_extended[t_idx]
 
-        loglik = loglik + loglik_t
-        oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-        key, subkey = jax.random.split(key)
-        counts, particlesF, norm_weights, thetas = jax.lax.cond(
-            oddr > thresh,
-            _resampler_thetas,
-            _no_resampler_thetas,
-            *(counts, particlesP, norm_weights, thetas, subkey),
-        )
-        particlesF = jnp.where(
-            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
-        )
-        obs_idx = obs_idx + 1
-        return (particlesF, loglik, norm_weights, counts, thetas, key, obs_idx, t)
+    measurements = jnp.nan_to_num(
+        dmeasures(ys[i], particlesP, thetas, covars_t, t).squeeze(),
+        nan=jnp.log(1e-18),
+    )
+    if len(measurements.shape) > 1:
+        measurements = measurements.sum(axis=-1)
 
-    def _without_observation(loglik, norm_weights, counts, thetas, key, obs_idx, t):
-        return (particlesP, loglik, norm_weights, counts, thetas, key, obs_idx, t)
+    weights = norm_weights + measurements
+    norm_weights, loglik_t = _normalize_weights(weights)
+    loglik = loglik + loglik_t
 
-    _with_observation_partial = partial(_with_observation, dmeasures=dmeasures)
-
-    particles, loglik, norm_weights, counts, thetas, key, obs_idx, t = jax.lax.cond(
-        ys_observed[i],
-        _with_observation_partial,
-        _without_observation,
-        *(loglik, norm_weights, counts, thetas, key, obs_idx, t),
+    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    key, subkey = jax.random.split(key)
+    counts, particlesF, norm_weights, thetas = jax.lax.cond(
+        oddr > thresh,
+        _resampler_thetas,
+        _no_resampler_thetas,
+        *(counts, particlesP, norm_weights, thetas, subkey),
     )
 
-    return (t, particles, thetas, loglik, norm_weights, counts, key, obs_idx)
+    return (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx)

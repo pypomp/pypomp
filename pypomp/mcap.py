@@ -1,10 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Sequence, Callable, Any, List
-
 import numpy as np
-import jax
-import jax.numpy as jnp
+
+# TODO list statsmodels as install dependency in package description
+from statsmodels.nonparametric.smoothers_lowess import lowess as sm_lowess
+from scipy.stats import chi2
+
+__all__ = ["MCAPResult", "mcap"]
 
 # MCAP result container
 @dataclass
@@ -20,3 +23,22 @@ class MCAPResult:
     quadratic_max: float
     quadratic_coef: Dict[str, float]
     vcov: np.ndarray 
+
+def _tricube_weights(dist: np.ndarray, cutoff: float) -> np.ndarray:
+    """Tricube weights on [0, cutoff]; 0 outside"""
+    w = np.zeros_like(dist, dtype=float)
+    if cutoff <= 0:
+        return w
+    u = np.clip(dist / cutoff, 0.0, 1.0)
+    inside = u < 1.0
+    w[inside] = (1.0 - u[inside] ** 3) ** 3
+    return w
+
+def mcap(
+    logLik: np.ndarray,
+    parameter: np.ndarray,
+    level: float = 0.95,
+    span: float = 0.75,
+    Ngrid: int = 1000,
+    lowess_it: int = 3,
+) -> MCAPResult:

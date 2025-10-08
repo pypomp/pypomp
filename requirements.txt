@@ -10,4 +10,3 @@ scipy
 typing_extensions
 seaborn
 matplotlib
-equinox

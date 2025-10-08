@@ -1,54 +1,43 @@
 import jax
-import unittest
-import jax.numpy as jnp
+import pytest
 
 import pypomp as pp
 
 
-class TestFit_LG(unittest.TestCase):
-    def setUp(self):
-        # Set default values for tests
-        self.LG = pp.LG()
-        self.ys = self.LG.ys
-        self.covars = None
-        self.theta = self.LG.theta
-        self.J = 5
-        self.key = jax.random.key(111)
-        self.M = 2
+@pytest.fixture(scope="function")
+def simple():
+    # Set default values for tests
+    LG = pp.LG()
+    ys = LG.ys
+    covars = None
+    theta = LG.theta
+    J = 5
+    key = jax.random.key(111)
+    M = 2
+    return LG, ys, covars, theta, J, key, M
 
-    def test_class_GD_basic(self):
-        optimizers = ["SGD", "Newton", "WeightedNewton", "BFGS"]
-        for optimizer in optimizers:
-            with self.subTest(optimizer=optimizer):
-                self.LG.train(
-                    J=self.J,
-                    M=self.M,
-                    optimizer=optimizer,
-                    scale=True,
-                    ls=True,
-                    n_monitors=1,
-                    key=self.key,
-                )
-                GD_out = self.LG.results_history[-1]
-                traces = GD_out["traces"]
-                # Check shape for first replicate
-                self.assertEqual(
-                    traces.sel(replicate=0).shape,
-                    (self.M + 1, len(self.LG.theta[0]) + 1),
-                )  # +1 for logLik column
-                # Check that "logLik" is in variable coordinate
-                self.assertIn("logLik", list(traces.coords["variable"].values))
-                # Check that all parameter names are in variable coordinate
-                for param in self.LG.theta[0].keys():
-                    self.assertIn(param, list(traces.coords["variable"].values))
 
-    def test_invalid_GD_input(self):
-        with self.assertRaises(ValueError):
-            # Check that an error is thrown when J is not positive
-            self.LG.train(
-                J=0,
-                M=self.M,
-                scale=True,
-                ls=True,
-                key=self.key,
-            )
+def test_class_GD_basic(simple):
+    LG, ys, covars, theta, J, key, M = simple
+    optimizers = ["SGD", "Newton", "WeightedNewton", "BFGS"]
+    for optimizer in optimizers:
+        LG.train(
+            J=J, M=M, optimizer=optimizer, scale=True, ls=True, n_monitors=1, key=key
+        )
+        GD_out = LG.results_history[-1]
+        traces = GD_out["traces"]
+        # Check shape for first replicate
+        assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
+        # +1 for logLik column
+        # Check that "logLik" is in variable coordinate
+        assert "logLik" in list(traces.coords["variable"].values)
+        # Check that all parameter names are in variable coordinate
+        for param in LG.theta[0].keys():
+            assert param in list(traces.coords["variable"].values)
+
+
+def test_invalid_GD_input(simple):
+    LG, ys, covars, theta, J, key, M = simple
+    with pytest.raises(ValueError):
+        # Check that an error is thrown when J is not positive
+        LG.train(J=0, M=M, scale=True, ls=True, key=key)

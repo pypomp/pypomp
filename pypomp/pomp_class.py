@@ -138,7 +138,7 @@ class Pomp:
             self._covars_extended,
             self._dt_array_extended,
             self._nstep_array,
-            _max_steps_per_interval,
+            self._max_steps_per_interval,
         ) = _calc_ys_covars(
             t0=self.rinit.t0,
             times=np.array(self.ys.index),
@@ -149,7 +149,7 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
-        self.rproc.set_max_steps_bound(_max_steps_per_interval)
+        self.rproc.set_max_steps_bound(self._max_steps_per_interval)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None

@@ -13,8 +13,8 @@ def test_calc_ys_covars():
     dt = 0.5
     nstep = 1
 
-    interp_covars, dt_array_ext = ifunc._calc_ys_covars(
-        t0, times, ys, ctimes, covars, dt, None, order
+    interp_covars, dt_array_ext, nstep_array, max_steps_per_interval = (
+        ifunc._calc_ys_covars(t0, times, ys, ctimes, covars, dt, None, order)
     )
 
     # Check that the first and last times in dt_array_ext correspond to t0 and times[-1]

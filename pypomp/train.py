@@ -35,6 +35,7 @@ def _train_internal(
     theta_ests: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     rinitializer: Callable,  # static
@@ -73,6 +74,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
+                nstep_array=nstep_array,
                 t0=t0,
                 times=times,
                 J=J,
@@ -91,6 +93,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
+                nstep_array=nstep_array,
                 t0=t0,
                 times=times,
                 J=J,
@@ -108,6 +111,7 @@ def _train_internal(
                     _vmapped_pfilter_internal(
                         theta_ests,
                         dt_array_extended,
+                        nstep_array,
                         t0,
                         times,
                         ys,
@@ -134,6 +138,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
+                nstep_array=nstep_array,
                 t0=t0,
                 times=times,
                 J=J,
@@ -153,6 +158,7 @@ def _train_internal(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
+                nstep_array=nstep_array,
                 t0=t0,
                 times=times,
                 J=J,
@@ -215,6 +221,7 @@ def _train_internal(
                 neg_loglik = _pfilter_internal(
                     theta,
                     dt_array_extended=dt_array_extended,
+                    nstep_array=nstep_array,
                     t0=t0,
                     times=times,
                     ys=ys,
@@ -289,6 +296,7 @@ def _train_internal(
             _vmapped_pfilter_internal(
                 final_theta,
                 dt_array_extended,
+                nstep_array,
                 t0,
                 times,
                 ys,
@@ -319,7 +327,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 19 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
 )
 
 
@@ -387,6 +395,7 @@ def _line_search(
 def _jgrad(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys_extended: jax.Array,
@@ -413,6 +422,7 @@ def _jgrad(
     return jax.grad(_pfilter_internal_mean)(
         theta_ests,  # for some reason this needs to be given as a positional argument
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         ys_extended=ys_extended,
@@ -432,6 +442,7 @@ def _jgrad(
 def _jvg(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys_extended: jax.Array,
@@ -473,6 +484,7 @@ def _jvg(
     return jax.value_and_grad(_pfilter_internal_mean)(
         theta_ests,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         ys_extended=ys_extended,
@@ -493,6 +505,7 @@ def _jgrad_mop(
     theta_ests: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     J: int,  # static
@@ -517,6 +530,7 @@ def _jgrad_mop(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         J=J,
@@ -534,6 +548,7 @@ def _jvg_mop(
     theta_ests: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     J: int,  # static
@@ -561,6 +576,7 @@ def _jvg_mop(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         J=J,
@@ -577,6 +593,7 @@ def _jvg_mop(
 def _jhess(
     theta_ests: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys_extended: jax.Array,
@@ -603,6 +620,7 @@ def _jhess(
     return jax.hessian(_pfilter_internal_mean)(
         theta_ests,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         ys_extended=ys_extended,
@@ -624,6 +642,7 @@ def _jhess_mop(
     theta_ests: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     J: int,  # static
@@ -648,6 +667,7 @@ def _jhess_mop(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         J=J,

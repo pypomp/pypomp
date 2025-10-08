@@ -137,6 +137,8 @@ class Pomp:
         (
             self._covars_extended,
             self._dt_array_extended,
+            self._nstep_array,
+            _max_steps_per_interval,
         ) = _calc_ys_covars(
             t0=self.rinit.t0,
             times=np.array(self.ys.index),
@@ -147,6 +149,7 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
+        self.rproc.set_max_steps_bound(_max_steps_per_interval)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -236,6 +239,7 @@ class Pomp:
                     theta=jnp.array(list(theta_i.values())),
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
+                    nstep_array=self._nstep_array,
                     t0=self.rinit.t0,
                     times=jnp.array(self.ys.index),
                     J=J,
@@ -316,6 +320,7 @@ class Pomp:
         results = _vmapped_pfilter_internal2(
             thetas_repl,
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -443,6 +448,7 @@ class Pomp:
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -595,6 +601,7 @@ class Pomp:
             theta_array,
             jnp.array(self.ys),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
             self.rinit.struct_pf,
@@ -710,6 +717,7 @@ class Pomp:
                 t0=self.rinit.t0,
                 times=times_arr,
                 dt_array_extended=self._dt_array_extended,
+                nstep_array=self._nstep_array,
                 ydim=self.rmeas.ydim,
                 covars_extended=self._covars_extended,
                 accumvars=self.rproc.accumvars,

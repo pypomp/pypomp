@@ -9,7 +9,7 @@ from typing import Callable
 from .internal_functions import _keys_helper
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 7, 10))
+@partial(jax.jit, static_argnums=(0, 1, 2, 8, 11))
 def _simulate_internal(
     rinitializer: Callable,  # static
     rprocess_interp: Callable,  # static
@@ -18,6 +18,7 @@ def _simulate_internal(
     t0: float,
     times: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     ydim: int,  # static
     covars_extended: jax.Array | None,
     accumvars: tuple[int, ...] | None,
@@ -43,6 +44,7 @@ def _simulate_internal(
         theta=theta,
         times0=times0,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         covars_extended=covars_extended,
         nsim=nsim,
         accumvars=accumvars,
@@ -63,6 +65,7 @@ def _simulate_helper(
     inputs: tuple[jax.Array, int, jax.Array, jax.Array, jax.Array, jax.Array],
     times0: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     rprocess_interp: Callable,
     rmeasure: Callable,
     theta: jax.Array,
@@ -74,10 +77,7 @@ def _simulate_helper(
 
     key, keys = _keys_helper(key=key, J=nsim, covars=covars_extended)
 
-    tol = jnp.sqrt(jnp.finfo(float).eps)
-    nstep_dynamic = jnp.ceil(
-        (times0[i + 1] - times0[i]) / dt_array_extended[t_idx] / (1 + tol)
-    ).astype(int)
+    nstep = nstep_array[i].astype(int)
 
     X_sims, t_idx = rprocess_interp(
         X_sims,
@@ -87,7 +87,7 @@ def _simulate_helper(
         dt_array_extended,
         t,
         t_idx,
-        nstep_dynamic,
+        nstep,
         accumvars,
     )
     t = times0[i + 1]

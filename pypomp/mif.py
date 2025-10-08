@@ -13,6 +13,7 @@ from .internal_functions import _geometric_cooling
 def _mif_internal(
     theta: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys: jax.Array,
@@ -40,6 +41,7 @@ def _mif_internal(
     _perfilter_internal_2 = partial(
         _perfilter_internal,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         ys=ys,
@@ -65,20 +67,21 @@ def _mif_internal(
     return logliks, params
 
 
-_jit_mif_internal = jit(_mif_internal, static_argnums=(5, 6, 7, 8, 13, 15))
+_jit_mif_internal = jit(_mif_internal, static_argnums=(6, 7, 8, 9, 14, 16))
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,),
+    in_axes=(1,) + (None,) * 17 + (0,),
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(5, 6, 7, 8, 13, 15))
+_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 9, 14, 16))
 
 
 def _perfilter_internal(
     m: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array],
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys: jax.Array,
@@ -119,6 +122,7 @@ def _perfilter_internal(
     perfilter_helper_2 = partial(
         _perfilter_helper_obs,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         times=times,
         ys=ys,
         rprocesses_interp=rprocesses_interp,
@@ -157,6 +161,7 @@ def _perfilter_helper_obs(
         int,
     ],
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     times: jax.Array,
     ys: jax.Array,
     rprocesses_interp: Callable,
@@ -193,10 +198,7 @@ def _perfilter_helper_obs(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
 
-    tol = jnp.sqrt(jnp.finfo(float).eps)
-    nstep_dynamic = jnp.ceil(
-        (times[i + 1] - times[i]) / dt_array_extended[t_idx] / (1 + tol)
-    ).astype(int)
+    nstep = nstep_array[i].astype(int)
 
     particlesP, t_idx = rprocesses_interp(
         particlesF,
@@ -206,7 +208,7 @@ def _perfilter_helper_obs(
         dt_array_extended,
         t,
         t_idx,
-        nstep_dynamic,
+        nstep,
         accumvars,
     )
     t = times[i + 1]

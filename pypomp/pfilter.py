@@ -9,10 +9,23 @@ from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 9, 13, 14, 15, 16))
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "CLL",
+        "ESS",
+        "filter_mean",
+        "prediction_mean",
+    ),
+)
 def _pfilter_internal(
     theta: jax.Array,  # should be first for _line_search in train.py
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys: jax.Array,
@@ -61,6 +74,7 @@ def _pfilter_internal(
         _pfilter_helper,
         ys=ys,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         times=times,
         theta=theta,
         rprocess_interp=rprocess_interp,
@@ -121,13 +135,13 @@ def _pfilter_internal(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 12 + (0,) + (None,) * 4,
+    in_axes=(None,) * 13 + (0,) + (None,) * 4,
 )
 
 # Map over theta and key
 _vmapped_pfilter_internal2 = jax.vmap(
     _pfilter_internal,
-    in_axes=(0,) + (None,) * 11 + (0,) + (None,) * 4,
+    in_axes=(0,) + (None,) * 12 + (0,) + (None,) * 4,
 )
 
 
@@ -135,6 +149,7 @@ _vmapped_pfilter_internal2 = jax.vmap(
 def _pfilter_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     ys: jax.Array,
@@ -156,6 +171,7 @@ def _pfilter_internal_mean(
         _pfilter_internal(
             theta=theta,
             dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
             t0=t0,
             times=times,
             ys=ys,
@@ -193,6 +209,7 @@ def _pfilter_helper(
     ],
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     times: jax.Array,
     theta: jax.Array,
     rprocess_interp: Callable,
@@ -239,10 +256,7 @@ def _pfilter_helper(
 
     # Propagate from times[i] to times[i+1] using the interpolator
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
-    tol = jnp.sqrt(jnp.finfo(float).eps)
-    nstep_dynamic = jnp.ceil(
-        (times[i + 1] - times[i]) / dt_array_extended[t_idx] / (1 + tol)
-    ).astype(int)
+    nstep = nstep_array[i]
     particlesP, t_idx = rprocess_interp(
         particlesF,
         theta,
@@ -251,7 +265,7 @@ def _pfilter_helper(
         dt_array_extended,
         t,
         t_idx,
-        nstep_dynamic,
+        nstep,
         accumvars,
     )
     t = times[i + 1]

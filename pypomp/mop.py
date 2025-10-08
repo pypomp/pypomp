@@ -12,11 +12,12 @@ from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
+@partial(jit, static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure"))
 def _mop_internal(
     theta: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     J: int,  # static
@@ -46,6 +47,7 @@ def _mop_internal(
             _mop_helper,
             ys=ys,
             dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
             times=times,
             theta=theta,
             rprocess_interp=rprocess_interp,
@@ -66,11 +68,12 @@ def _mop_internal(
     return -loglik
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8))
+@partial(jit, static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure"))
 def _mop_internal_mean(
     theta: jax.Array,
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
     J: int,  # static
@@ -89,6 +92,7 @@ def _mop_internal_mean(
     return _mop_internal(
         theta=theta,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
         ys=ys,
@@ -110,6 +114,7 @@ def _mop_helper(
     ],
     ys: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     times: jax.Array,
     theta: jax.Array,
     rprocess_interp: Callable,
@@ -128,10 +133,7 @@ def _mop_helper(
     weightsP = alpha * weightsF
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
-    tol = jnp.sqrt(jnp.finfo(float).eps)
-    nstep_dynamic = jnp.ceil(
-        (times[i + 1] - times[i]) / dt_array_extended[i] / (1 + tol)
-    ).astype(int)
+    nstep = nstep_array[i].astype(int)
     particlesP, t_idx = rprocess_interp(
         particlesF,
         theta,
@@ -140,7 +142,7 @@ def _mop_helper(
         dt_array_extended,
         t,
         t_idx,
-        nstep_dynamic,
+        nstep,
         accumvars,
     )
     t = times[i + 1]

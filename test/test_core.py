@@ -13,7 +13,7 @@ def test_calc_ys_covars():
     dt = 0.5
     nstep = 1
 
-    ys_ext, ys_obs, interp_covars, dt_array_ext = ifunc._calc_ys_covars(
+    interp_covars, dt_array_ext = ifunc._calc_ys_covars(
         t0, times, ys, ctimes, covars, dt, None, order
     )
 
@@ -23,12 +23,7 @@ def test_calc_ys_covars():
     dt_array_ext_expected = np.repeat(dt_array, nstep_array)
     assert np.allclose(np.array(dt_array_ext), dt_array_ext_expected)
 
-    # Check that ys_ext is the correct length
-    assert ys_ext.shape[0] == np.sum(nstep_array)
-
     # Check shapes
-    assert dt_array_ext.shape[0] == ys_ext.shape[0]
-    assert ys_obs.shape[0] == ys_ext.shape[0]
+    assert dt_array_ext.shape[0] == np.sum(nstep_array)
     assert interp_covars is not None
-    assert interp_covars.shape[0] == ys_ext.shape[0] + 1
     assert interp_covars.shape[1] == covars.shape[1]

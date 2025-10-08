@@ -13,7 +13,23 @@ from .mop import _mop_internal_mean
 
 @partial(
     jit,
-    static_argnums=(7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25),
+    static_argnames=(
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "J",
+        "optimizer",
+        "M",
+        "eta",
+        "c",
+        "max_ls_itn",
+        "thresh",
+        "scale",
+        "ls",
+        "alpha",
+        "n_monitors",
+        "n_obs",
+    ),
 )
 def _train_internal(
     theta_ests: jax.Array,
@@ -21,10 +37,7 @@ def _train_internal(
     dt_array_extended: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
     rinitializer: Callable,  # static
-    rprocess: Callable,  # static
     rprocess_interp: Callable,  # static
     dmeasure: Callable,  # static
     accumvars: tuple[int, ...] | None,
@@ -306,7 +319,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 22 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 19 + (0,) + (None,) * 2,
 )
 
 

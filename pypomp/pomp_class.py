@@ -135,8 +135,6 @@ class Pomp:
         self.results_history = []
         self.fresh_key = None
         (
-            self._ys_extended,
-            self._ys_observed,
             self._covars_extended,
             self._dt_array_extended,
         ) = _calc_ys_covars(
@@ -590,9 +588,7 @@ class Pomp:
         # Convert theta_list to array format for vmapping
         theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
 
-        # Calculate n_obs from ys_observed
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
+        n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
@@ -601,10 +597,7 @@ class Pomp:
             self._dt_array_extended,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
@@ -711,13 +704,11 @@ class Pomp:
             times_arr = jnp.array(self.ys.index) if times is None else times
             X_sims, Y_sims = _simulate_internal(
                 rinitializer=self.rinit.struct_pf,
-                rprocess=self.rproc.struct_pf,
+                rprocess_interp=self.rproc.struct_pf_interp,
                 rmeasure=self.rmeas.struct_pf,
                 theta=jnp.array(list(theta_i.values())),
                 t0=self.rinit.t0,
                 times=times_arr,
-                ylen=int(jnp.sum(self._ys_observed)),
-                ys_observed=self._ys_observed,
                 dt_array_extended=self._dt_array_extended,
                 ydim=self.rmeas.ydim,
                 covars_extended=self._covars_extended,

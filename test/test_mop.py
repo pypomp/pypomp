@@ -1,29 +1,24 @@
 import jax
-import unittest
 import jax.numpy as jnp
+import pytest
 import pypomp as pp
 
 
-class TestMop_LG(unittest.TestCase):
-    def setUp(self):
-        self.LG = pp.LG()
-        self.J = 2
-        self.ys = self.LG.ys
-        self.theta = self.LG.theta
-        self.covars = self.LG.covars
-        self.sigmas = 0.02
-        self.key = jax.random.key(111)
-
-        self.rinit = self.LG.rinit
-        self.rproc = self.LG.rproc
-        self.dmeas = self.LG.dmeas
-
-    def test_class_basic(self):
-        val = self.LG.mop(J=self.J, key=self.key)
-        self.assertEqual(val[0].shape, ())
-        self.assertTrue(jnp.isfinite(val[0].item()))
-        self.assertEqual(val[0].dtype, jnp.float32)
+@pytest.fixture(scope="function")
+def simple():
+    LG = pp.LG()
+    J = 2
+    ys = LG.ys
+    theta = LG.theta
+    covars = LG.covars
+    sigmas = 0.02
+    key = jax.random.key(111)
+    return (LG, J, ys, theta, covars, sigmas, key)
 
 
-if __name__ == "__main__":
-    unittest.main(argv=[""], verbosity=2, exit=False)
+def test_class_basic(simple):
+    LG, J, ys, theta, covars, sigmas, key = simple
+    val = LG.mop(J=J, key=key)
+    assert val[0].shape == ()
+    assert jnp.isfinite(val[0].item())
+    assert val[0].dtype == jnp.float32

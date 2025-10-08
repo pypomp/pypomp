@@ -30,3 +30,10 @@ def test_dacca_nstep():
     # Check that dacca.train() runs without error when nstep is specified.
     dacca_nstep = pp.dacca(nstep=10, dt=None)
     dacca_nstep.train(J=3, M=1, key=jax.random.key(111))
+
+
+def test_dacca_dt():
+    # Check that dacca.train() runs without error when dt is specified.
+    dacca_bad = pp.dacca(nstep=None, dt=1 / 240)
+    with pytest.raises(ValueError):
+        dacca_bad.train(J=3, M=1, key=jax.random.key(111))

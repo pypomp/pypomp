@@ -392,9 +392,9 @@ def dacca(
         raise ValueError("Cannot specify both dt and nstep")
 
     if nstep is not None:
-        rproc = RProc(rproc, step_type="fixedstep", nstep=nstep, accumvars=(3,))
+        rproc = RProc(rproc, nstep=nstep, accumvars=(3,))
     else:
-        rproc = RProc(rproc, step_type="euler", dt=dt, accumvars=(3,))
+        rproc = RProc(rproc, dt=dt, accumvars=(3,))
 
     dacca_obj = Pomp(
         rinit=rinit,

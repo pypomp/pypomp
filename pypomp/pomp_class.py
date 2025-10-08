@@ -135,10 +135,10 @@ class Pomp:
         self.results_history = []
         self.fresh_key = None
         (
-            self._ys_extended,
-            self._ys_observed,
             self._covars_extended,
             self._dt_array_extended,
+            self._nstep_array,
+            self._max_steps_per_interval,
         ) = _calc_ys_covars(
             t0=self.rinit.t0,
             times=np.array(self.ys.index),
@@ -149,6 +149,7 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
+        self.rproc.set_max_steps_bound(self._max_steps_per_interval)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -236,14 +237,14 @@ class Pomp:
             results.append(
                 -_mop_internal(
                     theta=jnp.array(list(theta_i.values())),
+                    ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
+                    nstep_array=self._nstep_array,
                     t0=self.rinit.t0,
                     times=jnp.array(self.ys.index),
-                    ys_extended=self._ys_extended,
-                    ys_observed=self._ys_observed,
                     J=J,
                     rinitializer=self.rinit.struct_pf,
-                    rprocess=self.rproc.struct_pf,
+                    rprocess_interp=self.rproc.struct_pf_interp,
                     dmeasure=self.dmeas.struct_pf,
                     covars_extended=self._covars_extended,
                     accumvars=self.rproc.accumvars,
@@ -316,26 +317,21 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
-        # n_obs = int(np.sum(np.array(self._ys_observed)))
-
         results = _vmapped_pfilter_internal2(
             thetas_repl,
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
+            jnp.array(self.ys),
             J,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
             thresh,
             rep_keys,
-            n_obs,
             CLL,
             ESS,
             filter_mean,
@@ -452,12 +448,13 @@ class Pomp:
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
+            jnp.array(self.ys),
             self.rinit.struct_per,
             self.rproc.struct_per,
+            self.rproc.struct_per_interp,
             self.dmeas.struct_per,
             sigmas,
             sigmas_init,
@@ -597,20 +594,18 @@ class Pomp:
         # Convert theta_list to array format for vmapping
         theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
 
-        # Calculate n_obs from ys_observed
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
+        n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
+            jnp.array(self.ys),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
@@ -716,14 +711,13 @@ class Pomp:
             times_arr = jnp.array(self.ys.index) if times is None else times
             X_sims, Y_sims = _simulate_internal(
                 rinitializer=self.rinit.struct_pf,
-                rprocess=self.rproc.struct_pf,
+                rprocess_interp=self.rproc.struct_pf_interp,
                 rmeasure=self.rmeas.struct_pf,
                 theta=jnp.array(list(theta_i.values())),
                 t0=self.rinit.t0,
                 times=times_arr,
-                ylen=int(jnp.sum(self._ys_observed)),
-                ys_observed=self._ys_observed,
                 dt_array_extended=self._dt_array_extended,
+                nstep_array=self._nstep_array,
                 ydim=self.rmeas.ydim,
                 covars_extended=self._covars_extended,
                 accumvars=self.rproc.accumvars,
@@ -1070,7 +1064,6 @@ class Pomp:
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
             state["_rproc_func_name"] = original_func.__name__
-            state["_rproc_step_type"] = getattr(self.rproc, "step_type", "onestep")
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
             state["_rproc_module"] = original_func.__module__
@@ -1118,7 +1111,7 @@ class Pomp:
             if isinstance(obj, RProc):
                 self.rproc = obj
             else:
-                kwargs = {"step_type": state["_rproc_step_type"]}
+                kwargs = {}
                 if state["_rproc_dt"] is not None:
                     kwargs["dt"] = state["_rproc_dt"]
                 if state["_rproc_accumvars"] is not None:
@@ -1155,7 +1148,6 @@ class Pomp:
             "_rinit_t0",
             "_rinit_module",
             "_rproc_func_name",
-            "_rproc_step_type",
             "_rproc_dt",
             "_rproc_accumvars",
             "_rproc_module",

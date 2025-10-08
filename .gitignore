@@ -5,6 +5,8 @@
 scratch/
 scratch.py
 test/test_scratch.py
+.cursor
+scratch/
 
 
 #### the following is the default Python package gitignore from GitHub ####

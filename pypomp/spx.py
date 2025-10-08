@@ -50,7 +50,7 @@ def rinit(theta_, key, covars=None, t0=None):
     return jnp.array([V_0, S_0])
 
 
-@partial(RProc, step_type="fixedstep", nstep=1)
+@partial(RProc, nstep=1)
 def rproc(X_, theta_, key, covars, t=None, dt=None):
     V, S = X_
     mu, kappa, theta, xi, rho, V_0 = theta_

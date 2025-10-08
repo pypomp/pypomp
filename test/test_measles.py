@@ -87,18 +87,18 @@ def test_measles_pfilter(london):
     measles.pfilter(J=J, key=key)
 
 
-# def test_measles_pfilter_600(london):
-#     import time
+def test_measles_pfilter_600(london):
+    import time
 
-#     measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, J, key, M, sigmas, sigmas_init, a = london
 
-#     time_start = time.time()
-#     measles.pfilter(J=600, key=key)
-#     measles.results()
-#     time_taken = time.time() - time_start
-#     print(f"Time taken: {time_taken} seconds")
-#     print(measles.results())
-#     pass
+    time_start = time.time()
+    measles.pfilter(J=600, key=key)
+    measles.results()
+    time_taken = time.time() - time_start
+    print(f"Time taken: {time_taken} seconds")
+    print(measles.results())
+    pass
 
 
 def test_measles_mif(london):

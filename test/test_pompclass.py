@@ -73,34 +73,24 @@ def test_invalid_initialization(simple):
             pp.Pomp(**kwargs)
 
 
-def test_results(simple):
-    LG, J, sigmas, a, M, key = simple
+def test_results(neapolitan):
+    LG, J, sigmas, a, M, key = neapolitan
     # Check that results() returns one row per parameter set and correct columns
     # pfilter: should be one row per parameter set (len(theta))
     n_paramsets = len(LG.theta)
-    LG.pfilter(J=J, reps=1, key=key)
-    res_pfilter = LG.results()
+    res_pfilter = LG.results(0)
     assert res_pfilter.shape[0] == n_paramsets  # one row per parameter set
     expected_cols = {"logLik", "se", *LG.theta[0].keys()}
     assert set(res_pfilter.columns) == expected_cols
 
     # mif: should be one row per parameter set (len(theta))
-    LG.mif(
-        J=J,
-        sigmas=sigmas,
-        sigmas_init=sigmas,
-        M=M,
-        a=a,
-        key=key,
-    )
-    res_mif = LG.results()
+    res_mif = LG.results(1)
     n_paramsets = len(LG.theta)
     assert res_mif.shape[0] == n_paramsets  # one row per parameter set
     assert set(res_mif.columns) == expected_cols
 
     # train: should be one row per parameter set (len(theta))
-    LG.train(J=J, M=1, key=key)
-    res_train = LG.results()
+    res_train = LG.results(2)
     n_paramsets = len(LG.theta)
     assert res_train.shape[0] == n_paramsets  # one row per parameter set
     assert set(res_train.columns) == expected_cols

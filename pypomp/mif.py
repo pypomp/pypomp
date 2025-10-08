@@ -211,7 +211,7 @@ def _perfilter_helper_obs(
         nstep,
         accumvars,
     )
-    t = times[i + 1]
+    t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
 

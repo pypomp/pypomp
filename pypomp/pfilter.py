@@ -268,7 +268,7 @@ def _pfilter_helper(
         nstep,
         accumvars,
     )
-    t = times[i + 1]
+    t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     measurements = dmeasure(ys[i], particlesP, theta, covars_t, t)

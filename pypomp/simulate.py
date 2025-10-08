@@ -90,7 +90,7 @@ def _simulate_helper(
         nstep,
         accumvars,
     )
-    t = times0[i + 1]
+    t = times0[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     key, *keys = jax.random.split(key, num=nsim + 1)

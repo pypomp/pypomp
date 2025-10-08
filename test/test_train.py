@@ -11,7 +11,7 @@ def simple():
     ys = LG.ys
     covars = None
     theta = LG.theta
-    J = 5
+    J = 2
     key = jax.random.key(111)
     M = 2
     return LG, ys, covars, theta, J, key, M

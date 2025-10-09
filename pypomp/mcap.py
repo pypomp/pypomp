@@ -1,3 +1,6 @@
+"""
+This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Sequence, Callable, Any, List
@@ -25,7 +28,9 @@ class MCAPResult:
     vcov: np.ndarray 
 
 def _tricube_weights(dist: np.ndarray, cutoff: float) -> np.ndarray:
-    """Tricube weights on [0, cutoff]; 0 outside"""
+    """
+    Acquires the tricube weights on (0, cutoff]
+    """
     w = np.zeros_like(dist, dtype=float)
     if cutoff <= 0:
         return w
@@ -42,3 +47,26 @@ def mcap(
     Ngrid: int = 1000,
     lowess_it: int = 3,
 ) -> MCAPResult:
+    
+    phi = np.asarray(parameter, dtype = float).ravel()
+    ll = np.asarray(logLik, dtype = float).ravel()
+    if phi.size != ll.size:
+        raise ValueError("`parameter` and `logLik` must have the same length.")
+    if phi.size < 3:
+        raise ValueError("Need at least 3 points to compute a quadratic fit.")
+
+    # Sort by parameter for stable smoothing
+    order = np.argsort(phi)
+    phi = phi[order]
+    ll = ll[order]
+
+    # Build grid for smoothed curve & CI search
+    p_grid = np.linspace(phi.min(), phi.max(), int(Ngrid))
+
+    # LOWESS smoothing evaluated on grid
+    smoothed = sm_lowess(
+        endog = ll, exog = phi, frac = span, it = lowess_it, xvals = p_grid, is_sorted = True
+    )
+
+    # Smoothed argmax
+    smooth_arg_max = p_grid[int(np.nanargmax(smoothed))]

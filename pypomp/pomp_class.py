@@ -149,7 +149,7 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
-        self.rproc.set_max_steps_bound(self._max_steps_per_interval)
+        self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None

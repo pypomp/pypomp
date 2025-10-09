@@ -11,7 +11,6 @@ from typing import Callable
 def _time_interp(
     rproc: Callable,  # potentially vmap'd
     nstep_fixed: int | None,
-    dt_fixed: float | None,
     max_steps_bound: int | None,
 ) -> Callable:
     vsplit = jax.vmap(
@@ -27,7 +26,7 @@ def _time_interp(
         # keys is a (J,) array when rproc is vmap'd
         X_, theta_, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
-        dt = jnp.asarray(dt_fixed) if dt_fixed is not None else dt_array_extended[t_idx]
+        dt = dt_array_extended[t_idx]
         vkeys = vsplit(keys, 2)
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
@@ -135,19 +134,16 @@ class RProc:
         self.struct_interp = _time_interp(
             struct,
             nstep_fixed=nstep,
-            dt_fixed=dt,
             max_steps_bound=None,
         )
         self.struct_pf_interp = _time_interp(
             jax.vmap(struct, (0, None, 0, None, None, None)),
             nstep_fixed=nstep,
-            dt_fixed=dt,
             max_steps_bound=None,
         )
         self.struct_per_interp = _time_interp(
             jax.vmap(struct, (0, 0, 0, None, None, None)),
             nstep_fixed=nstep,
-            dt_fixed=dt,
             max_steps_bound=None,
         )
         self.nstep = int(nstep) if nstep is not None else None
@@ -156,30 +152,33 @@ class RProc:
         self._max_steps_bound = None
         self.original_func = struct
 
-    def set_max_steps_bound(self, max_steps_bound: int | None) -> None:
+    def rebuild_interp(
+        self, nstep_array: jax.Array | None, max_steps_bound: int | None
+    ) -> None:
         """
-        Set the maximum number of sub-steps allowed within any observation interval.
-        Rebuilds interpolator functions to honor this bound.
+        Set the maximum number of sub-steps allowed within any observation interval, and
+        use a fixed nstep if nstep_array contains only one value. Rebuilds interpolator
+        functions to honor this bound and set the nstep attribute.
         """
+        if nstep_array is not None and jnp.min(nstep_array) == jnp.max(nstep_array):
+            self.nstep = int(jnp.min(nstep_array))
+
         self._max_steps_bound = (
             int(max_steps_bound) if max_steps_bound is not None else None
         )
         self.struct_interp = _time_interp(
             self.struct,
             nstep_fixed=self.nstep,
-            dt_fixed=self.dt,
             max_steps_bound=self._max_steps_bound,
         )
         self.struct_pf_interp = _time_interp(
             self.struct_pf,
             nstep_fixed=self.nstep,
-            dt_fixed=self.dt,
             max_steps_bound=self._max_steps_bound,
         )
         self.struct_per_interp = _time_interp(
             self.struct_per,
             nstep_fixed=self.nstep,
-            dt_fixed=self.dt,
             max_steps_bound=self._max_steps_bound,
         )
 

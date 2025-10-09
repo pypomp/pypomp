@@ -28,7 +28,7 @@ def london():
             "S_0": float(init_params_T[0]),
             "E_0": float(init_params_T[1]),
             "I_0": float(init_params_T[2]),
-            "R_0": float(init_params_T[4]),
+            "R_0": float(init_params_T[3]),
         },
         # dt=7 / 365.25,
     )
@@ -37,7 +37,7 @@ def london():
     M = 2
     sigmas = 0.02
     sigmas_init = 0.1
-    a = 0.987
+    a = 0.5
     return measles, J, key, M, sigmas, sigmas_init, a
 
 

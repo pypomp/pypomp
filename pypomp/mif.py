@@ -189,7 +189,6 @@ def _perfilter_helper_obs(
     (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = inputs
     J = len(particlesF)
 
-    # Perturb parameters at the start of each observation interval
     sigmas_cooled = _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a) * sigmas
     key, subkey = jax.random.split(key)
     thetas = thetas + sigmas_cooled * jnp.array(

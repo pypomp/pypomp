@@ -254,7 +254,6 @@ def _pfilter_helper(
     ) = inputs
     J = len(particlesF)
 
-    # Propagate from times[i] to times[i+1] using the interpolator
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     nstep = nstep_array[i]
     particlesP, t_idx = rprocess_interp(

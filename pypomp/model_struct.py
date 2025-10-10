@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Callable
+from equinox.internal import while_loop
 
 
 def _time_interp(
@@ -18,20 +19,19 @@ def _time_interp(
     )  # handle multiple keys from vmap'd rproc
 
     def _interp_body(
-        i: int,
-        inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, int],
+        inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, int, int],
         covars_extended: jax.Array,
         dt_array_extended: jax.Array,
-    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, int]:
+    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, int, int]:
         # keys is a (J,) array when rproc is vmap'd
-        X_, theta_, keys, t, t_idx = inputs
+        X_, theta_, keys, t, t_idx, i = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         vkeys = vsplit(keys, 2)
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
         t = t + dt
         t_idx = t_idx + 1
-        return (X_, theta_, vkeys[:, 1], t, t_idx)
+        return (X_, theta_, vkeys[:, 1], t, t_idx, i + 1)
 
     def _rproc_interp(
         X_: jax.Array,
@@ -54,11 +54,12 @@ def _time_interp(
             covars_extended=covars_extended,
             dt_array_extended=dt_array_extended,
         )
-        X_, theta_, keys, t, t_idx = jax.lax.fori_loop(
-            lower=0,
-            upper=nstep,
+        X_, theta_, keys, t, t_idx, i = while_loop(
+            cond_fun=lambda inputs: inputs[5] < nstep,
             body_fun=interp_body2,
-            init_val=(X_, theta_, keys, t, t_idx),
+            init_val=(X_, theta_, keys, t, t_idx, 0),
+            kind="bounded",
+            max_steps=(int(max_steps_bound) if max_steps_bound is not None else None),
         )
         return X_, t_idx
 

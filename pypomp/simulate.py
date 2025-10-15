@@ -9,7 +9,6 @@ from typing import Callable
 from .internal_functions import _keys_helper
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 8, 11))
 def _simulate_internal(
     rinitializer: Callable,  # static
     rprocess_interp: Callable,  # static
@@ -58,6 +57,32 @@ def _simulate_internal(
     )
 
     return X_array, Y_array
+
+
+_jit_simulate_internal = jax.jit(
+    _simulate_internal,
+    static_argnames=(
+        "rinitializer",
+        "rprocess_interp",
+        "rmeasure",
+        "ydim",
+        "nsim",
+    ),
+)
+
+_jv_simulate_internal = jax.jit(
+    jax.vmap(
+        _simulate_internal,
+        (None,) * 3 + (0,) + (None,) * 8 + (0,),
+    ),
+    static_argnames=(
+        "rinitializer",
+        "rprocess_interp",
+        "rmeasure",
+        "ydim",
+        "nsim",
+    ),
+)
 
 
 def _simulate_helper(

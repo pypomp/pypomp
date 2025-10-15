@@ -16,7 +16,7 @@ from .mif import _jv_mif_internal
 from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
-from .simulate import _simulate_internal
+from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
@@ -676,7 +676,7 @@ class Pomp:
         theta: dict | list[dict] | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> list[dict]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Simulates the evolution of a system over time using a Partially Observed
         Markov Process (POMP) model.
@@ -691,9 +691,12 @@ class Pomp:
             nsim (int): The number of simulations to perform. Defaults to 1.
 
         Returns:
-            list[dict]: A list of dictionaries each containing:
-                - 'X_sims' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
-                - 'Y_sims' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
+            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
+            The columns are as follows:
+            - replicate: The index of the parameter set.
+            - sim: The index of the simulation.
+            - time: The time points at which the observations were made.
+            - Remaining columns contain the features of the state and observation processes.
         """
         theta = theta or self.theta
         self._validate_theta(theta)
@@ -704,40 +707,54 @@ class Pomp:
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
             )
 
+        thetas_array = jnp.vstack(
+            [jnp.array(list(theta_i.values())) for theta_i in theta_list]
+        )
+
         new_key, old_key = self._update_fresh_key(key)
-        keys = jax.random.split(new_key, len(theta_list))
-        results = []
-        for theta_i, k in zip(theta_list, keys):
-            times_arr = jnp.array(self.ys.index) if times is None else times
-            X_sims, Y_sims = _simulate_internal(
-                rinitializer=self.rinit.struct_pf,
-                rprocess_interp=self.rproc.struct_pf_interp,
-                rmeasure=self.rmeas.struct_pf,
-                theta=jnp.array(list(theta_i.values())),
-                t0=self.rinit.t0,
-                times=times_arr,
-                dt_array_extended=self._dt_array_extended,
-                nstep_array=self._nstep_array,
-                ydim=self.rmeas.ydim,
-                covars_extended=self._covars_extended,
-                accumvars=self.rproc.accumvars,
-                nsim=nsim,
-                key=k,
+        keys = jax.random.split(new_key, thetas_array.shape[0])
+        times_array = jnp.array(self.ys.index) if times is None else times
+        X_sims, Y_sims = _jv_simulate_internal(
+            self.rinit.struct_pf,
+            self.rproc.struct_pf_interp,
+            self.rmeas.struct_pf,
+            thetas_array,
+            self.rinit.t0,
+            times_array,
+            self._dt_array_extended,
+            self._nstep_array,
+            self.rmeas.ydim,
+            self._covars_extended,
+            self.rproc.accumvars,
+            nsim,
+            keys,
+        )
+
+        def _to_long(
+            arr: np.ndarray, times_vec: np.ndarray, prefix: str
+        ) -> pd.DataFrame:
+            vals = np.asarray(arr)  # (n_theta, n_time, n_feat, n_sim)
+            n_theta_l, n_time_l, n_feat_l, n_sim_l = vals.shape
+            flat = np.transpose(vals, (0, 3, 1, 2)).reshape(
+                n_theta_l * n_sim_l * n_time_l, n_feat_l
             )
-            X_sims = xr.DataArray(
-                X_sims,
-                dims=["time", "element", "sim"],
-                coords={
-                    "time": jnp.concatenate(
-                        [jnp.array([self.rinit.t0]), jnp.array(times_arr)]
-                    )
-                },
-            )
-            Y_sims = xr.DataArray(
-                Y_sims, dims=["time", "element", "sim"], coords={"time": times_arr}
-            )
-            results.append({"X_sims": X_sims, "Y_sims": Y_sims})
-        return results
+            theta_idx_l = np.repeat(np.arange(n_theta_l), n_sim_l * n_time_l)
+            sim_idx_l = np.tile(np.repeat(np.arange(n_sim_l), n_time_l), n_theta_l)
+            time_vals_l = np.tile(
+                np.asarray(times_vec).reshape(1, -1), (n_theta_l * n_sim_l, 1)
+            ).reshape(-1)
+            cols = pd.Index([f"{prefix}_{i}" for i in range(n_feat_l)])
+            df = pd.DataFrame(flat, columns=cols)
+            df.insert(0, "time", time_vals_l)
+            df.insert(0, "sim", sim_idx_l)
+            df.insert(0, "replicate", theta_idx_l)
+            return df
+
+        times0 = np.concatenate([np.array([self.rinit.t0]), np.array(times_array)])
+        X_sims_long = _to_long(X_sims, times0, "state")
+        Y_sims_long = _to_long(Y_sims, np.array(times_array), "obs")
+
+        return X_sims_long, Y_sims_long
 
     def traces(self) -> pd.DataFrame:
         """

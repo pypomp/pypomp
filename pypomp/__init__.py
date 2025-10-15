@@ -12,3 +12,4 @@ from .fast_random import (
     fast_approx_gamma,
     fast_approx_loggamma,
 )
+from .panelPomp_class import PanelPomp

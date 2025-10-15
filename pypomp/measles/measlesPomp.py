@@ -108,6 +108,33 @@ class UKMeasles:
             }
 
     @staticmethod
+    def AK_mles():
+        """
+        MLEs from https://kingaa.github.io/sbied/measles/index.html
+        """
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        data_file = os.path.join(module_dir, os.pardir, "data/uk_measles/AK_mles.csv")
+        df = pd.read_csv(data_file, index_col="town")
+        df.drop(columns=["loglik", "loglik.sd", "mu", "delay"], inplace=True)
+        return df[
+            [
+                "R0",
+                "sigma",
+                "gamma",
+                "iota",
+                "rho",
+                "sigmaSE",
+                "psi",
+                "cohort",
+                "amplitude",
+                "S_0",
+                "E_0",
+                "I_0",
+                "R_0",
+            ]
+        ].T
+
+    @staticmethod
     def Pomp(
         unit: list[str],
         theta: dict | list[dict],

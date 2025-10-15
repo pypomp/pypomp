@@ -17,23 +17,20 @@ def simple():
     return LG, ys, covars, theta, J, key, M
 
 
-def test_class_GD_basic(simple):
+@pytest.mark.parametrize("optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS"])
+def test_class_GD_basic(optimizer, simple):
     LG, ys, covars, theta, J, key, M = simple
-    optimizers = ["SGD", "Newton", "WeightedNewton", "BFGS"]
-    for optimizer in optimizers:
-        LG.train(
-            J=J, M=M, optimizer=optimizer, scale=True, ls=False, n_monitors=0, key=key
-        )
-        GD_out = LG.results_history[-1]
-        traces = GD_out["traces"]
-        # Check shape for first replicate
-        assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
-        # +1 for logLik column
-        # Check that "logLik" is in variable coordinate
-        assert "logLik" in list(traces.coords["variable"].values)
-        # Check that all parameter names are in variable coordinate
-        for param in LG.theta[0].keys():
-            assert param in list(traces.coords["variable"].values)
+    LG.train(J=J, M=M, optimizer=optimizer, scale=True, ls=False, n_monitors=0, key=key)
+    GD_out = LG.results_history[-1]
+    traces = GD_out["traces"]
+    # Check shape for first replicate
+    assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
+    # +1 for logLik column
+    # Check that "logLik" is in variable coordinate
+    assert "logLik" in list(traces.coords["variable"].values)
+    # Check that all parameter names are in variable coordinate
+    for param in LG.theta[0].keys():
+        assert param in list(traces.coords["variable"].values)
 
 
 def test_class_GD_ls(simple):

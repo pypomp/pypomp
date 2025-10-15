@@ -43,62 +43,12 @@ def london():
 
 def test_measles_sim(london):
     measles, J, key, M, sigmas, sigmas_init, a = london
-    x = measles
-    # out1 = x.simulate(key=jax.random.key(1), nsim=2)
-    out2 = x.simulate(
-        key=jax.random.key(1),
-        nsim=1,  # times=self.measles.ys.index[0:1]
-    )[0]
-
-    # if True:  # Process and obs plots
-    #     import matplotlib.pyplot as plt
-
-    #     fig, axs = plt.subplots(7, 1, sharex=True)
-    #     sim_n = 0
-    #     for i in range(6):
-    #         axs[i].plot(
-    #             out2["X_sims"].coords["time"],
-    #             out2["X_sims"].sel(sim=sim_n, element=i),
-    #         )
-    #         axs[i].set_title(f"Element {i}")
-    #     axs[6].plot(
-    #         out2["Y_sims"].coords["time"], out2["Y_sims"].sel(sim=sim_n, element=0)
-    #     )
-    #     axs[6].set_title("Observed")
-    #     plt.xlabel("time")
-    #     plt.ylabel("Value")
-    #     plt.title("London")
-    #     plt.show()
-
-    # if False:  # Covars plots
-    #     fig, axs = plt.subplots(2, 1, sharex=True)
-    #     for i, key in enumerate(["pop", "birthrate"]):
-    #         axs[i].plot(x.covars.index, x.covars[key], label=key)
-    #         axs[i].set_title(key)
-    #         axs[i].set_xlabel("Time")
-    #         axs[i].set_ylabel(key.capitalize())
-    #         axs[i].legend()
-    #     plt.tight_layout()
-    #     plt.show()
+    measles.simulate(key=key, nsim=1)
 
 
 def test_measles_pfilter(london):
     measles, J, key, M, sigmas, sigmas_init, a = london
     measles.pfilter(J=J, key=key)
-
-
-def test_measles_pfilter_600(london):
-    import time
-
-    measles, J, key, M, sigmas, sigmas_init, a = london
-
-    time_start = time.time()
-    measles.pfilter(J=600, key=key)
-    measles.results()
-    time_taken = time.time() - time_start
-    print(f"Time taken: {time_taken} seconds")
-    print(measles.results())
-    pass
 
 
 def test_measles_mif(london):
@@ -118,9 +68,9 @@ def test_measles_mop(london):
     measles.mop(J=J, key=key)
 
 
-# Commenting out for now due to errors
-# def test_measles_train(self):
-#     self.measles.train(M=1, J=self.J, key=self.key)
+def test_measles_train(london):
+    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles.train(M=1, J=J, key=key)
 
 
 def test_measles_clean():

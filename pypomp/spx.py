@@ -33,6 +33,7 @@ def _rho_transform(x):
     return float(jnp.log((1 + x) / (1 - x)))
 
 
+# Transformed scale parameters
 theta = {
     "mu": float(jnp.log(3.68e-4)),
     "kappa": float(jnp.log(3.14e-2)),

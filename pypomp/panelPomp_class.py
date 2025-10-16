@@ -478,18 +478,44 @@ class PanelPomp:
             },
         )
 
-        unit_logliks_squeezed = (
-            unit_logliks if unit_logliks.ndim == 1 else unit_logliks[0]
+        full_logliks = xr.DataArray(
+            jnp.concatenate(
+                [np.sum(unit_logliks, axis=1).reshape(-1, 1), unit_logliks], axis=1
+            ),
+            dims=["replicate", "unit"],
+            coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},
         )
+
+        if shared is not None:
+            self.shared = [
+                pd.DataFrame(
+                    shared_traces[rep, -1, 1:].reshape(-1, 1),
+                    index=pd.Index(shared_index),
+                    columns=pd.Index(["shared"]),
+                )
+                for rep in range(shared_traces.shape[0])
+            ]
+        else:
+            self.shared = None
+
+        if unit_specific is not None:
+            self.unit_specific = [
+                pd.DataFrame(
+                    unit_traces[rep, -1, 1:, :],
+                    index=pd.Index(spec_index),
+                    columns=pd.Index(unit_names),
+                )
+                for rep in range(unit_traces.shape[0])
+            ]
+        else:
+            self.unit_specific = None
 
         self.results_history.append(
             {
                 "method": "mif",
                 "shared_traces": shared_da,
                 "unit_traces": unit_da,
-                "unit_logliks": xr.DataArray(
-                    unit_logliks_squeezed, dims=["unit"], coords={"unit": unit_names}
-                ),
+                "logLiks": full_logliks,
                 "shared": shared,
                 "unit_specific": unit_specific,
                 "J": J,

@@ -81,14 +81,13 @@ def test_mif(measles_panel_setup2):
     M = 2
     a = 0.5
     panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
-    # Check that the last results are present and correct for 'mif'
     result = panel.results_history[-1]
+
     assert result["method"] == "mif"
     assert "shared_traces" in result
     assert "unit_traces" in result
-    assert "unit_logliks" in result
+    assert "logLiks" in result
     assert result["shared"] is None
-    assert result["unit_specific"] is panel.unit_specific
     assert result["J"] == J
     assert result["M"] == M
     assert result["a"] == a
@@ -96,15 +95,14 @@ def test_mif(measles_panel_setup2):
     assert result["sigmas_init"] == sigmas_init
     assert isinstance(result["shared_traces"], xr.DataArray)
     assert isinstance(result["unit_traces"], xr.DataArray)
-    assert isinstance(result["unit_logliks"], xr.DataArray)
-    # additional shape checks
+    assert isinstance(result["logLiks"], xr.DataArray)
     assert "iteration" in result["shared_traces"].dims
     assert "variable" in result["shared_traces"].dims
     assert "iteration" in result["unit_traces"].dims
     assert "variable" in result["unit_traces"].dims
     assert "unit" in result["unit_traces"].dims
-    assert result["shared_traces"].shape[1] == 3  # M+1 iterations where M=2, so 3
-    assert result["unit_traces"].shape[1] == 3  # M+1 iterations where M=2, so 3
-    assert set(result["unit_logliks"].coords["unit"].values) == set(
-        panel.unit_objects.keys()
+    assert result["shared_traces"].shape[1] == M + 1
+    assert result["unit_traces"].shape[1] == M + 1
+    assert set(result["logLiks"].coords["unit"].values) == set(
+        ["shared"] + list(panel.unit_objects.keys())
     )

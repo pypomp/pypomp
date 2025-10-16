@@ -313,6 +313,13 @@ def _panel_mif_internal(
 
             covars_u = None if covars_per_unit is None else covars_per_unit[u]
 
+            sigmas_init_cooled = (
+                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
+            )
+            sigmas_cooled = (
+                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas
+            )
+
             nLL_u, updated_thetas_u = _mif_internal(
                 thetas_u,
                 dt_array_extended,
@@ -323,8 +330,8 @@ def _panel_mif_internal(
                 rinitializers,
                 rprocesses_interp,
                 dmeasures,
-                sigmas,
-                sigmas_init,
+                sigmas_cooled,
+                sigmas_init_cooled,
                 accumvars,
                 covars_u,
                 1,

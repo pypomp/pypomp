@@ -6,9 +6,8 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 import xarray as xr
-from tqdm import tqdm
 from .pomp_class import Pomp
-from .mif import _jit_mif_internal
+from .mif import _jv_panel_mif_internal
 import numpy as np
 
 
@@ -238,7 +237,8 @@ class PanelPomp:
                 particles.
             reps (int): Number of replicates to run.
         Returns:
-            None
+            None. Updates self.results_history with the results of the particle filter
+            algorithm for each unit in the panel.
         """
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
@@ -278,381 +278,227 @@ class PanelPomp:
             }
         )
 
-    # def _initialize_parameters(
-    #     self, J: int, shared: pd.DataFrame | None, unit_specific: pd.DataFrame | None
-    # ) -> tuple[jax.Array | None, jax.Array | None, list[str], list[str], list[str]]:
-    #     """Initialize parameter matrices for MIF algorithm."""
-    #     # Handle None cases for shared parameters
-    #     if shared is None and self.shared is None:
-    #         shared_params = []
-    #         shared_values = jnp.array([])
-    #     else:
-    #         shared = shared or self.shared
-    #         shared_params = list(shared.index)
-    #         shared_values = (
-    #             shared["shared"].values if not shared.empty else jnp.array([])
-    #         )
+    # TODO: quant test this function
+    def mif(
+        self,
+        J: int,
+        key: jax.Array,
+        sigmas: float | jax.Array,
+        sigmas_init: float | jax.Array,
+        M: int,
+        a: float,
+        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        thresh: float = 0,
+        block: bool = True,
+    ) -> None:
+        """
+        Runs the panel iterated filtering (PIF) algorithm, which estimates parameters
+        by maximizing the combined log-likelihood across all units.
 
-    #     # Handle None cases for unit-specific parameters
-    #     if unit_specific is None and self.unit_specific is None:
-    #         unit_specific_params = []
-    #         unit_specific_values = jnp.array([])
-    #     else:
-    #         unit_specific = unit_specific or self.unit_specific
-    #         unit_specific_params = list(unit_specific.index)
-    #         unit_specific_values = (
-    #             unit_specific.values if not unit_specific.empty else jnp.array([])
-    #         )
+        Args:
+            J (int): The number of particles.
+            key (jax.Array): The random key for reproducibility.
+            sigmas (float | jax.Array): Perturbation factor for parameters.
+            sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
+            M (int): Number of algorithm iterations.
+            a (float): Decay factor for sigmas.
+            shared (pd.DataFrame | list[pd.DataFrame], optional): Shared parameters
+                involved in the POMP model. If provided, overrides the shared
+                parameter attribute.
+            unit_specific (pd.DataFrame | list[pd.DataFrame], optional): Parameters
+                involved in the POMP model for each unit. If provided, overrides the
+                unit-specific parameters.
+            thresh (float, optional): Resampling threshold.
+            block (bool, optional): Whether to block resampling of unit-specific
+                parameters.
 
-    #     unit_names = list(self.unit_objects.keys())
+        Returns:
+            None. Updates self.results_history with the results of the MIF algorithm.
+        """
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+        shared, unit_specific, _ = self._validate_params_and_units(
+            shared, unit_specific, self.unit_objects
+        )
+        if J < 1:
+            raise ValueError("J should be greater than 0.")
+        if M < 1:
+            raise ValueError("M should be greater than 0.")
+        if a < 0 or a > 1:
+            raise ValueError("a should be between 0 and 1.")
+        if block is False:
+            raise NotImplementedError("block=False is not supported yet.")
 
-    #     # Initialize shared parameters
-    #     shared_thetas = (
-    #         jnp.tile(jnp.array(shared_values), (J, 1)).T
-    #         if len(shared_values) > 0
-    #         else None
-    #     )
+        unit_names = list(self.unit_objects.keys())
+        U = len(unit_names)
+        # Use a representative unit for structural arrays and static callables
+        rep_unit = self.unit_objects[unit_names[0]]
 
-    #     # Initialize unit-specific parameters
-    #     unit_specific_thetas = (
-    #         jnp.tile(unit_specific_values[:, None, :], (1, J, 1))
-    #         if len(unit_specific_values) > 0
-    #         else None
-    #     )
+        # TODO: make this more flexible
+        # Assume all units share the same dt_array_extended, nstep_array, t0, and times
+        dt_array_extended = rep_unit._dt_array_extended
+        nstep_array = rep_unit._nstep_array
+        t0 = rep_unit.rinit.t0
+        times = jnp.array(rep_unit.ys.index)
 
-    #     return (
-    #         shared_thetas,
-    #         unit_specific_thetas,
-    #         shared_params,
-    #         unit_specific_params,
-    #         unit_names,
-    #     )
+        if rep_unit.dmeas is None:
+            raise ValueError("dmeas cannot be None in PanelPomp units")
 
-    # def _process_unit(
-    #     self,
-    #     unit: str,
-    #     unit_idx: int,
-    #     shared_thetas: jax.Array | None,
-    #     unit_specific_thetas: jax.Array | None,
-    #     shared_params: list[str],
-    #     unit_specific_params: list[str],
-    #     J: int,
-    #     sigmas: float | jax.Array,
-    #     sigmas_init: float | jax.Array,
-    #     thresh: float,
-    #     key: jax.Array,
-    # ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    #     """Process a single unit in the MIF algorithm."""
-    #     # Get unit-specific data
-    #     unit_ys = self.unit_objects[unit].ys
-    #     unit_covars = self.unit_objects[unit].covars
+        # TODO: make this more flexible
+        # Assume all units share the same rinitializers, rprocesses_interp, dmeasures, accumvars
+        rinitializers = rep_unit.rinit.struct_per
+        rprocesses_interp = rep_unit.rproc.struct_per_interp
+        dmeasures = rep_unit.dmeas.struct_per
+        accumvars = rep_unit.rproc.accumvars
 
-    #     # Get unit-specific components
-    #     unit_rinit = self.unit_objects[unit].rinit
-    #     unit_rproc = self.unit_objects[unit].rproc
-    #     unit_dmeas = self.unit_objects[unit].dmeas
+        has_covars = [
+            self.unit_objects[u]._covars_extended is not None for u in unit_names
+        ]
+        if all(has_covars):
+            covars_per_unit = jnp.stack(
+                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
+                axis=0,
+            )
+        elif any(has_covars):
+            raise NotImplementedError(
+                "Some units have covariates, but not all units have covariates. This is not supported yet."
+            )
+        else:
+            covars_per_unit = None
 
-    #     if unit_rinit is None or unit_rproc is None or unit_dmeas is None:
-    #         raise ValueError(f"Missing required components for unit {unit}")
+        shared_list = shared if isinstance(shared, list) else []
+        spec_list = unit_specific if isinstance(unit_specific, list) else []
+        n_reps = self._get_theta_list_len(shared, unit_specific)
 
-    #     # Combine parameters for this unit
-    #     unit_theta = {}
-    #     if shared_thetas is not None:
-    #         unit_theta.update(dict(zip(shared_params, shared_thetas)))
-    #     if unit_specific_thetas is not None:
-    #         unit_theta.update(
-    #             dict(zip(unit_specific_params, unit_specific_thetas[:, :, unit_idx]))
-    #         )
+        # Shared parameters
+        if len(shared_list) == 0:
+            n_shared = 0
+            shared_array = jnp.zeros((n_reps, 0, J))
+            shared_index: list[str] = []
+        else:
+            shared_index = list(shared_list[0].index)
+            n_shared = len(shared_index)
+            shared_array = jnp.stack(
+                [
+                    jnp.tile(
+                        jnp.array(df["shared"].to_numpy().astype(float)).reshape(
+                            n_shared, 1
+                        ),
+                        (1, J),
+                    )
+                    for df in shared_list
+                ],
+                axis=0,
+            )
 
-    #     # Validate parameters
-    #     expected_param_order = self._unit_param_order[unit]
-    #     for param in expected_param_order:
-    #         if param not in unit_theta:
-    #             raise KeyError(
-    #                 f"Parameter '{param}' missing for unit '{unit}'. Check shared/unit-specific DataFrames."
-    #             )
+        # Unit-specific parameters
+        if len(spec_list) == 0:
+            n_spec = 0
+            unit_array = jnp.zeros((n_reps, 0, J, U))
+            spec_index: list[str] = []
+        else:
+            spec_index = list(spec_list[0].index)
+            n_spec = len(spec_index)
+            unit_array = jnp.stack(
+                [
+                    jnp.stack(
+                        [
+                            jnp.tile(
+                                jnp.array(df[unit].to_numpy().astype(float)).reshape(
+                                    n_spec, 1
+                                ),
+                                (1, J),
+                            )
+                            for unit in unit_names
+                        ],
+                        axis=2,
+                    )  # shape: (n_spec, J, U)
+                    for df in spec_list
+                ],
+                axis=0,
+            )  # shape: (R, n_spec, J, U)
 
-    #     # Build parameter array for particles
-    #     theta_values = jnp.stack(
-    #         [
-    #             jnp.stack([unit_theta[param][j] for param in expected_param_order])
-    #             for j in range(J)
-    #         ]
-    #     )
+        # Stack ys per unit (units assumed to share time grid and dt/nstep arrays)
+        ys_per_unit = jnp.stack(
+            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        )
 
-    #     # Run perturbed particle filter
-    #     key, subkey = jax.random.split(key)
-    #     unit_loglik, unit_thetas = _jit_mif_internal(
-    #         theta=theta_values,
-    #         t0=unit_rinit.t0,
-    #         times=jnp.array(unit_ys.index),
-    #         ys=jnp.array(unit_ys),
-    #         rinitializers=unit_rinit.struct_per,
-    #         rprocesses=unit_rproc.struct_per,
-    #         dmeasures=unit_dmeas.struct_per,
-    #         sigmas=sigmas,
-    #         sigmas_init=sigmas_init,
-    #         ctimes=jnp.array(unit_covars.index) if unit_covars is not None else None,
-    #         covars=jnp.array(unit_covars) if unit_covars is not None else None,
-    #         M=1,  # Single iteration for each unit
-    #         a=1.0,  # Not used in single iteration
-    #         J=J,
-    #         thresh=thresh,
-    #         key=subkey,
-    #     )
+        old_key = key
+        keys = jax.random.split(key, n_reps)
+        (
+            shared_array_f,
+            unit_array_f,
+            shared_traces,
+            unit_traces,
+            unit_logliks,
+        ) = _jv_panel_mif_internal(
+            shared_array,
+            unit_array,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys_per_unit,
+            rinitializers,
+            rprocesses_interp,
+            dmeasures,
+            sigmas,
+            sigmas_init,
+            accumvars,
+            covars_per_unit,
+            M,
+            a,
+            J,
+            U,
+            thresh,
+            keys,
+        )
 
-    #     return unit_loglik[1], unit_thetas[1], key
+        shared_vars = ["logLik"] + shared_index
+        unit_vars = ["unitLogLik"] + spec_index
 
-    # def _update_parameters(
-    #     self,
-    #     unit_thetas: jax.Array,
-    #     expected_param_order: list[str],
-    #     shared_params: list[str],
-    #     unit_specific_params: list[str],
-    #     shared_thetas: jax.Array | None,
-    #     unit_specific_thetas: jax.Array | None,
-    #     unit_idx: int,
-    #     unit_names: list[str],
-    #     J: int,
-    #     block: bool,
-    # ) -> tuple[jax.Array | None, jax.Array | None]:
-    #     """Update parameters based on particle filter results."""
-    #     updated_shared_thetas = shared_thetas
-    #     updated_unit_specific_thetas = unit_specific_thetas
+        shared_da = xr.DataArray(
+            shared_traces,
+            dims=["replicate", "iteration", "variable"],
+            coords={
+                "replicate": jnp.arange(shared_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": shared_vars,
+            },
+        )
+        unit_da = xr.DataArray(
+            unit_traces,
+            dims=["replicate", "iteration", "variable", "unit"],
+            coords={
+                "replicate": jnp.arange(unit_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": unit_vars,
+                "unit": unit_names,
+            },
+        )
 
-    #     if shared_thetas is not None:
-    #         shared_indices = [
-    #             i for i, p in enumerate(expected_param_order) if p in shared_params
-    #         ]
-    #         updated_shared_thetas = unit_thetas[:, shared_indices].T
+        unit_logliks_squeezed = (
+            unit_logliks if unit_logliks.ndim == 1 else unit_logliks[0]
+        )
 
-    #     if unit_specific_thetas is not None:
-    #         unit_specific_indices = [
-    #             i
-    #             for i, p in enumerate(expected_param_order)
-    #             if p in unit_specific_params
-    #         ]
-    #         updated_unit_specific_thetas = unit_specific_thetas.at[:, :, unit_idx].set(
-    #             unit_thetas[:, unit_specific_indices].T
-    #         )
-
-    #         # Resample other units if not blocked
-    #         if not block:
-    #             for other_idx in range(len(unit_names)):
-    #                 if other_idx != unit_idx:
-    #                     updated_unit_specific_thetas = updated_unit_specific_thetas.at[
-    #                         :, :, other_idx
-    #                     ].set(updated_unit_specific_thetas[:, jnp.arange(J), other_idx])
-
-    #     return updated_shared_thetas, updated_unit_specific_thetas
-
-    # def _create_results(
-    #     self,
-    #     logliks: jax.Array,
-    #     shared_params_history: list[jax.Array],
-    #     unit_specific_params_history: list[jax.Array],
-    #     unit_logliks: dict[str, list[float]],
-    #     shared_params: list[str],
-    #     unit_specific_params: list[str],
-    #     unit_names: list[str],
-    #     J: int,
-    # ) -> dict[str, xr.DataArray]:
-    #     """Create results dictionary in xarray format."""
-    #     # Handle empty logliks
-    #     if logliks.shape == (0,):
-    #         logliks = jnp.zeros(len(unit_logliks[unit_names[0]]))
-
-    #     results = {
-    #         "logLiks": xr.DataArray(
-    #             logliks,
-    #             dims=["iteration"],
-    #             coords={"iteration": range(1, len(logliks) + 1)},
-    #         ),
-    #     }
-
-    #     if shared_params_history:
-    #         shared_params_history_array = jnp.stack(shared_params_history)
-    #         results["shared_thetas"] = xr.DataArray(
-    #             shared_params_history_array,
-    #             dims=["iteration", "param", "particle"],
-    #             coords={
-    #                 "iteration": range(len(shared_params_history_array)),
-    #                 "param": shared_params,
-    #                 "particle": range(J),
-    #             },
-    #         )
-
-    #     if unit_specific_params_history:
-    #         unit_specific_params_history_array = jnp.stack(unit_specific_params_history)
-    #         results["unit_specific_thetas"] = xr.DataArray(
-    #             unit_specific_params_history_array,
-    #             dims=["iteration", "param", "particle", "unit"],
-    #             coords={
-    #                 "iteration": range(len(unit_specific_params_history_array)),
-    #                 "param": unit_specific_params,
-    #                 "particle": range(J),
-    #                 "unit": unit_names,
-    #             },
-    #         )
-
-    #     # Create unit_logLiks
-    #     results["unit_logLiks"] = xr.DataArray(
-    #         jnp.array([unit_logliks[unit] for unit in unit_names]).T,
-    #         dims=["iteration", "unit"],
-    #         coords={
-    #             "iteration": range(len(unit_logliks[unit_names[0]])),
-    #             "unit": unit_names,
-    #         },
-    #     )
-
-    #     return results
-
-    # # TODO: quant test this function
-    # def mif(
-    #     self,
-    #     J: int,
-    #     key: jax.Array,
-    #     sigmas: float | jax.Array,
-    #     sigmas_init: float | jax.Array,
-    #     M: int,
-    #     a: float,
-    #     shared: pd.DataFrame | None = None,
-    #     unit_specific: pd.DataFrame | None = None,
-    #     thresh: float = 0,
-    #     block: bool = True,
-    # ) -> None:
-    #     """
-    #     Runs the panel iterated filtering (PIF) algorithm, which estimates parameters
-    #     by maximizing the combined log-likelihood across all units.
-
-    #     Args:
-    #         J (int): The number of particles.
-    #         key (jax.Array): The random key for reproducibility.
-    #         sigmas (float | jax.Array): Perturbation factor for parameters.
-    #         sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-    #         M (int): Number of algorithm iterations.
-    #         a (float): Decay factor for sigmas.
-    #         shared (pd.DataFrame, optional): Parameters involved in the POMP model.
-    #             If provided, overrides the shared parameters.
-    #         unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
-    #             If provided, overrides the unit-specific parameters.
-    #         thresh (float, optional): Resampling threshold. Defaults to 0.
-    #         block (bool, optional): Whether to block resampling of unit-specific parameters.
-    #             Defaults to True.
-
-    #     Returns:
-    #         None
-    #     """
-    #     if J < 1:
-    #         raise ValueError("J should be greater than 0.")
-
-    #     # Initialize parameters
-    #     (
-    #         shared_thetas,
-    #         unit_specific_thetas,
-    #         shared_params,
-    #         unit_specific_params,
-    #         unit_names,
-    #     ) = self._initialize_parameters(J, shared, unit_specific)
-
-    #     # Initialize arrays to store results
-    #     logliks = []
-    #     shared_params_history = []
-    #     unit_specific_params_history = []
-    #     unit_logliks = {unit: [] for unit in unit_names}
-
-    #     # Store initial parameter state (iteration 0)
-    #     if shared_thetas is not None:
-    #         shared_params_history.append(shared_thetas.copy())
-    #     if unit_specific_thetas is not None:
-    #         unit_specific_params_history.append(unit_specific_thetas.copy())
-
-    #     # Main MIF iterations
-    #     for m in tqdm(range(M)):
-    #         # Cool sigmas
-    #         sigmas = a * sigmas
-    #         sigmas_init = a * sigmas_init
-
-    #         # Perturb parameters
-    #         key, *subkeys = jax.random.split(key, num=3)
-    #         if shared_thetas is not None:
-    #             shared_thetas = shared_thetas + sigmas_init * jax.random.normal(
-    #                 shape=shared_thetas.shape, key=subkeys[0]
-    #             )
-    #         if unit_specific_thetas is not None:
-    #             unit_specific_thetas = (
-    #                 unit_specific_thetas
-    #                 + sigmas_init
-    #                 * jax.random.normal(
-    #                     shape=unit_specific_thetas.shape, key=subkeys[1]
-    #                 )
-    #             )
-
-    #         # Process each unit
-    #         total_loglik = 0
-    #         for unit_idx, unit in enumerate(unit_names):
-    #             # Process unit
-    #             unit_loglik, unit_thetas, key = self._process_unit(
-    #                 unit,
-    #                 unit_idx,
-    #                 shared_thetas,
-    #                 unit_specific_thetas,
-    #                 shared_params,
-    #                 unit_specific_params,
-    #                 J,
-    #                 sigmas,
-    #                 sigmas_init,
-    #                 thresh,
-    #                 key,
-    #             )
-
-    #             # Update total log-likelihood
-    #             total_loglik += unit_loglik
-    #             unit_logliks[unit].append(unit_loglik)
-
-    #             # Update parameters
-    #             shared_thetas, unit_specific_thetas = self._update_parameters(
-    #                 unit_thetas,
-    #                 self._unit_param_order[unit],
-    #                 shared_params,
-    #                 unit_specific_params,
-    #                 shared_thetas,
-    #                 unit_specific_thetas,
-    #                 unit_idx,
-    #                 unit_names,
-    #                 J,
-    #                 block,
-    #             )
-
-    #         # Store parameter history
-    #         if shared_thetas is not None:
-    #             shared_params_history.append(shared_thetas.copy())
-    #         if unit_specific_thetas is not None:
-    #             unit_specific_params_history.append(unit_specific_thetas.copy())
-    #         logliks.append(total_loglik)
-
-    #     # TODO: update self.theta
-    #     # Create results
-    #     self.results_history.append(
-    #         {
-    #             **self._create_results(
-    #                 jnp.array(logliks),
-    #                 shared_params_history,
-    #                 unit_specific_params_history,
-    #                 unit_logliks,
-    #                 shared_params,
-    #                 unit_specific_params,
-    #                 unit_names,
-    #                 J,
-    #             ),
-    #             "shared": shared,
-    #             "unit_specific": unit_specific,
-    #             "J": J,
-    #             "thresh": thresh,
-    #             "sigmas": sigmas,
-    #             "sigmas_init": sigmas_init,
-    #             "M": M,
-    #             "a": a,
-    #             "block": block,
-    #         }
-    #     )
+        self.results_history.append(
+            {
+                "method": "mif",
+                "shared_traces": shared_da,
+                "unit_traces": unit_da,
+                "unit_logliks": xr.DataArray(
+                    unit_logliks_squeezed, dims=["unit"], coords={"unit": unit_names}
+                ),
+                "shared": shared,
+                "unit_specific": unit_specific,
+                "J": J,
+                "thresh": thresh,
+                "sigmas": sigmas,
+                "sigmas_init": sigmas_init,
+                "M": M,
+                "a": a,
+                "block": block,
+                "key": old_key,
+            }
+        )

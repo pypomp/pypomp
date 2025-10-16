@@ -453,7 +453,6 @@ class Pomp:
             jnp.array(self.ys.index),
             jnp.array(self.ys),
             self.rinit.struct_per,
-            self.rproc.struct_per,
             self.rproc.struct_per_interp,
             self.dmeas.struct_per,
             sigmas,

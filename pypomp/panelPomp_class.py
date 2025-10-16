@@ -8,6 +8,7 @@ import pandas as pd
 import xarray as xr
 from .pomp_class import Pomp
 from .mif import _jv_panel_mif_internal
+from .util import logmeanexp
 import numpy as np
 
 
@@ -528,3 +529,156 @@ class PanelPomp:
                 "key": old_key,
             }
         )
+
+    # TODO: clean up results functions
+    def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
+        """
+        Return a DataFrame with results for each replicate and unit for the given method.
+
+        Columns:
+            - replicate: index of the replicate
+            - unit: the unit name
+            - shared log-likelihood: log-likelihood contribution of shared parameters
+            - unit log-likelihood: log-likelihood contribution of unit parameters
+            - <shared_param>: columns for each shared parameter
+            - <unit_param>: columns for each unit parameter
+        """
+        res = self.results_history[index]
+        method = res.get("method", None)
+        if method == "mif":
+            return self._results_from_mif(res)
+        elif method == "pfilter":
+            return self._results_from_pfilter(res, ignore_nan=ignore_nan)
+        else:
+            raise ValueError(f"Unknown method '{method}' for results()")
+
+    def _extract_parameter_dict(self, values, names, skip_first=False):
+        """Helper to extract parameter dictionary from values and names."""
+        if skip_first and len(values) > 1:
+            values = values[1:]
+            names = names[1:] if len(names) > 1 else []
+
+        return {str(name): float(val.item()) for name, val in zip(names, values)}
+
+    def _build_result_row(
+        self, rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+    ):
+        """Helper to build a result row."""
+        return {
+            "replicate": rep,
+            "unit": unit,
+            "shared log-likelihood": shared_loglik,
+            "unit log-likelihood": unit_loglik,
+            **shared_dict,
+            **unit_dict,
+        }
+
+    def _results_from_mif(self, res) -> pd.DataFrame:
+        """
+        Helper to process results from the panel mif method.
+        """
+        shared_da = res["shared_traces"]
+        unit_da = res["unit_traces"]
+        full_logliks = res["logLiks"]
+
+        # Get parameter names, skipping loglikelihood entries
+        all_shared_vars = list(shared_da.coords["variable"].values)
+        shared_names = all_shared_vars[1:] if len(all_shared_vars) > 1 else []
+
+        all_unit_vars = list(unit_da.coords["variable"].values)
+        unit_names = list(unit_da.coords["unit"].values)
+        n_reps = shared_da.sizes["replicate"]
+
+        rows = []
+        for rep in range(n_reps):
+            for unit_idx, unit in enumerate(unit_names):
+                shared_loglik = float(full_logliks[rep, 0].item())
+                unit_loglik = float(full_logliks[rep, unit_idx + 1].item())
+
+                if shared_names:
+                    shared_final = shared_da.sel(
+                        replicate=rep, variable=shared_names
+                    ).values[-1, :]
+                    shared_dict = self._extract_parameter_dict(
+                        shared_final, shared_names
+                    )
+                else:
+                    shared_dict = {}
+
+                unit_final = unit_da.sel(replicate=rep, unit=unit).values[-1, :]
+                unit_dict = self._extract_parameter_dict(
+                    unit_final, all_unit_vars, skip_first=True
+                )
+
+                rows.append(
+                    self._build_result_row(
+                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+                    )
+                )
+
+        return pd.DataFrame(rows)
+
+    def _results_from_pfilter(self, res, ignore_nan) -> pd.DataFrame:
+        """
+        Helper to process results from the panel pfilter method.
+        """
+        logLiks = res["logLiks"]
+        shared_params = res.get("shared", [])
+        unit_specific_params = res.get("unit_specific", [])
+
+        # Get unit names from coords (no "shared" unit in pfilter results)
+        unit_names = list(logLiks.coords["unit"].values)
+        n_reps = logLiks.sizes["theta"]
+
+        rows = []
+
+        for rep in range(n_reps):
+            shared_loglik = np.sum(
+                [
+                    logmeanexp(logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan)
+                    for unit_idx in range(len(unit_names))
+                ]
+            )
+            for unit_idx, unit in enumerate(unit_names):
+                unit_loglik = logmeanexp(
+                    logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan
+                )
+
+                if shared_params and rep < len(shared_params):
+                    shared_df = shared_params[rep]
+                    shared_vals = (
+                        shared_df.iloc[:, 0].values
+                        if hasattr(shared_df, "values")
+                        else []
+                    )
+                    shared_names = (
+                        list(shared_df.columns) if hasattr(shared_df, "columns") else []
+                    )
+                    shared_dict = self._extract_parameter_dict(
+                        shared_vals, shared_names
+                    )
+                else:
+                    shared_dict = {}
+
+                if unit_specific_params and rep < len(unit_specific_params):
+                    unit_df = unit_specific_params[rep]
+                    if unit in unit_df.columns:
+                        unit_vals = unit_df[unit].values
+                        unit_param_names = (
+                            list(unit_df.index) if hasattr(unit_df, "index") else []
+                        )
+                        unit_dict = self._extract_parameter_dict(
+                            unit_vals, unit_param_names
+                        )
+                    else:
+                        unit_dict = {}
+                else:
+                    unit_dict = {}
+
+                rows.append(
+                    self._build_result_row(
+                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+                    )
+                )
+
+        return pd.DataFrame(rows)

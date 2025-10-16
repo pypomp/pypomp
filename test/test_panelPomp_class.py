@@ -106,3 +106,37 @@ def test_mif(measles_panel_setup2):
     assert set(result["logLiks"].coords["unit"].values) == set(
         ["shared"] + list(panel.unit_objects.keys())
     )
+
+
+def test_results(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    J = 2
+    M = 2
+    a = 0.5
+    sigmas = 0.02
+    sigmas_init = 0.1
+    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    panel.pfilter(J=J, key=key)
+    results0 = panel.results(0)
+    results1 = panel.results(1)
+    # Check expected columns for results0 (from mif, index=0)
+    expected_cols = {
+        "replicate",
+        "unit",
+        "shared log-likelihood",
+        "unit log-likelihood",
+    }
+    # Add dynamic parameter columns (shared/unit) if present.
+    results0_cols = set(results0.columns)
+    assert expected_cols.issubset(results0_cols)
+    # It should have one row for each replicate/unit combination
+    n_units = len(panel.unit_objects)
+    n_reps = results0["replicate"].nunique()
+    assert len(results0) == n_units * n_reps
+
+    # Check expected columns for results1 (from pfilter, index=1)
+    results1_cols = set(results1.columns)
+    assert expected_cols.issubset(results1_cols)
+    n_units1 = len(panel.unit_objects)
+    n_reps1 = results1["replicate"].nunique()
+    assert len(results1) == n_units1 * n_reps1

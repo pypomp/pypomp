@@ -3,6 +3,7 @@ import xarray as xr
 import jax
 import pypomp as pp
 import pytest
+import numpy as np
 
 
 @pytest.fixture(scope="function")
@@ -116,7 +117,7 @@ def test_results(measles_panel_setup2):
     sigmas = 0.02
     sigmas_init = 0.1
     panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
-    panel.pfilter(J=J, key=key)
+    panel.pfilter(J=J)
     results0 = panel.results(0)
     results1 = panel.results(1)
     # Check expected columns for results0 (from mif, index=0)
@@ -140,3 +141,16 @@ def test_results(measles_panel_setup2):
     n_units1 = len(panel.unit_objects)
     n_reps1 = results1["replicate"].nunique()
     assert len(results1) == n_units1 * n_reps1
+
+
+def test_fresh_key(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    J = 2
+    panel.pfilter(J=J, key=key)
+    assert not np.array_equal(
+        jax.random.key_data(panel.fresh_key), jax.random.key_data(key)
+    )
+    assert np.array_equal(
+        jax.random.key_data(panel.results_history[0]["key"]),
+        jax.random.key_data(key),
+    )

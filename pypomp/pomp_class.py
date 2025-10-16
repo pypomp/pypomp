@@ -397,11 +397,11 @@ class Pomp:
 
     def mif(
         self,
+        J: int,
+        M: int,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
-        M: int,
         a: float,
-        J: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         thresh: float = 0,
@@ -413,12 +413,12 @@ class Pomp:
         function.
 
         Args:
+            J (int): The number of particles.
+            M (int): Number of algorithm iterations.
             sigmas (float | jax.Array): Perturbation factor for parameters.
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            M (int): Number of algorithm iterations.
             a (float): A fraction specifying the amount to cool sigmas and sigmas_init
                 over 50 iterations.
-            J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, list[dict], optional): Initial parameters for the POMP model.

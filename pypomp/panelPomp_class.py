@@ -41,6 +41,7 @@ class PanelPomp:
         self.shared = shared
         self.unit_specific = unit_specific
         self.results_history = []
+        self.fresh_key = None
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
@@ -111,6 +112,25 @@ class PanelPomp:
         if shared is not None and unit_specific is not None:
             assert len(shared) == len(unit_specific)
         return shared, unit_specific, unit_objects
+
+    def _update_fresh_key(
+        self, key: jax.Array | None = None
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Updates the fresh_key attribute and returns a new key along with the old key.
+
+        Returns:
+            tuple[jax.Array, jax.Array]: A tuple containing the new key and the old key.
+                The old key is the key that was used to update the fresh_key attribute.
+                The new key is the key that should be used for the next method call.
+        """
+        old_key = self.fresh_key if key is None else key
+        if old_key is None:
+            raise ValueError(
+                "Both the key argument and the fresh_key attribute are None. At least one key must be given."
+            )
+        self.fresh_key, new_key = jax.random.split(old_key)
+        return new_key, old_key
 
     def get_unit_parameters(
         self,
@@ -217,7 +237,7 @@ class PanelPomp:
     def pfilter(
         self,
         J: int,
-        key: jax.Array,
+        key: jax.Array | None = None,
         shared: pd.DataFrame | list[pd.DataFrame] | None = None,
         unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
         thresh: float = 0,
@@ -228,7 +248,8 @@ class PanelPomp:
 
         Args:
             J (int): The number of particles to use in the filter.
-            key (jax.Array): The random key for reproducibility.
+            key (jax.Array, optional): The random key for reproducibility. Defaults to
+                self.fresh_key attribute.
             shared (pd.DataFrame | list[pd.DataFrame], optional): Parameters involved
                 in the POMP model. If provided, overrides the shared parameters.
             unit_specific (pd.DataFrame | list[pd.DataFrame], optional): Parameters
@@ -246,7 +267,7 @@ class PanelPomp:
         shared, unit_specific, _ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
-        old_key = key
+        key, old_key = self._update_fresh_key(key)
 
         tll = self._get_theta_list_len(shared, unit_specific)
         results = xr.DataArray(
@@ -256,7 +277,7 @@ class PanelPomp:
         )
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, shared, unit_specific)
-            key, subkey = jax.random.split(key)
+            key, subkey = jax.random.split(key)  # pyright: ignore[reportArgumentType]
             obj.pfilter(
                 J=J,
                 key=subkey,
@@ -283,11 +304,11 @@ class PanelPomp:
     def mif(
         self,
         J: int,
-        key: jax.Array,
+        M: int,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
-        M: int,
         a: float,
+        key: jax.Array | None = None,
         shared: pd.DataFrame | list[pd.DataFrame] | None = None,
         unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
         thresh: float = 0,
@@ -299,11 +320,11 @@ class PanelPomp:
 
         Args:
             J (int): The number of particles.
-            key (jax.Array): The random key for reproducibility.
+            M (int): Number of algorithm iterations.
             sigmas (float | jax.Array): Perturbation factor for parameters.
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            M (int): Number of algorithm iterations.
             a (float): Decay factor for sigmas.
+            key (jax.Array): The random key for reproducibility.
             shared (pd.DataFrame | list[pd.DataFrame], optional): Shared parameters
                 involved in the POMP model. If provided, overrides the shared
                 parameter attribute.
@@ -322,6 +343,7 @@ class PanelPomp:
         shared, unit_specific, _ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
+        key, old_key = self._update_fresh_key(key)
         if J < 1:
             raise ValueError("J should be greater than 0.")
         if M < 1:

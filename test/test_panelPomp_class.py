@@ -6,8 +6,8 @@ import pytest
 import numpy as np
 
 
-@pytest.fixture(scope="function")
-def measles_panel_setup():
+@pytest.fixture(scope="module")
+def measles_panel_setup_module():
     AK_mles = pp.UKMeasles.AK_mles()
     london_theta = AK_mles["London"].to_dict()
     hastings_theta = AK_mles["Hastings"].to_dict()
@@ -27,6 +27,19 @@ def measles_panel_setup():
         unit_specific=unit_specific,
     )
     key = jax.random.key(0)
+    shared = panel.shared
+    unit_specific = panel.unit_specific
+    fresh_key = panel.fresh_key
+    return panel, key, shared, unit_specific, fresh_key
+
+
+@pytest.fixture(scope="function")
+def measles_panel_setup(measles_panel_setup_module):
+    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
+    panel.results_history.clear()
+    panel.shared = shared
+    panel.unit_specific = unit_specific
+    panel.fresh_key = fresh_key
     return panel, key
 
 
@@ -37,9 +50,9 @@ def measles_panel_setup2(measles_panel_setup):
     return panel, key
 
 
-@pytest.fixture(scope="function")
-def measles_panel_mp(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+@pytest.fixture(scope="module")
+def measles_panel_mp_module(measles_panel_setup_module):
+    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
     J = 2
     M = 2
     a = 0.5
@@ -47,6 +60,42 @@ def measles_panel_mp(measles_panel_setup2):
     sigmas_init = 0.1
     panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
     panel.pfilter(J=J)
+    results_history = panel.results_history
+    fresh_key = panel.fresh_key
+    return (
+        panel,
+        key,
+        J,
+        M,
+        a,
+        sigmas,
+        sigmas_init,
+        shared,
+        unit_specific,
+        fresh_key,
+        results_history,
+    )
+
+
+@pytest.fixture(scope="function")
+def measles_panel_mp(measles_panel_mp_module):
+    (
+        panel,
+        key,
+        J,
+        M,
+        a,
+        sigmas,
+        sigmas_init,
+        shared,
+        unit_specific,
+        fresh_key,
+        results_history,
+    ) = measles_panel_mp_module
+    panel.results_history = results_history
+    panel.shared = shared
+    panel.unit_specific = unit_specific
+    panel.fresh_key = fresh_key
     return panel, key, J, M, a, sigmas, sigmas_init
 
 
@@ -171,3 +220,12 @@ def test_traces(measles_panel_mp):
     assert "iteration" in traces.columns
     assert "method" in traces.columns
     assert "logLik" in traces.columns
+
+
+def test_time(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+    time_df = panel.time()
+    assert isinstance(time_df, pd.DataFrame)
+    assert "method" in time_df.columns
+    assert "time" in time_df.columns
+    assert time_df.index.name == "history_index"

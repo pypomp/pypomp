@@ -12,6 +12,7 @@ import seaborn as sns
 from .mif import _jv_panel_mif_internal
 from .util import logmeanexp
 import numpy as np
+import time
 
 
 class PanelPomp:
@@ -283,6 +284,7 @@ class PanelPomp:
             None. Updates self.results_history with the results of the particle filter
             algorithm for each unit in the panel.
         """
+        start_time = time.time()
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
         shared, unit_specific, _ = self._validate_params_and_units(
@@ -308,6 +310,9 @@ class PanelPomp:
             )
             results.loc[:, unit, :] = obj.results_history[-1]["logLiks"]
             obj.results_history = []
+
+        execution_time = time.time() - start_time
+
         self.results_history.append(
             {
                 "method": "pfilter",
@@ -318,6 +323,7 @@ class PanelPomp:
                 "reps": reps,
                 "thresh": thresh,
                 "key": old_key,
+                "execution_time": execution_time,
             }
         )
 
@@ -359,6 +365,7 @@ class PanelPomp:
         Returns:
             None. Updates self.results_history with the results of the MIF algorithm.
         """
+        start_time = time.time()
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
         shared, unit_specific, _ = self._validate_params_and_units(
@@ -554,6 +561,7 @@ class PanelPomp:
         else:
             self.unit_specific = None
 
+        execution_time = time.time() - start_time
         self.results_history.append(
             {
                 "method": "mif",
@@ -570,6 +578,7 @@ class PanelPomp:
                 "a": a,
                 "block": block,
                 "key": old_key,
+                "execution_time": execution_time,
             }
         )
 
@@ -725,6 +734,24 @@ class PanelPomp:
                 )
 
         return pd.DataFrame(rows)
+
+    def time(self):
+        """
+        Return a DataFrame summarizing the execution times of methods run.
+
+        Returns:
+            pd.DataFrame: A DataFrame where each row contains:
+                - 'method': The name of the method run.
+                - 'time': The execution time in seconds.
+        """
+        rows = []
+        for idx, res in enumerate(self.results_history):
+            method = res.get("method", None)
+            exec_time = res.get("execution_time", None)
+            rows.append({"method": method, "time": exec_time})
+        df = pd.DataFrame(rows)
+        df.index.name = "history_index"
+        return df
 
     # TODO: clean up traces function
     def traces(self) -> pd.DataFrame:

@@ -907,7 +907,6 @@ class Pomp:
 
         Returns:
             pd.DataFrame: A DataFrame where each row contains:
-                - 'index': The index of the result in results_history.
                 - 'method': The name of the method run.
                 - 'time': The execution time in seconds.
         """
@@ -915,8 +914,10 @@ class Pomp:
         for idx, res in enumerate(self.results_history):
             method = res.get("method", None)
             exec_time = res.get("execution_time", None)
-            rows.append({"index": idx, "method": method, "time": exec_time})
-        return pd.DataFrame(rows)
+            rows.append({"method": method, "time": exec_time})
+        df = pd.DataFrame(rows)
+        df.index.name = "history_index"
+        return df
 
     def prune(self, n: int = 1, index: int = -1, refill: bool = True):
         """

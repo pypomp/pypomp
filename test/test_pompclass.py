@@ -13,7 +13,8 @@ def simple_setup():
     M = 2
     key = jax.random.key(111)
     theta = LG.theta
-    return LG, J, sigmas, a, M, key, theta
+    fresh_key = LG.fresh_key
+    return LG, J, sigmas, a, M, key, theta, fresh_key
 
 
 @pytest.fixture(scope="module")
@@ -37,24 +38,27 @@ def neapolitan_setup():
     LG.train(J=J, M=1, key=key)
     results_history = LG.results_history
     theta = LG.theta
-    return LG, J, sigmas, a, M, key, theta, results_history
+    fresh_key = LG.fresh_key
+    return LG, J, sigmas, a, M, key, theta, results_history, fresh_key
 
 
 @pytest.fixture(scope="function")
 def simple(simple_setup):
     # Reset results history and theta to prevent carryover from other tests.
-    LG, J, sigmas, a, M, key, theta = simple_setup
+    LG, J, sigmas, a, M, key, theta, fresh_key = simple_setup
     LG.results_history.clear()
     LG.theta = theta
+    LG.fresh_key = fresh_key
     return LG, J, sigmas, a, M, key
 
 
 @pytest.fixture(scope="function")
 def neapolitan(neapolitan_setup):
     # Reset results history and theta to prevent carryover from other tests.
-    LG, J, sigmas, a, M, key, theta, results_history = neapolitan_setup
+    LG, J, sigmas, a, M, key, theta, results_history, fresh_key = neapolitan_setup
     LG.results_history = results_history
     LG.theta = theta
+    LG.fresh_key = fresh_key
     return LG, J, sigmas, a, M, key
 
 
@@ -236,7 +240,6 @@ def test_time(neapolitan):
     assert len(time_df) == 3
     assert time_df["method"].tolist() == ["pfilter", "mif", "train"]
     assert isinstance(time_df["time"].tolist(), list)
-    assert isinstance(time_df["index"].tolist(), list)
 
 
 def test_print_summary(neapolitan):

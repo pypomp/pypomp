@@ -4,6 +4,7 @@ import jax
 import pypomp as pp
 import pytest
 import numpy as np
+import pickle
 
 
 @pytest.fixture(scope="module")
@@ -229,3 +230,61 @@ def test_time(measles_panel_mp):
     assert "method" in time_df.columns
     assert "time" in time_df.columns
     assert time_df.index.name == "history_index"
+
+
+def test_pickle_panelpomp(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+
+    pickled = pickle.dumps(panel)
+    unpickled_panel = pickle.loads(pickled)
+
+    # Check that the basic attributes are preserved
+    assert isinstance(unpickled_panel, pp.PanelPomp)
+    assert list(unpickled_panel.unit_objects.keys()) == list(panel.unit_objects.keys())
+    assert unpickled_panel.shared is None  # This panel has no shared parameters
+    assert isinstance(unpickled_panel.unit_specific, list)
+    assert list(unpickled_panel.unit_specific[0].columns) == list(
+        panel.unit_specific[0].columns
+    )
+
+    assert len(unpickled_panel.results_history) == len(panel.results_history)
+    for orig, unpickled in zip(panel.results_history, unpickled_panel.results_history):
+        assert orig.keys() == unpickled.keys()
+        # Compare values for common keys; skip non-comparable objects
+        for k in orig.keys():
+            v1 = orig[k]
+            v2 = unpickled[k]
+            if isinstance(v1, np.ndarray):
+                assert np.allclose(v1, v2)
+            elif isinstance(v1, pd.DataFrame):
+                pd.testing.assert_frame_equal(v1, v2)
+            elif isinstance(v1, xr.DataArray):
+                xr.testing.assert_equal(v1, v2)
+            elif isinstance(v1, (float, int, str, type(None))):
+                assert v1 == v2
+            elif k == "key":
+                assert np.array_equal(jax.random.key_data(v1), jax.random.key_data(v2))
+            else:
+                pass
+
+    # Check that the unit objects are properly reconstructed
+    for unit_name in panel.unit_objects.keys():
+        original_unit = panel.unit_objects[unit_name]
+        unpickled_unit = unpickled_panel.unit_objects[unit_name]
+
+        assert isinstance(unpickled_unit, pp.Pomp)
+
+        assert original_unit.ys.shape == unpickled_unit.ys.shape
+        assert list(original_unit.ys.columns) == list(unpickled_unit.ys.columns)
+
+        assert hasattr(unpickled_unit, "rinit")
+        assert hasattr(unpickled_unit, "rproc")
+        assert hasattr(unpickled_unit, "dmeas")
+
+        assert callable(unpickled_unit.rinit.struct_per)
+        assert callable(unpickled_unit.rproc.struct_per_interp)
+        if unpickled_unit.dmeas is not None:
+            assert callable(unpickled_unit.dmeas.struct_per)
+
+    # check that the unpickled panel can be used for filtering
+    unpickled_panel.pfilter(J=2)

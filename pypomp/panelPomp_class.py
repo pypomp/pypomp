@@ -1175,3 +1175,44 @@ class PanelPomp:
         if show:
             plt.show()
         return g
+
+    def __getstate__(self):
+        """
+        Custom pickling method to handle wrapped function objects. This is
+        necessary because the JAX-wrapped functions in the Pomp objects are not picklable.
+        """
+        state = self.__dict__.copy()
+
+        # Handle unit_objects by storing their state information
+        if hasattr(self, "unit_objects") and self.unit_objects is not None:
+            unit_objects_state = {}
+            for unit_name, pomp_obj in self.unit_objects.items():
+                # Get the state of each Pomp object
+                unit_objects_state[unit_name] = pomp_obj.__getstate__()
+            state["_unit_objects_state"] = unit_objects_state
+            # Remove the original unit_objects from state
+            state.pop("unit_objects", None)
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling method to reconstruct wrapped function objects. This is
+        necessary because the JAX-wrapped functions in the Pomp objects are not picklable.
+        """
+        # Restore basic attributes
+        self.__dict__.update(state)
+
+        # Reconstruct unit_objects
+        if "_unit_objects_state" in state:
+            unit_objects = {}
+            for unit_name, pomp_state in state["_unit_objects_state"].items():
+                # Create a new Pomp object and restore its state
+                pomp_obj = Pomp.__new__(Pomp)
+                pomp_obj.__setstate__(pomp_state)
+                unit_objects[unit_name] = pomp_obj
+            self.unit_objects = unit_objects
+            # Clean up temporary state
+            del self.__dict__["_unit_objects_state"]
+        else:
+            self.unit_objects = {}

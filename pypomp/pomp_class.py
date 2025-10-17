@@ -762,7 +762,7 @@ class Pomp:
             - replicate: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'
-            - loglik: The log-likelihood estimate (averaged over reps for pfilter)
+            - logLik: The log-likelihood estimate (averaged over reps for pfilter)
             - <param>: One column for each parameter
         """
         if not self.results_history:

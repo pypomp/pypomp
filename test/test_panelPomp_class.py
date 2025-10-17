@@ -37,6 +37,19 @@ def measles_panel_setup2(measles_panel_setup):
     return panel, key
 
 
+@pytest.fixture(scope="function")
+def measles_panel_mp(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    J = 2
+    M = 2
+    a = 0.5
+    sigmas = 0.02
+    sigmas_init = 0.1
+    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    panel.pfilter(J=J)
+    return panel, key, J, M, a, sigmas, sigmas_init
+
+
 def test_get_unit_parameters(measles_panel_setup2):
     panel, key = measles_panel_setup2
     params = panel.get_unit_parameters(unit="London")
@@ -109,15 +122,8 @@ def test_mif(measles_panel_setup2):
     )
 
 
-def test_results(measles_panel_setup2):
-    panel, key = measles_panel_setup2
-    J = 2
-    M = 2
-    a = 0.5
-    sigmas = 0.02
-    sigmas_init = 0.1
-    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
-    panel.pfilter(J=J)
+def test_results(measles_panel_mp):
+    panel, *_ = measles_panel_mp
     results0 = panel.results(0)
     results1 = panel.results(1)
     # Check expected columns for results0 (from mif, index=0)
@@ -154,3 +160,14 @@ def test_fresh_key(measles_panel_setup2):
         jax.random.key_data(panel.results_history[0]["key"]),
         jax.random.key_data(key),
     )
+
+
+def test_traces(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+    traces = panel.traces()
+    assert isinstance(traces, pd.DataFrame)
+    assert "replicate" in traces.columns
+    assert "unit" in traces.columns
+    assert "iteration" in traces.columns
+    assert "method" in traces.columns
+    assert "logLik" in traces.columns

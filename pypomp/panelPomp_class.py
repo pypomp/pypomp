@@ -610,8 +610,8 @@ class PanelPomp:
         return {
             "replicate": rep,
             "unit": unit,
-            "shared log-likelihood": shared_loglik,
-            "unit log-likelihood": unit_loglik,
+            "shared logLik": shared_loglik,
+            "unit logLik": unit_loglik,
             **shared_dict,
             **unit_dict,
         }

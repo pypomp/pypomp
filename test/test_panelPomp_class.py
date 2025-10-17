@@ -130,8 +130,8 @@ def test_results(measles_panel_mp):
     expected_cols = {
         "replicate",
         "unit",
-        "shared log-likelihood",
-        "unit log-likelihood",
+        "shared logLik",
+        "unit logLik",
     }
     # Add dynamic parameter columns (shared/unit) if present.
     results0_cols = set(results0.columns)

@@ -276,7 +276,9 @@ def _panel_mif_internal(
         n_spec > 0, jnp.mean(unit_array, axis=1), jnp.zeros((n_spec, U))
     )
     shared_traces = shared_traces.at[0, 1:].set(shared_means0)
+    shared_traces = shared_traces.at[0, 0].set(jnp.nan)
     unit_traces = unit_traces.at[0, 1:, :].set(unit_means0)
+    unit_traces = unit_traces.at[0, 0, :].set(jnp.nan)
 
     unit_logliks = jnp.zeros((U,))
 
@@ -375,7 +377,7 @@ def _panel_mif_internal(
             loglik_u = -nLL_u
             sum_loglik_u = sum_loglik_u + loglik_u
             unit_logliks_u = unit_logliks_u.at[u].add(loglik_u)
-            unit_traces_u = unit_traces_u.at[m, 0, u].set(loglik_u)
+            unit_traces_u = unit_traces_u.at[m + 1, 0, u].set(loglik_u)
 
             return (
                 shared_array_u,
@@ -414,7 +416,7 @@ def _panel_mif_internal(
             n_spec > 0, jnp.mean(unit_array_m, axis=1), jnp.zeros((n_spec, U))
         )
         shared_traces_m = shared_traces_m.at[m + 1, 1:].set(shared_means)
-        shared_traces_m = shared_traces_m.at[m, 0].set(sum_loglik_iter)
+        shared_traces_m = shared_traces_m.at[m + 1, 0].set(sum_loglik_iter)
         unit_traces_m = unit_traces_m.at[m + 1, 1:, :].set(unit_means)
 
         return (

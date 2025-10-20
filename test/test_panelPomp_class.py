@@ -1,352 +1,353 @@
-import jax
-import unittest
 import pandas as pd
-import pypomp as pp
-import jax.numpy as jnp
-import numpy.testing as npt
 import xarray as xr
+import jax
+import pypomp as pp
+import pytest
+import numpy as np
+import pickle
 
 
-class TestPompClass_LG(unittest.TestCase):
-    def setUp(self):
-        self.LG1 = pp.LG()
-        self.LG2 = pp.LG()
-
-        # LG model expects 16 parameters: A(4), C(4), Q(4), R(4)
-        shared_params = pd.DataFrame(
-            {
-                "shared": [
-                    float(jnp.cos(0.2)),
-                    float(-jnp.sin(0.2)),
-                    float(jnp.sin(0.2)),
-                    float(jnp.cos(0.2)),
-                    1.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                ]
-            },
-            index=pd.Index(["A1", "A2", "A3", "A4", "C1", "C2", "C3", "C4"]),
-        )
-        unit_specific_params = pd.DataFrame(
-            {
-                "LG1": [
-                    1 / 100,
-                    1e-4 / 100,
-                    1e-4 / 100,
-                    1 / 100,
-                    1 / 10,
-                    0.1 / 10,
-                    0.1 / 10,
-                    1 / 10,
-                ],
-                "LG2": [
-                    1 / 100,
-                    1e-4 / 100,
-                    1e-4 / 100,
-                    1 / 100,
-                    1 / 10,
-                    0.1 / 10,
-                    0.1 / 10,
-                    1 / 10,
-                ],
-            },
-            index=pd.Index(["Q1", "Q2", "Q3", "Q4", "R1", "R2", "R3", "R4"]),
-        )
-
-        self.panel = pp.PanelPomp(
-            {"LG1": self.LG1, "LG2": self.LG2},
-            shared=shared_params,
-            unit_specific=unit_specific_params,
-        )
-        self.J = 5
-        self.sigmas = 0.02
-        self.sigmas_init = 0.1
-        self.M = 2
-        self.a = 0.9
-        self.key = jax.random.key(111)
-
-    def test_basic_initialization(self):
-        self.assertIsInstance(self.panel, pp.PanelPomp)
-
-        # Test invalid initialization with single Pomp object
-        with self.assertRaises(TypeError):
-            pp.PanelPomp(
-                self.LG1,  # type: ignore
-                shared=pd.DataFrame({"shared": [0.1]}, index=pd.Index(["param1"])),
-                unit_specific=pd.DataFrame({"LG1": [0.2]}, index=pd.Index(["param2"])),
-            )
-
-        # Test invalid initialization with non-Pomp object
-        with self.assertRaises(TypeError):
-            pp.PanelPomp(
-                {"LG1": self.LG1, "LG2": 2},
-                shared=pd.DataFrame({"shared": [0.1]}, index=pd.Index(["param1"])),
-                unit_specific=pd.DataFrame(
-                    {"LG1": [0.2], "LG2": [0.3]}, index=pd.Index(["param2"])
-                ),
-            )
-
-        # Test invalid shared parameters format
-        with self.assertRaises(ValueError):
-            pp.PanelPomp(
-                {"LG1": self.LG1, "LG2": self.LG2},
-                shared=pd.DataFrame({"wrong_col": [0.1]}, index=pd.Index(["param1"])),
-                unit_specific=pd.DataFrame(
-                    {"LG1": [0.2], "LG2": [0.3]}, index=pd.Index(["param2"])
-                ),
-            )
-
-        # Test invalid unit-specific parameters format
-        with self.assertRaises(ValueError):
-            pp.PanelPomp(
-                {"LG1": self.LG1, "LG2": self.LG2},
-                shared=pd.DataFrame({"shared": [0.1]}, index=pd.Index(["param1"])),
-                unit_specific=pd.DataFrame(
-                    {"wrong_unit": [0.2]}, index=pd.Index(["param2"])
-                ),
-            )
-
-    def test_simulate(self):
-        # Test that simulate runs to completion
-        sim = self.panel.simulate(key=self.key)
-        self.assertIsInstance(sim, dict)
-        self.assertEqual(set(sim.keys()), {"LG1", "LG2"})
-        for unit in sim:
-            self.assertIn("X_sims", sim[unit])
-            self.assertIn("Y_sims", sim[unit])
-
-    def test_pfilter(self):
-        # Test that pfilter runs to completion
-        self.panel.pfilter(J=self.J, key=self.key)
-        pfilter_out = self.panel.results_history[-1]
-        self.assertIsInstance(pfilter_out, dict)
-        self.assertEqual(
-            set(pfilter_out.keys()),
-            {"logLik", "shared", "unit_specific", "J", "thresh"},
-        )
-        self.assertIsInstance(pfilter_out["logLik"], xr.DataArray)
-        self.assertEqual(
-            set(pfilter_out["logLik"].coords["unit"].values), {"LG1", "LG2"}
-        )
-        self.assertEqual(set(pfilter_out["logLik"].coords["replicate"].values), {0})
-
-    def test_mif(self):
-        # Test that mif runs to completion
-        self.panel.mif(
-            J=self.J,
-            sigmas=self.sigmas,
-            sigmas_init=self.sigmas_init,
-            M=self.M,
-            a=self.a,
-            key=self.key,
-        )
-        mif_out = self.panel.results_history[-1]
-        self.assertIsInstance(mif_out, dict)
-        self.assertIn("logLiks", mif_out)
-        self.assertIn("shared_thetas", mif_out)
-        self.assertIn("unit_specific_thetas", mif_out)
-        self.assertIn("unit_logLiks", mif_out)
-
-        # Check dimensions of output arrays
-        if mif_out["shared_thetas"] is not None:
-            self.assertEqual(
-                mif_out["shared_thetas"].shape[0], self.M + 1
-            )  # iterations
-            self.assertEqual(mif_out["shared_thetas"].shape[1], len(self.panel.shared))
-            self.assertEqual(mif_out["shared_thetas"].shape[2], self.J)  # particles
-
-        if mif_out["unit_specific_thetas"] is not None:
-            self.assertEqual(
-                mif_out["unit_specific_thetas"].shape[0], self.M + 1
-            )  # iterations
-            self.assertEqual(
-                mif_out["unit_specific_thetas"].shape[1], len(self.panel.unit_specific)
-            )
-            self.assertEqual(
-                mif_out["unit_specific_thetas"].shape[2], self.J
-            )  # particles
-            self.assertEqual(mif_out["unit_specific_thetas"].shape[3], 2)  # units
-
-    def test_mif_zero_sigmas(self):
-        """Test that parameters remain unchanged when sigmas and sigmas_init are 0."""
-        # Run mif with zero sigmas
-        self.panel.mif(
-            J=self.J,
-            sigmas=0.0,
-            sigmas_init=0.0,
-            M=self.M,
-            a=self.a,
-            key=self.key,
-        )
-        mif_out = self.panel.results_history[-1]
-
-        # Check shared parameters
-        shared_initial = jnp.array(self.panel.shared["shared"].values)
-        shared_final = mif_out["shared_thetas"][-1].mean(
-            axis=1
-        )  # Average over particles
-        npt.assert_allclose(shared_initial, shared_final, rtol=1e-5)
-
-        # Check unit-specific parameters
-        for i, unit in enumerate(self.panel.unit_objects.keys()):
-            unit_initial = jnp.array(self.panel.unit_specific[unit].values)
-            unit_final = mif_out["unit_specific_thetas"][-1, :, :, i].mean(
-                axis=1
-            )  # Average over particles
-            npt.assert_allclose(unit_initial, unit_final, rtol=1e-5)
-
-        # Verify that parameters are identical across iterations
-        for i in range(1, self.M + 1):
-            npt.assert_allclose(
-                mif_out["shared_thetas"][i].mean(axis=1),
-                mif_out["shared_thetas"][0].mean(axis=1),
-                rtol=1e-5,
-            )
-
-        for i in range(1, self.M + 1):
-            for j in range(len(self.panel.unit_objects)):
-                npt.assert_allclose(
-                    mif_out["unit_specific_thetas"][i, :, :, j].mean(axis=1),
-                    mif_out["unit_specific_thetas"][0, :, :, j].mean(axis=1),
-                    rtol=1e-5,
-                )
+@pytest.fixture(scope="module")
+def measles_panel_setup_module():
+    AK_mles = pp.UKMeasles.AK_mles()
+    london_theta = AK_mles["London"].to_dict()
+    hastings_theta = AK_mles["Hastings"].to_dict()
+    london = pp.UKMeasles.Pomp(
+        unit=["London"],
+        theta=london_theta,
+    )
+    hastings = pp.UKMeasles.Pomp(
+        unit=["Hastings"],
+        theta=hastings_theta,
+    )
+    unit_specific = AK_mles[["London", "Hastings"]]
+    assert isinstance(unit_specific, pd.DataFrame)
+    panel = pp.PanelPomp(
+        Pomp_dict={"London": london, "Hastings": hastings},
+        shared=None,
+        unit_specific=unit_specific,
+    )
+    key = jax.random.key(0)
+    shared = panel.shared
+    unit_specific = panel.unit_specific
+    fresh_key = panel.fresh_key
+    return panel, key, shared, unit_specific, fresh_key
 
 
-class TestPompClass_LG_AllUnitSpecific(unittest.TestCase):
-    def setUp(self):
-        self.LG1 = pp.LG()
-        self.LG2 = pp.LG()
+@pytest.fixture(scope="function")
+def measles_panel_setup(measles_panel_setup_module):
+    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
+    panel.results_history.clear()
+    panel.shared = shared
+    panel.unit_specific = unit_specific
+    panel.fresh_key = fresh_key
+    return panel, key
 
-        # LG model expects 16 parameters: A(4), C(4), Q(4), R(4)
-        # All parameters are unit-specific in this test
-        shared_params = pd.DataFrame(
-            {"shared": []},
-            index=pd.Index([]),
-        )
-        unit_specific_params = pd.DataFrame(
-            {
-                "LG1": [
-                    float(jnp.cos(0.2)),
-                    float(-jnp.sin(0.2)),
-                    float(jnp.sin(0.2)),
-                    float(jnp.cos(0.2)),
-                    1.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1 / 100,
-                    1e-4 / 100,
-                    1e-4 / 100,
-                    1 / 100,
-                    1 / 10,
-                    0.1 / 10,
-                    0.1 / 10,
-                    1 / 10,
-                ],
-                "LG2": [
-                    float(jnp.cos(0.3)),  # Different A matrix
-                    float(-jnp.sin(0.3)),
-                    float(jnp.sin(0.3)),
-                    float(jnp.cos(0.3)),
-                    1.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1 / 100,
-                    1e-4 / 100,
-                    1e-4 / 100,
-                    1 / 100,
-                    1 / 10,
-                    0.1 / 10,
-                    0.1 / 10,
-                    1 / 10,
-                ],
-            },
-            index=pd.Index(
-                [
-                    "A1",
-                    "A2",
-                    "A3",
-                    "A4",
-                    "C1",
-                    "C2",
-                    "C3",
-                    "C4",
-                    "Q1",
-                    "Q2",
-                    "Q3",
-                    "Q4",
-                    "R1",
-                    "R2",
-                    "R3",
-                    "R4",
-                ]
-            ),
-        )
 
-        self.panel = pp.PanelPomp(
-            {"LG1": self.LG1, "LG2": self.LG2},
-            shared=shared_params,
-            unit_specific=unit_specific_params,
-        )
-        self.J = 5
-        self.sigmas = 0.02
-        self.sigmas_init = 0.1
-        self.M = 2
-        self.a = 0.9
-        self.key = jax.random.key(111)
+@pytest.fixture(scope="function")
+def measles_panel_setup2(measles_panel_setup):
+    panel, key = measles_panel_setup
+    panel.unit_specific = panel.unit_specific * 2
+    return panel, key
 
-    def test_basic_initialization(self):
-        self.assertIsInstance(self.panel, pp.PanelPomp)
 
-    def test_simulate(self):
-        # Test that simulate runs to completion
-        sim = self.panel.simulate(key=self.key)
-        self.assertIsInstance(sim, dict)
-        self.assertEqual(set(sim.keys()), {"LG1", "LG2"})
-        for unit in sim:
-            self.assertIn("X_sims", sim[unit])
-            self.assertIn("Y_sims", sim[unit])
+@pytest.fixture(scope="module")
+def measles_panel_mp_module(measles_panel_setup_module):
+    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
+    J = 2
+    M = 2
+    a = 0.5
+    sigmas = 0.02
+    sigmas_init = 0.1
+    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    panel.pfilter(J=J)
+    results_history = panel.results_history
+    fresh_key = panel.fresh_key
+    return (
+        panel,
+        key,
+        J,
+        M,
+        a,
+        sigmas,
+        sigmas_init,
+        shared,
+        unit_specific,
+        fresh_key,
+        results_history,
+    )
 
-    def test_pfilter(self):
-        # Test that pfilter runs to completion
-        self.panel.pfilter(J=self.J, key=self.key)
-        pfilter_out = self.panel.results_history[-1]
-        self.assertIsInstance(pfilter_out, dict)
-        self.assertEqual(
-            set(pfilter_out.keys()),
-            {"logLik", "shared", "unit_specific", "J", "thresh"},
-        )
-        self.assertIsInstance(pfilter_out["logLik"], xr.DataArray)
-        self.assertEqual(
-            set(pfilter_out["logLik"].coords["unit"].values), {"LG1", "LG2"}
-        )
-        self.assertEqual(set(pfilter_out["logLik"].coords["replicate"].values), {0})
 
-    def test_mif(self):
-        # Test that mif runs to completion
-        self.panel.mif(
-            J=self.J,
-            sigmas=self.sigmas,
-            sigmas_init=self.sigmas_init,
-            M=self.M,
-            a=self.a,
-            key=self.key,
-        )
-        mif_out = self.panel.results_history[-1]
-        self.assertIsInstance(mif_out, dict)
-        self.assertIn("logLiks", mif_out)
-        self.assertNotIn("shared_thetas", mif_out)
-        self.assertIn("unit_specific_thetas", mif_out)
-        self.assertIn("unit_logLiks", mif_out)
+@pytest.fixture(scope="function")
+def measles_panel_mp(measles_panel_mp_module):
+    (
+        panel,
+        key,
+        J,
+        M,
+        a,
+        sigmas,
+        sigmas_init,
+        shared,
+        unit_specific,
+        fresh_key,
+        results_history,
+    ) = measles_panel_mp_module
+    panel.results_history = results_history
+    panel.shared = shared
+    panel.unit_specific = unit_specific
+    panel.fresh_key = fresh_key
+    return panel, key, J, M, a, sigmas, sigmas_init
 
-        # Check dimensions of output arrays
-        self.assertEqual(
-            mif_out["unit_specific_thetas"].shape[0], self.M + 1
-        )  # iterations
-        self.assertEqual(
-            mif_out["unit_specific_thetas"].shape[1], len(self.panel.unit_specific)
-        )  # parameters
-        self.assertEqual(mif_out["unit_specific_thetas"].shape[2], self.J)  # particles
-        self.assertEqual(mif_out["unit_specific_thetas"].shape[3], 2)  # units
+
+def test_get_unit_parameters(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    params = panel.get_unit_parameters(unit="London")
+    assert isinstance(params, list)
+    assert isinstance(params[0], dict)
+    assert len(params) == panel._get_theta_list_len(panel.shared, panel.unit_specific)
+
+
+def test_simulate(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    X_sim_order = ["unit", "replicate", "sim", "time"] + [
+        f"state_{i}" for i in range(0, 6)
+    ]
+    Y_sim_order = ["unit", "replicate", "sim", "time", "obs_0"]
+
+    X_sims, Y_sims = panel.simulate(key=key)
+
+    assert isinstance(X_sims, pd.DataFrame)
+    assert isinstance(Y_sims, pd.DataFrame)
+    assert list(X_sims.columns) == X_sim_order
+    assert list(Y_sims.columns) == Y_sim_order
+
+
+def test_pfilter(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    panel.pfilter(J=2, key=key)
+    assert isinstance(panel.results_history[-1]["logLiks"], xr.DataArray)
+    assert panel.results_history[-1]["logLiks"].dims == ("theta", "unit", "replicate")
+    assert panel.results_history[-1]["logLiks"].shape == (2, 2, 1)
+    assert panel.results_history[-1]["shared"] is None
+    assert panel.results_history[-1]["unit_specific"] is panel.unit_specific
+    assert panel.results_history[-1]["J"] == 2
+    assert panel.results_history[-1]["reps"] == 1
+    assert panel.results_history[-1]["thresh"] == 0
+    assert panel.results_history[-1]["key"] == key
+
+
+def test_mif(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    J = 2
+    sigmas = 0.02
+    sigmas_init = 0.1
+    M = 2
+    a = 0.5
+    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    result = panel.results_history[-1]
+
+    assert result["method"] == "mif"
+    assert "shared_traces" in result
+    assert "unit_traces" in result
+    assert "logLiks" in result
+    assert result["shared"] is None
+    assert result["J"] == J
+    assert result["M"] == M
+    assert result["a"] == a
+    assert result["sigmas"] == sigmas
+    assert result["sigmas_init"] == sigmas_init
+    assert isinstance(result["shared_traces"], xr.DataArray)
+    assert isinstance(result["unit_traces"], xr.DataArray)
+    assert isinstance(result["logLiks"], xr.DataArray)
+    assert "iteration" in result["shared_traces"].dims
+    assert "variable" in result["shared_traces"].dims
+    assert "iteration" in result["unit_traces"].dims
+    assert "variable" in result["unit_traces"].dims
+    assert "unit" in result["unit_traces"].dims
+    assert result["shared_traces"].shape[1] == M + 1
+    assert result["unit_traces"].shape[1] == M + 1
+    assert set(result["logLiks"].coords["unit"].values) == set(
+        ["shared"] + list(panel.unit_objects.keys())
+    )
+
+
+def test_results(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+    results0 = panel.results(0)
+    results1 = panel.results(1)
+    # Check expected columns for results0 (from mif, index=0)
+    expected_cols = {
+        "replicate",
+        "unit",
+        "shared logLik",
+        "unit logLik",
+    }
+    # Add dynamic parameter columns (shared/unit) if present.
+    results0_cols = set(results0.columns)
+    assert expected_cols.issubset(results0_cols)
+    # It should have one row for each replicate/unit combination
+    n_units = len(panel.unit_objects)
+    n_reps = results0["replicate"].nunique()
+    assert len(results0) == n_units * n_reps
+
+    # Check expected columns for results1 (from pfilter, index=1)
+    results1_cols = set(results1.columns)
+    assert expected_cols.issubset(results1_cols)
+    n_units1 = len(panel.unit_objects)
+    n_reps1 = results1["replicate"].nunique()
+    assert len(results1) == n_units1 * n_reps1
+
+
+def test_fresh_key(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    J = 2
+    panel.pfilter(J=J, key=key)
+    assert not np.array_equal(
+        jax.random.key_data(panel.fresh_key), jax.random.key_data(key)
+    )
+    assert np.array_equal(
+        jax.random.key_data(panel.results_history[0]["key"]),
+        jax.random.key_data(key),
+    )
+
+
+def test_traces(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+    traces = panel.traces()
+    assert isinstance(traces, pd.DataFrame)
+    assert "replicate" in traces.columns
+    assert "unit" in traces.columns
+    assert "iteration" in traces.columns
+    assert "method" in traces.columns
+    assert "logLik" in traces.columns
+
+
+def test_time(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+    time_df = panel.time()
+    assert isinstance(time_df, pd.DataFrame)
+    assert "method" in time_df.columns
+    assert "time" in time_df.columns
+    assert time_df.index.name == "history_index"
+
+
+def test_pickle_panelpomp(measles_panel_mp):
+    panel, *_ = measles_panel_mp
+
+    pickled = pickle.dumps(panel)
+    unpickled_panel = pickle.loads(pickled)
+
+    # Check that the basic attributes are preserved
+    assert isinstance(unpickled_panel, pp.PanelPomp)
+    assert list(unpickled_panel.unit_objects.keys()) == list(panel.unit_objects.keys())
+    assert unpickled_panel.shared is None  # This panel has no shared parameters
+    assert isinstance(unpickled_panel.unit_specific, list)
+    assert list(unpickled_panel.unit_specific[0].columns) == list(
+        panel.unit_specific[0].columns
+    )
+
+    assert len(unpickled_panel.results_history) == len(panel.results_history)
+    for orig, unpickled in zip(panel.results_history, unpickled_panel.results_history):
+        assert orig.keys() == unpickled.keys()
+        # Compare values for common keys; skip non-comparable objects
+        for k in orig.keys():
+            v1 = orig[k]
+            v2 = unpickled[k]
+            if isinstance(v1, np.ndarray):
+                assert np.allclose(v1, v2)
+            elif isinstance(v1, pd.DataFrame):
+                pd.testing.assert_frame_equal(v1, v2)
+            elif isinstance(v1, xr.DataArray):
+                xr.testing.assert_equal(v1, v2)
+            elif isinstance(v1, (float, int, str, type(None))):
+                assert v1 == v2
+            elif k == "key":
+                assert np.array_equal(jax.random.key_data(v1), jax.random.key_data(v2))
+            else:
+                pass
+
+    # Check that the unit objects are properly reconstructed
+    for unit_name in panel.unit_objects.keys():
+        original_unit = panel.unit_objects[unit_name]
+        unpickled_unit = unpickled_panel.unit_objects[unit_name]
+
+        assert isinstance(unpickled_unit, pp.Pomp)
+
+        assert original_unit.ys.shape == unpickled_unit.ys.shape
+        assert list(original_unit.ys.columns) == list(unpickled_unit.ys.columns)
+
+        assert hasattr(unpickled_unit, "rinit")
+        assert hasattr(unpickled_unit, "rproc")
+        assert hasattr(unpickled_unit, "dmeas")
+
+        assert callable(unpickled_unit.rinit.struct_per)
+        assert callable(unpickled_unit.rproc.struct_per_interp)
+        if unpickled_unit.dmeas is not None:
+            assert callable(unpickled_unit.dmeas.struct_per)
+
+    # check that the unpickled panel can be used for filtering
+    unpickled_panel.pfilter(J=2)
+
+
+def test_sample_params(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    param_bounds = {
+        "R0": [10.0, 60.0],
+        "sigma": [25.0, 100.0],
+        "gamma": [25.0, 320.0],
+        "iota": [0.004, 3.0],
+        "rho": [0.1, 0.9],
+        "sigmaSE": [0.04, 0.1],
+        "psi": [0.05, 3.0],
+        "cohort": [0.1, 0.7],
+        "amplitude": [0.1, 0.6],
+        "S_0": [0.01, 0.07],
+        "E_0": [0.000004, 0.0001],
+        "I_0": [0.000003, 0.001],
+        "R_0": [0.9, 0.99],
+    }
+    shared_names = ["gamma", "cohort"]
+    shared_param_sets, unit_specific_param_sets = panel.sample_params(
+        param_bounds=param_bounds,
+        units=list(panel.unit_objects.keys()),
+        n=2,
+        key=key,
+        shared_names=shared_names,
+    )
+    assert isinstance(shared_param_sets, list)
+    assert isinstance(unit_specific_param_sets, list)
+    assert len(shared_param_sets) == 2
+    assert len(unit_specific_param_sets) == 2
+
+    # Check that shared_param_sets DataFrames have correct index and column in correct order
+    for shared_df in shared_param_sets:
+        # Index should be shared_names, in order
+        assert list(shared_df.index) == shared_names
+        # Only one column which is exactly ["shared"]
+        assert list(shared_df.columns) == ["shared"]
+
+    # For unit_specific_param_sets, check columns and index are correct
+    units = list(panel.unit_objects.keys())
+    unit_specific_names = [
+        name for name in param_bounds if name not in set(shared_names)
+    ]
+    for unit_df in unit_specific_param_sets:
+        # Columns (units) are in the correct order
+        assert list(unit_df.columns) == units
+        # Index should be unit_specific_names, in order
+        assert list(unit_df.index) == unit_specific_names
+
+    # Also check that each value is within the specified bounds
+    for shared_df in shared_param_sets:
+        for name in shared_names:
+            val = shared_df.loc[name, "shared"]
+            lower, upper = param_bounds[name]
+            assert lower <= val <= upper
+
+    for unit_df in unit_specific_param_sets:
+        for param_name in unit_specific_names:
+            lower, upper = param_bounds[param_name]
+            for unit in units:
+                val = unit_df.loc[param_name, unit]
+                assert lower <= val <= upper

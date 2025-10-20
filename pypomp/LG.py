@@ -3,6 +3,7 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 
 from pypomp.pomp_class import Pomp
@@ -38,7 +39,7 @@ def rinit(theta_, key, covars=None, t0=None):
     return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
 
 
-@partial(RProc, step_type="fixedstep", nstep=1)
+@partial(RProc, nstep=1)
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
@@ -99,7 +100,9 @@ def LG(
     theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
     theta = dict(zip(theta_names, transform_thetas(A, C, Q, R).tolist()))
 
-    ys_temp = pd.DataFrame(0, index=range(1, T + 1), columns=pd.Index(["Y1", "Y2"]))
+    ys_temp = pd.DataFrame(
+        0, index=np.arange(1, T + 1, dtype=float), columns=pd.Index(["Y1", "Y2"])
+    )
 
     LG_obj_temp = Pomp(
         rinit=rinit,
@@ -110,18 +113,18 @@ def LG(
         theta=theta,
         covars=None,
     )
-    sims = LG_obj_temp.simulate(key=key)
+    _, Y_sims = LG_obj_temp.simulate(key=key)
+    Y_sims = Y_sims.rename(columns={"obs_0": "Y1", "obs_1": "Y2"})
+    Y_sims = Y_sims[["time", "Y1", "Y2"]]
+    Y_sims.set_index("time", inplace=True)
+    assert isinstance(Y_sims, pd.DataFrame)
 
     LG_obj = Pomp(
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,
         rmeas=rmeas,
-        ys=pd.DataFrame(
-            sims[0]["Y_sims"].squeeze(),
-            index=range(1, T + 1),
-            columns=pd.Index(["Y1", "Y2"]),
-        ),
+        ys=Y_sims,
         theta=theta,
         covars=None,
     )

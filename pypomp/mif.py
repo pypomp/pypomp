@@ -16,13 +16,13 @@ _IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
 def _mif_internal(
     theta: jax.Array,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    rinitializers: Callable,
-    rprocesses: Callable,
-    dmeasures: Callable,
+    ys: jax.Array,
+    rinitializers: Callable,  # static
+    rprocesses_interp: Callable,  # static
+    dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
@@ -44,15 +44,15 @@ def _mif_internal(
     _perfilter_internal_2 = partial(
         _perfilter_internal,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         t0=t0,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
+        ys=ys,
         J=J,
         sigmas=sigmas,
         sigmas_init=sigmas_init,
         rinitializers=rinitializers,
-        rprocesses=rprocesses,
+        rprocesses_interp=rprocesses_interp,
         dmeasures=dmeasures,
         accumvars=accumvars,
         covars_extended=covars_extended,
@@ -70,8 +70,6 @@ def _mif_internal(
     return logliks, params
 
 
-_jit_mif_internal = jit(_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16))
-
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
     in_axes=(1,) + (None,) * 17 + (0,),
@@ -84,15 +82,15 @@ def _perfilter_internal(
     m: int,
     inputs: tuple[jax.Array, jax.Array, jax.Array],
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
+    ys: jax.Array,
     J: int,
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     rinitializers: Callable,
-    rprocesses: Callable,
+    rprocesses_interp: Callable,
     dmeasures: Callable,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
@@ -122,10 +120,10 @@ def _perfilter_internal(
     perfilter_helper_2 = partial(
         _perfilter_helper,
         dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
         times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        rprocesses=rprocesses,
+        ys=ys,
+        rprocesses_interp=rprocesses_interp,
         dmeasures=dmeasures,
         sigmas=sigmas,
         accumvars=accumvars,
@@ -135,10 +133,10 @@ def _perfilter_internal(
         a=a,
         partrans=partrans,
     )
-    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = (
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = (
         jax.lax.fori_loop(
             lower=0,
-            upper=len(ys_extended),
+            upper=len(ys),
             body_fun=perfilter_helper_2,
             init_val=(t0, particlesF, thetas, loglik, norm_weights, counts, key, 0),
         )
@@ -163,10 +161,10 @@ def _perfilter_helper(
         int,
     ],
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
     times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    rprocesses: Callable,
+    ys: jax.Array,
+    rprocesses_interp: Callable,
     dmeasures: Callable,
     sigmas: float | jax.Array,
     accumvars: jax.Array | None,
@@ -185,77 +183,286 @@ def _perfilter_helper(
     jax.Array,
     int,
 ]:
-    (t, particlesF, thetas, loglik, norm_weights, counts, key, obs_idx) = inputs
+    """
+    Runs one iteration of the perturbed particle filtering algorithm.
+    """
+    (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = inputs
     J = len(particlesF)
 
-    def _perturb_thetas(thetas, key):
-        sigmas_cooled = (
-            _geometric_cooling(nt=obs_idx, m=m, ntimes=len(times), a=a) * sigmas
-        )
-        key, subkey = jax.random.split(key)
-        thetas = thetas + sigmas_cooled * jnp.array(
-            jax.random.normal(shape=thetas.shape, key=subkey)
-        )
-        return thetas, key
-
-    time_interval_begins = jnp.logical_or(i == 0, ys_observed[i - 1])
-    thetas, key = jax.lax.cond(
-        time_interval_begins,
-        _perturb_thetas,
-        lambda thetas, key: (thetas, key),
-        *(thetas, key),
+    sigmas_cooled = _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a) * sigmas
+    key, subkey = jax.random.split(key)
+    thetas = thetas + sigmas_cooled * jnp.array(
+        jax.random.normal(shape=thetas.shape, key=subkey)
     )
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
-    covars_t = None if covars_extended is None else covars_extended[i]
-    thetas_nat = _pt_inverse(thetas, partrans)
-    particlesP = rprocesses(
-        particlesF, thetas_nat, keys, covars_t, t, dt_array_extended[i]
+
+    nstep = nstep_array[i].astype(int)
+
+    particlesP, t_idx = rprocesses_interp(
+        particlesF,
+        thetas,
+        keys,
+        covars_extended,
+        dt_array_extended,
+        t,
+        t_idx,
+        nstep,
+        accumvars,
     )
-    t = t + dt_array_extended[i]
+    t = times[i]
 
-    def _with_observation(
-        loglik, norm_weights, counts, thetas, key, obs_idx, t, dmeasures
-    ):
-        t = times[obs_idx]
-        covars_t = None if covars_extended is None else covars_extended[i + 1]
-        thetas_nat = _pt_inverse(thetas, partrans)
-        measurements = jnp.nan_to_num(
-            dmeasures(ys_extended[i], particlesP, thetas_nat, covars_t, t).squeeze(),
-            nan=jnp.log(1e-18),
-        )
+    covars_t = None if covars_extended is None else covars_extended[t_idx]
 
-        if len(measurements.shape) > 1:
-            measurements = measurements.sum(axis=-1)
+    measurements = jnp.nan_to_num(
+        dmeasures(ys[i], particlesP, thetas, covars_t, t).squeeze(),
+        nan=jnp.log(1e-18),
+    )
+    if len(measurements.shape) > 1:
+        measurements = measurements.sum(axis=-1)
 
-        weights = norm_weights + measurements
-        norm_weights, loglik_t = _normalize_weights(weights)
+    weights = norm_weights + measurements
+    norm_weights, loglik_t = _normalize_weights(weights)
+    loglik = loglik + loglik_t
 
-        loglik = loglik + loglik_t
-        oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-        key, subkey = jax.random.split(key)
-        counts, particlesF, norm_weights, thetas = jax.lax.cond(
-            oddr > thresh,
-            _resampler_thetas,
-            _no_resampler_thetas,
-            *(counts, particlesP, norm_weights, thetas, subkey),
-        )
-        particlesF = jnp.where(
-            accumvars is not None, particlesF.at[:, accumvars].set(0.0), particlesF
-        )
-        obs_idx = obs_idx + 1
-        return (particlesF, loglik, norm_weights, counts, thetas, key, obs_idx, t)
-
-    def _without_observation(loglik, norm_weights, counts, thetas, key, obs_idx, t):
-        return (particlesP, loglik, norm_weights, counts, thetas, key, obs_idx, t)
-
-    _with_observation_partial = partial(_with_observation, dmeasures=dmeasures)
-
-    particles, loglik, norm_weights, counts, thetas, key, obs_idx, t = jax.lax.cond(
-        ys_observed[i],
-        _with_observation_partial,
-        _without_observation,
-        *(loglik, norm_weights, counts, thetas, key, obs_idx, t),
+    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    key, subkey = jax.random.split(key)
+    counts, particlesF, norm_weights, thetas = jax.lax.cond(
+        oddr > thresh,
+        _resampler_thetas,
+        _no_resampler_thetas,
+        *(counts, particlesP, norm_weights, thetas, subkey),
     )
 
-    return (t, particles, thetas, loglik, norm_weights, counts, key, obs_idx)
+    return (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx)
+
+
+def _panel_mif_internal(
+    shared_array: jax.Array,  # (n_shared, J)
+    unit_array: jax.Array,  # (n_spec, J, U)
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys_per_unit: jax.Array,  # (U, T, ...)
+    rinitializers: Callable,
+    rprocesses_interp: Callable,
+    dmeasures: Callable,
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
+    accumvars: jax.Array | None,
+    covars_per_unit: jax.Array | None,  # (U, ...) or None
+    M: int,
+    a: float,
+    J: int,
+    U: int,
+    thresh: float,
+    key: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    """
+    Fully JIT-compiled Panel IF2 across M iterations and U units.
+
+    Returns
+        shared_array_final: (n_shared, J)
+        unit_array_final: (n_spec, J, U)
+        shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
+        unit_traces: (M+1, n_spec+1, U) where [:,0,:] is per-unit logLik per iter, [:,1:,:] are means
+        unit_logliks: (U,) sum of logLik across M iterations
+    """
+    n_shared = shared_array.shape[0]
+    n_spec = unit_array.shape[0]
+
+    shared_traces = jnp.zeros((M + 1, n_shared + 1))
+    unit_traces = jnp.zeros((M + 1, n_spec + 1, U))
+
+    shared_means0 = jnp.where(
+        n_shared > 0, jnp.mean(shared_array, axis=1), jnp.zeros((n_shared,))
+    )
+    unit_means0 = jnp.where(
+        n_spec > 0, jnp.mean(unit_array, axis=1), jnp.zeros((n_spec, U))
+    )
+    shared_traces = shared_traces.at[0, 1:].set(shared_means0)
+    shared_traces = shared_traces.at[0, 0].set(jnp.nan)
+    unit_traces = unit_traces.at[0, 1:, :].set(unit_means0)
+    unit_traces = unit_traces.at[0, 0, :].set(jnp.nan)
+
+    unit_logliks = jnp.zeros((U,))
+
+    def iter_body(m: int, carry):
+        (
+            shared_array_m,
+            unit_array_m,
+            shared_traces_m,
+            unit_traces_m,
+            unit_logliks_m,
+            key_m,
+        ) = carry
+
+        sum_loglik_iter = 0.0
+
+        def unit_body(u: int, inner_carry):
+            (
+                shared_array_u,
+                unit_array_u,
+                sum_loglik_u,
+                unit_traces_u,
+                unit_logliks_u,
+                key_u,
+            ) = inner_carry
+
+            # Build per-unit thetas: (J, n_shared + n_spec)
+            thetas_u = (
+                jnp.concatenate([shared_array_u.T, unit_array_u[:, :, u].T], axis=1)
+                if (n_shared + n_spec) > 0
+                else jnp.zeros((J, 0))
+            )
+
+            key_u, subkey = jax.random.split(key_u)
+
+            covars_u = None if covars_per_unit is None else covars_per_unit[u]
+
+            sigmas_init_cooled = (
+                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
+            )
+            sigmas_cooled = (
+                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas
+            )
+
+            nLL_u, updated_thetas_u = _mif_internal(
+                thetas_u,
+                dt_array_extended,
+                nstep_array,
+                t0,
+                times,
+                ys_per_unit[u],
+                rinitializers,
+                rprocesses_interp,
+                dmeasures,
+                sigmas_cooled,
+                sigmas_init_cooled,
+                accumvars,
+                covars_u,
+                1,
+                a,
+                J,
+                thresh,
+                subkey,
+            )
+            nLL_u = nLL_u[0]
+            # skips initial parameters from output:
+            updated_thetas_u = updated_thetas_u[1]
+
+            # Split back into shared and specific
+            def update_shared(ppm, ut):
+                return ut[:, :n_shared].T
+
+            def keep_shared(ppm, ut):
+                return ppm
+
+            def update_spec(ppa, ut):
+                return ut[:, n_shared:].T
+
+            def keep_spec(ppa, ut):
+                return ppa[:, :, u]
+
+            new_shared_array = jax.lax.cond(
+                n_shared > 0,
+                update_shared,
+                keep_shared,
+                *(shared_array_u, updated_thetas_u),
+            )
+            updated_spec_u = jax.lax.cond(
+                n_spec > 0,
+                update_spec,
+                keep_spec,
+                *(unit_array_u, updated_thetas_u),
+            )
+            unit_array_u = unit_array_u.at[:, :, u].set(updated_spec_u)
+            shared_array_u = new_shared_array
+
+            loglik_u = -nLL_u
+            sum_loglik_u = sum_loglik_u + loglik_u
+            unit_logliks_u = unit_logliks_u.at[u].add(loglik_u)
+            unit_traces_u = unit_traces_u.at[m + 1, 0, u].set(loglik_u)
+
+            return (
+                shared_array_u,
+                unit_array_u,
+                sum_loglik_u,
+                unit_traces_u,
+                unit_logliks_u,
+                key_u,
+            )
+
+        (
+            shared_array_m,
+            unit_array_m,
+            sum_loglik_iter,
+            unit_traces_m,
+            unit_logliks_m,
+            key_m,
+        ) = jax.lax.fori_loop(
+            0,
+            U,
+            unit_body,
+            (
+                shared_array_m,
+                unit_array_m,
+                sum_loglik_iter,
+                unit_traces_m,
+                unit_logliks_m,
+                key_m,
+            ),
+        )
+
+        shared_means = jnp.where(
+            n_shared > 0, jnp.mean(shared_array_m, axis=1), jnp.zeros((n_shared,))
+        )
+        unit_means = jnp.where(
+            n_spec > 0, jnp.mean(unit_array_m, axis=1), jnp.zeros((n_spec, U))
+        )
+        shared_traces_m = shared_traces_m.at[m + 1, 1:].set(shared_means)
+        shared_traces_m = shared_traces_m.at[m + 1, 0].set(sum_loglik_iter)
+        unit_traces_m = unit_traces_m.at[m + 1, 1:, :].set(unit_means)
+
+        return (
+            shared_array_m,
+            unit_array_m,
+            shared_traces_m,
+            unit_traces_m,
+            unit_logliks_m,
+            key_m,
+        )
+
+    (
+        shared_array,
+        unit_array,
+        shared_traces,
+        unit_traces,
+        unit_logliks,
+        key,
+    ) = jax.lax.fori_loop(
+        0,
+        M,
+        iter_body,
+        (shared_array, unit_array, shared_traces, unit_traces, unit_logliks, key),
+    )
+
+    return shared_array, unit_array, shared_traces, unit_traces, unit_logliks
+
+
+_vmapped_panel_mif_internal = jax.vmap(
+    _panel_mif_internal, in_axes=((0, 0) + (None,) * 17 + (0,))
+)
+
+_jv_panel_mif_internal = jit(
+    _vmapped_panel_mif_internal,
+    static_argnums=(
+        7,  # rinitializers
+        8,  # rprocesses_interp
+        9,  # dmeasures
+        14,  # M
+        16,  # J
+        17,  # U
+    ),
+)

@@ -16,7 +16,7 @@ from .mif import _jv_mif_internal
 from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
-from .simulate import _simulate_internal
+from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
@@ -138,10 +138,10 @@ class Pomp:
         self.results_history = []
         self.fresh_key = None
         (
-            self._ys_extended,
-            self._ys_observed,
             self._covars_extended,
             self._dt_array_extended,
+            self._nstep_array,
+            self._max_steps_per_interval,
         ) = _calc_ys_covars(
             t0=self.rinit.t0,
             times=np.array(self.ys.index),
@@ -152,9 +152,7 @@ class Pomp:
             nstep=self.rproc.nstep,
             order="linear",
         )
-        names = paramnames or list(self.theta[0].keys())
-        partrans_spec = partrans or parameter_trans()
-        self.partrans = materialize_partrans(partrans_spec, names)
+        self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -242,14 +240,14 @@ class Pomp:
             results.append(
                 -_mop_internal(
                     theta=jnp.array(list(theta_i.values())),
+                    ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
+                    nstep_array=self._nstep_array,
                     t0=self.rinit.t0,
                     times=jnp.array(self.ys.index),
-                    ys_extended=self._ys_extended,
-                    ys_observed=self._ys_observed,
                     J=J,
                     rinitializer=self.rinit.struct_pf,
-                    rprocess=self.rproc.struct_pf,
+                    rprocess_interp=self.rproc.struct_pf_interp,
                     dmeasure=self.dmeas.struct_pf,
                     covars_extended=self._covars_extended,
                     accumvars=self.rproc.accumvars,
@@ -270,6 +268,7 @@ class Pomp:
         ESS: bool = False,
         filter_mean: bool = False,
         prediction_mean: bool = False,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for the particle filtering algorithm.
@@ -284,19 +283,20 @@ class Pomp:
                 resample particles. Defaults to 0.
             reps (int, optional): Number of replicates to run. Defaults to 1.
             CLL (bool, optional): Boolean flag controlling whether to compute and store
-                the conditional log-likelihoods at each time point. Defaults to False.
+                the conditional log-likelihoods at each time point.
             ESS (bool, optional): Boolean flag controlling whether to compute and store
-                the effective sample size at each time point. Defaults to False.
-            filter_mean (bool, optional): Boolean flag controlling whether to compute and store
-                the filtered mean at each time point. Defaults to False.
-            prediction_mean (bool, optional): Boolean flag controlling whether to compute and store
-                the prediction mean at each time point. Defaults to False.
-
+                the effective sample size at each time point.
+            filter_mean (bool, optional): Boolean flag controlling whether to compute
+                and store the filtered mean at each time point.
+            prediction_mean (bool, optional): Boolean flag controlling whether to
+                compute and store the prediction mean at each time point.
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
         Returns:
            None. Updates self.results with a dictionary containing the log-likelihoods,
            algorithmic parameters used. The conditional log-likelihoods (CLL),
-           effective sample size (ESS), filtered mean, and prediction mean at each time point
-           are also included if their respective boolean flags are set to True.
+           effective sample size (ESS), filtered mean, and prediction mean at each time
+           point are also included if their respective boolean flags are set to True.
         """
         start_time = time.time()
 
@@ -320,26 +320,21 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
-        # n_obs = int(np.sum(np.array(self._ys_observed)))
-
         results = _vmapped_pfilter_internal2(
             thetas_repl,
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
+            jnp.array(self.ys),
             J,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
             thresh,
             rep_keys,
-            n_obs,
             CLL,
             ESS,
             filter_mean,
@@ -355,7 +350,11 @@ class Pomp:
             (-neg_logliks).reshape(n_theta, reps), dims=["theta", "replicate"]
         )
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            neg_logliks.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         result_dict = {
             "method": "pfilter",
@@ -401,14 +400,15 @@ class Pomp:
 
     def mif(
         self,
+        J: int,
+        M: int,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
-        M: int,
         a: float,
-        J: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         thresh: float = 0,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for conducting the iterated filtering (IF2) algorithm,
@@ -416,21 +416,21 @@ class Pomp:
         function.
 
         Args:
+            J (int): The number of particles.
+            M (int): Number of algorithm iterations.
             sigmas (float | jax.Array): Perturbation factor for parameters.
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            M (int): Number of algorithm iterations.
             a (float): A fraction specifying the amount to cool sigmas and sigmas_init
                 over 50 iterations.
-            J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, list[dict], optional): Initial parameters for the POMP model.
                 Defaults to self.theta.
             thresh (float, optional): Resampling threshold. Defaults to 0.
-
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
         Returns:
-            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods
-            and parameter estimates averaged over particles, and theta.
+            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods and parameter estimates averaged over particles, and theta.
         """
         start_time = time.time()
 
@@ -451,12 +451,12 @@ class Pomp:
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
+            jnp.array(self.ys),
             self.rinit.struct_per,
-            self.rproc.struct_per,
+            self.rproc.struct_per_interp,
             self.dmeas.struct_per,
             sigmas,
             sigmas_init,
@@ -506,7 +506,11 @@ class Pomp:
             for theta_ests in final_theta_ests
         ]
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            nLLs.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         self.results_history.append(
             {
@@ -539,6 +543,7 @@ class Pomp:
         c: float = 0.1,
         max_ls_itn: int = 10,
         n_monitors: int = 0,
+        track_time: bool = True,
     ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
@@ -569,6 +574,8 @@ class Pomp:
                     search algorithm.
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
+            track_time (bool, optional): Boolean flag controlling whether to track the
+                execution time.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -590,20 +597,18 @@ class Pomp:
         # Convert theta_list to array format for vmapping
         theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
 
-        # Calculate n_obs from ys_observed
-        ys_observed_np = np.array(self._ys_observed)
-        n_obs = int(np.sum(ys_observed_np))
+        n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
+            jnp.array(self.ys),
             self._dt_array_extended,
+            self._nstep_array,
             self.rinit.t0,
             jnp.array(self.ys.index),
-            self._ys_extended,
-            self._ys_observed,
             self.rinit.struct_pf,
-            self.rproc.struct_pf,
+            self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
             self._covars_extended,
@@ -643,7 +648,11 @@ class Pomp:
             for i in range(len(theta_list))
         ]
 
-        execution_time = time.time() - start_time
+        if track_time is True:
+            nLLs.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
 
         self.results_history.append(
             {
@@ -670,7 +679,7 @@ class Pomp:
         theta: dict | list[dict] | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> list[dict]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Simulates the evolution of a system over time using a Partially Observed
         Markov Process (POMP) model.
@@ -685,9 +694,12 @@ class Pomp:
             nsim (int): The number of simulations to perform. Defaults to 1.
 
         Returns:
-            list[dict]: A list of dictionaries each containing:
-                - 'X_sims' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
-                - 'Y_sims' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
+            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
+            The columns are as follows:
+            - replicate: The index of the parameter set.
+            - sim: The index of the simulation.
+            - time: The time points at which the observations were made.
+            - Remaining columns contain the features of the state and observation processes.
         """
         theta = theta or self.theta
         self._validate_theta(theta)
@@ -698,41 +710,54 @@ class Pomp:
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
             )
 
+        thetas_array = jnp.vstack(
+            [jnp.array(list(theta_i.values())) for theta_i in theta_list]
+        )
+
         new_key, old_key = self._update_fresh_key(key)
-        keys = jax.random.split(new_key, len(theta_list))
-        results = []
-        for theta_i, k in zip(theta_list, keys):
-            times_arr = jnp.array(self.ys.index) if times is None else times
-            X_sims, Y_sims = _simulate_internal(
-                rinitializer=self.rinit.struct_pf,
-                rprocess=self.rproc.struct_pf,
-                rmeasure=self.rmeas.struct_pf,
-                theta=jnp.array(list(theta_i.values())),
-                t0=self.rinit.t0,
-                times=times_arr,
-                ylen=int(jnp.sum(self._ys_observed)),
-                ys_observed=self._ys_observed,
-                dt_array_extended=self._dt_array_extended,
-                ydim=self.rmeas.ydim,
-                covars_extended=self._covars_extended,
-                accumvars=self.rproc.accumvars,
-                nsim=nsim,
-                key=k,
+        keys = jax.random.split(new_key, thetas_array.shape[0])
+        times_array = jnp.array(self.ys.index) if times is None else times
+        X_sims, Y_sims = _jv_simulate_internal(
+            self.rinit.struct_pf,
+            self.rproc.struct_pf_interp,
+            self.rmeas.struct_pf,
+            thetas_array,
+            self.rinit.t0,
+            times_array,
+            self._dt_array_extended,
+            self._nstep_array,
+            self.rmeas.ydim,
+            self._covars_extended,
+            self.rproc.accumvars,
+            nsim,
+            keys,
+        )
+
+        def _to_long(
+            arr: np.ndarray, times_vec: np.ndarray, prefix: str
+        ) -> pd.DataFrame:
+            vals = np.asarray(arr)  # (n_theta, n_time, n_feat, n_sim)
+            n_theta_l, n_time_l, n_feat_l, n_sim_l = vals.shape
+            flat = np.transpose(vals, (0, 3, 1, 2)).reshape(
+                n_theta_l * n_sim_l * n_time_l, n_feat_l
             )
-            X_sims = xr.DataArray(
-                X_sims,
-                dims=["time", "element", "sim"],
-                coords={
-                    "time": jnp.concatenate(
-                        [jnp.array([self.rinit.t0]), jnp.array(times_arr)]
-                    )
-                },
-            )
-            Y_sims = xr.DataArray(
-                Y_sims, dims=["time", "element", "sim"], coords={"time": times_arr}
-            )
-            results.append({"X_sims": X_sims, "Y_sims": Y_sims})
-        return results
+            theta_idx_l = np.repeat(np.arange(n_theta_l), n_sim_l * n_time_l)
+            sim_idx_l = np.tile(np.repeat(np.arange(n_sim_l), n_time_l), n_theta_l)
+            time_vals_l = np.tile(
+                np.asarray(times_vec).reshape(1, -1), (n_theta_l * n_sim_l, 1)
+            ).reshape(-1)
+            cols = pd.Index([f"{prefix}_{i}" for i in range(n_feat_l)])
+            df = pd.DataFrame(flat, columns=cols)
+            df.insert(0, "time", time_vals_l)
+            df.insert(0, "sim", sim_idx_l)
+            df.insert(0, "replicate", theta_idx_l)
+            return df
+
+        times0 = np.concatenate([np.array([self.rinit.t0]), np.array(times_array)])
+        X_sims_long = _to_long(X_sims, times0, "state")
+        Y_sims_long = _to_long(Y_sims, np.array(times_array), "obs")
+
+        return X_sims_long, Y_sims_long
 
     def traces(self) -> pd.DataFrame:
         """
@@ -741,7 +766,7 @@ class Pomp:
             - replicate: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'
-            - loglik: The log-likelihood estimate (averaged over reps for pfilter)
+            - logLik: The log-likelihood estimate (averaged over reps for pfilter)
             - <param>: One column for each parameter
         """
         if not self.results_history:
@@ -885,7 +910,6 @@ class Pomp:
 
         Returns:
             pd.DataFrame: A DataFrame where each row contains:
-                - 'index': The index of the result in results_history.
                 - 'method': The name of the method run.
                 - 'time': The execution time in seconds.
         """
@@ -893,8 +917,10 @@ class Pomp:
         for idx, res in enumerate(self.results_history):
             method = res.get("method", None)
             exec_time = res.get("execution_time", None)
-            rows.append({"index": idx, "method": method, "time": exec_time})
-        return pd.DataFrame(rows)
+            rows.append({"method": method, "time": exec_time})
+        df = pd.DataFrame(rows)
+        df.index.name = "history_index"
+        return df
 
     def prune(self, n: int = 1, index: int = -1, refill: bool = True):
         """
@@ -1056,7 +1082,6 @@ class Pomp:
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
             state["_rproc_func_name"] = original_func.__name__
-            state["_rproc_step_type"] = getattr(self.rproc, "step_type", "onestep")
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
             state["_rproc_module"] = original_func.__module__
@@ -1101,7 +1126,7 @@ class Pomp:
             if isinstance(obj, RProc):
                 self.rproc = obj
             else:
-                kwargs = {"step_type": state["_rproc_step_type"]}
+                kwargs = {}
                 if state["_rproc_dt"] is not None:
                     kwargs["dt"] = state["_rproc_dt"]
                 if state["_rproc_accumvars"] is not None:
@@ -1134,7 +1159,6 @@ class Pomp:
             "_rinit_t0",
             "_rinit_module",
             "_rproc_func_name",
-            "_rproc_step_type",
             "_rproc_dt",
             "_rproc_accumvars",
             "_rproc_module",

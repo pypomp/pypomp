@@ -54,6 +54,7 @@ DTypeLikeFloat = DTypeLike
 Shape = Sequence[int]
 
 
+@partial(jit, static_argnums=(3, 4))
 def normal_approx_binomial(
     key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple, dtype: jax.Array
 ) -> jax.Array:
@@ -64,6 +65,7 @@ def normal_approx_binomial(
     return lax.clamp(0, draws, n).astype(dtype)
 
 
+@partial(jit, static_argnums=(2, 3))
 def normal_approx_poisson(
     key: jax.Array, lam: jax.Array, shape: tuple, dtype: jax.Array
 ) -> jax.Array:
@@ -724,7 +726,6 @@ def _poisson(key, lam, shape, dtype, max_rejections) -> Array:
     # use_knuth = _isnan(lam) | (lam < 10)
     use_knuth = False
     # TODO: might want to add an argument to choose which method to use
-    # use_knuth = False
     lam_knuth = lax.select(use_knuth, lam, lax.full_like(lam, 0.0))
     # The acceptance probability for rejection sampling maxes out at 89% as
     # λ -> ∞, so pick some arbitrary large value.
@@ -732,7 +733,7 @@ def _poisson(key, lam, shape, dtype, max_rejections) -> Array:
     max_iters = max_rejections + 1
     result = lax.select(
         use_knuth,
-        _poisson_knuth(key, lam_knuth, shape, dtype, max_iters),
+        _poisson_rejection(key, lam_rejection, shape, dtype, max_iters),
         _poisson_rejection(key, lam_rejection, shape, dtype, max_iters),
     )
     result = jnp.clip(result, 0, jnp.inf)
@@ -892,14 +893,11 @@ def _gamma_grad(sample, a, *, max_rejections, log_space):
         samples = lax.select(lax.eq(samples, zero), tiny, samples)
 
         def gamma_grad(alpha, sample):  # pyright: ignore[reportRedeclaration]  # noqa: F811
-            return (
-                lax_special.random_gamma_grad(alpha, sample, dtype=sample.dtype)
-                / sample
-            )
+            return lax_special.random_gamma_grad(alpha, sample) / sample  # pyright: ignore[reportCallIssue]
     else:
 
         def gamma_grad(alpha, sample):
-            return lax_special.random_gamma_grad(alpha, sample, dtype=sample.dtype)
+            return lax_special.random_gamma_grad(alpha, sample)  # pyright: ignore[reportCallIssue][reportRedeclaration]
 
     if xla_bridge.get_backend().platform == "cpu":
         grads = lax_control_flow.map(lambda args: gamma_grad(*args), (alphas, samples))

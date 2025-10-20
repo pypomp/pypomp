@@ -6,18 +6,21 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 import xarray as xr
-from tqdm import tqdm
 from .pomp_class import Pomp
-from .mif import _jit_mif_internal
+import matplotlib.pyplot as plt
+import seaborn as sns
+from .mif import _jv_panel_mif_internal
+from .util import logmeanexp
 import numpy as np
+import time
 
 
 class PanelPomp:
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
-        shared: pd.DataFrame | None = None,
-        unit_specific: pd.DataFrame | None = None,
+        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
     ):
         """
         Initializes a PanelPOMP model, which consists of multiple POMP models
@@ -33,72 +36,284 @@ class PanelPomp:
             unit_specific (pd.DataFrame): A (d,U) DataFrame containing unit-specific parameters.
                 The index should be parameter names and columns should be unit names.
         """
-        if not isinstance(Pomp_dict, dict):
-            raise TypeError("Pomp_dict must be a dictionary")
-        for value in Pomp_dict.values():
-            if not isinstance(value, Pomp):
-                raise TypeError(
-                    "Every element of Pomp_dict must be an instance of the class Pomp"
-                )
+        shared, unit_specific, unit_objects = self._validate_params_and_units(
+            shared, unit_specific, Pomp_dict
+        )
 
-        # Validate shared parameters DataFrame
-        if not isinstance(shared, pd.DataFrame):
-            raise TypeError("shared must be a pandas DataFrame")
-        if shared.shape[1] != 1 or shared.columns[0] != "shared":
-            raise ValueError(
-                "shared must be a (d,1) DataFrame with column name 'shared'"
-            )
-
-        # Validate unit-specific parameters DataFrame
-        if not isinstance(unit_specific, pd.DataFrame):
-            raise TypeError("unit_specific must be a pandas DataFrame")
-        if not all(unit in Pomp_dict for unit in unit_specific.columns):
-            raise ValueError("unit_specific columns must match Pomp_dict keys")
-
-        self.unit_objects = Pomp_dict
+        self.unit_objects = unit_objects
         self.shared = shared
         self.unit_specific = unit_specific
         self.results_history = []
+        self.fresh_key = None
 
-        # Store original parameter order for each unit
-        self._unit_param_order = {}
-        for unit, obj in self.unit_objects.items():
-            self._unit_param_order[unit] = (
-                list(obj.theta[0].keys()) if obj.theta is not None else []
+        for unit in self.unit_objects.keys():
+            self.unit_objects[unit].theta = None  # type: ignore
+
+    def _validate_unit_objects(self, unit_objects: dict[str, Pomp]) -> dict[str, Pomp]:
+        if not isinstance(unit_objects, dict):
+            raise TypeError("unit_objects must be a dictionary")
+        for value in unit_objects.values():
+            if not isinstance(value, Pomp):
+                raise TypeError(
+                    "Every element of unit_objects must be an instance of the class Pomp"
+                )
+        return unit_objects
+
+    def _validate_shared(
+        self, shared: pd.DataFrame | list[pd.DataFrame] | None
+    ) -> list[pd.DataFrame] | None:
+        if not isinstance(shared, (pd.DataFrame, list)) and shared is not None:
+            raise TypeError(
+                "shared must be a pandas DataFrame, a list of pandas DataFrames, or None"
             )
-            obj.theta = None  # type: ignore
+        if shared is None:
+            return None
+        if isinstance(shared, pd.DataFrame):
+            shared = [shared]
+        if not all(shared_i.shape[1] == 1 for shared_i in shared):
+            raise ValueError("Data frames in shared must have shape (d,1)")
+        for shared_i in shared:
+            shared_i.columns = ["shared"]
+            if not shared_i.index.equals(shared[0].index):
+                raise ValueError("shared index must match for all shared DataFrames")
+        return shared
 
-    def get_unit_parameters(self, unit: str) -> dict:
+    def _validate_unit_specific(
+        self, unit_specific: pd.DataFrame | list[pd.DataFrame] | None, units: list[str]
+    ) -> list[pd.DataFrame] | None:
+        if (
+            not isinstance(unit_specific, (pd.DataFrame, list))
+            and unit_specific is not None
+        ):
+            raise TypeError(
+                "unit_specific must be a pandas DataFrame, a list of pandas DataFrames, or None"
+            )
+        if unit_specific is None:
+            return None
+        if isinstance(unit_specific, pd.DataFrame):
+            unit_specific = [unit_specific]
+        for unit_specific_i in unit_specific:
+            if not all(unit_specific_i.columns == units):
+                raise ValueError(
+                    "unit_specific columns must match unit_objects keys in content and order"
+                )
+            if not unit_specific_i.index.equals(unit_specific[0].index):
+                raise ValueError(
+                    "unit_specific index must match for all unit_specific DataFrames"
+                )
+
+        return unit_specific
+
+    def _validate_params_and_units(
+        self,
+        shared: pd.DataFrame | list[pd.DataFrame] | None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None,
+        unit_objects: dict[str, Pomp],
+    ) -> tuple[
+        list[pd.DataFrame] | None,
+        list[pd.DataFrame] | None,
+        dict[str, Pomp],
+    ]:
+        unit_objects = self._validate_unit_objects(unit_objects)
+        shared = self._validate_shared(shared)
+        units = list(unit_objects.keys())
+        unit_specific = self._validate_unit_specific(unit_specific, units)
+        if shared is not None and unit_specific is not None:
+            assert len(shared) == len(unit_specific)
+        return shared, unit_specific, unit_objects
+
+    def _update_fresh_key(
+        self, key: jax.Array | None = None
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Updates the fresh_key attribute and returns a new key along with the old key.
+
+        Returns:
+            tuple[jax.Array, jax.Array]: A tuple containing the new key and the old key.
+                The old key is the key that was used to update the fresh_key attribute.
+                The new key is the key that should be used for the next method call.
+        """
+        old_key = self.fresh_key if key is None else key
+        if old_key is None:
+            raise ValueError(
+                "Both the key argument and the fresh_key attribute are None. At least one key must be given."
+            )
+        self.fresh_key, new_key = jax.random.split(old_key)
+        return new_key, old_key
+
+    def _get_param_names(
+        self,
+        shared: list[pd.DataFrame] | None = None,
+        unit_specific: list[pd.DataFrame] | None = None,
+    ) -> tuple[list[str], list[str]]:
+        shared = shared or self.shared
+        shared_lst = [] if shared is None else list(shared[0].index)
+        unit_specific = unit_specific or self.unit_specific
+        unit_specific_lst = (
+            [] if unit_specific is None else list(unit_specific[0].index)
+        )
+        return shared_lst, unit_specific_lst
+
+    def get_unit_parameters(
+        self,
+        unit: str,
+        shared: list[pd.DataFrame] | None = None,
+        unit_specific: list[pd.DataFrame] | None = None,
+    ) -> list[dict]:
         """
         Get the complete parameter set for a specific unit, combining shared and
         unit-specific parameters.
 
         Args:
             unit (str): The unit identifier.
+            shared (list[pd.DataFrame], optional): Shared parameters involved in the POMP model. If provided,
+                overrides the shared parameter attribute.
+            unit_specific (list[pd.DataFrame], optional): Unit-specific parameters involved in the POMP model.
+                If provided, overrides the unit-specific parameter attribute.
 
         Returns:
-            dict: Combined parameters for the specified unit.
+            list[dict]: List of dictionaries with combined parameters for the specified unit.
         """
-        params = {}
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+        tll = self._get_theta_list_len(shared, unit_specific)
+        params = [{}] * tll
 
-        # Add shared parameters
-        if not self.shared.empty:
-            params.update(self.shared["shared"].to_dict())
-
-        # Add unit-specific parameters
-        if not self.unit_specific.empty:
-            params.update(self.unit_specific[unit].to_dict())
+        for i in range(tll):
+            if shared is not None:
+                params[i].update(shared[i]["shared"].to_dict())
+            if unit_specific is not None:
+                params[i].update(unit_specific[i][unit].to_dict())
 
         return params
+
+    def _get_theta_list_len(
+        self,
+        shared: list[pd.DataFrame] | None,
+        unit_specific: list[pd.DataFrame] | None,
+    ) -> int:
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+        return (
+            len(shared)
+            if shared is not None
+            else len(unit_specific)
+            if unit_specific is not None
+            else 0
+        )
+
+    @staticmethod
+    def sample_params(
+        param_bounds: dict,
+        units: list[str],
+        n: int,
+        key: jax.Array,
+        shared_names: list[str] | None = None,
+    ) -> tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None]:
+        """
+        Sample n sets of parameters from uniform distributions.
+
+        Args:
+            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds
+            units (list[str]): List of unit names to sample parameters for.
+            n (int): Number of parameter sets to sample
+            key (jax.Array): JAX random key for reproducibility
+            shared_names (list[str] | None): Names of shared parameters. Remaining
+                parameters are unit-specific. If None, all parameters are unit-specific.
+
+
+        Returns:
+            tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None]: Two lists of length n.
+              - First list: shared parameter DataFrames (S,1) with column 'shared' and
+                index shared parameter names; None if no shared parameters were specified.
+              - Second list: unit-specific parameter DataFrames (U*, len(units)) with
+                columns equal to `units` and index unit-specific parameter names; None
+                if no unit-specific parameters were specified.
+        """
+        param_keys = jax.random.split(key, n)
+        param_names = list(param_bounds.keys())
+        if shared_names is not None:
+            unit_specific_names = [
+                name for name in param_names if name not in set(shared_names)
+            ]
+        else:
+            unit_specific_names = list(param_names)
+        shared_param_sets: list[pd.DataFrame] | None = (
+            [] if shared_names is not None and len(shared_names) > 0 else None
+        )
+        unit_specific_param_sets: list[pd.DataFrame] | None = (
+            []
+            if unit_specific_names is not None and len(unit_specific_names) > 0
+            else None
+        )
+
+        for i in range(n):
+            if (
+                shared_names is not None
+                and len(shared_names) > 0
+                and shared_param_sets is not None
+            ):
+                shared_keys = jax.random.split(param_keys[i], len(shared_names))
+                shared_values: list[float] = []
+                for j_idx, param_name in enumerate(shared_names):
+                    lower, upper = param_bounds[param_name]
+                    val = float(
+                        jax.random.uniform(
+                            shared_keys[j_idx], shape=(), minval=lower, maxval=upper
+                        )
+                    )
+                    shared_values.append(val)
+                shared_df = pd.DataFrame(
+                    shared_values,
+                    index=pd.Index(shared_names),
+                    columns=pd.Index(["shared"]),
+                )
+                shared_param_sets.append(shared_df)
+
+            if (
+                unit_specific_names is not None
+                and len(unit_specific_names) > 0
+                and unit_specific_param_sets is not None
+            ):
+                total_needed = len(unit_specific_names) * len(units)
+                unit_keys = jax.random.split(param_keys[i], total_needed)
+                values_by_param: dict[str, list[float]] = {
+                    name: [] for name in unit_specific_names
+                }
+                k = 0
+                for param_name in unit_specific_names:
+                    lower, upper = param_bounds[param_name]
+                    col_values: list[float] = []
+                    for _unit in units:
+                        val = float(
+                            jax.random.uniform(
+                                unit_keys[k], shape=(), minval=lower, maxval=upper
+                            )
+                        )
+                        col_values.append(val)
+                        k += 1
+                    values_by_param[param_name] = col_values
+
+                unit_df: pd.DataFrame | None = pd.DataFrame(
+                    data={
+                        u: [values_by_param[p][ui] for p in unit_specific_names]
+                        for ui, u in enumerate(units)
+                    },
+                    index=pd.Index(unit_specific_names),
+                    columns=pd.Index(units),
+                )
+                unit_specific_param_sets.append(unit_df)
+
+        return shared_param_sets, unit_specific_param_sets
 
     def simulate(
         self,
         key: jax.Array,
-        shared: pd.DataFrame | None = None,
-        unit_specific: pd.DataFrame | None = None,
+        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> dict:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Simulates the PanelPOMP model by applying the simulate method to each unit.
 
@@ -113,37 +328,45 @@ class PanelPomp:
             nsim (int, optional): The number of simulations to perform. Defaults to 1.
 
         Returns:
-            dict: A dictionary mapping unit names to simulation results. Each result
-                is a dictionary containing:
-                - 'X' (jax.Array): Unobserved state values with shape (n_times, n_states, nsim)
-                - 'Y' (jax.Array): Observed values with shape (n_times, n_obs, nsim)
+            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
+            The columns are as follows:
+            - replicate: The index of the parameter set.
+            - sim: The index of the simulation.
+            - time: The time points at which the observations were made.
+            - Remaining columns contain the features of the state and observation processes.
         """
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
+        shared, unit_specific, _ = self._validate_params_and_units(
+            shared, unit_specific, self.unit_objects
+        )
 
-        results = {}
+        X_sims_list = []
+        Y_sims_list = []
         for unit, obj in self.unit_objects.items():
-            theta_u = {}
-            if shared is not None:
-                theta_u.update(shared["shared"].to_dict())
-            if unit_specific is not None:
-                theta_u.update(unit_specific[unit].to_dict())
+            theta_list = self.get_unit_parameters(unit, shared, unit_specific)
             key, subkey = jax.random.split(key)
-            results[unit] = obj.simulate(
+            X_sims, Y_sims = obj.simulate(
                 key=subkey,
-                theta=theta_u,
+                theta=theta_list,
                 times=times,
                 nsim=nsim,
-            )[0]
-        return results
+            )
+            X_sims.insert(0, "unit", unit)
+            Y_sims.insert(0, "unit", unit)
+            X_sims_list.append(X_sims)
+            Y_sims_list.append(Y_sims)
+        X_sims_long = pd.concat(X_sims_list)
+        Y_sims_long = pd.concat(Y_sims_list)
+        return X_sims_long, Y_sims_long
 
     def pfilter(
         self,
         J: int,
-        key: jax.Array,
-        shared: pd.DataFrame | None = None,
-        unit_specific: pd.DataFrame | None = None,
-        thresh: float = 0,
+        key: jax.Array | None = None,
+        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        thresh: float = 0.0,
         reps: int = 1,
     ) -> None:
         """
@@ -151,291 +374,74 @@ class PanelPomp:
 
         Args:
             J (int): The number of particles to use in the filter.
-            key (jax.Array): The random key for reproducibility.
-            shared (pd.DataFrame, optional): Parameters involved in the POMP model.
-                If provided, overrides the shared parameters.
-            unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
-                If provided, overrides the unit-specific parameters.
-            thresh (float, optional): Threshold value to determine whether to resample particles.
-                Defaults to 0.
-            reps (int): Number of replicates to run. Defaults to 1.
+            key (jax.Array, optional): The random key for reproducibility. Defaults to
+                self.fresh_key attribute.
+            shared (pd.DataFrame | list[pd.DataFrame], optional): Parameters involved
+                in the POMP model. If provided, overrides the shared parameters.
+            unit_specific (pd.DataFrame | list[pd.DataFrame], optional): Parameters
+                involved in the POMP model. If provided, overrides the unit-specific
+                parameters.
+            thresh (float, optional): Threshold value to determine whether to resample
+                particles.
+            reps (int): Number of replicates to run.
         Returns:
-            None
+            None. Updates self.results_history with the results of the particle filter
+            algorithm for each unit in the panel.
         """
+        start_time = time.time()
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
+        shared, unit_specific, _ = self._validate_params_and_units(
+            shared, unit_specific, self.unit_objects
+        )
+        key, old_key = self._update_fresh_key(key)
 
+        tll = self._get_theta_list_len(shared, unit_specific)
         results = xr.DataArray(
-            np.zeros((len(self.unit_objects), reps)),
-            dims=["unit", "replicate"],
+            np.zeros((tll, len(self.unit_objects), reps)),
+            dims=["theta", "unit", "replicate"],
             coords={"unit": list(self.unit_objects.keys()), "replicate": range(reps)},
         )
         for unit, obj in self.unit_objects.items():
-            theta_u = {}
-            if shared is not None:
-                theta_u.update(shared["shared"].to_dict())
-            if unit_specific is not None:
-                theta_u.update(unit_specific[unit].to_dict())
-            key, subkey = jax.random.split(key)
+            theta_list = self.get_unit_parameters(unit, shared, unit_specific)
+            key, subkey = jax.random.split(key)  # pyright: ignore[reportArgumentType]
             obj.pfilter(
                 J=J,
                 key=subkey,
-                theta=theta_u,
+                theta=theta_list,
                 thresh=thresh,
                 reps=reps,
             )
-            results.loc[unit, :] = obj.results_history[-1]["logLiks"][0]
+            results.loc[:, unit, :] = obj.results_history[-1]["logLiks"]
             obj.results_history = []
+
+        execution_time = time.time() - start_time
+
         self.results_history.append(
             {
-                "logLik": results,
+                "method": "pfilter",
+                "logLiks": results,
                 "shared": shared,
                 "unit_specific": unit_specific,
                 "J": J,
+                "reps": reps,
                 "thresh": thresh,
+                "key": old_key,
+                "execution_time": execution_time,
             }
         )
-
-    def _initialize_parameters(
-        self, J: int, shared: pd.DataFrame | None, unit_specific: pd.DataFrame | None
-    ) -> tuple[jax.Array | None, jax.Array | None, list[str], list[str], list[str]]:
-        """Initialize parameter matrices for MIF algorithm."""
-        # Handle None cases for shared parameters
-        if shared is None and self.shared is None:
-            shared_params = []
-            shared_values = jnp.array([])
-        else:
-            shared = shared or self.shared
-            shared_params = list(shared.index)
-            shared_values = (
-                shared["shared"].values if not shared.empty else jnp.array([])
-            )
-
-        # Handle None cases for unit-specific parameters
-        if unit_specific is None and self.unit_specific is None:
-            unit_specific_params = []
-            unit_specific_values = jnp.array([])
-        else:
-            unit_specific = unit_specific or self.unit_specific
-            unit_specific_params = list(unit_specific.index)
-            unit_specific_values = (
-                unit_specific.values if not unit_specific.empty else jnp.array([])
-            )
-
-        unit_names = list(self.unit_objects.keys())
-
-        # Initialize shared parameters
-        shared_thetas = (
-            jnp.tile(jnp.array(shared_values), (J, 1)).T
-            if len(shared_values) > 0
-            else None
-        )
-
-        # Initialize unit-specific parameters
-        unit_specific_thetas = (
-            jnp.tile(unit_specific_values[:, None, :], (1, J, 1))
-            if len(unit_specific_values) > 0
-            else None
-        )
-
-        return (
-            shared_thetas,
-            unit_specific_thetas,
-            shared_params,
-            unit_specific_params,
-            unit_names,
-        )
-
-    def _process_unit(
-        self,
-        unit: str,
-        unit_idx: int,
-        shared_thetas: jax.Array | None,
-        unit_specific_thetas: jax.Array | None,
-        shared_params: list[str],
-        unit_specific_params: list[str],
-        J: int,
-        sigmas: float | jax.Array,
-        sigmas_init: float | jax.Array,
-        thresh: float,
-        key: jax.Array,
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
-        """Process a single unit in the MIF algorithm."""
-        # Get unit-specific data
-        unit_ys = self.unit_objects[unit].ys
-        unit_covars = self.unit_objects[unit].covars
-
-        # Get unit-specific components
-        unit_rinit = self.unit_objects[unit].rinit
-        unit_rproc = self.unit_objects[unit].rproc
-        unit_dmeas = self.unit_objects[unit].dmeas
-
-        if unit_rinit is None or unit_rproc is None or unit_dmeas is None:
-            raise ValueError(f"Missing required components for unit {unit}")
-
-        # Combine parameters for this unit
-        unit_theta = {}
-        if shared_thetas is not None:
-            unit_theta.update(dict(zip(shared_params, shared_thetas)))
-        if unit_specific_thetas is not None:
-            unit_theta.update(
-                dict(zip(unit_specific_params, unit_specific_thetas[:, :, unit_idx]))
-            )
-
-        # Validate parameters
-        expected_param_order = self._unit_param_order[unit]
-        for param in expected_param_order:
-            if param not in unit_theta:
-                raise KeyError(
-                    f"Parameter '{param}' missing for unit '{unit}'. Check shared/unit-specific DataFrames."
-                )
-
-        # Build parameter array for particles
-        theta_values = jnp.stack(
-            [
-                jnp.stack([unit_theta[param][j] for param in expected_param_order])
-                for j in range(J)
-            ]
-        )
-
-        # Run perturbed particle filter
-        key, subkey = jax.random.split(key)
-        unit_loglik, unit_thetas = _jit_mif_internal(
-            theta=theta_values,
-            t0=unit_rinit.t0,
-            times=jnp.array(unit_ys.index),
-            ys=jnp.array(unit_ys),
-            rinitializers=unit_rinit.struct_per,
-            rprocesses=unit_rproc.struct_per,
-            dmeasures=unit_dmeas.struct_per,
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
-            ctimes=jnp.array(unit_covars.index) if unit_covars is not None else None,
-            covars=jnp.array(unit_covars) if unit_covars is not None else None,
-            M=1,  # Single iteration for each unit
-            a=1.0,  # Not used in single iteration
-            J=J,
-            thresh=thresh,
-            key=subkey,
-        )
-
-        return unit_loglik[1], unit_thetas[1], key
-
-    def _update_parameters(
-        self,
-        unit_thetas: jax.Array,
-        expected_param_order: list[str],
-        shared_params: list[str],
-        unit_specific_params: list[str],
-        shared_thetas: jax.Array | None,
-        unit_specific_thetas: jax.Array | None,
-        unit_idx: int,
-        unit_names: list[str],
-        J: int,
-        block: bool,
-    ) -> tuple[jax.Array | None, jax.Array | None]:
-        """Update parameters based on particle filter results."""
-        updated_shared_thetas = shared_thetas
-        updated_unit_specific_thetas = unit_specific_thetas
-
-        if shared_thetas is not None:
-            shared_indices = [
-                i for i, p in enumerate(expected_param_order) if p in shared_params
-            ]
-            updated_shared_thetas = unit_thetas[:, shared_indices].T
-
-        if unit_specific_thetas is not None:
-            unit_specific_indices = [
-                i
-                for i, p in enumerate(expected_param_order)
-                if p in unit_specific_params
-            ]
-            updated_unit_specific_thetas = unit_specific_thetas.at[:, :, unit_idx].set(
-                unit_thetas[:, unit_specific_indices].T
-            )
-
-            # Resample other units if not blocked
-            if not block:
-                for other_idx in range(len(unit_names)):
-                    if other_idx != unit_idx:
-                        updated_unit_specific_thetas = updated_unit_specific_thetas.at[
-                            :, :, other_idx
-                        ].set(updated_unit_specific_thetas[:, jnp.arange(J), other_idx])
-
-        return updated_shared_thetas, updated_unit_specific_thetas
-
-    def _create_results(
-        self,
-        logliks: jax.Array,
-        shared_params_history: list[jax.Array],
-        unit_specific_params_history: list[jax.Array],
-        unit_logliks: dict[str, list[float]],
-        shared_params: list[str],
-        unit_specific_params: list[str],
-        unit_names: list[str],
-        J: int,
-    ) -> dict[str, xr.DataArray]:
-        """Create results dictionary in xarray format."""
-        # Handle empty logliks
-        if logliks.shape == (0,):
-            logliks = jnp.zeros(len(unit_logliks[unit_names[0]]))
-
-        results = {
-            "logLiks": xr.DataArray(
-                logliks,
-                dims=["iteration"],
-                coords={"iteration": range(1, len(logliks) + 1)},
-            ),
-        }
-
-        if shared_params_history:
-            shared_params_history_array = jnp.stack(shared_params_history)
-            results["shared_thetas"] = xr.DataArray(
-                shared_params_history_array,
-                dims=["iteration", "param", "particle"],
-                coords={
-                    "iteration": range(len(shared_params_history_array)),
-                    "param": shared_params,
-                    "particle": range(J),
-                },
-            )
-
-        if unit_specific_params_history:
-            unit_specific_params_history_array = jnp.stack(unit_specific_params_history)
-            results["unit_specific_thetas"] = xr.DataArray(
-                unit_specific_params_history_array,
-                dims=["iteration", "param", "particle", "unit"],
-                coords={
-                    "iteration": range(len(unit_specific_params_history_array)),
-                    "param": unit_specific_params,
-                    "particle": range(J),
-                    "unit": unit_names,
-                },
-            )
-
-        # Create unit_logLiks
-        results["unit_logLiks"] = xr.DataArray(
-            jnp.array([unit_logliks[unit] for unit in unit_names]).T,
-            dims=["iteration", "unit"],
-            coords={
-                "iteration": range(len(unit_logliks[unit_names[0]])),
-                "unit": unit_names,
-            },
-        )
-
-        return results
 
     # TODO: quant test this function
     def mif(
         self,
         J: int,
-        key: jax.Array,
+        M: int,
         sigmas: float | jax.Array,
         sigmas_init: float | jax.Array,
-        M: int,
         a: float,
-        shared: pd.DataFrame | None = None,
-        unit_specific: pd.DataFrame | None = None,
+        key: jax.Array | None = None,
+        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
+        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
         thresh: float = 0,
         block: bool = True,
     ) -> None:
@@ -445,124 +451,227 @@ class PanelPomp:
 
         Args:
             J (int): The number of particles.
-            key (jax.Array): The random key for reproducibility.
+            M (int): Number of algorithm iterations.
             sigmas (float | jax.Array): Perturbation factor for parameters.
             sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            M (int): Number of algorithm iterations.
             a (float): Decay factor for sigmas.
-            shared (pd.DataFrame, optional): Parameters involved in the POMP model.
-                If provided, overrides the shared parameters.
-            unit_specific (pd.DataFrame, optional): Parameters involved in the POMP model.
-                If provided, overrides the unit-specific parameters.
-            thresh (float, optional): Resampling threshold. Defaults to 0.
-            block (bool, optional): Whether to block resampling of unit-specific parameters.
-                Defaults to True.
+            key (jax.Array): The random key for reproducibility.
+            shared (pd.DataFrame | list[pd.DataFrame], optional): Shared parameters
+                involved in the POMP model. If provided, overrides the shared
+                parameter attribute.
+            unit_specific (pd.DataFrame | list[pd.DataFrame], optional): Parameters
+                involved in the POMP model for each unit. If provided, overrides the
+                unit-specific parameters.
+            thresh (float, optional): Resampling threshold.
+            block (bool, optional): Whether to block resampling of unit-specific
+                parameters.
 
         Returns:
-            None
+            None. Updates self.results_history with the results of the MIF algorithm.
         """
+        start_time = time.time()
+        shared = shared or self.shared
+        unit_specific = unit_specific or self.unit_specific
+        shared, unit_specific, _ = self._validate_params_and_units(
+            shared, unit_specific, self.unit_objects
+        )
+        key, old_key = self._update_fresh_key(key)
         if J < 1:
             raise ValueError("J should be greater than 0.")
+        if M < 1:
+            raise ValueError("M should be greater than 0.")
+        if a < 0 or a > 1:
+            raise ValueError("a should be between 0 and 1.")
+        if block is False:
+            raise NotImplementedError("block=False is not supported yet.")
 
-        # Initialize parameters
-        (
-            shared_thetas,
-            unit_specific_thetas,
-            shared_params,
-            unit_specific_params,
-            unit_names,
-        ) = self._initialize_parameters(J, shared, unit_specific)
+        unit_names = list(self.unit_objects.keys())
+        U = len(unit_names)
+        # Use a representative unit for structural arrays and static callables
+        rep_unit = self.unit_objects[unit_names[0]]
 
-        # Initialize arrays to store results
-        logliks = []
-        shared_params_history = []
-        unit_specific_params_history = []
-        unit_logliks = {unit: [] for unit in unit_names}
+        # TODO: make this more flexible
+        # Assume all units share the same dt_array_extended, nstep_array, t0, and times
+        dt_array_extended = rep_unit._dt_array_extended
+        nstep_array = rep_unit._nstep_array
+        t0 = rep_unit.rinit.t0
+        times = jnp.array(rep_unit.ys.index)
 
-        # Store initial parameter state (iteration 0)
-        if shared_thetas is not None:
-            shared_params_history.append(shared_thetas.copy())
-        if unit_specific_thetas is not None:
-            unit_specific_params_history.append(unit_specific_thetas.copy())
+        if rep_unit.dmeas is None:
+            raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        # Main MIF iterations
-        for m in tqdm(range(M)):
-            # Cool sigmas
-            sigmas = a * sigmas
-            sigmas_init = a * sigmas_init
+        # TODO: make this more flexible
+        # Assume all units share the same rinitializers, rprocesses_interp, dmeasures, accumvars
+        rinitializers = rep_unit.rinit.struct_per
+        rprocesses_interp = rep_unit.rproc.struct_per_interp
+        dmeasures = rep_unit.dmeas.struct_per
+        accumvars = rep_unit.rproc.accumvars
 
-            # Perturb parameters
-            key, *subkeys = jax.random.split(key, num=3)
-            if shared_thetas is not None:
-                shared_thetas = shared_thetas + sigmas_init * jax.random.normal(
-                    shape=shared_thetas.shape, key=subkeys[0]
-                )
-            if unit_specific_thetas is not None:
-                unit_specific_thetas = (
-                    unit_specific_thetas
-                    + sigmas_init
-                    * jax.random.normal(
-                        shape=unit_specific_thetas.shape, key=subkeys[1]
+        has_covars = [
+            self.unit_objects[u]._covars_extended is not None for u in unit_names
+        ]
+        if all(has_covars):
+            covars_per_unit = jnp.stack(
+                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
+                axis=0,
+            )
+        elif any(has_covars):
+            raise NotImplementedError(
+                "Some units have covariates, but not all units have covariates. This is not supported yet."
+            )
+        else:
+            covars_per_unit = None
+
+        shared_list = shared if isinstance(shared, list) else []
+        spec_list = unit_specific if isinstance(unit_specific, list) else []
+        n_reps = self._get_theta_list_len(shared, unit_specific)
+
+        # Shared parameters
+        if len(shared_list) == 0:
+            n_shared = 0
+            shared_array = jnp.zeros((n_reps, 0, J))
+            shared_index: list[str] = []
+        else:
+            shared_index = list(shared_list[0].index)
+            n_shared = len(shared_index)
+            shared_array = jnp.stack(
+                [
+                    jnp.tile(
+                        jnp.array(df["shared"].to_numpy().astype(float)).reshape(
+                            n_shared, 1
+                        ),
+                        (1, J),
                     )
+                    for df in shared_list
+                ],
+                axis=0,
+            )
+
+        # Unit-specific parameters
+        if len(spec_list) == 0:
+            n_spec = 0
+            unit_array = jnp.zeros((n_reps, 0, J, U))
+            spec_index: list[str] = []
+        else:
+            spec_index = list(spec_list[0].index)
+            n_spec = len(spec_index)
+            unit_array = jnp.stack(
+                [
+                    jnp.stack(
+                        [
+                            jnp.tile(
+                                jnp.array(df[unit].to_numpy().astype(float)).reshape(
+                                    n_spec, 1
+                                ),
+                                (1, J),
+                            )
+                            for unit in unit_names
+                        ],
+                        axis=2,
+                    )  # shape: (n_spec, J, U)
+                    for df in spec_list
+                ],
+                axis=0,
+            )  # shape: (R, n_spec, J, U)
+
+        # Stack ys per unit (units assumed to share time grid and dt/nstep arrays)
+        ys_per_unit = jnp.stack(
+            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        )
+
+        old_key = key
+        keys = jax.random.split(key, n_reps)
+        (
+            shared_array_f,
+            unit_array_f,
+            shared_traces,
+            unit_traces,
+            unit_logliks,
+        ) = _jv_panel_mif_internal(
+            shared_array,
+            unit_array,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys_per_unit,
+            rinitializers,
+            rprocesses_interp,
+            dmeasures,
+            sigmas,
+            sigmas_init,
+            accumvars,
+            covars_per_unit,
+            M,
+            a,
+            J,
+            U,
+            thresh,
+            keys,
+        )
+
+        shared_vars = ["logLik"] + shared_index
+        unit_vars = ["unitLogLik"] + spec_index
+
+        shared_da = xr.DataArray(
+            shared_traces,
+            dims=["replicate", "iteration", "variable"],
+            coords={
+                "replicate": jnp.arange(shared_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": shared_vars,
+            },
+        )
+        unit_da = xr.DataArray(
+            unit_traces,
+            dims=["replicate", "iteration", "variable", "unit"],
+            coords={
+                "replicate": jnp.arange(unit_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": unit_vars,
+                "unit": unit_names,
+            },
+        )
+
+        full_logliks = xr.DataArray(
+            jnp.concatenate(
+                [np.sum(unit_logliks, axis=1).reshape(-1, 1), unit_logliks], axis=1
+            ),
+            dims=["replicate", "unit"],
+            coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},
+        )
+
+        if shared is not None:
+            self.shared = [
+                pd.DataFrame(
+                    shared_traces[rep, -1, 1:].reshape(-1, 1),
+                    index=pd.Index(shared_index),
+                    columns=pd.Index(["shared"]),
                 )
+                for rep in range(shared_traces.shape[0])
+            ]
+        else:
+            self.shared = None
 
-            # Process each unit
-            total_loglik = 0
-            for unit_idx, unit in enumerate(unit_names):
-                # Process unit
-                unit_loglik, unit_thetas, key = self._process_unit(
-                    unit,
-                    unit_idx,
-                    shared_thetas,
-                    unit_specific_thetas,
-                    shared_params,
-                    unit_specific_params,
-                    J,
-                    sigmas,
-                    sigmas_init,
-                    thresh,
-                    key,
+        if unit_specific is not None:
+            self.unit_specific = [
+                pd.DataFrame(
+                    unit_traces[rep, -1, 1:, :],
+                    index=pd.Index(spec_index),
+                    columns=pd.Index(unit_names),
                 )
+                for rep in range(unit_traces.shape[0])
+            ]
+        else:
+            self.unit_specific = None
 
-                # Update total log-likelihood
-                total_loglik += unit_loglik
-                unit_logliks[unit].append(unit_loglik)
-
-                # Update parameters
-                shared_thetas, unit_specific_thetas = self._update_parameters(
-                    unit_thetas,
-                    self._unit_param_order[unit],
-                    shared_params,
-                    unit_specific_params,
-                    shared_thetas,
-                    unit_specific_thetas,
-                    unit_idx,
-                    unit_names,
-                    J,
-                    block,
-                )
-
-            # Store parameter history
-            if shared_thetas is not None:
-                shared_params_history.append(shared_thetas.copy())
-            if unit_specific_thetas is not None:
-                unit_specific_params_history.append(unit_specific_thetas.copy())
-            logliks.append(total_loglik)
-
-        # TODO: update self.theta
-        # Create results
+        execution_time = time.time() - start_time
         self.results_history.append(
             {
-                **self._create_results(
-                    jnp.array(logliks),
-                    shared_params_history,
-                    unit_specific_params_history,
-                    unit_logliks,
-                    shared_params,
-                    unit_specific_params,
-                    unit_names,
-                    J,
-                ),
+                "method": "mif",
+                "shared_traces": shared_da,
+                "unit_traces": unit_da,
+                "logLiks": full_logliks,
                 "shared": shared,
                 "unit_specific": unit_specific,
                 "J": J,
@@ -572,5 +681,642 @@ class PanelPomp:
                 "M": M,
                 "a": a,
                 "block": block,
+                "key": old_key,
+                "execution_time": execution_time,
             }
         )
+
+    # TODO: clean up results functions
+    def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
+        """
+        Return a DataFrame with results for each replicate and unit for the given method.
+
+        Columns:
+            - replicate: index of the replicate
+            - unit: the unit name
+            - shared log-likelihood: log-likelihood contribution of shared parameters
+            - unit log-likelihood: log-likelihood contribution of unit parameters
+            - <shared_param>: columns for each shared parameter
+            - <unit_param>: columns for each unit parameter
+        """
+        res = self.results_history[index]
+        method = res.get("method", None)
+        if method == "mif":
+            return self._results_from_mif(res)
+        elif method == "pfilter":
+            return self._results_from_pfilter(res, ignore_nan=ignore_nan)
+        else:
+            raise ValueError(f"Unknown method '{method}' for results()")
+
+    def _extract_parameter_dict(self, values, names, skip_first=False):
+        """Helper to extract parameter dictionary from values and names."""
+        if skip_first and len(values) > 1:
+            values = values[1:]
+            names = names[1:] if len(names) > 1 else []
+
+        return {str(name): float(val.item()) for name, val in zip(names, values)}
+
+    def _build_result_row(
+        self, rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+    ):
+        """Helper to build a result row."""
+        return {
+            "replicate": rep,
+            "unit": unit,
+            "shared logLik": shared_loglik,
+            "unit logLik": unit_loglik,
+            **shared_dict,
+            **unit_dict,
+        }
+
+    def _results_from_mif(self, res) -> pd.DataFrame:
+        """
+        Helper to process results from the panel mif method.
+        """
+        shared_da = res["shared_traces"]
+        unit_da = res["unit_traces"]
+        full_logliks = res["logLiks"]
+
+        # Get parameter names, skipping loglikelihood entries
+        all_shared_vars = list(shared_da.coords["variable"].values)
+        shared_names = all_shared_vars[1:] if len(all_shared_vars) > 1 else []
+
+        all_unit_vars = list(unit_da.coords["variable"].values)
+        unit_names = list(unit_da.coords["unit"].values)
+        n_reps = shared_da.sizes["replicate"]
+
+        rows = []
+        for rep in range(n_reps):
+            for unit_idx, unit in enumerate(unit_names):
+                shared_loglik = float(full_logliks[rep, 0].item())
+                unit_loglik = float(full_logliks[rep, unit_idx + 1].item())
+
+                if shared_names:
+                    shared_final = shared_da.sel(
+                        replicate=rep, variable=shared_names
+                    ).values[-1, :]
+                    shared_dict = self._extract_parameter_dict(
+                        shared_final, shared_names
+                    )
+                else:
+                    shared_dict = {}
+
+                unit_final = unit_da.sel(replicate=rep, unit=unit).values[-1, :]
+                unit_dict = self._extract_parameter_dict(
+                    unit_final, all_unit_vars, skip_first=True
+                )
+
+                rows.append(
+                    self._build_result_row(
+                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+                    )
+                )
+
+        return pd.DataFrame(rows)
+
+    def _results_from_pfilter(self, res, ignore_nan) -> pd.DataFrame:
+        """
+        Helper to process results from the panel pfilter method.
+        """
+        logLiks = res["logLiks"]
+        shared_params = res.get("shared", [])
+        unit_specific_params = res.get("unit_specific", [])
+
+        # Get unit names from coords (no "shared" unit in pfilter results)
+        unit_names = list(logLiks.coords["unit"].values)
+        n_reps = logLiks.sizes["theta"]
+
+        rows = []
+
+        for rep in range(n_reps):
+            shared_loglik = np.sum(
+                [
+                    logmeanexp(logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan)
+                    for unit_idx in range(len(unit_names))
+                ]
+            )
+            for unit_idx, unit in enumerate(unit_names):
+                unit_loglik = logmeanexp(
+                    logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan
+                )
+
+                if shared_params and rep < len(shared_params):
+                    shared_df = shared_params[rep]
+                    shared_vals = (
+                        shared_df.iloc[:, 0].values
+                        if hasattr(shared_df, "values")
+                        else []
+                    )
+                    shared_names = (
+                        list(shared_df.columns) if hasattr(shared_df, "columns") else []
+                    )
+                    shared_dict = self._extract_parameter_dict(
+                        shared_vals, shared_names
+                    )
+                else:
+                    shared_dict = {}
+
+                if unit_specific_params and rep < len(unit_specific_params):
+                    unit_df = unit_specific_params[rep]
+                    if unit in unit_df.columns:
+                        unit_vals = unit_df[unit].values
+                        unit_param_names = (
+                            list(unit_df.index) if hasattr(unit_df, "index") else []
+                        )
+                        unit_dict = self._extract_parameter_dict(
+                            unit_vals, unit_param_names
+                        )
+                    else:
+                        unit_dict = {}
+                else:
+                    unit_dict = {}
+
+                rows.append(
+                    self._build_result_row(
+                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+                    )
+                )
+
+        return pd.DataFrame(rows)
+
+    def time(self):
+        """
+        Return a DataFrame summarizing the execution times of methods run.
+
+        Returns:
+            pd.DataFrame: A DataFrame where each row contains:
+                - 'method': The name of the method run.
+                - 'time': The execution time in seconds.
+        """
+        rows = []
+        for idx, res in enumerate(self.results_history):
+            method = res.get("method", None)
+            exec_time = res.get("execution_time", None)
+            rows.append({"method": method, "time": exec_time})
+        df = pd.DataFrame(rows)
+        df.index.name = "history_index"
+        return df
+
+    # TODO: clean up traces function
+    def traces(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
+        Columns:
+            - replicate: The index of the parameter set (for all methods)
+            - unit: The unit name (includes 'shared' for shared parameters/log-likelihood)
+            - iteration: The global iteration number for that parameter set (increments over all mif calls for that set; for pfilter, the last iteration for that set)
+            - method: 'pfilter' or 'mif'
+            - logLik: The log-likelihood estimate (for mif: shared total on unit='shared' rows and per-unit unitLogLik on unit rows; for pfilter: averaged over reps; the shared row is the sum over units)
+            - <param>: One column for each parameter (shared parameters are repeated on all rows; unit-specific parameters appear on their corresponding unit rows; others are NaN)
+        """
+        if not self.results_history:
+            return pd.DataFrame()
+
+        shared_param_names, unit_param_names = self._get_param_names()
+        all_param_names = shared_param_names + unit_param_names
+
+        # Storage for rows
+        rows: list[dict] = []
+        # Track global iteration per replicate (starts at 0, increments over mif iters)
+        global_iters: dict[int, int] = {}
+
+        for res in self.results_history:
+            method = res.get("method")
+            if method == "mif":
+                shared_da = res["shared_traces"]  # dims: replicate, iteration, variable
+                unit_da = res[
+                    "unit_traces"
+                ]  # dims: replicate, iteration, variable, unit
+                unit_names = list(unit_da.coords["unit"].values)
+                shared_vars = list(shared_da.coords["variable"].values)
+                unit_vars = list(unit_da.coords["variable"].values)
+
+                n_rep = shared_da.sizes["replicate"]
+                n_iter = shared_da.sizes["iteration"]
+
+                for rep_idx in range(n_rep):
+                    if rep_idx not in global_iters:
+                        global_iters[rep_idx] = 0
+                    for iter_idx in range(n_iter):
+                        # Extract shared values for this iteration
+                        shared_vals = shared_da.sel(
+                            replicate=rep_idx, iteration=iter_idx
+                        )
+                        shared_loglik = float(shared_vals.sel(variable="logLik").values)
+                        shared_params = {
+                            name: float(shared_vals.sel(variable=name).values)
+                            for name in shared_vars[1:]
+                        }
+
+                        # Row for shared
+                        row_shared = {
+                            "replicate": rep_idx,
+                            "unit": "shared",
+                            "iteration": global_iters[rep_idx],
+                            "method": "mif",
+                            "logLik": shared_loglik,
+                        }
+                        for name in all_param_names:
+                            if name in shared_params:
+                                row_shared[name] = shared_params[name]
+                            else:
+                                row_shared[name] = float("nan")
+                        rows.append(row_shared)
+
+                        # Now per-unit rows
+                        for unit in unit_names:
+                            unit_vals = unit_da.sel(
+                                replicate=rep_idx, iteration=iter_idx, unit=unit
+                            )
+                            unit_loglik = float(
+                                unit_vals.sel(variable="unitLogLik").values
+                            )
+                            unit_params = {
+                                name: float(unit_vals.sel(variable=name).values)
+                                for name in unit_vars[1:]
+                            }
+                            row_unit = {
+                                "replicate": rep_idx,
+                                "unit": str(unit),
+                                "iteration": global_iters[rep_idx],
+                                "method": "mif",
+                                "logLik": unit_loglik,
+                            }
+                            for name in all_param_names:
+                                if name in unit_params:
+                                    row_unit[name] = unit_params[name]
+                                elif name in shared_params:
+                                    row_unit[name] = shared_params[name]
+                                else:
+                                    row_unit[name] = float("nan")
+                            rows.append(row_unit)
+
+                        global_iters[rep_idx] += 1
+
+            elif method == "pfilter":
+                logLiks = res["logLiks"]  # dims: theta, unit, replicate
+                unit_names = list(logLiks.coords["unit"].values)
+                # Determine parameter values for this result, if available
+                shared_list = res.get("shared")
+                unit_list = res.get("unit_specific")
+
+                n_theta = logLiks.sizes["theta"]
+                for rep_idx in range(n_theta):
+                    # Compute per-unit averaged loglik across replicate dimension
+                    # logLiks[rep, unit, rep_run]
+                    unit_avgs = [
+                        float(logmeanexp(np.asarray(logLiks[rep_idx, u_i, :].values)))
+                        for u_i in range(len(unit_names))
+                    ]
+                    shared_total = float(np.sum(unit_avgs))
+
+                    # Get parameter dicts if present
+                    shared_params = {}
+                    if isinstance(shared_list, list) and rep_idx < len(shared_list):
+                        df = shared_list[rep_idx]
+                        if hasattr(df, "index") and df.shape[1] >= 1:
+                            shared_params = {
+                                str(idx): float(val)
+                                for idx, val in zip(df.index, df.iloc[:, 0].values)
+                            }
+
+                    # Shared row
+                    iter_val = global_iters.get(rep_idx, 1) - 1
+                    row_shared = {
+                        "replicate": rep_idx,
+                        "unit": "shared",
+                        "iteration": iter_val if iter_val > 0 else 1,
+                        "method": "pfilter",
+                        "logLik": shared_total,
+                    }
+                    for name in all_param_names:
+                        if name in shared_params:
+                            row_shared[name] = shared_params[name]
+                        else:
+                            row_shared[name] = float("nan")
+                    rows.append(row_shared)
+
+                    # Unit rows
+                    for u_i, unit in enumerate(unit_names):
+                        unit_params = {}
+                        if (
+                            isinstance(unit_list, list)
+                            and rep_idx < len(unit_list)
+                            and hasattr(unit_list[rep_idx], "columns")
+                            and str(unit) in unit_list[rep_idx].columns
+                        ):
+                            dfu = unit_list[rep_idx]
+                            unit_params = {
+                                str(idx): float(val)
+                                for idx, val in zip(dfu.index, dfu[str(unit)].values)
+                            }
+
+                        row_unit = {
+                            "replicate": rep_idx,
+                            "unit": str(unit),
+                            "iteration": iter_val if iter_val > 0 else 1,
+                            "method": "pfilter",
+                            "logLik": unit_avgs[u_i],
+                        }
+                        for name in all_param_names:
+                            if name in unit_params:
+                                row_unit[name] = unit_params[name]
+                            elif name in shared_params:
+                                row_unit[name] = shared_params[name]
+                            else:
+                                row_unit[name] = float("nan")
+                        rows.append(row_unit)
+            # else: ignore unknown methods
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+        # Sort for readability
+        if not df.empty:
+            df = df.sort_values(["replicate", "unit", "iteration"]).reset_index(
+                drop=True
+            )
+        return df
+
+    # TODO: clean up plot_traces function
+    def plot_traces(self, which: str = "shared", show: bool = True):
+        """
+        Plot traces using PanelPomp.traces(). Produces a single figure per call.
+
+        Args:
+            which (str): One of:
+                - "shared": plot all shared values (including shared logLik) faceted by variable
+                - "unitLogLik": plot per-unit logLik (faceted by unit, unit != 'shared')
+                - <unit-specific parameter name>: plot that parameter across units (faceted by unit)
+            show (bool): Whether to display the plot.
+        """
+
+        traces = self.traces()
+        assert isinstance(traces, pd.DataFrame)
+        if traces.empty:
+            print("No trace data to plot.")
+            return
+
+        # Identify columns
+        value_cols = [
+            c
+            for c in traces.columns
+            if c not in ["replicate", "iteration", "method", "unit"]
+        ]
+
+        # Determine shared vs unit-specific parameters using presence on the shared row
+        has_shared_rows = bool((traces["unit"] == "shared").any())
+        shared_params = []
+        if has_shared_rows:
+            shared_rows = traces.loc[traces["unit"] == "shared"]
+            for c in value_cols:
+                if c != "logLik" and pd.notna(shared_rows[c]).any():
+                    shared_params.append(c)
+        else:
+            shared_params = []
+
+        unit_params = [
+            c for c in value_cols if c != "logLik" and c not in shared_params
+        ]
+
+        if which == "shared":
+            if not has_shared_rows:
+                print("No shared rows to plot.")
+                return None
+            shared_vars = (["logLik"] if "logLik" in value_cols else []) + shared_params
+            if len(shared_vars) == 0:
+                print("No shared parameters or logLik to plot.")
+                return None
+
+            df_shared = traces.loc[
+                traces["unit"] == "shared",
+                ["replicate", "iteration", "method", *shared_vars],
+            ]
+            assert isinstance(df_shared, pd.DataFrame)
+            df_shared_long: pd.DataFrame = df_shared.melt(
+                id_vars=["replicate", "iteration", "method"],
+                value_vars=shared_vars,
+                var_name="variable",
+                value_name="value",
+            )
+
+            g = sns.FacetGrid(
+                df_shared_long,
+                col="variable",
+                sharex=True,
+                sharey=False,
+                hue="replicate",
+                col_wrap=3,
+                height=3.5,
+                aspect=1.2,
+                palette="tab10",
+            )
+
+            def facet_plot_shared(data, color, **kwargs):
+                for rep, group in data.groupby("replicate"):
+                    for method in ["mif", "train"]:
+                        sub = group[group["method"] == method]
+                        if len(sub) > 1:
+                            plt.plot(
+                                sub["iteration"],
+                                sub["value"],
+                                "-",
+                                color=color,
+                                alpha=0.8,
+                            )
+                        elif len(sub) == 1:
+                            plt.scatter(
+                                sub["iteration"],
+                                sub["value"],
+                                color=color,
+                                marker="o",
+                                alpha=0.8,
+                            )
+                    sub = group[group["method"] == "pfilter"]
+                    if not sub.empty:
+                        plt.scatter(
+                            sub["iteration"],
+                            sub["value"],
+                            color=color,
+                            marker="o",
+                            edgecolor="k",
+                            zorder=3,
+                        )
+
+            g.map_dataframe(facet_plot_shared)
+            g.add_legend(title="Replicate")
+            g.set_axis_labels("Iteration", "Value")
+            g.set_titles(col_template="{col_name}")
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return g
+
+        if which == "unitLogLik":
+            # Plot per-unit logLik, exclude the shared row
+            df_ul = traces.loc[
+                traces["unit"] != "shared",
+                ["replicate", "iteration", "method", "unit", "logLik"],
+            ].rename(columns={"logLik": "value"})
+            df_ul = df_ul.loc[pd.notna(df_ul["value"])]
+            if bool(df_ul.empty):
+                print("No unit-specific logLik data to plot.")
+                return None
+
+            g = sns.FacetGrid(
+                df_ul,
+                col="unit",
+                sharex=True,
+                sharey=False,
+                hue="replicate",
+                col_wrap=4,
+                height=3.2,
+                aspect=1.1,
+                palette="tab10",
+            )
+
+            def facet_plot_units_ll(data, color, **kwargs):
+                for rep, group in data.groupby("replicate"):
+                    for method in ["mif", "train"]:
+                        sub = group[group["method"] == method]
+                        if len(sub) > 1:
+                            plt.plot(
+                                sub["iteration"],
+                                sub["value"],
+                                "-",
+                                color=color,
+                                alpha=0.8,
+                            )
+                        elif len(sub) == 1:
+                            plt.scatter(
+                                sub["iteration"],
+                                sub["value"],
+                                color=color,
+                                marker="o",
+                                alpha=0.8,
+                            )
+                    sub = group[group["method"] == "pfilter"]
+                    if not sub.empty:
+                        plt.scatter(
+                            sub["iteration"],
+                            sub["value"],
+                            color=color,
+                            marker="o",
+                            edgecolor="k",
+                            zorder=3,
+                        )
+
+            g.map_dataframe(facet_plot_units_ll)
+            g.add_legend(title="Replicate")
+            g.set_axis_labels("Iteration", "logLik")
+            g.set_titles(col_template="{col_name}")
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return g
+
+        # Otherwise, treat 'which' as a unit-specific parameter name
+        if which not in unit_params:
+            raise ValueError(
+                f"'{which}' not found among unit-specific parameters: {unit_params}"
+            )
+
+        df_param = traces.loc[
+            :, ["replicate", "iteration", "method", "unit", which]
+        ].copy()
+        assert isinstance(df_param, pd.DataFrame)
+        df_param = df_param.loc[pd.notna(df_param[which])]
+        if bool(df_param.empty):
+            print(f"No data to plot for unit-specific parameter '{which}'.")
+            return None
+        df_param = df_param.rename(columns={which: "value"})
+
+        g = sns.FacetGrid(
+            df_param,
+            col="unit",
+            sharex=True,
+            sharey=False,
+            hue="replicate",
+            col_wrap=4,
+            height=3.2,
+            aspect=1.1,
+            palette="tab10",
+        )
+
+        def facet_plot_units(data, color, **kwargs):
+            for rep, group in data.groupby("replicate"):
+                for method in ["mif", "train"]:
+                    sub = group[group["method"] == method]
+                    if len(sub) > 1:
+                        plt.plot(
+                            sub["iteration"], sub["value"], "-", color=color, alpha=0.8
+                        )
+                    elif len(sub) == 1:
+                        plt.scatter(
+                            sub["iteration"],
+                            sub["value"],
+                            color=color,
+                            marker="o",
+                            alpha=0.8,
+                        )
+                sub = group[group["method"] == "pfilter"]
+                if not sub.empty:
+                    plt.scatter(
+                        sub["iteration"],
+                        sub["value"],
+                        color=color,
+                        marker="o",
+                        edgecolor="k",
+                        zorder=3,
+                    )
+
+        g.map_dataframe(facet_plot_units)
+        g.add_legend(title="Replicate")
+        g.set_axis_labels("Iteration", which)
+        g.set_titles(col_template="{col_name}")
+        plt.tight_layout()
+        if show:
+            plt.show()
+        return g
+
+    def __getstate__(self):
+        """
+        Custom pickling method to handle wrapped function objects. This is
+        necessary because the JAX-wrapped functions in the Pomp objects are not picklable.
+        """
+        state = self.__dict__.copy()
+
+        # Handle unit_objects by storing their state information
+        if hasattr(self, "unit_objects") and self.unit_objects is not None:
+            unit_objects_state = {}
+            for unit_name, pomp_obj in self.unit_objects.items():
+                # Get the state of each Pomp object
+                unit_objects_state[unit_name] = pomp_obj.__getstate__()
+            state["_unit_objects_state"] = unit_objects_state
+            # Remove the original unit_objects from state
+            state.pop("unit_objects", None)
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling method to reconstruct wrapped function objects. This is
+        necessary because the JAX-wrapped functions in the Pomp objects are not picklable.
+        """
+        # Restore basic attributes
+        self.__dict__.update(state)
+
+        # Reconstruct unit_objects
+        if "_unit_objects_state" in state:
+            unit_objects = {}
+            for unit_name, pomp_state in state["_unit_objects_state"].items():
+                # Create a new Pomp object and restore its state
+                pomp_obj = Pomp.__new__(Pomp)
+                pomp_obj.__setstate__(pomp_state)
+                unit_objects[unit_name] = pomp_obj
+            self.unit_objects = unit_objects
+            # Clean up temporary state
+            del self.__dict__["_unit_objects_state"]
+        else:
+            self.unit_objects = {}

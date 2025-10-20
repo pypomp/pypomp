@@ -1,8 +1,14 @@
 **.DS_Store
 .vscode
+.cursor
 *~
+scratch/
 scratch.py
-test/test_scratch.py
+test/test_scratch
+.cursor
+scratch/
+makefile
+
 
 #### the following is the default Python package gitignore from GitHub ####
 

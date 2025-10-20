@@ -1,34 +1,39 @@
 import jax
-import unittest
 import pypomp as pp
+import pytest
 
 
-class Test_Dacca(unittest.TestCase):
-    def setUp(self):
-        self.dacca = pp.dacca()
-        self.J = 3
-        self.key = jax.random.key(111)
-        self.ys = self.dacca.ys
-
-    def test_dacca_basic(self):
-        # Check whether dacca.mif() finishes running. I think this should be sufficient
-        # to check whether dacca's attributes are set up correctly, as mif uses all of
-        # them.
-        self.dacca.mif(
-            sigmas=0.02,
-            sigmas_init=0.1,
-            J=self.J,
-            thresh=-1,
-            key=self.key,
-            M=1,
-            a=0.9,
-        )
-
-    def test_dacca_nstep(self):
-        # Check that dacca.train() runs without error when nstep is specified.
-        dacca_nstep = pp.dacca(nstep=10, dt=None)
-        dacca_nstep.train(J=self.J, M=1, key=self.key)
+@pytest.fixture(scope="function")
+def simple():
+    dacca = pp.dacca()
+    J = 3
+    key = jax.random.key(111)
+    ys = dacca.ys
+    return dacca, J, key, ys
 
 
-if __name__ == "__main__":
-    unittest.main(argv=[""], verbosity=2, exit=False)
+def test_dacca_basic(simple):
+    # Check whether dacca.mif() finishes running.
+    dacca, J, key, ys = simple
+    dacca.mif(
+        sigmas=0.02,
+        sigmas_init=0.1,
+        J=J,
+        thresh=-1,
+        key=key,
+        M=1,
+        a=0.9,
+    )
+
+
+def test_dacca_nstep():
+    # Check that dacca.train() runs without error when nstep is specified.
+    dacca_nstep = pp.dacca(nstep=10, dt=None)
+    dacca_nstep.train(J=2, M=1, key=jax.random.key(111))
+
+
+def test_dacca_dt():
+    # Check that dacca.train() runs without error when dt is specified and nstep
+    # happens to be the same for every observation interval.
+    dacca_dt = pp.dacca(nstep=None, dt=1 / 240)
+    dacca_dt.train(J=2, M=1, key=jax.random.key(111))

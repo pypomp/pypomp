@@ -202,6 +202,110 @@ class PanelPomp:
             else 0
         )
 
+    @staticmethod
+    def sample_params(
+        param_bounds: dict,
+        units: list[str],
+        n: int,
+        key: jax.Array,
+        shared_names: list[str] | None = None,
+    ) -> tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None]:
+        """
+        Sample n sets of parameters from uniform distributions.
+
+        Args:
+            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds
+            units (list[str]): List of unit names to sample parameters for.
+            n (int): Number of parameter sets to sample
+            key (jax.Array): JAX random key for reproducibility
+            shared_names (list[str] | None): Names of shared parameters. Remaining
+                parameters are unit-specific. If None, all parameters are unit-specific.
+
+
+        Returns:
+            tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None]: Two lists of length n.
+              - First list: shared parameter DataFrames (S,1) with column 'shared' and
+                index shared parameter names; None if no shared parameters were specified.
+              - Second list: unit-specific parameter DataFrames (U*, len(units)) with
+                columns equal to `units` and index unit-specific parameter names; None
+                if no unit-specific parameters were specified.
+        """
+        param_keys = jax.random.split(key, n)
+        param_names = list(param_bounds.keys())
+        if shared_names is not None:
+            unit_specific_names = [
+                name for name in param_names if name not in set(shared_names)
+            ]
+        else:
+            unit_specific_names = list(param_names)
+        shared_param_sets: list[pd.DataFrame] | None = (
+            [] if shared_names is not None and len(shared_names) > 0 else None
+        )
+        unit_specific_param_sets: list[pd.DataFrame] | None = (
+            []
+            if unit_specific_names is not None and len(unit_specific_names) > 0
+            else None
+        )
+
+        for i in range(n):
+            if (
+                shared_names is not None
+                and len(shared_names) > 0
+                and shared_param_sets is not None
+            ):
+                shared_keys = jax.random.split(param_keys[i], len(shared_names))
+                shared_values: list[float] = []
+                for j_idx, param_name in enumerate(shared_names):
+                    lower, upper = param_bounds[param_name]
+                    val = float(
+                        jax.random.uniform(
+                            shared_keys[j_idx], shape=(), minval=lower, maxval=upper
+                        )
+                    )
+                    shared_values.append(val)
+                shared_df = pd.DataFrame(
+                    shared_values,
+                    index=pd.Index(shared_names),
+                    columns=pd.Index(["shared"]),
+                )
+                shared_param_sets.append(shared_df)
+
+            if (
+                unit_specific_names is not None
+                and len(unit_specific_names) > 0
+                and unit_specific_param_sets is not None
+            ):
+                total_needed = len(unit_specific_names) * len(units)
+                unit_keys = jax.random.split(param_keys[i], total_needed)
+                values_by_param: dict[str, list[float]] = {
+                    name: [] for name in unit_specific_names
+                }
+                k = 0
+                for param_name in unit_specific_names:
+                    lower, upper = param_bounds[param_name]
+                    col_values: list[float] = []
+                    for _unit in units:
+                        val = float(
+                            jax.random.uniform(
+                                unit_keys[k], shape=(), minval=lower, maxval=upper
+                            )
+                        )
+                        col_values.append(val)
+                        k += 1
+                    values_by_param[param_name] = col_values
+
+                unit_df: pd.DataFrame | None = pd.DataFrame(
+                    data={
+                        u: [values_by_param[p][ui] for p in unit_specific_names]
+                        for ui, u in enumerate(units)
+                    },
+                    index=pd.Index(unit_specific_names),
+                    columns=pd.Index(units),
+                )
+                unit_specific_param_sets.append(unit_df)
+
+        return shared_param_sets, unit_specific_param_sets
+
     def simulate(
         self,
         key: jax.Array,

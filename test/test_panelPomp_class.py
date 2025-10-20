@@ -288,3 +288,66 @@ def test_pickle_panelpomp(measles_panel_mp):
 
     # check that the unpickled panel can be used for filtering
     unpickled_panel.pfilter(J=2)
+
+
+def test_sample_params(measles_panel_setup2):
+    panel, key = measles_panel_setup2
+    param_bounds = {
+        "R0": [10.0, 60.0],
+        "sigma": [25.0, 100.0],
+        "gamma": [25.0, 320.0],
+        "iota": [0.004, 3.0],
+        "rho": [0.1, 0.9],
+        "sigmaSE": [0.04, 0.1],
+        "psi": [0.05, 3.0],
+        "cohort": [0.1, 0.7],
+        "amplitude": [0.1, 0.6],
+        "S_0": [0.01, 0.07],
+        "E_0": [0.000004, 0.0001],
+        "I_0": [0.000003, 0.001],
+        "R_0": [0.9, 0.99],
+    }
+    shared_names = ["gamma", "cohort"]
+    shared_param_sets, unit_specific_param_sets = panel.sample_params(
+        param_bounds=param_bounds,
+        units=list(panel.unit_objects.keys()),
+        n=2,
+        key=key,
+        shared_names=shared_names,
+    )
+    assert isinstance(shared_param_sets, list)
+    assert isinstance(unit_specific_param_sets, list)
+    assert len(shared_param_sets) == 2
+    assert len(unit_specific_param_sets) == 2
+
+    # Check that shared_param_sets DataFrames have correct index and column in correct order
+    for shared_df in shared_param_sets:
+        # Index should be shared_names, in order
+        assert list(shared_df.index) == shared_names
+        # Only one column which is exactly ["shared"]
+        assert list(shared_df.columns) == ["shared"]
+
+    # For unit_specific_param_sets, check columns and index are correct
+    units = list(panel.unit_objects.keys())
+    unit_specific_names = [
+        name for name in param_bounds if name not in set(shared_names)
+    ]
+    for unit_df in unit_specific_param_sets:
+        # Columns (units) are in the correct order
+        assert list(unit_df.columns) == units
+        # Index should be unit_specific_names, in order
+        assert list(unit_df.index) == unit_specific_names
+
+    # Also check that each value is within the specified bounds
+    for shared_df in shared_param_sets:
+        for name in shared_names:
+            val = shared_df.loc[name, "shared"]
+            lower, upper = param_bounds[name]
+            assert lower <= val <= upper
+
+    for unit_df in unit_specific_param_sets:
+        for param_name in unit_specific_names:
+            lower, upper = param_bounds[param_name]
+            for unit in units:
+                val = unit_df.loc[param_name, unit]
+                assert lower <= val <= upper

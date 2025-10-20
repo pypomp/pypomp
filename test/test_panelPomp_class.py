@@ -272,19 +272,27 @@ def test_pickle_panelpomp(measles_panel_mp):
         original_unit = panel.unit_objects[unit_name]
         unpickled_unit = unpickled_panel.unit_objects[unit_name]
 
-        assert isinstance(unpickled_unit, pp.Pomp)
-
-        assert original_unit.ys.shape == unpickled_unit.ys.shape
-        assert list(original_unit.ys.columns) == list(unpickled_unit.ys.columns)
-
-        assert hasattr(unpickled_unit, "rinit")
-        assert hasattr(unpickled_unit, "rproc")
-        assert hasattr(unpickled_unit, "dmeas")
-
-        assert callable(unpickled_unit.rinit.struct_per)
-        assert callable(unpickled_unit.rproc.struct_per_interp)
-        if unpickled_unit.dmeas is not None:
-            assert callable(unpickled_unit.dmeas.struct_per)
+        # Compare ys values, handling NaN values properly
+        orig_ys_values = original_unit.ys.values
+        unpickled_ys_values = unpickled_unit.ys.values
+        assert orig_ys_values.shape == unpickled_ys_values.shape
+        # Use numpy's array_equal which handles NaN values correctly
+        assert np.array_equal(orig_ys_values, unpickled_ys_values, equal_nan=True)
+        assert original_unit.theta == unpickled_unit.theta
+        assert unpickled_unit.covars is not None
+        assert (
+            original_unit.covars.values.tolist()
+            == unpickled_unit.covars.values.tolist()
+        )
+        assert original_unit.rinit == unpickled_unit.rinit
+        assert original_unit.rproc.original_func == unpickled_unit.rproc.original_func
+        assert original_unit.dmeas == unpickled_unit.dmeas
+        assert original_unit.rproc.dt == unpickled_unit.rproc.dt
+        assert original_unit.results_history == unpickled_unit.results_history
+        assert (
+            original_unit.traces().values.tolist()
+            == unpickled_unit.traces().values.tolist()
+        )
 
     # check that the unpickled panel can be used for filtering
     unpickled_panel.pfilter(J=2)

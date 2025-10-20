@@ -11,17 +11,17 @@ import numpy as np
 
 
 def get_thetas(theta):
-    gamma = jnp.exp(theta[0])
-    m = jnp.exp(theta[1])
-    rho = jnp.exp(theta[2])
-    epsilon = jnp.exp(theta[3])
-    omega = jnp.exp(theta[4])
-    c = jspecial.expit(theta[5])
-    beta_trend = theta[6] / 100
-    sigma = jnp.exp(theta[7])
-    tau = jnp.exp(theta[8])
-    bs = theta[9:15]
-    omegas = theta[15:21]
+    gamma = jnp.exp(theta["gamma"])
+    m = jnp.exp(theta["m"])
+    rho = jnp.exp(theta["rho"])
+    epsilon = jnp.exp(theta["epsilon"])
+    omega = jnp.exp(theta["omega"])
+    c = jspecial.expit(theta["c"])
+    beta_trend = theta["beta_trend"] / 100
+    sigma = jnp.exp(theta["sigma"])
+    tau = jnp.exp(theta["tau"])
+    bs = jnp.array([theta[f"b{i}"] for i in range(1, 7)])
+    omegas = jnp.array([theta[f"omega{i}"] for i in range(1, 7)])
     k = 3
     delta = 0.02
     return (
@@ -131,8 +131,9 @@ theta = dict(
     )
 )
 
+statenames = ["S", "I", "Y", "Mn", "R1", "R2", "R3", "count"]
 
-@partial(RInit, t0=1891.0)
+
 def rinit(theta_, key, covars, t0=None):
     S_0 = 0.621
     I_0 = 0.378
@@ -149,16 +150,25 @@ def rinit(theta_, key, covars, t0=None):
     R3 = pop * R3_0
     Mn = 0
     count = 0
-    return jnp.array([S, I, Y, Mn, R1, R2, R3, count])
+    return {
+        "S": S,
+        "I": I,
+        "Y": Y,
+        "Mn": Mn,
+        "R1": R1,
+        "R2": R2,
+        "R3": R3,
+        "count": count,
+    }
 
 
 def rproc(X_, theta_, key, covars, t, dt):
-    S = X_[0]
-    I = X_[1]
-    Y = X_[2]
-    deaths = X_[3]
-    pts = X_[4:-1]
-    count = X_[-1]
+    S = X_["S"]
+    I = X_["I"]
+    Y = X_["Y"]
+    deaths = X_["Mn"]
+    pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
+    count = X_["count"]
     trend = covars[0]
     dpopdt = covars[1]
     pop = covars[2]
@@ -223,16 +233,25 @@ def rproc(X_, theta_, key, covars, t, dt):
     pts = jnp.clip(pts, 0)
     deaths = jnp.clip(deaths, 0)
 
-    return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([count])])
+    return {
+        "S": S,
+        "I": I,
+        "Y": Y,
+        "Mn": deaths,
+        "R1": pts[0],
+        "R2": pts[1],
+        "R3": pts[2],
+        "count": count,
+    }
 
 
 def rproc_gamma(X_, theta_, key, covars, t, dt):
-    S = X_[0]
-    I = X_[1]
-    Y = X_[2]
-    deaths = X_[3]
-    pts = X_[4:-1]
-    count = X_[-1]
+    S = X_["S"]
+    I = X_["I"]
+    Y = X_["Y"]
+    deaths = X_["Mn"]
+    pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
+    count = X_["count"]
     trend = covars[0]
     dpopdt = covars[1]
     pop = covars[2]
@@ -309,7 +328,16 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     pts = jnp.clip(pts, 0)
     deaths = jnp.clip(deaths, 0)
 
-    return jnp.hstack([jnp.array([S, I, Y, deaths]), pts, jnp.array([count])])
+    return {
+        "S": S,
+        "I": I,
+        "Y": Y,
+        "Mn": deaths,
+        "R1": pts[0],
+        "R2": pts[1],
+        "R3": pts[2],
+        "count": count,
+    }
 
 
 def dmeas_helper(y, deaths, v, tol, ltol):
@@ -322,10 +350,9 @@ def dmeas_helper_tol(y, deaths, v, tol, ltol):
     return jnp.array([ltol])
 
 
-@DMeas
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    deaths = X_[3]
-    count = X_[-1]
+    deaths = X_["Mn"]
+    count = X_["count"]
     tol = 1.0e-18
     ltol = jnp.log(tol)
     (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
@@ -343,9 +370,8 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     )
 
 
-@partial(RMeas, ydim=1)
 def rmeas(X_, theta_, key, covars=None, t=None):
-    deaths = X_[3]
+    deaths = X_["Mn"]
     (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
         get_thetas(theta_)
     )
@@ -391,18 +417,19 @@ def dacca(
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")
 
-    if nstep is not None:
-        rproc = RProc(rproc, nstep=nstep, accumvars=(3,))
-    else:
-        rproc = RProc(rproc, dt=dt, accumvars=(3,))
-
     dacca_obj = Pomp(
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,
         rmeas=rmeas,
         ys=ys,
+        t0=1891.0,
+        nstep=nstep,
+        dt=dt,
+        accumvars=(3,),
+        ydim=1,
         theta=theta,
         covars=covars,
+        statenames=statenames,
     )
     return dacca_obj

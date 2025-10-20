@@ -43,23 +43,30 @@ theta = {
     "V_0": float(jnp.log(7.66e-3**2)),
 }
 
+statenames = ["V", "S"]
 
-@partial(RInit, t0=0.0)
+
 def rinit(theta_, key, covars=None, t0=None):
-    V_0 = jnp.exp(theta_[5])
+    V_0 = jnp.exp(theta_["V_0"])
     S_0 = 1105  # Initial price
-    return jnp.array([V_0, S_0])
+    return {"V": V_0, "S": S_0}
 
 
-@partial(RProc, nstep=1)
 def rproc(X_, theta_, key, covars, t=None, dt=None):
-    V, S = X_
-    mu, kappa, theta, xi, rho, V_0 = theta_
+    V, S = X_["V"], X_["S"]
+    mu, kappa, theta_val, xi, rho, V_0 = (
+        theta_["mu"],
+        theta_["kappa"],
+        theta_["theta"],
+        theta_["xi"],
+        theta_["rho"],
+        theta_["V_0"],
+    )
     y_prev = covars
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     kappa = jnp.exp(kappa)
-    theta = jnp.exp(theta)
+    theta_val = jnp.exp(theta_val)
     xi = jnp.exp(xi)
     rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Wiener process generation (Gaussian noise)
@@ -68,18 +75,17 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
     # dWv with correlation
     dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
-    V = V + kappa * (theta - V) + xi * jnp.sqrt(V) * dWv
+    V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
-    # Results must be returned as a JAX array
-    return jnp.array([V, S]).squeeze()
+    # Results must be returned as a dict
+    return {"V": V, "S": S}
 
 
-@DMeas
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    V, S = X_
+    V, S = X_["V"], X_["S"]
     # Transform mu onto the natural scale
-    mu = jnp.exp(theta_[0])
+    mu = jnp.exp(theta_["mu"])
     return jax.scipy.stats.norm.logpdf(Y_, mu - 0.5 * V, jnp.sqrt(V))
 
 
@@ -106,5 +112,15 @@ def spx():
     """
     assert isinstance(sp500, pd.DataFrame)
     return Pomp(
-        ys=sp500, theta=theta, rinit=rinit, rproc=rproc, dmeas=dmeas, covars=covars
+        ys=sp500,
+        theta=theta,
+        t0=0.0,
+        nstep=1,
+        dt=None,
+        ydim=1,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        covars=covars,
+        statenames=statenames,
     )

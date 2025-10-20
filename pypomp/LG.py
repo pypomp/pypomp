@@ -17,10 +17,10 @@ def get_thetas(theta):
     """
     Cast a theta vector into A, C, Q, and R matrices as if casting iron.
     """
-    A = theta[0:4].reshape(2, 2)
-    C = theta[4:8].reshape(2, 2)
-    Q = theta[8:12].reshape(2, 2)
-    R = theta[12:16].reshape(2, 2)
+    A = jnp.array([theta["A1"], theta["A2"], theta["A3"], theta["A4"]]).reshape(2, 2)
+    C = jnp.array([theta["C1"], theta["C2"], theta["C3"], theta["C4"]]).reshape(2, 2)
+    Q = jnp.array([theta["Q1"], theta["Q2"], theta["Q3"], theta["Q4"]]).reshape(2, 2)
+    R = jnp.array([theta["R1"], theta["R2"], theta["R3"], theta["R4"]]).reshape(2, 2)
     return A, C, Q, R
 
 
@@ -32,32 +32,33 @@ def transform_thetas(A, C, Q, R):
 
 
 # TODO: Add custom starting position.
-@partial(RInit, t0=0.0)
 def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    return jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
+    result = jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
+    return {"state_0": result[0], "state_1": result[1]}
 
 
-@partial(RProc, nstep=1)
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    return jax.random.multivariate_normal(key=key, mean=A @ X_, cov=Q)
+    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    result = jax.random.multivariate_normal(key=key, mean=A @ X_array, cov=Q)
+    return {"state_0": result[0], "state_1": result[1]}
 
 
-@DMeas
 def dmeas(Y_, X_, theta_, covars=None, t=None):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_, R)
+    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_array, R)
 
 
-@partial(RMeas, ydim=2)
 def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    return jax.random.multivariate_normal(key=key, mean=C @ X_, cov=R)
+    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
 
 
 def LG(
@@ -110,8 +111,13 @@ def LG(
         dmeas=dmeas,
         rmeas=rmeas,
         ys=ys_temp,
+        t0=0.0,
+        nstep=1,
+        dt=None,
+        ydim=2,
         theta=theta,
         covars=None,
+        statenames=["state_0", "state_1"],
     )
     _, Y_sims = LG_obj_temp.simulate(key=key)
     Y_sims = Y_sims.rename(columns={"obs_0": "Y1", "obs_1": "Y2"})
@@ -125,8 +131,13 @@ def LG(
         dmeas=dmeas,
         rmeas=rmeas,
         ys=Y_sims,
+        t0=0.0,
+        nstep=1,
+        dt=None,
+        ydim=2,
         theta=theta,
         covars=None,
+        statenames=["state_0", "state_1"],
     )
 
     return LG_obj

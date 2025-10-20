@@ -20,6 +20,7 @@ from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
+from .parameter_trans import parameter_trans, materialize_partrans
 
 
 class Pomp:
@@ -83,6 +84,8 @@ class Pomp:
         dmeas: DMeas | None = None,
         rmeas: RMeas | None = None,
         covars: pd.DataFrame | None = None,
+        partrans=None,
+        paramnames=None,
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -459,6 +462,7 @@ class Pomp:
             sigmas_init,
             self.rproc.accumvars,
             self._covars_extended,
+            self.partrans,
             M,
             a,
             J,
@@ -827,7 +831,6 @@ class Pomp:
                 ):
                     last_iter = global_iters.get(rep_idx, 1) - 1
                     avg_loglik = float(logmeanexp(logLik_arr))
-
                     replicate_list.append(rep_idx)
                     iteration_list.append(last_iter if last_iter > 0 else 1)
                     method_list.append("pfilter")
@@ -987,12 +990,12 @@ class Pomp:
             aspect=1.2,
             palette="tab10",
         )
-
         # Plot lines for mif/train, dots for pfilter
         def facet_plot(data, color, **kwargs):
             # Lines for mif/train
             for rep, group in data.groupby("replicate"):
                 for method in ["mif", "train"]:
+                    # Dots for pfilter
                     sub = group[group["method"] == method]
                     if len(sub) > 1:
                         plt.plot(
@@ -1006,7 +1009,6 @@ class Pomp:
                             marker="o",
                             alpha=0.8,
                         )
-                # Dots for pfilter
                 sub = group[group["method"] == "pfilter"]
                 if not sub.empty:
                     plt.scatter(
@@ -1070,7 +1072,6 @@ class Pomp:
         necessary because the JAX-wrapped functions are not picklable.
         """
         state = self.__dict__.copy()
-
         # Store function names and parameters instead of the wrapped objects
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
@@ -1095,7 +1096,6 @@ class Pomp:
             state["_rmeas_func_name"] = original_func.__name__
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
-
         # Remove the wrapped objects from state
         state.pop("rinit", None)
         state.pop("rproc", None)
@@ -1111,7 +1111,6 @@ class Pomp:
         """
         # Restore basic attributes
         self.__dict__.update(state)
-
         # Reconstruct rinit
         if "_rinit_func_name" in state:
             module = importlib.import_module(state["_rinit_module"])
@@ -1120,7 +1119,6 @@ class Pomp:
                 self.rinit = obj
             else:
                 self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
-
         # Reconstruct rproc
         if "_rproc_func_name" in state:
             module = importlib.import_module(state["_rproc_module"])
@@ -1134,7 +1132,6 @@ class Pomp:
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = partial(RProc, **kwargs)(obj)
-
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:
             module = importlib.import_module(state["_dmeas_module"])
@@ -1143,7 +1140,6 @@ class Pomp:
                 self.dmeas = obj
             else:
                 self.dmeas = DMeas(obj)
-
         # Reconstruct rmeas
         if "_rmeas_func_name" in state:
             module = importlib.import_module(state["_rmeas_module"])
@@ -1152,13 +1148,11 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
-
         # Set rmeas or dmeas to None if not set
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
             self.dmeas = None
-
         # Clean up temporary state variables
         for key in [
             "_rinit_func_name",

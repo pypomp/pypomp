@@ -8,6 +8,9 @@ from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
+from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
+
+_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
 
 
 def _mif_internal(
@@ -24,11 +27,12 @@ def _mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    M: int,  # static
-    a: float,
-    J: int,  # static
-    thresh: float,
-    key: jax.Array,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
+    M: int = 1,
+    a: float = 1.0,
+    J: int = 1,
+    thresh: float = 0.0,
+    key: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     times = times.astype(float)
     n_theta = theta.shape[-1]
@@ -54,6 +58,7 @@ def _mif_internal(
         covars_extended=covars_extended,
         thresh=thresh,
         a=a,
+        partrans=partrans,
     )
 
     (params, logliks, key) = jax.lax.fori_loop(
@@ -67,10 +72,10 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,),
+    in_axes=(1,) + (None,) * 17 + (0,),
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
+_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16))
 
 
 def _perfilter_internal(
@@ -91,13 +96,10 @@ def _perfilter_internal(
     covars_extended: jax.Array | None,
     thresh: float,
     a: float,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
 ):
-    """
-    Internal function for the perturbed particle filtering algorithm, which calls
-    function 'perfilter_helper' iteratively.
-    """
     (params, logliks, key) = inputs
-    thetas = params[m]
+    thetas = _pt_forward(params[m], partrans)
     loglik = 0.0
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
@@ -109,7 +111,8 @@ def _perfilter_internal(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF = rinitializers(thetas, keys, covars0, t0)
+    thetas_nat0 = _pt_inverse(thetas, partrans)
+    particlesF = rinitializers(thetas_nat0, keys, covars0, t0)
 
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
@@ -128,6 +131,7 @@ def _perfilter_internal(
         thresh=thresh,
         m=m,
         a=a,
+        partrans=partrans,
     )
     (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = (
         jax.lax.fori_loop(
@@ -139,7 +143,8 @@ def _perfilter_internal(
     )
 
     logliks = logliks.at[m].set(-loglik)
-    params = params.at[m + 1].set(thetas)
+    thetas_nat_end = _pt_inverse(thetas, partrans)
+    params = params.at[m + 1].set(thetas_nat_end)
     return params, logliks, key
 
 
@@ -167,6 +172,7 @@ def _perfilter_helper(
     thresh: float,
     m: int,
     a: float,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
 ) -> tuple[
     jax.Array,
     jax.Array,

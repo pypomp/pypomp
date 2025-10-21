@@ -602,6 +602,7 @@ class PanelPomp:
             sigmas_init,
             accumvars,
             covars_per_unit,
+            rep_unit.partrans,
             M,
             a,
             J,

@@ -20,6 +20,7 @@ from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
+from .parameter_trans import parameter_trans, materialize_partrans
 
 
 def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
@@ -105,6 +106,8 @@ class Pomp:
         ydim: int | None = None,
         accumvars: tuple[int, ...] | None = None,
         covars: pd.DataFrame | None = None,
+        partrans=None,
+        paramnames=None, 
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -197,6 +200,9 @@ class Pomp:
             order="linear",
         )
         self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
+        names = paramnames or list(self.theta[0].keys())
+        partrans_spec = partrans or parameter_trans()
+        self.partrans = materialize_partrans(partrans_spec, names)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -296,6 +302,7 @@ class Pomp:
                     covars_extended=self._covars_extended,
                     accumvars=self.rproc.accumvars,
                     alpha=alpha,
+                    partrans=self.partrans,
                     key=k,
                 )
             )
@@ -507,6 +514,7 @@ class Pomp:
             sigmas_init,
             self.rproc.accumvars,
             self._covars_extended,
+            self.partrans,
             M,
             a,
             J,
@@ -636,13 +644,18 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
-        keys = jnp.array(jax.random.split(new_key, len(theta_list)))
+        rep = len(theta_list)
+        keys = jax.random.split(new_key, rep)
+        if getattr(keys, "ndim", 0) == 0:
+            keys = keys[None]
 
         # Convert theta_list to array format for vmapping
         theta_array = jnp.array(
             [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
 
+        # Convert theta_list to array format for vmapping
+        theta_array = jnp.stack([jnp.array(list(theta_i.values()), dtype=jnp.float32) for theta_i in theta_list],axis=0)
         n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
@@ -671,6 +684,7 @@ class Pomp:
             keys,
             n_monitors,
             n_obs,
+            partrans=self.partrans,
         )
 
         joined_array = xr.DataArray(

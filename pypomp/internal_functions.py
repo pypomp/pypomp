@@ -365,3 +365,20 @@ def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
     factor = a ** (1 / 50)
     alpha = factor ** (nt / ntimes + m - 1)
     return alpha
+
+
+def _validate_sigmas(
+    param_names: list[str], sigmas: float | dict[str, float]
+) -> jax.Array:
+    if isinstance(sigmas, float):
+        return jnp.full(len(param_names), sigmas)
+    elif isinstance(sigmas, dict):
+        if not all(param_name in sigmas for param_name in param_names):
+            raise ValueError("All parameter names must be in sigmas dictionary")
+        if not all(isinstance(sigmas[param_name], float) for param_name in param_names):
+            raise ValueError("All values in sigmas dictionary must be floats")
+        return jnp.array(
+            [sigmas[param_name] for param_name in param_names], dtype=float
+        )
+    else:
+        raise ValueError("sigmas must be a float or a dictionary")

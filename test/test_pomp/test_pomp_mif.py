@@ -10,7 +10,8 @@ def simple_setup():
     LG = pp.LG()
     sigmas = 0.02
     sigmas_init = 0.1
-    sigmas_long = jnp.array([0.02] * (len(LG.theta[0]) - 1) + [0])
+    sigmas_long = {param_name: 0.02 for param_name in LG.param_names}
+    sigmas_long[LG.param_names[-1]] = 0.0
     J = 2
     key = jax.random.key(111)
     a = 0.5
@@ -61,14 +62,12 @@ def test_class_mif_sigmas_array(simple):
         sigmas=sigmas_long,
         sigmas_init=1e-20,
         J=J,
-        M=2,
-        a=0.9,
+        M=M,
+        a=a,
         key=key,
     )
     mif_out2 = LG.results_history[-1]
     traces2 = mif_out2["traces"]
-    # check that sigmas isn't modified by mif when passed as an array
-    assert (sigmas_long == jnp.array([0.02] * (len(LG.theta[0]) - 1) + [0])).all()
     # check that the last parameter is never perturbed (assuming it's the 16th parameter)
     param_names = list(LG.theta[0].keys())
     last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
@@ -78,6 +77,60 @@ def test_class_mif_sigmas_array(simple):
     first_param = param_names[0]
     first_param_trace = traces2.sel(replicate=0, variable=first_param).values
     assert (first_param_trace != first_param_trace[0]).any()
+
+
+def test_mif_order_of_sigmas_consistency(simple):
+    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M = simple
+    theta = LG.theta
+
+    param_names = LG.param_names
+
+    base_sigma = 0.01
+    unique_sigmas = [base_sigma + 0.001 * i for i in range(len(param_names))]
+    sigmas_dict = {k: v for k, v in zip(param_names, unique_sigmas)}
+
+    reversed_param_names = list(reversed(param_names))
+    sigmas_dict_reversed = {k: sigmas_dict[k] for k in reversed_param_names}
+
+    LG.mif(
+        theta=theta,
+        J=J,
+        M=M,
+        sigmas=sigmas_dict,
+        sigmas_init=sigmas_init,
+        a=a,
+        key=key,
+    )
+    traces_ref = LG.results_history[-1]["traces"]
+
+    LG.results_history.clear()
+
+    LG.mif(
+        theta=theta,
+        J=J,
+        M=M,
+        sigmas=sigmas_dict_reversed,
+        sigmas_init=sigmas_init,
+        a=a,
+        key=key,
+    )
+    traces_rev = LG.results_history[-1]["traces"]
+
+    for param in param_names:
+        arr1 = traces_ref.sel(replicate=0, variable=param).values
+        arr2 = traces_rev.sel(replicate=0, variable=param).values
+        assert jnp.allclose(arr1, arr2), (
+            f"Traces for param {param} differed after reordering sigmas dict keys:\n"
+            f"default: {arr1}\nreversed: {arr2}"
+        )
+    arr1 = traces_ref.sel(replicate=0, variable="logLik").values
+    arr2 = traces_rev.sel(replicate=0, variable="logLik").values
+    nan_mask1 = jnp.isnan(arr1)
+    nan_mask2 = jnp.isnan(arr2)
+    assert jnp.array_equal(nan_mask1, nan_mask2), (
+        f"NaN positions for logLik differed after reordering sigmas dict keys:\n"
+        f"default NaN mask: {nan_mask1}\nreversed NaN mask: {nan_mask2}"
+    )
 
 
 def test_order_of_parameters_consistency(simple):

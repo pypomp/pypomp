@@ -18,7 +18,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _calc_ys_covars
+from .internal_functions import _calc_ys_covars, _validate_sigmas
 from .util import logmeanexp, logmeanexp_se
 
 
@@ -446,8 +446,8 @@ class Pomp:
         self,
         J: int,
         M: int,
-        sigmas: float | jax.Array,
-        sigmas_init: float | jax.Array,
+        sigmas: float | dict[str, float],
+        sigmas_init: float | dict[str, float],
         a: float,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
@@ -462,8 +462,8 @@ class Pomp:
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            sigmas (float | jax.Array): Perturbation factor for parameters.
-            sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
+            sigmas (float | dict[str, float]): Perturbation factor for parameters.
+            sigmas_init (float | dict[str, float]): Initial perturbation factor for parameters.
             a (float): A fraction specifying the amount to cool sigmas and sigmas_init
                 over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
@@ -482,6 +482,8 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
+        sigmas_array = _validate_sigmas(self.param_names, sigmas)
+        sigmas_init_array = _validate_sigmas(self.param_names, sigmas_init)
         theta_array = jnp.array(
             [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
@@ -503,8 +505,8 @@ class Pomp:
             self.rinit.struct_per,
             self.rproc.struct_per_interp,
             self.dmeas.struct_per,
-            sigmas,
-            sigmas_init,
+            sigmas_array,
+            sigmas_init_array,
             self.rproc.accumvars,
             self._covars_extended,
             M,

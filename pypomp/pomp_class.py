@@ -18,8 +18,9 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _calc_ys_covars, _validate_sigmas
+from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
+from .rw_sd_class import RWSigma
 
 
 def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
@@ -446,8 +447,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        sigmas: float | dict[str, float],
-        sigmas_init: float | dict[str, float],
+        rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
@@ -462,10 +462,8 @@ class Pomp:
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            sigmas (float | dict[str, float]): Perturbation factor for parameters.
-            sigmas_init (float | dict[str, float]): Initial perturbation factor for parameters.
-            a (float): A fraction specifying the amount to cool sigmas and sigmas_init
-                over 50 iterations.
+            rw_sd (RWSigma): Random walk sigma object.
+            a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, list[dict], optional): Initial parameters for the POMP model.
@@ -482,8 +480,9 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-        sigmas_array = _validate_sigmas(self.param_names, sigmas)
-        sigmas_init_array = _validate_sigmas(self.param_names, sigmas_init)
+        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
+            param_names=self.param_names
+        )
         theta_array = jnp.array(
             [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
@@ -565,8 +564,7 @@ class Pomp:
                 "theta": theta_list,
                 "J": J,
                 "M": M,
-                "sigmas": sigmas,
-                "sigmas_init": sigmas_init,
+                "rw_sd": rw_sd,
                 "a": a,
                 "thresh": thresh,
                 "key": old_key,

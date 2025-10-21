@@ -13,7 +13,7 @@ from .mif import _jv_panel_mif_internal
 from .util import logmeanexp
 import numpy as np
 import time
-from .internal_functions import _validate_sigmas
+from .rw_sd_class import RWSigma
 
 
 class PanelPomp:
@@ -443,8 +443,7 @@ class PanelPomp:
         self,
         J: int,
         M: int,
-        sigmas: float | dict[str, float],
-        sigmas_init: float | dict[str, float],
+        rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
         shared: pd.DataFrame | list[pd.DataFrame] | None = None,
@@ -459,9 +458,8 @@ class PanelPomp:
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            sigmas (float | dict[str, float]): Perturbation factor for parameters.
-            sigmas_init (float | dict[str, float]): Initial perturbation factor for parameters.
-            a (float): Decay factor for sigmas.
+            rw_sd (RWSigma): Random walk sigma object.
+            a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array): The random key for reproducibility.
             shared (pd.DataFrame | list[pd.DataFrame], optional): Shared parameters
                 involved in the POMP model. If provided, overrides the shared
@@ -482,8 +480,9 @@ class PanelPomp:
         shared, unit_specific, _ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
-        sigmas_array = _validate_sigmas(self.param_names, sigmas)
-        sigmas_init_array = _validate_sigmas(self.param_names, sigmas_init)
+        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
+            param_names=self.param_names
+        )
         key, old_key = self._update_fresh_key(key)
         if J < 1:
             raise ValueError("J should be greater than 0.")
@@ -684,8 +683,7 @@ class PanelPomp:
                 "unit_specific": unit_specific,
                 "J": J,
                 "thresh": thresh,
-                "sigmas": sigmas,
-                "sigmas_init": sigmas_init,
+                "rw_sd": rw_sd,
                 "M": M,
                 "a": a,
                 "block": block,

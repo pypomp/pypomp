@@ -7,7 +7,7 @@ import pickle
 
 
 def test_get_unit_parameters(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+    panel, rw_sd, key = measles_panel_setup2
     params = panel.get_unit_parameters(unit="London")
     assert isinstance(params, list)
     assert isinstance(params[0], dict)
@@ -42,7 +42,7 @@ def test_results(measles_panel_mp):
 
 
 def test_fresh_key(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+    panel, rw_sd, key = measles_panel_setup2
     J = 2
     panel.pfilter(J=J, key=key)
     assert not np.array_equal(
@@ -141,7 +141,7 @@ def test_pickle_panelpomp(measles_panel_mp):
 
 
 def test_sample_params(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+    panel, rw_sd, key = measles_panel_setup2
     param_bounds = {
         "R0": [10.0, 60.0],
         "sigma": [25.0, 100.0],

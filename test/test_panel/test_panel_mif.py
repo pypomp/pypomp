@@ -2,13 +2,11 @@ import xarray as xr
 
 
 def test_mif(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+    panel, rw_sd, key = measles_panel_setup2
     J = 2
-    sigmas = 0.02
-    sigmas_init = 0.1
     M = 2
     a = 0.5
-    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
     result = panel.results_history[-1]
 
     assert result["method"] == "mif"
@@ -19,8 +17,7 @@ def test_mif(measles_panel_setup2):
     assert result["J"] == J
     assert result["M"] == M
     assert result["a"] == a
-    assert result["sigmas"] == sigmas
-    assert result["sigmas_init"] == sigmas_init
+    assert result["rw_sd"] == rw_sd
     assert isinstance(result["shared_traces"], xr.DataArray)
     assert isinstance(result["unit_traces"], xr.DataArray)
     assert isinstance(result["logLiks"], xr.DataArray)

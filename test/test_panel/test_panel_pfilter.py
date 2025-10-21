@@ -2,7 +2,7 @@ import xarray as xr
 
 
 def test_pfilter(measles_panel_setup2):
-    panel, key = measles_panel_setup2
+    panel, rw_sd, key = measles_panel_setup2
     panel.pfilter(J=2, key=key)
     assert isinstance(panel.results_history[-1]["logLiks"], xr.DataArray)
     assert panel.results_history[-1]["logLiks"].dims == ("theta", "unit", "replicate")

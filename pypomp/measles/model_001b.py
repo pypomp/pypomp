@@ -26,9 +26,13 @@ param_names = (
     "R_0",  # 12
 )
 
+statenames = ["S", "E", "I", "R", "W", "C"]
+
 
 def rinit(theta_, key, covars, t0=None):
-    exp_theta_9_13 = jnp.exp(theta_[9:])
+    exp_theta_9_13 = jnp.exp(
+        jnp.array([theta_["S_0"], theta_["E_0"], theta_["I_0"], theta_["R_0"]])
+    )
     S_0, E_0, I_0, R_0 = exp_theta_9_13 / jnp.sum(exp_theta_9_13)
     m = covars[0] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
@@ -37,19 +41,29 @@ def rinit(theta_, key, covars, t0=None):
     R = jnp.round(m * R_0)
     W = 0
     C = 0
-    return jnp.array([S, E, I, R, W, C])
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
 def rproc(X_, theta_, key, covars, t, dt):
-    S, E, I, R, W, C = X_
-    exp_theta = jnp.exp(theta_[jnp.array([0, 1, 2, 3, 5])])
+    S, E, I, R, W, C = X_["S"], X_["E"], X_["I"], X_["R"], X_["W"], X_["C"]
+    exp_theta = jnp.exp(
+        jnp.array(
+            [
+                theta_["R0"],
+                theta_["sigma"],
+                theta_["gamma"],
+                theta_["iota"],
+                theta_["sigmaSE"],
+            ]
+        )
+    )
     R0 = exp_theta[0]
     sigma = exp_theta[1]
     gamma = exp_theta[2]
     iota = exp_theta[3]
     sigmaSE = exp_theta[4]
-    cohort = expit(theta_[7])
-    amplitude = expit(theta_[8])
+    cohort = expit(theta_["cohort"])
+    amplitude = expit(theta_["amplitude"])
     pop = covars[0]
     birthrate = covars[1]
     mu = 0.02
@@ -120,13 +134,13 @@ def rproc(X_, theta_, key, covars, t, dt):
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
     C = C + trans_I[0]
-    return jnp.array([S, E, I, R, W, C])
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    rho = expit(theta_[4])
-    psi = jnp.exp(theta_[6])
-    C = X_[5]
+    rho = expit(theta_["rho"])
+    psi = jnp.exp(theta_["psi"])
+    C = X_["C"]
     tol = 1.0e-18
 
     m = rho * C
@@ -151,9 +165,9 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
-    rho = expit(theta_[4])
-    psi = jnp.exp(theta_[6])
-    C = X_[5]
+    rho = expit(theta_["rho"])
+    psi = jnp.exp(theta_["psi"])
+    C = X_["C"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-18  # 1.0e-18 in He10 model; 0.0 is 'correct'

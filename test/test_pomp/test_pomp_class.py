@@ -226,9 +226,13 @@ def test_prune(simple):
     LG2 = LG.__class__(
         ys=LG.ys.copy(),
         theta=LG.theta[0].copy(),
-        rinit=LG.rinit,
-        rproc=LG.rproc,
-        dmeas=LG.dmeas,
+        rinit=LG.rinit.original_func,
+        rproc=LG.rproc.original_func,
+        dmeas=LG.dmeas.original_func,
+        t0=LG.t0,
+        nstep=LG.rproc.nstep,
+        ydim=LG.rmeas.ydim,
+        statenames=["state_0", "state_1"],
     )
     with pytest.raises(IndexError):
         LG2.prune(n=1)

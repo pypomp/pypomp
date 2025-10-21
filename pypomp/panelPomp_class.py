@@ -494,7 +494,7 @@ class PanelPomp:
         # Assume all units share the same dt_array_extended, nstep_array, t0, and times
         dt_array_extended = rep_unit._dt_array_extended
         nstep_array = rep_unit._nstep_array
-        t0 = rep_unit.rinit.t0
+        t0 = rep_unit.t0
         times = jnp.array(rep_unit.ys.index)
 
         if rep_unit.dmeas is None:

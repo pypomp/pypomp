@@ -6,49 +6,62 @@ import pytest
 def test_RInit_value_error():
     # Test that an error is thrown with incorrect arguments
     bad_lambdas = [
-        lambda foo, key, covars, t0: jnp.array([0]),
-        lambda theta_, foo, covars, t0: jnp.array([0]),
-        lambda theta_, key, foo, t0: jnp.array([0]),
-        lambda theta_, key, covars, foo: jnp.array([0]),
+        lambda foo, key, covars, t0: {"state_0": 0},
+        lambda theta_, foo, covars, t0: {"state_0": 0},
+        lambda theta_, key, foo, t0: {"state_0": 0},
+        lambda theta_, key, covars, foo: {"state_0": 0},
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RInit(fn, t0=0)
+            pp.RInit(fn, statenames=["state_0"], param_names=["param_0"])
     # Test that correct arguments run without error
-    pp.RInit(lambda theta_, key, covars, t0: jnp.array([0]), t0=0)
+    pp.RInit(
+        lambda theta_, key, covars, t0: {"state_0": 0},
+        statenames=["state_0"],
+        param_names=["param_0"],
+    )
 
 
 def test_RProc_value_error():
     # Test that an error is thrown with incorrect arguments
     bad_lambdas = [
-        lambda foo, theta_, key, covars, t, dt: jnp.array([0]),
-        lambda X_, foo, key, covars, t, dt: jnp.array([0]),
-        lambda X_, theta_, foo, covars, t, dt: jnp.array([0]),
-        lambda X_, theta_, key, foo, t, dt: jnp.array([0]),
-        lambda X_, theta_, key, covars, foo, dt: jnp.array([0]),
-        lambda X_, theta_, key, covars, t, foo: jnp.array([0]),
+        lambda foo, theta_, key, covars, t, dt: {"state_0": 0},
+        lambda X_, foo, key, covars, t, dt: {"state_0": 0},
+        lambda X_, theta_, foo, covars, t, dt: {"state_0": 0},
+        lambda X_, theta_, key, foo, t, dt: {"state_0": 0},
+        lambda X_, theta_, key, covars, foo, dt: {"state_0": 0},
+        lambda X_, theta_, key, covars, t, foo: {"state_0": 0},
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RProc(fn, nstep=1)
+            pp.RProc(fn, statenames=["state_0"], param_names=["param_0"], nstep=1)
     # Test that correct arguments run without error
-    pp.RProc(lambda X_, theta_, key, covars, t, dt: jnp.array([0]), nstep=1)
+    pp.RProc(
+        lambda X_, theta_, key, covars, t, dt: {"state_0": 0},
+        statenames=["state_0"],
+        param_names=["param_0"],
+        nstep=1,
+    )
 
 
 def test_DMeas_value_error():
     # Test that an error is thrown with incorrect arguments
     bad_lambdas = [
-        lambda foo, X_, theta_, covars, t: jnp.array([0]),
-        lambda Y_, foo, theta_, covars, t: jnp.array([0]),
-        lambda Y_, X_, foo, covars, t: jnp.array([0]),
-        lambda Y_, X_, theta_, foo, t: jnp.array([0]),
-        lambda Y_, X_, theta_, covars, foo: jnp.array([0]),
+        lambda foo, X_, theta_, covars, t: 0.0,
+        lambda Y_, foo, theta_, covars, t: 0.0,
+        lambda Y_, X_, foo, covars, t: 0.0,
+        lambda Y_, X_, theta_, foo, t: 0.0,
+        lambda Y_, X_, theta_, covars, foo: 0.0,
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.DMeas(fn)
+            pp.DMeas(fn, statenames=["state_0"], param_names=["param_0"])
     # Test that correct arguments run without error
-    pp.DMeas(lambda Y_, X_, theta_, covars, t: jnp.array([0]))
+    pp.DMeas(
+        lambda Y_, X_, theta_, covars, t: 0.0,
+        statenames=["state_0"],
+        param_names=["param_0"],
+    )
 
 
 def test_RMeas_value_error():
@@ -62,6 +75,11 @@ def test_RMeas_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RMeas(fn, ydim=1)
+            pp.RMeas(fn, ydim=1, statenames=["state_0"], param_names=["param_0"])
     # Test that correct arguments run without error
-    pp.RMeas(lambda X_, theta_, key, covars, t: jnp.array([0]), ydim=1)
+    pp.RMeas(
+        lambda X_, theta_, key, covars, t: jnp.array([0]),
+        ydim=1,
+        statenames=["state_0"],
+        param_names=["param_0"],
+    )

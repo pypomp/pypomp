@@ -7,10 +7,7 @@ import pypomp.measles.model_001c as m001c
 from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
-from pypomp.model_struct import RInit
-from pypomp.model_struct import RProc
-from pypomp.model_struct import DMeas
-from pypomp.model_struct import RMeas
+import copy
 
 
 # Not sure if this is the best way to implement this.
@@ -40,7 +37,7 @@ class UKMeasles:
         A dictionary with the same structure as UKMeasles.data, but with the
         data subsetted to only include the given units.
         """
-        data = UKMeasles.data
+        data = copy.deepcopy(UKMeasles.data)
 
         if clean:
             # London 1955-08-12   124
@@ -223,8 +220,14 @@ class UKMeasles:
             ys=dat_filtered,
             theta=theta,
             covars=covar_df,
-            rinit=RInit(mod.rinit, t0=t0),
-            rproc=RProc(mod.rproc, dt=dt, accumvars=(4, 5)),
-            dmeas=DMeas(mod.dmeas),
-            rmeas=RMeas(mod.rmeas, ydim=1),
+            t0=t0,
+            nstep=None,
+            dt=dt,
+            ydim=1,
+            accumvars=(4, 5),
+            statenames=mod.statenames,
+            rinit=mod.rinit,
+            rproc=mod.rproc,
+            dmeas=mod.dmeas,
+            rmeas=mod.rmeas,
         )

@@ -1,6 +1,6 @@
 import jax
 import pytest
-
+import numpy as np
 import pypomp as pp
 
 
@@ -47,3 +47,35 @@ def test_invalid_GD_input(simple):
     with pytest.raises(ValueError):
         # Check that an error is thrown when J is not positive
         LG.train(J=0, M=M, scale=True, ls=True, key=key)
+
+        # INSERT_YOUR_CODE
+
+
+def test_train_param_order_invariance(simple):
+    LG, ys, covars, theta, J, key, M = simple
+    LG.train(
+        J=J,
+        M=M,
+        optimizer="Newton",
+        scale=True,
+        ls=False,
+        n_monitors=0,
+        key=key,
+        theta=theta,
+    )
+    out1 = LG.results_history[-1]["traces"].values
+    param_keys = list(theta[0].keys())
+    rev_keys = list(reversed(param_keys))
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
+    LG.train(
+        J=J,
+        M=M,
+        optimizer="Newton",
+        scale=True,
+        ls=False,
+        n_monitors=0,
+        key=key,
+        theta=permuted_theta,
+    )
+    out2 = LG.results_history[-1]["traces"].values
+    np.testing.assert_allclose(out1, out2, atol=1e-7)

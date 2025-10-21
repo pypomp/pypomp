@@ -4,7 +4,7 @@ This module implements the OOP structure for POMP models.
 
 import importlib
 import time
-from functools import partial
+from typing import Callable
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -21,6 +21,22 @@ from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
 from .parameter_trans import parameter_trans, materialize_partrans
+
+
+def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
+    """
+    Convert a theta dictionary to a JAX array using canonical parameter ordering.
+
+    Args:
+        theta_dict: Dictionary mapping parameter names to values
+        param_names: List of parameter names in canonical order
+
+    Returns:
+        JAX array with parameter values in canonical order
+    """
+    # Reorder dict to match canonical order
+    ordered_values = [theta_dict[name] for name in param_names]
+    return jnp.array(ordered_values)
 
 
 class Pomp:
@@ -79,10 +95,16 @@ class Pomp:
         self,
         ys: pd.DataFrame,
         theta: dict | list[dict],
-        rinit: RInit,
-        rproc: RProc,
-        dmeas: DMeas | None = None,
-        rmeas: RMeas | None = None,
+        statenames: list[str],
+        t0: float,
+        rinit: Callable,
+        rproc: Callable,
+        dmeas: Callable | None = None,
+        rmeas: Callable | None = None,
+        nstep: int | None = None,
+        dt: float | None = None,
+        ydim: int | None = None,
+        accumvars: tuple[int, ...] | None = None,
         covars: pd.DataFrame | None = None,
         partrans=None,
         paramnames=None, 
@@ -93,57 +115,82 @@ class Pomp:
         Args:
             ys (pd.DataFrame): The measurement data frame. The row index must contain the
                 observation times.
-            rinit (RInit): Simulator for the process model.
-            rproc (RProc): Basic component of the simulator for the process
-                model.
-            dmeas (DMeas): Basic component of the density evaluation for the
-                measurement model.
-            rmeas (RMeas): Measurement simulator.
             theta (dict or list[dict]): Parameters involved in the POMP model. Each
                 value should be a float. Can be a single dict or a list of dicts.
+            rinit (Callable): Initial state simulator function.
+            rproc (Callable): Process simulator function.
+            dmeas (Callable, optional): Measurement density function.
+            rmeas (Callable, optional): Measurement simulator function.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
+            statenames (list[str], optional): List of state variable names. If None,
+                will be inferred from the rinit function.
         """
-        if not isinstance(rinit, RInit):
-            raise TypeError("rinit must be an instance of the class RInit")
-        if not isinstance(rproc, RProc):
-            raise TypeError("rproc must be an instance of the class RProc")
-        if dmeas is None and rmeas is None:
-            raise ValueError("You must supply at least one of dmeas or rmeas")
-        else:
-            if dmeas is not None and not isinstance(dmeas, DMeas):
-                raise TypeError("dmeas must be an instance of the class DMeas")
-            if rmeas is not None and not isinstance(rmeas, RMeas):
-                raise TypeError("rmeas must be an instance of the class RMeas")
-
-        self._validate_theta(theta)
-
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        self.ys = ys
+        self._validate_theta(theta)
+
         if isinstance(theta, dict):
             self.theta = [theta]
         elif isinstance(theta, list):
             self.theta = theta
         else:
             raise TypeError("theta must be a dictionary or a list of dictionaries")
-        self.rinit = rinit
-        self.rproc = rproc
-        self.dmeas = dmeas
-        self.rmeas = rmeas
+
+        # Extract parameter names from first theta dict
+        self.param_names = list(self.theta[0].keys())
+
+        # Validate that all theta dicts have the same keys
+        for theta_dict in self.theta:
+            if set(theta_dict.keys()) != set(self.param_names):
+                raise ValueError("All theta dictionaries must have the same keys")
+
+        # If statenames not provided, we need to infer them
+        if statenames is None:
+            raise ValueError(
+                "statenames must be provided as a list of state variable names"
+            )
+
+        if not isinstance(statenames, list) or not all(
+            isinstance(name, str) for name in statenames
+        ):
+            raise ValueError("statenames must be a list of strings")
+
+        self.statenames = statenames
+        self.ys = ys
         self.covars = covars
+        self.t0 = float(t0)
         self.results_history = []
         self.fresh_key = None
+
+        self.rinit = RInit(rinit, statenames, self.param_names)
+        self.rproc = RProc(rproc, statenames, self.param_names, nstep, dt, accumvars)
+
+        if dmeas is not None:
+            self.dmeas = DMeas(dmeas, statenames, self.param_names)
+        else:
+            self.dmeas = None
+
+        if rmeas is not None:
+            if ydim is None:
+                raise ValueError("rmeas function must have ydim attribute")
+            self.rmeas = RMeas(rmeas, ydim, statenames, self.param_names)
+        else:
+            self.rmeas = None
+
+        if self.dmeas is None and self.rmeas is None:
+            raise ValueError("You must supply at least one of dmeas or rmeas")
+
         (
             self._covars_extended,
             self._dt_array_extended,
             self._nstep_array,
             self._max_steps_per_interval,
         ) = _calc_ys_covars(
-            t0=self.rinit.t0,
+            t0=self.t0,
             times=np.array(self.ys.index),
             ys=np.array(self.ys),
             ctimes=np.array(self.covars.index) if self.covars is not None else None,
@@ -242,11 +289,11 @@ class Pomp:
         for theta_i, k in zip(theta_list, keys):
             results.append(
                 -_mop_internal(
-                    theta=jnp.array(list(theta_i.values())),
+                    theta=_theta_dict_to_array(theta_i, self.param_names),
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     nstep_array=self._nstep_array,
-                    t0=self.rinit.t0,
+                    t0=self.t0,
                     times=jnp.array(self.ys.index),
                     J=J,
                     rinitializer=self.rinit.struct_pf,
@@ -317,7 +364,7 @@ class Pomp:
 
         thetas_repl = jnp.vstack(
             [
-                jnp.tile(jnp.array(list(theta_i.values())), (reps, 1))
+                jnp.tile(_theta_dict_to_array(theta_i, self.param_names), (reps, 1))
                 for theta_i in theta_list
             ]
         )
@@ -328,7 +375,7 @@ class Pomp:
             thetas_repl,
             self._dt_array_extended,
             self._nstep_array,
-            self.rinit.t0,
+            self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
             J,
@@ -442,20 +489,22 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-        theta_array = jnp.stack([jnp.array(list(theta_i.values()), dtype=jnp.float32) for theta_i in theta_list],axis=0 )
+        theta_array = jnp.array(
+            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+        )
+
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list))
 
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self._dt_array_extended,
             self._nstep_array,
-            self.rinit.t0,
+            self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
             self.rinit.struct_per,
@@ -475,7 +524,7 @@ class Pomp:
 
         final_theta_ests = []
         n_paramsets = len(theta_list)
-        param_names = list(theta_list[0].keys())
+        param_names = self.param_names
         trace_vars = ["logLik"] + param_names
         trace_data = np.zeros((n_paramsets, M + 1, len(trace_vars)), dtype=float)
 
@@ -600,6 +649,10 @@ class Pomp:
         if getattr(keys, "ndim", 0) == 0:
             keys = keys[None]
 
+        # Convert theta_list to array format for vmapping
+        theta_array = jnp.array(
+            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+        )
 
         # Convert theta_list to array format for vmapping
         theta_array = jnp.stack([jnp.array(list(theta_i.values()), dtype=jnp.float32) for theta_i in theta_list],axis=0)
@@ -611,7 +664,7 @@ class Pomp:
             jnp.array(self.ys),
             self._dt_array_extended,
             self._nstep_array,
-            self.rinit.t0,
+            self.t0,
             jnp.array(self.ys.index),
             self.rinit.struct_pf,
             self.rproc.struct_pf_interp,
@@ -646,12 +699,12 @@ class Pomp:
             coords={
                 "replicate": range(0, len(theta_list)),
                 "iteration": range(0, M + 1),
-                "variable": ["logLik"] + list(theta_list[0].keys()),
+                "variable": ["logLik"] + self.param_names,
             },
         )
 
         self.theta = [
-            dict(zip(theta_list[0].keys(), theta_ests[i, -1, :].tolist()))
+            dict(zip(self.param_names, theta_ests[i, -1, :].tolist()))
             for i in range(len(theta_list))
         ]
 
@@ -718,7 +771,7 @@ class Pomp:
             )
 
         thetas_array = jnp.vstack(
-            [jnp.array(list(theta_i.values())) for theta_i in theta_list]
+            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
 
         new_key, old_key = self._update_fresh_key(key)
@@ -729,7 +782,7 @@ class Pomp:
             self.rproc.struct_pf_interp,
             self.rmeas.struct_pf,
             thetas_array,
-            self.rinit.t0,
+            self.t0,
             times_array,
             self._dt_array_extended,
             self._nstep_array,
@@ -760,7 +813,7 @@ class Pomp:
             df.insert(0, "replicate", theta_idx_l)
             return df
 
-        times0 = np.concatenate([np.array([self.rinit.t0]), np.array(times_array)])
+        times0 = np.concatenate([np.array([self.t0]), np.array(times_array)])
         X_sims_long = _to_long(X_sims, times0, "state")
         Y_sims_long = _to_long(Y_sims, np.array(times_array), "obs")
 
@@ -1086,13 +1139,13 @@ class Pomp:
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
             state["_rinit_func_name"] = original_func.__name__
-            state["_rinit_t0"] = self.rinit.t0
             state["_rinit_module"] = original_func.__module__
 
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
             state["_rproc_func_name"] = original_func.__name__
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
+            state["_rproc_nstep"] = getattr(self.rproc, "nstep", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
             state["_rproc_module"] = original_func.__module__
 
@@ -1130,7 +1183,7 @@ class Pomp:
             if isinstance(obj, RInit):
                 self.rinit = obj
             else:
-                self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
+                self.rinit = RInit(obj, self.statenames, self.param_names)
 
         # Reconstruct rproc
         if "_rproc_func_name" in state:
@@ -1142,9 +1195,13 @@ class Pomp:
                 kwargs = {}
                 if state["_rproc_dt"] is not None:
                     kwargs["dt"] = state["_rproc_dt"]
+                # If nstep is provided, but dt is not, use nstep. This prevents an error
+                # being thrown by RProc when both are not None.
+                if state["_rproc_nstep"] is not None and state["_rproc_dt"] is None:
+                    kwargs["nstep"] = state["_rproc_nstep"]
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
-                self.rproc = partial(RProc, **kwargs)(obj)
+                self.rproc = RProc(obj, self.statenames, self.param_names, **kwargs)
 
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:
@@ -1153,7 +1210,7 @@ class Pomp:
             if isinstance(obj, DMeas):
                 self.dmeas = obj
             else:
-                self.dmeas = DMeas(obj)
+                self.dmeas = DMeas(obj, self.statenames, self.param_names)
 
         # Reconstruct rmeas
         if "_rmeas_func_name" in state:
@@ -1162,7 +1219,9 @@ class Pomp:
             if isinstance(obj, RMeas):
                 self.rmeas = obj
             else:
-                self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
+                self.rmeas = RMeas(
+                    obj, state["_rmeas_ydim"], self.statenames, self.param_names
+                )
 
         # Set rmeas or dmeas to None if not set
         if not hasattr(self, "rmeas"):
@@ -1173,10 +1232,10 @@ class Pomp:
         # Clean up temporary state variables
         for key in [
             "_rinit_func_name",
-            "_rinit_t0",
             "_rinit_module",
             "_rproc_func_name",
             "_rproc_dt",
+            "_rproc_nstep",
             "_rproc_accumvars",
             "_rproc_module",
             "_dmeas_func_name",

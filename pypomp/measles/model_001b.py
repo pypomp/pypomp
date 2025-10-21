@@ -34,7 +34,7 @@ def rinit(theta_, key, covars, t0=None):
         jnp.array([theta_["S_0"], theta_["E_0"], theta_["I_0"], theta_["R_0"]])
     )
     S_0, E_0, I_0, R_0 = exp_theta_9_13 / jnp.sum(exp_theta_9_13)
-    m = covars[0] / (S_0 + E_0 + I_0 + R_0)
+    m = covars["pop"] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
     E = jnp.round(m * E_0)
     I = jnp.round(m * I_0)
@@ -64,8 +64,8 @@ def rproc(X_, theta_, key, covars, t, dt):
     sigmaSE = exp_theta[4]
     cohort = expit(theta_["cohort"])
     amplitude = expit(theta_["amplitude"])
-    pop = covars[0]
-    birthrate = covars[1]
+    pop = covars["pop"]
+    birthrate = covars["birthrate"]
     mu = 0.02
 
     t_mod = t - jnp.floor(t)

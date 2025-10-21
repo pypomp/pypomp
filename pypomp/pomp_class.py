@@ -164,18 +164,27 @@ class Pomp:
         self.results_history = []
         self.fresh_key = None
 
-        self.rinit = RInit(rinit, statenames, self.param_names)
-        self.rproc = RProc(rproc, statenames, self.param_names, nstep, dt, accumvars)
+        if covars is not None:
+            self.covar_names = list(covars.columns)
+        else:
+            self.covar_names = []
+
+        self.rinit = RInit(rinit, statenames, self.param_names, self.covar_names)
+        self.rproc = RProc(
+            rproc, statenames, self.param_names, self.covar_names, nstep, dt, accumvars
+        )
 
         if dmeas is not None:
-            self.dmeas = DMeas(dmeas, statenames, self.param_names)
+            self.dmeas = DMeas(dmeas, statenames, self.param_names, self.covar_names)
         else:
             self.dmeas = None
 
         if rmeas is not None:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
-            self.rmeas = RMeas(rmeas, ydim, statenames, self.param_names)
+            self.rmeas = RMeas(
+                rmeas, ydim, statenames, self.param_names, self.covar_names
+            )
         else:
             self.rmeas = None
 
@@ -1169,7 +1178,9 @@ class Pomp:
             if isinstance(obj, RInit):
                 self.rinit = obj
             else:
-                self.rinit = RInit(obj, self.statenames, self.param_names)
+                self.rinit = RInit(
+                    obj, self.statenames, self.param_names, self.covar_names
+                )
 
         # Reconstruct rproc
         if "_rproc_func_name" in state:
@@ -1187,7 +1198,9 @@ class Pomp:
                     kwargs["nstep"] = state["_rproc_nstep"]
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
-                self.rproc = RProc(obj, self.statenames, self.param_names, **kwargs)
+                self.rproc = RProc(
+                    obj, self.statenames, self.param_names, self.covar_names, **kwargs
+                )
 
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:
@@ -1196,7 +1209,9 @@ class Pomp:
             if isinstance(obj, DMeas):
                 self.dmeas = obj
             else:
-                self.dmeas = DMeas(obj, self.statenames, self.param_names)
+                self.dmeas = DMeas(
+                    obj, self.statenames, self.param_names, self.covar_names
+                )
 
         # Reconstruct rmeas
         if "_rmeas_func_name" in state:
@@ -1206,7 +1221,11 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = RMeas(
-                    obj, state["_rmeas_ydim"], self.statenames, self.param_names
+                    obj,
+                    state["_rmeas_ydim"],
+                    self.statenames,
+                    self.param_names,
+                    self.covar_names,
                 )
 
         # Set rmeas or dmeas to None if not set

@@ -1,15 +1,18 @@
+# pypomp/mif.py
 from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
+
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
-from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
 
+# ---- Parameter transforms: minimal integration ----
+from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
 _IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
 
 
@@ -20,25 +23,31 @@ def _mif_internal(
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    rinitializers: Callable,  # static
-    rprocesses_interp: Callable,  # static
-    dmeasures: Callable,  # static
+    rinitializers: Callable,         # static
+    rprocesses_interp: Callable,     # static
+    dmeasures: Callable,             # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    partrans: ParTrans = _IDENTITY_PARTRANS,
-    M: int = 1,
+    partrans: ParTrans = _IDENTITY_PARTRANS,   # optional parameter transform (identity by default)
+    M: int = 1,                      # static
     a: float = 1.0,
-    J: int = 1,
+    J: int = 1,                      # static
     thresh: float = 0.0,
     key: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
+    """
+    IF2 core for a single set of parameters (shape (J, n_theta)).
+    Runs M iterations and returns the negative log-likelihoods per iteration
+    and the updated particle parameters.
+    """
     times = times.astype(float)
     n_theta = theta.shape[-1]
     logliks = jnp.zeros(M)
     params = jnp.zeros((M, J, n_theta))
 
+    # Row 0 holds the initial parameters (natural scale)
     params = jnp.concatenate([theta.reshape((1, J, n_theta)), params], axis=0)
 
     _perfilter_internal_2 = partial(
@@ -70,12 +79,18 @@ def _mif_internal(
     return logliks, params
 
 
+# vmap: replicate along theta's 2nd axis (index 1); vmap over keys along axis 0
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 17 + (0,),
+    in_axes=(1,) + (None,) * 17 + (0,),  # matches the function signature (17 None entries)
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16))
+# jit: static argument indices (0-based)
+# 6=rinitializers, 7=rprocesses_interp, 8=dmeasures, 13=partrans, 14=M, 16=J
+_jv_mif_internal = jit(
+    _vmapped_mif_internal,
+    static_argnums=(6, 7, 8, 13, 14, 16),
+)
 
 
 def _perfilter_internal(
@@ -98,21 +113,25 @@ def _perfilter_internal(
     a: float,
     partrans: ParTrans = _IDENTITY_PARTRANS,
 ):
+    """
+    One IF2 iteration: run a perturbed particle filter once over the observation times.
+    """
     (params, logliks, key) = inputs
-    thetas = _pt_forward(params[m], partrans)
+    thetas = params[m]  # natural scale
     loglik = 0.0
+
+    # ---- Initial perturbation on the estimation scale ----
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
         _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
     )
-    thetas = thetas + sigmas_init_cooled * jax.random.normal(
-        shape=thetas.shape, key=subkey
-    )
+    z0 = _pt_forward(thetas, partrans)
+    z0 = z0 + sigmas_init_cooled * jax.random.normal(shape=z0.shape, key=subkey)
+    thetas = _pt_inverse(z0, partrans)  # map back to natural scale
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    thetas_nat0 = _pt_inverse(thetas, partrans)
-    particlesF = rinitializers(thetas_nat0, keys, covars0, t0)
+    particlesF = rinitializers(thetas, keys, covars0, t0)
 
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
@@ -143,8 +162,7 @@ def _perfilter_internal(
     )
 
     logliks = logliks.at[m].set(-loglik)
-    thetas_nat_end = _pt_inverse(thetas, partrans)
-    params = params.at[m + 1].set(thetas_nat_end)
+    params = params.at[m + 1].set(thetas)  # store in natural scale
     return params, logliks, key
 
 
@@ -184,16 +202,18 @@ def _perfilter_helper(
     int,
 ]:
     """
-    Runs one iteration of the perturbed particle filtering algorithm.
+    One predict–update step within the i-th observation interval, followed by
+    optional resampling.
     """
     (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx) = inputs
     J = len(particlesF)
 
+    # ---- At the start of the interval: perturb parameters on the estimation scale ----
     sigmas_cooled = _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a) * sigmas
     key, subkey = jax.random.split(key)
-    thetas = thetas + sigmas_cooled * jnp.array(
-        jax.random.normal(shape=thetas.shape, key=subkey)
-    )
+    z = _pt_forward(thetas, partrans)
+    z = z + sigmas_cooled * jnp.array(jax.random.normal(shape=z.shape, key=subkey))
+    thetas = _pt_inverse(z, partrans)  # map back to natural scale for rproc/dmeas
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
 
@@ -237,14 +257,17 @@ def _perfilter_helper(
     return (t, particlesF, thetas, loglik, norm_weights, counts, key, t_idx)
 
 
+# --------------------------------
+# Panel IF2 (optional): integrate partrans with minimal changes as well
+# --------------------------------
 def _panel_mif_internal(
     shared_array: jax.Array,  # (n_shared, J)
-    unit_array: jax.Array,  # (n_spec, J, U)
+    unit_array: jax.Array,    # (n_spec, J, U)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
-    ys_per_unit: jax.Array,  # (U, T, ...)
+    ys_per_unit: jax.Array,   # (U, T, ...)
     rinitializers: Callable,
     rprocesses_interp: Callable,
     dmeasures: Callable,
@@ -252,22 +275,26 @@ def _panel_mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_per_unit: jax.Array | None,  # (U, ...) or None
-    M: int,
-    a: float,
-    J: int,
-    U: int,
-    thresh: float,
-    key: jax.Array,
+    partrans: ParTrans = _IDENTITY_PARTRANS,
+    M: int = 1,
+    a: float = 1.0,
+    J: int = 1,
+    U: int = 1,
+    thresh: float = 0.0,
+    key: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compiled Panel IF2 across M iterations and U units.
 
     Returns
-        shared_array_final: (n_shared, J)
-        unit_array_final: (n_spec, J, U)
-        shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
-        unit_traces: (M+1, n_spec+1, U) where [:,0,:] is per-unit logLik per iter, [:,1:,:] are means
-        unit_logliks: (U,) sum of logLik across M iterations
+    -------
+    shared_array_final : (n_shared, J)
+    unit_array_final   : (n_spec, J, U)
+    shared_traces      : (M+1, n_shared+1); [:,0] is the sum of per-unit logLik in iteration m,
+                         [:,1:] are means of shared parameters across particles.
+    unit_traces        : (M+1, n_spec+1, U); [:,0,:] is per-unit logLik, [:,1:,:] are means of
+                         unit-specific parameters across particles.
+    unit_logliks       : (U,) sum of per-unit logLik across M iterations.
     """
     n_shared = shared_array.shape[0]
     n_spec = unit_array.shape[0]
@@ -310,7 +337,7 @@ def _panel_mif_internal(
                 key_u,
             ) = inner_carry
 
-            # Build per-unit thetas: (J, n_shared + n_spec)
+            # Build per-unit theta matrix: (J, n_shared + n_spec)
             thetas_u = (
                 jnp.concatenate([shared_array_u.T, unit_array_u[:, :, u].T], axis=1)
                 if (n_shared + n_spec) > 0
@@ -342,6 +369,7 @@ def _panel_mif_internal(
                 sigmas_init_cooled,
                 accumvars,
                 covars_u,
+                partrans,
                 1,
                 a,
                 J,
@@ -349,10 +377,9 @@ def _panel_mif_internal(
                 subkey,
             )
             nLL_u = nLL_u[0]
-            # skips initial parameters from output:
-            updated_thetas_u = updated_thetas_u[1]
+            updated_thetas_u = updated_thetas_u[1]  # skip the initial parameters
 
-            # Split back into shared and specific
+            # Split back into shared and unit-specific blocks
             def update_shared(ppm, ut):
                 return ut[:, :n_shared].T
 
@@ -452,17 +479,13 @@ def _panel_mif_internal(
 
 
 _vmapped_panel_mif_internal = jax.vmap(
-    _panel_mif_internal, in_axes=((0, 0) + (None,) * 17 + (0,))
+    _panel_mif_internal,
+    in_axes=((0, 0) + (None,) * 18 + (0,)),  # 21 args in total: 2*(0) + 18*None + 1*(0)
 )
 
+# static arg indices (0-based):
+# 7=rinitializers, 8=rprocesses_interp, 9=dmeasures, 14=partrans, 15=M, 17=J, 18=U
 _jv_panel_mif_internal = jit(
     _vmapped_panel_mif_internal,
-    static_argnums=(
-        7,  # rinitializers
-        8,  # rprocesses_interp
-        9,  # dmeasures
-        14,  # M
-        16,  # J
-        17,  # U
-    ),
+    static_argnums=(7, 8, 9, 14, 15, 17, 18),
 )

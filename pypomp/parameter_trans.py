@@ -1,7 +1,7 @@
+# pypomp/parameter_trans.py
 from typing import Callable, NamedTuple, Optional, Tuple, Sequence
 import jax
 import jax.numpy as jnp
-
 
 class ParTrans(NamedTuple):
     is_custom: bool

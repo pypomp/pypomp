@@ -85,7 +85,7 @@ class Pomp:
         rmeas: RMeas | None = None,
         covars: pd.DataFrame | None = None,
         partrans=None,
-        paramnames=None,
+        paramnames=None, 
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -153,6 +153,9 @@ class Pomp:
             order="linear",
         )
         self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
+        names = paramnames or list(self.theta[0].keys())
+        partrans_spec = partrans or parameter_trans()
+        self.partrans = materialize_partrans(partrans_spec, names)
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -252,6 +255,7 @@ class Pomp:
                     covars_extended=self._covars_extended,
                     accumvars=self.rproc.accumvars,
                     alpha=alpha,
+                    partrans=self.partrans,
                     key=k,
                 )
             )
@@ -438,8 +442,7 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
-
+        theta_array = jnp.stack([jnp.array(list(theta_i.values()), dtype=jnp.float32) for theta_i in theta_list],axis=0 )
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -592,11 +595,14 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
-        keys = jnp.array(jax.random.split(new_key, len(theta_list)))
+        rep = len(theta_list)
+        keys = jax.random.split(new_key, rep)
+        if getattr(keys, "ndim", 0) == 0:
+            keys = keys[None]
+
 
         # Convert theta_list to array format for vmapping
-        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
-
+        theta_array = jnp.stack([jnp.array(list(theta_i.values()), dtype=jnp.float32) for theta_i in theta_list],axis=0)
         n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
@@ -625,6 +631,7 @@ class Pomp:
             keys,
             n_monitors,
             n_obs,
+            partrans=self.partrans,
         )
 
         joined_array = xr.DataArray(
@@ -831,6 +838,7 @@ class Pomp:
                 ):
                     last_iter = global_iters.get(rep_idx, 1) - 1
                     avg_loglik = float(logmeanexp(logLik_arr))
+
                     replicate_list.append(rep_idx)
                     iteration_list.append(last_iter if last_iter > 0 else 1)
                     method_list.append("pfilter")
@@ -990,12 +998,12 @@ class Pomp:
             aspect=1.2,
             palette="tab10",
         )
+
         # Plot lines for mif/train, dots for pfilter
         def facet_plot(data, color, **kwargs):
             # Lines for mif/train
             for rep, group in data.groupby("replicate"):
                 for method in ["mif", "train"]:
-                    # Dots for pfilter
                     sub = group[group["method"] == method]
                     if len(sub) > 1:
                         plt.plot(
@@ -1009,6 +1017,7 @@ class Pomp:
                             marker="o",
                             alpha=0.8,
                         )
+                # Dots for pfilter
                 sub = group[group["method"] == "pfilter"]
                 if not sub.empty:
                     plt.scatter(
@@ -1072,6 +1081,7 @@ class Pomp:
         necessary because the JAX-wrapped functions are not picklable.
         """
         state = self.__dict__.copy()
+
         # Store function names and parameters instead of the wrapped objects
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
@@ -1096,6 +1106,7 @@ class Pomp:
             state["_rmeas_func_name"] = original_func.__name__
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
+
         # Remove the wrapped objects from state
         state.pop("rinit", None)
         state.pop("rproc", None)
@@ -1111,6 +1122,7 @@ class Pomp:
         """
         # Restore basic attributes
         self.__dict__.update(state)
+
         # Reconstruct rinit
         if "_rinit_func_name" in state:
             module = importlib.import_module(state["_rinit_module"])
@@ -1119,6 +1131,7 @@ class Pomp:
                 self.rinit = obj
             else:
                 self.rinit = partial(RInit, t0=state["_rinit_t0"])(obj)
+
         # Reconstruct rproc
         if "_rproc_func_name" in state:
             module = importlib.import_module(state["_rproc_module"])
@@ -1132,6 +1145,7 @@ class Pomp:
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = partial(RProc, **kwargs)(obj)
+
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:
             module = importlib.import_module(state["_dmeas_module"])
@@ -1140,6 +1154,7 @@ class Pomp:
                 self.dmeas = obj
             else:
                 self.dmeas = DMeas(obj)
+
         # Reconstruct rmeas
         if "_rmeas_func_name" in state:
             module = importlib.import_module(state["_rmeas_module"])
@@ -1148,11 +1163,13 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = partial(RMeas, ydim=state["_rmeas_ydim"])(obj)
+
         # Set rmeas or dmeas to None if not set
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
             self.dmeas = None
+
         # Clean up temporary state variables
         for key in [
             "_rinit_func_name",

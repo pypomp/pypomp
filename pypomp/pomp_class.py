@@ -482,14 +482,15 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
+        theta_array = jnp.array(
+            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+        )
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list))
 
         nLLs, theta_ests = _jv_mif_internal(
@@ -515,7 +516,7 @@ class Pomp:
 
         final_theta_ests = []
         n_paramsets = len(theta_list)
-        param_names = list(theta_list[0].keys())
+        param_names = self.param_names
         trace_vars = ["logLik"] + param_names
         trace_data = np.zeros((n_paramsets, M + 1, len(trace_vars)), dtype=float)
 
@@ -638,7 +639,9 @@ class Pomp:
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
         # Convert theta_list to array format for vmapping
-        theta_array = jnp.array([list(theta_i.values()) for theta_i in theta_list])
+        theta_array = jnp.array(
+            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+        )
 
         n_obs = len(self.ys)
 
@@ -682,12 +685,12 @@ class Pomp:
             coords={
                 "replicate": range(0, len(theta_list)),
                 "iteration": range(0, M + 1),
-                "variable": ["logLik"] + list(theta_list[0].keys()),
+                "variable": ["logLik"] + self.param_names,
             },
         )
 
         self.theta = [
-            dict(zip(theta_list[0].keys(), theta_ests[i, -1, :].tolist()))
+            dict(zip(self.param_names, theta_ests[i, -1, :].tolist()))
             for i in range(len(theta_list))
         ]
 

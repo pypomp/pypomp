@@ -22,3 +22,15 @@ def test_class_basic(simple):
     assert val[0].shape == ()
     assert jnp.isfinite(val[0].item())
     assert val[0].dtype == jnp.float32
+
+
+def test_mop_param_order_invariance(simple):
+    LG, J, ys, theta, covars, sigmas, key = simple
+    val1 = LG.mop(J=J, key=key, theta=theta)
+    param_keys = list(theta[0].keys())
+    rev_keys = list(reversed(param_keys))
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
+    val2 = LG.mop(J=J, key=key, theta=permuted_theta)
+    assert jnp.allclose(val1[0], val2[0], atol=1e-7), (
+        f"MOP result changed after theta reordering: {val1[0]} vs {val2[0]}"
+    )

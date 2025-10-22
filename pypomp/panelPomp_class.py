@@ -815,13 +815,13 @@ class PanelPomp:
         for rep in range(n_reps):
             shared_loglik = np.sum(
                 [
-                    logmeanexp(logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan)
+                    logmeanexp(logLiks[rep, unit_idx, :], ignore_nan=ignore_nan)
                     for unit_idx in range(len(unit_names))
                 ]
             )
             for unit_idx, unit in enumerate(unit_names):
                 unit_loglik = logmeanexp(
-                    logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan
+                    logLiks[rep, unit_idx, :], ignore_nan=ignore_nan
                 )
 
                 if shared_params and rep < len(shared_params):

@@ -304,7 +304,8 @@ def _panel_mif_internal(
                 key_u,
             ) = inner_carry
 
-            # Build per-unit thetas: (J, n_shared + n_spec)
+            # Build per-unit thetas: (J, n_shared + n_spec).
+            # shared MUST come first for dictionary keys to line up with correct values later.
             thetas_u = (
                 jnp.concatenate([shared_array_u.T, unit_array_u[:, :, u].T], axis=1)
                 if (n_shared + n_spec) > 0

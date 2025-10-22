@@ -41,17 +41,17 @@ class PanelPomp:
             shared, unit_specific, Pomp_dict
         )
 
-        self.unit_objects = unit_objects
-        self.shared = shared
-        self.unit_specific = unit_specific
+        self.unit_objects: dict[str, Pomp] = unit_objects
+        self.shared: list[pd.DataFrame] | None = shared
+        self.unit_specific: list[pd.DataFrame] | None = unit_specific
         self.results_history = []
-        self.fresh_key = None
+        self.fresh_key: jax.Array | None = None
         shared_param_names, unit_param_names = self._get_param_names(
             shared, unit_specific
         )
-        self.shared_param_names = shared_param_names
-        self.unit_param_names = unit_param_names
-        self.param_names = shared_param_names + unit_param_names
+        self.canonical_shared_param_names: list[str] = shared_param_names
+        self.canonical_unit_param_names: list[str] = unit_param_names
+        self.canonical_param_names: list[str] = shared_param_names + unit_param_names
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
@@ -160,6 +160,24 @@ class PanelPomp:
             [] if unit_specific is None else list(unit_specific[0].index)
         )
         return shared_lst, unit_specific_lst
+
+    def _dataframe_to_array_canonical(
+        self, df: pd.DataFrame, param_names: list[str], column_name: str
+    ) -> jnp.ndarray:
+        """
+        Convert a DataFrame column to a JAX array using canonical parameter ordering.
+
+        Args:
+            df: DataFrame with parameter names as index
+            param_names: List of parameter names in canonical order
+            column_name: Name of the column to extract values from
+
+        Returns:
+            JAX array with parameter values in canonical order
+        """
+        # Reorder DataFrame to match canonical order
+        ordered_values = [df.loc[name, column_name] for name in param_names]
+        return jnp.array(ordered_values, dtype=float)
 
     def get_unit_parameters(
         self,
@@ -481,7 +499,7 @@ class PanelPomp:
             shared, unit_specific, self.unit_objects
         )
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
-            param_names=self.param_names
+            param_names=self.canonical_param_names
         )
         key, old_key = self._update_fresh_key(key)
         if J < 1:
@@ -539,14 +557,14 @@ class PanelPomp:
             shared_array = jnp.zeros((n_reps, 0, J))
             shared_index: list[str] = []
         else:
-            shared_index = list(shared_list[0].index)
+            shared_index = self.canonical_shared_param_names
             n_shared = len(shared_index)
             shared_array = jnp.stack(
                 [
                     jnp.tile(
-                        jnp.array(df["shared"].to_numpy().astype(float)).reshape(
-                            n_shared, 1
-                        ),
+                        self._dataframe_to_array_canonical(
+                            df, self.canonical_shared_param_names, "shared"
+                        ).reshape(n_shared, 1),
                         (1, J),
                     )
                     for df in shared_list
@@ -560,16 +578,16 @@ class PanelPomp:
             unit_array = jnp.zeros((n_reps, 0, J, U))
             spec_index: list[str] = []
         else:
-            spec_index = list(spec_list[0].index)
+            spec_index = self.canonical_unit_param_names
             n_spec = len(spec_index)
             unit_array = jnp.stack(
                 [
                     jnp.stack(
                         [
                             jnp.tile(
-                                jnp.array(df[unit].to_numpy().astype(float)).reshape(
-                                    n_spec, 1
-                                ),
+                                self._dataframe_to_array_canonical(
+                                    df, self.canonical_unit_param_names, unit
+                                ).reshape(n_spec, 1),
                                 (1, J),
                             )
                             for unit in unit_names

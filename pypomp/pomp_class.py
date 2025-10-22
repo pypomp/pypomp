@@ -23,7 +23,7 @@ from .util import logmeanexp, logmeanexp_se
 from .rw_sd_class import RWSigma
 
 # NEW: minimal parameter-transform support
-from .parameter_trans import ParTrans, _pt_inverse
+from .parameter_trans import ParTrans, _pt_inverse, _pt_forward
 _IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)  # identity transform
 
 
@@ -301,9 +301,12 @@ class Pomp:
         keys = jax.random.split(new_key, len(theta_list))
         results = []
         for theta_i, k in zip(theta_list, keys):
+            theta_vec_nat = _theta_dict_to_array(theta_i, self.param_names)   # natural
+            theta_vec_est = _pt_forward(theta_vec_nat, self.partrans)   
+            
             results.append(
                 -_mop_internal(
-                    theta=_theta_dict_to_array(theta_i, self.param_names),  # estimation scale
+                    theta=theta_vec_est, 
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     nstep_array=self._nstep_array,
@@ -661,15 +664,17 @@ class Pomp:
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
         # Convert theta_list to array format for vmapping (estimation scale)
-        theta_array = jnp.array(
+        theta_array_nat = jnp.array(
             [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
+
+        theta_array_est = _pt_forward(theta_array_nat, self.partrans) 
 
         n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
-            theta_array,
+            theta_array_est, 
             jnp.array(self.ys),
             self._dt_array_extended,
             self._nstep_array,

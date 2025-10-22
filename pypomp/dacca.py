@@ -1,11 +1,9 @@
-from functools import partial
 import os
 import csv
 import jax
 import jax.numpy as jnp
 import pandas as pd
 from pypomp.pomp_class import Pomp
-from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import jax.scipy.special as jspecial
 import numpy as np
 

@@ -41,17 +41,17 @@ class PanelPomp:
             shared, unit_specific, Pomp_dict
         )
 
-        self.unit_objects = unit_objects
-        self.shared = shared
-        self.unit_specific = unit_specific
+        self.unit_objects: dict[str, Pomp] = unit_objects
+        self.shared: list[pd.DataFrame] | None = shared
+        self.unit_specific: list[pd.DataFrame] | None = unit_specific
         self.results_history = []
-        self.fresh_key = None
+        self.fresh_key: jax.Array | None = None
         shared_param_names, unit_param_names = self._get_param_names(
             shared, unit_specific
         )
-        self.shared_param_names = shared_param_names
-        self.unit_param_names = unit_param_names
-        self.param_names = shared_param_names + unit_param_names
+        self.canonical_shared_param_names: list[str] = shared_param_names
+        self.canonical_unit_param_names: list[str] = unit_param_names
+        self.canonical_param_names: list[str] = shared_param_names + unit_param_names
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
@@ -160,6 +160,24 @@ class PanelPomp:
             [] if unit_specific is None else list(unit_specific[0].index)
         )
         return shared_lst, unit_specific_lst
+
+    def _dataframe_to_array_canonical(
+        self, df: pd.DataFrame, param_names: list[str], column_name: str
+    ) -> jnp.ndarray:
+        """
+        Convert a DataFrame column to a JAX array using canonical parameter ordering.
+
+        Args:
+            df: DataFrame with parameter names as index
+            param_names: List of parameter names in canonical order
+            column_name: Name of the column to extract values from
+
+        Returns:
+            JAX array with parameter values in canonical order
+        """
+        # Reorder DataFrame to match canonical order
+        ordered_values = [df.loc[name, column_name] for name in param_names]
+        return jnp.array(ordered_values, dtype=float)
 
     def get_unit_parameters(
         self,
@@ -481,7 +499,7 @@ class PanelPomp:
             shared, unit_specific, self.unit_objects
         )
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
-            param_names=self.param_names
+            param_names=self.canonical_param_names
         )
         key, old_key = self._update_fresh_key(key)
         if J < 1:
@@ -539,14 +557,14 @@ class PanelPomp:
             shared_array = jnp.zeros((n_reps, 0, J))
             shared_index: list[str] = []
         else:
-            shared_index = list(shared_list[0].index)
+            shared_index = self.canonical_shared_param_names
             n_shared = len(shared_index)
             shared_array = jnp.stack(
                 [
                     jnp.tile(
-                        jnp.array(df["shared"].to_numpy().astype(float)).reshape(
-                            n_shared, 1
-                        ),
+                        self._dataframe_to_array_canonical(
+                            df, self.canonical_shared_param_names, "shared"
+                        ).reshape(n_shared, 1),
                         (1, J),
                     )
                     for df in shared_list
@@ -560,16 +578,16 @@ class PanelPomp:
             unit_array = jnp.zeros((n_reps, 0, J, U))
             spec_index: list[str] = []
         else:
-            spec_index = list(spec_list[0].index)
+            spec_index = self.canonical_unit_param_names
             n_spec = len(spec_index)
             unit_array = jnp.stack(
                 [
                     jnp.stack(
                         [
                             jnp.tile(
-                                jnp.array(df[unit].to_numpy().astype(float)).reshape(
-                                    n_spec, 1
-                                ),
+                                self._dataframe_to_array_canonical(
+                                    df, self.canonical_unit_param_names, unit
+                                ).reshape(n_spec, 1),
                                 (1, J),
                             )
                             for unit in unit_names
@@ -752,34 +770,39 @@ class PanelPomp:
         unit_names = list(unit_da.coords["unit"].values)
         n_reps = shared_da.sizes["replicate"]
 
-        rows = []
-        for rep in range(n_reps):
-            for unit_idx, unit in enumerate(unit_names):
-                shared_loglik = float(full_logliks[rep, 0].item())
-                unit_loglik = float(full_logliks[rep, unit_idx + 1].item())
+        shared_final_values = shared_da.isel(
+            iteration=-1
+        ).values  # shape: (n_reps, n_vars)
+        unit_final_values = unit_da.isel(
+            iteration=-1
+        ).values  # shape: (n_reps, n_vars, n_units)
 
-                if shared_names:
-                    shared_final = shared_da.sel(
-                        replicate=rep, variable=shared_names
-                    ).values[-1, :]
-                    shared_dict = self._extract_parameter_dict(
-                        shared_final, shared_names
-                    )
-                else:
-                    shared_dict = {}
+        # Extract loglikelihoods
+        shared_logliks = full_logliks[:, 0].values  # shape: (n_reps,)
+        unit_logliks = full_logliks[:, 1:].values  # shape: (n_reps, n_units)
 
-                unit_final = unit_da.sel(replicate=rep, unit=unit).values[-1, :]
-                unit_dict = self._extract_parameter_dict(
-                    unit_final, all_unit_vars, skip_first=True
-                )
+        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
+        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
 
-                rows.append(
-                    self._build_result_row(
-                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
-                    )
-                )
+        data = {
+            "replicate": rep_indices,
+            "unit": [unit_names[i] for i in unit_indices],
+            "shared logLik": shared_logliks[rep_indices],
+            "unit logLik": unit_logliks[rep_indices, unit_indices],
+        }
 
-        return pd.DataFrame(rows)
+        if shared_names:
+            shared_param_values = shared_final_values[:, 1:]  # Skip logLik column
+            for i, param_name in enumerate(shared_names):
+                data[param_name] = shared_param_values[rep_indices, i]
+
+        unit_param_values = unit_final_values[
+            :, 1:, :
+        ]  # Skip logLik column, shape: (n_reps, n_unit_params, n_units)
+        for i, param_name in enumerate(all_unit_vars[1:]):  # Skip logLik
+            data[param_name] = unit_param_values[rep_indices, i, unit_indices]
+
+        return pd.DataFrame(data)
 
     def _results_from_pfilter(self, res, ignore_nan) -> pd.DataFrame:
         """
@@ -793,58 +816,72 @@ class PanelPomp:
         unit_names = list(logLiks.coords["unit"].values)
         n_reps = logLiks.sizes["theta"]
 
-        rows = []
+        logliks_array = logLiks.values  # shape: (n_reps, n_units, n_replicates)
 
-        for rep in range(n_reps):
-            shared_loglik = np.sum(
+        unit_logliks = np.array(
+            [
                 [
-                    logmeanexp(logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan)
+                    logmeanexp(logliks_array[rep, unit_idx, :], ignore_nan=ignore_nan)
                     for unit_idx in range(len(unit_names))
                 ]
-            )
-            for unit_idx, unit in enumerate(unit_names):
-                unit_loglik = logmeanexp(
-                    logLiks[rep, unit_idx, :].item(), ignore_nan=ignore_nan
-                )
+                for rep in range(n_reps)
+            ]
+        )  # shape: (n_reps, n_units)
 
-                if shared_params and rep < len(shared_params):
-                    shared_df = shared_params[rep]
-                    shared_vals = (
-                        shared_df.iloc[:, 0].values
-                        if hasattr(shared_df, "values")
-                        else []
-                    )
+        shared_logliks = np.sum(unit_logliks, axis=1)  # shape: (n_reps,)
+
+        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
+        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
+
+        data = {
+            "replicate": rep_indices,
+            "unit": [unit_names[i] for i in unit_indices],
+            "shared logLik": shared_logliks[rep_indices],
+            "unit logLik": unit_logliks[rep_indices, unit_indices],
+        }
+
+        if shared_params and len(shared_params) > 0:
+            shared_param_data = {}
+            for rep in range(min(n_reps, len(shared_params))):
+                shared_df = shared_params[rep]
+                if hasattr(shared_df, "values") and shared_df.shape[1] >= 1:
+                    shared_vals = shared_df.iloc[:, 0].values
                     shared_names = (
                         list(shared_df.columns) if hasattr(shared_df, "columns") else []
                     )
-                    shared_dict = self._extract_parameter_dict(
-                        shared_vals, shared_names
-                    )
-                else:
-                    shared_dict = {}
-
-                if unit_specific_params and rep < len(unit_specific_params):
-                    unit_df = unit_specific_params[rep]
-                    if unit in unit_df.columns:
-                        unit_vals = unit_df[unit].values
-                        unit_param_names = (
-                            list(unit_df.index) if hasattr(unit_df, "index") else []
+                    for i, param_name in enumerate(shared_names):
+                        if param_name not in shared_param_data:
+                            shared_param_data[param_name] = np.full(n_reps, np.nan)
+                        shared_param_data[param_name][rep] = (
+                            shared_vals[i] if i < len(shared_vals) else np.nan
                         )
-                        unit_dict = self._extract_parameter_dict(
-                            unit_vals, unit_param_names
-                        )
-                    else:
-                        unit_dict = {}
-                else:
-                    unit_dict = {}
 
-                rows.append(
-                    self._build_result_row(
-                        rep, unit, shared_loglik, unit_loglik, shared_dict, unit_dict
+            for param_name, values in shared_param_data.items():
+                data[param_name] = values[rep_indices]
+
+        if unit_specific_params and len(unit_specific_params) > 0:
+            unit_param_data = {}
+            for rep in range(min(n_reps, len(unit_specific_params))):
+                unit_df = unit_specific_params[rep]
+                if hasattr(unit_df, "columns"):
+                    unit_param_names = (
+                        list(unit_df.index) if hasattr(unit_df, "index") else []
                     )
-                )
+                    for param_name in unit_param_names:
+                        if param_name not in unit_param_data:
+                            unit_param_data[param_name] = np.full(
+                                (n_reps, len(unit_names)), np.nan
+                            )
+                        for unit_idx, unit in enumerate(unit_names):
+                            if unit in unit_df.columns:
+                                unit_param_data[param_name][rep, unit_idx] = (
+                                    unit_df.loc[param_name, unit]
+                                )
 
-        return pd.DataFrame(rows)
+            for param_name, values in unit_param_data.items():
+                data[param_name] = values[rep_indices, unit_indices]
+
+        return pd.DataFrame(data)
 
     def time(self):
         """
@@ -864,7 +901,6 @@ class PanelPomp:
         df.index.name = "history_index"
         return df
 
-    # TODO: clean up traces function
     def traces(self) -> pd.DataFrame:
         """
         Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
@@ -882,9 +918,7 @@ class PanelPomp:
         shared_param_names, unit_param_names = self._get_param_names()
         all_param_names = shared_param_names + unit_param_names
 
-        # Storage for rows
-        rows: list[dict] = []
-        # Track global iteration per replicate (starts at 0, increments over mif iters)
+        all_data = []
         global_iters: dict[int, int] = {}
 
         for res in self.results_history:
@@ -901,22 +935,32 @@ class PanelPomp:
                 n_rep = shared_da.sizes["replicate"]
                 n_iter = shared_da.sizes["iteration"]
 
+                shared_values = shared_da.values  # shape: (n_rep, n_iter, n_vars)
+                unit_values = unit_da.values  # shape: (n_rep, n_iter, n_vars, n_units)
+
+                shared_param_indices = {
+                    name: i for i, name in enumerate(shared_vars[1:])
+                }
+                unit_param_indices = {name: i for i, name in enumerate(unit_vars[1:])}
+
                 for rep_idx in range(n_rep):
                     if rep_idx not in global_iters:
                         global_iters[rep_idx] = 0
+
                     for iter_idx in range(n_iter):
-                        # Extract shared values for this iteration
-                        shared_vals = shared_da.sel(
-                            replicate=rep_idx, iteration=iter_idx
-                        )
-                        shared_loglik = float(shared_vals.sel(variable="logLik").values)
+                        shared_loglik = float(
+                            shared_values[rep_idx, iter_idx, 0]
+                        )  # logLik is first
                         shared_params = {
-                            name: float(shared_vals.sel(variable=name).values)
-                            for name in shared_vars[1:]
+                            name: float(
+                                shared_values[
+                                    rep_idx, iter_idx, shared_param_indices[name] + 1
+                                ]
+                            )
+                            for name in shared_param_indices
                         }
 
-                        # Row for shared
-                        row_shared = {
+                        shared_row = {
                             "replicate": rep_idx,
                             "unit": "shared",
                             "iteration": global_iters[rep_idx],
@@ -924,25 +968,26 @@ class PanelPomp:
                             "logLik": shared_loglik,
                         }
                         for name in all_param_names:
-                            if name in shared_params:
-                                row_shared[name] = shared_params[name]
-                            else:
-                                row_shared[name] = float("nan")
-                        rows.append(row_shared)
+                            shared_row[name] = shared_params.get(name, float("nan"))
+                        all_data.append(shared_row)
 
-                        # Now per-unit rows
-                        for unit in unit_names:
-                            unit_vals = unit_da.sel(
-                                replicate=rep_idx, iteration=iter_idx, unit=unit
-                            )
+                        for unit_idx, unit in enumerate(unit_names):
                             unit_loglik = float(
-                                unit_vals.sel(variable="unitLogLik").values
-                            )
+                                unit_values[rep_idx, iter_idx, 0, unit_idx]
+                            )  # unitLogLik is first
                             unit_params = {
-                                name: float(unit_vals.sel(variable=name).values)
-                                for name in unit_vars[1:]
+                                name: float(
+                                    unit_values[
+                                        rep_idx,
+                                        iter_idx,
+                                        unit_param_indices[name] + 1,
+                                        unit_idx,
+                                    ]
+                                )
+                                for name in unit_param_indices
                             }
-                            row_unit = {
+
+                            unit_row = {
                                 "replicate": rep_idx,
                                 "unit": str(unit),
                                 "iteration": global_iters[rep_idx],
@@ -951,94 +996,104 @@ class PanelPomp:
                             }
                             for name in all_param_names:
                                 if name in unit_params:
-                                    row_unit[name] = unit_params[name]
+                                    unit_row[name] = unit_params[name]
                                 elif name in shared_params:
-                                    row_unit[name] = shared_params[name]
+                                    unit_row[name] = shared_params[name]
                                 else:
-                                    row_unit[name] = float("nan")
-                            rows.append(row_unit)
+                                    unit_row[name] = float("nan")
+                            all_data.append(unit_row)
 
                         global_iters[rep_idx] += 1
 
             elif method == "pfilter":
                 logLiks = res["logLiks"]  # dims: theta, unit, replicate
                 unit_names = list(logLiks.coords["unit"].values)
-                # Determine parameter values for this result, if available
                 shared_list = res.get("shared")
                 unit_list = res.get("unit_specific")
 
                 n_theta = logLiks.sizes["theta"]
-                for rep_idx in range(n_theta):
-                    # Compute per-unit averaged loglik across replicate dimension
-                    # logLiks[rep, unit, rep_run]
-                    unit_avgs = [
-                        float(logmeanexp(np.asarray(logLiks[rep_idx, u_i, :].values)))
-                        for u_i in range(len(unit_names))
-                    ]
-                    shared_total = float(np.sum(unit_avgs))
 
-                    # Get parameter dicts if present
-                    shared_params = {}
-                    if isinstance(shared_list, list) and rep_idx < len(shared_list):
+                logliks_array = (
+                    logLiks.values
+                )  # shape: (n_theta, n_units, n_replicates)
+                unit_avgs = np.array(
+                    [
+                        [
+                            logmeanexp(logliks_array[rep_idx, u_i, :])
+                            for u_i in range(len(unit_names))
+                        ]
+                        for rep_idx in range(n_theta)
+                    ]
+                )  # shape: (n_theta, n_units)
+                shared_totals = np.sum(unit_avgs, axis=1)  # shape: (n_theta,)
+
+                shared_param_data = {}
+                if isinstance(shared_list, list):
+                    for rep_idx in range(min(n_theta, len(shared_list))):
                         df = shared_list[rep_idx]
                         if hasattr(df, "index") and df.shape[1] >= 1:
-                            shared_params = {
-                                str(idx): float(val)
-                                for idx, val in zip(df.index, df.iloc[:, 0].values)
-                            }
+                            for name in df.index:
+                                if name not in shared_param_data:
+                                    shared_param_data[name] = np.full(n_theta, np.nan)
+                                shared_param_data[name][rep_idx] = float(
+                                    df.loc[name, df.columns[0]]
+                                )
 
-                    # Shared row
+                unit_param_data = {}
+                if isinstance(unit_list, list):
+                    for rep_idx in range(min(n_theta, len(unit_list))):
+                        df = unit_list[rep_idx]
+                        if hasattr(df, "columns"):
+                            for name in df.index:
+                                if name not in unit_param_data:
+                                    unit_param_data[name] = np.full(
+                                        (n_theta, len(unit_names)), np.nan
+                                    )
+                                for unit_idx, unit in enumerate(unit_names):
+                                    if str(unit) in df.columns:
+                                        unit_param_data[name][rep_idx, unit_idx] = (
+                                            float(df.loc[name, str(unit)])
+                                        )
+
+                for rep_idx in range(n_theta):
                     iter_val = global_iters.get(rep_idx, 1) - 1
-                    row_shared = {
+                    iter_val = iter_val if iter_val > 0 else 1
+
+                    shared_row = {
                         "replicate": rep_idx,
                         "unit": "shared",
-                        "iteration": iter_val if iter_val > 0 else 1,
+                        "iteration": iter_val,
                         "method": "pfilter",
-                        "logLik": shared_total,
+                        "logLik": float(shared_totals[rep_idx]),
                     }
                     for name in all_param_names:
-                        if name in shared_params:
-                            row_shared[name] = shared_params[name]
+                        if name in shared_param_data:
+                            shared_row[name] = shared_param_data[name][rep_idx]
                         else:
-                            row_shared[name] = float("nan")
-                    rows.append(row_shared)
+                            shared_row[name] = float("nan")
+                    all_data.append(shared_row)
 
-                    # Unit rows
                     for u_i, unit in enumerate(unit_names):
-                        unit_params = {}
-                        if (
-                            isinstance(unit_list, list)
-                            and rep_idx < len(unit_list)
-                            and hasattr(unit_list[rep_idx], "columns")
-                            and str(unit) in unit_list[rep_idx].columns
-                        ):
-                            dfu = unit_list[rep_idx]
-                            unit_params = {
-                                str(idx): float(val)
-                                for idx, val in zip(dfu.index, dfu[str(unit)].values)
-                            }
-
-                        row_unit = {
+                        unit_row = {
                             "replicate": rep_idx,
                             "unit": str(unit),
-                            "iteration": iter_val if iter_val > 0 else 1,
+                            "iteration": iter_val,
                             "method": "pfilter",
-                            "logLik": unit_avgs[u_i],
+                            "logLik": float(unit_avgs[rep_idx, u_i]),
                         }
                         for name in all_param_names:
-                            if name in unit_params:
-                                row_unit[name] = unit_params[name]
-                            elif name in shared_params:
-                                row_unit[name] = shared_params[name]
+                            if name in unit_param_data:
+                                unit_row[name] = unit_param_data[name][rep_idx, u_i]
+                            elif name in shared_param_data:
+                                unit_row[name] = shared_param_data[name][rep_idx]
                             else:
-                                row_unit[name] = float("nan")
-                        rows.append(row_unit)
-            # else: ignore unknown methods
+                                unit_row[name] = float("nan")
+                        all_data.append(unit_row)
 
-        if not rows:
+        if not all_data:
             return pd.DataFrame()
 
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(all_data)
         # Sort for readability
         if not df.empty:
             df = df.sort_values(["replicate", "unit", "iteration"]).reset_index(
@@ -1065,7 +1120,6 @@ class PanelPomp:
             print("No trace data to plot.")
             return
 
-        # Identify columns
         value_cols = [
             c
             for c in traces.columns

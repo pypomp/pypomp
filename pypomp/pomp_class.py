@@ -127,8 +127,7 @@ class Pomp:
             rmeas (Callable, optional): Measurement simulator function.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
-            statenames (list[str], optional): List of state variable names. If None,
-                will be inferred from the rinit function.
+            statenames (list[str], optional): List of state variable names.
             partrans (ParTrans, optional): Parameter transform (defaults to identity).
         """
         if not isinstance(ys, pd.DataFrame):
@@ -139,14 +138,14 @@ class Pomp:
         self._validate_theta(theta)
 
         if isinstance(theta, dict):
-            self.theta = [theta]
+            self.theta: list[dict] = [theta]
         elif isinstance(theta, list):
-            self.theta = theta
+            self.theta: list[dict] = theta
         else:
             raise TypeError("theta must be a dictionary or a list of dictionaries")
 
         # Extract parameter names from first theta dict
-        self.param_names = list(self.theta[0].keys())
+        self.param_names: list[str] = list(self.theta[0].keys())
 
         # Validate that all theta dicts have the same keys
         for theta_dict in self.theta:
@@ -164,36 +163,38 @@ class Pomp:
         ):
             raise ValueError("statenames must be a list of strings")
 
-        self.statenames = statenames
-        self.ys = ys
-        self.covars = covars
-        self.t0 = float(t0)
-        self.results_history = []
-        self.fresh_key = None
+        self.statenames: list[str] = statenames
+        self.ys: pd.DataFrame = ys
+        self.covars: pd.DataFrame | None = covars
+        self.t0: float = float(t0)
+        self.results_history: list[dict] = []
+        self.fresh_key: jax.Array | None = None
 
         if covars is not None:
-            self.covar_names = list(covars.columns)
+            self.covar_names: list[str] = list(covars.columns)
         else:
-            self.covar_names = []
+            self.covar_names: list[str] = []
 
-        self.rinit = RInit(rinit, statenames, self.param_names, self.covar_names)
-        self.rproc = RProc(
+        self.rinit: RInit = RInit(rinit, statenames, self.param_names, self.covar_names)
+        self.rproc: RProc = RProc(
             rproc, statenames, self.param_names, self.covar_names, nstep, dt, accumvars
         )
 
         if dmeas is not None:
-            self.dmeas = DMeas(dmeas, statenames, self.param_names, self.covar_names)
+            self.dmeas: DMeas | None = DMeas(
+                dmeas, statenames, self.param_names, self.covar_names
+            )
         else:
-            self.dmeas = None
+            self.dmeas: DMeas | None = None
 
         if rmeas is not None:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
-            self.rmeas = RMeas(
+            self.rmeas: RMeas | None = RMeas(
                 rmeas, ydim, statenames, self.param_names, self.covar_names
             )
         else:
-            self.rmeas = None
+            self.rmeas: RMeas | None = None
 
         if self.dmeas is None and self.rmeas is None:
             raise ValueError("You must supply at least one of dmeas or rmeas")

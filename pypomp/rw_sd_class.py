@@ -89,3 +89,18 @@ class RWSigma:
         sigmas_array = all_sigmas_array * not_init_mask
         sigmas_init_array = all_sigmas_array * init_mask
         return sigmas_array, sigmas_init_array
+
+    def cool(self, factor: float) -> None:
+        """
+        Reduces all sigmas by multiplying them by the specified factor in place.
+
+        Args:
+            factor (float): Value by which to multiply each sigma.
+
+        Returns:
+            None
+        """
+        if not (0 <= factor <= 1):
+            raise ValueError("factor should be between 0 and 1")
+        for key in self.sigmas:
+            self.sigmas[key] *= factor

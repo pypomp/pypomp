@@ -1,8 +1,8 @@
 import pandas as pd
 
 
-def test_simulate(measles_panel_setup2):
-    panel, rw_sd, key = measles_panel_setup2
+def test_simulate(measles_panel_setup_some_shared):
+    panel, rw_sd, key = measles_panel_setup_some_shared
     X_sim_order = ["unit", "replicate", "sim", "time"] + [
         f"state_{i}" for i in range(0, 6)
     ]

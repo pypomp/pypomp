@@ -1,8 +1,5 @@
 """
-This module implements the MOP algorithm for POMP models, with optional
-parameter transforms so that optimization can be performed on an
-"estimation scale" while the state/measurement models always receive
-parameters on the natural scale.
+This module implements the MOP algorithm for POMP models.
 """
 
 from functools import partial
@@ -10,28 +7,21 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
-
 from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
-# ---- Parameter transforms (minimal integration) ----
-from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
-_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
+# NEW: minimal parameter-transform integration
+from .parameter_trans import ParTrans, _pt_inverse  # only need inverse here
+_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)  # NEW: identity
 
 
 @partial(
     jit,
-    static_argnames=(
-        "J",
-        "rinitializer",
-        "rprocess_interp",
-        "dmeasure",
-        "partrans",  # treat transform (with callables) as static
-    ),
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),  # NEW
 )
 def _mop_internal(
-    theta: jax.Array,
+    theta: jax.Array,  # estimation-scale parameter
     ys: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -45,7 +35,7 @@ def _mop_internal(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,
+    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW: optional transform
 ) -> jax.Array:
     """
     Internal function for the MOP algorithm, which calls function 'mop_helper'
@@ -53,20 +43,17 @@ def _mop_internal(
 
     Notes
     -----
-    - `theta` is interpreted on the *estimation scale* when `partrans` is provided.
-      It is mapped to natural scale once via `_pt_inverse` before filtering.
-    - When `partrans` is the identity (default), this is equivalent to using `theta`
-      directly on the natural scale (backward compatible).
+    - 'theta' is on the *estimation scale*; we map it once to the *natural scale*
+      before passing into model components.
     """
     times = times.astype(float)
 
-    # Map from estimation scale to natural scale once (so AD flows through the transform).
+    # NEW: estimation-scale -> natural-scale (used throughout this run)
     theta_nat = _pt_inverse(theta, partrans)
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF = rinitializer(theta_nat, keys, covars0, t0)
-
+    particlesF = rinitializer(theta_nat, keys, covars0, t0)  # use natural-scale theta
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
@@ -79,7 +66,7 @@ def _mop_internal(
             dt_array_extended=dt_array_extended,
             nstep_array=nstep_array,
             times=times,
-            theta_nat=theta_nat,  # pass natural-scale theta into helper
+            theta_nat=theta_nat,  # NEW: pass natural-scale theta
             rprocess_interp=rprocess_interp,
             dmeasure=dmeasure,
             covars_extended=covars_extended,
@@ -100,16 +87,10 @@ def _mop_internal(
 
 @partial(
     jit,
-    static_argnames=(
-        "J",
-        "rinitializer",
-        "rprocess_interp",
-        "dmeasure",
-        "partrans",
-    ),
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),  # NEW
 )
 def _mop_internal_mean(
-    theta: jax.Array,
+    theta: jax.Array,  # estimation-scale
     ys: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -123,11 +104,11 @@ def _mop_internal_mean(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,
+    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW
 ) -> jax.Array:
     """
     Internal function for calculating the MOP estimate of the log likelihood divided by
-    the number of observations. This is used in internal pypomp.train functions.
+    the length of the observations. This is used in internal pypomp.train functions.
     """
     return _mop_internal(
         theta=theta,
@@ -144,7 +125,7 @@ def _mop_internal_mean(
         accumvars=accumvars,
         alpha=alpha,
         key=key,
-        partrans=partrans,
+        partrans=partrans,  # NEW
     ) / len(ys)
 
 
@@ -157,7 +138,7 @@ def _mop_helper(
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     times: jax.Array,
-    theta_nat: jax.Array,  # already on natural scale
+    theta_nat: jax.Array,  # NEW: natural-scale parameter
     rprocess_interp: Callable,
     dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
@@ -165,7 +146,8 @@ def _mop_helper(
     alpha: float,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, int]:
     """
-    Helper function for the MOP algorithm, which performs a single filtering step.
+    Helper function for the MOP algorithm, which conducts a single iteration of
+    filtering and is called in the function 'mop_internal'.
     """
     t, particlesF, loglik, weightsF, counts, key, t_idx = inputs
     J = len(particlesF)
@@ -174,10 +156,9 @@ def _mop_helper(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     nstep = nstep_array[i].astype(int)
-
     particlesP, t_idx = rprocess_interp(
         particlesF,
-        theta_nat,           # always use natural-scale parameters for the model
+        theta_nat,  # NEW: always use natural-scale theta
         keys,
         covars_extended,
         dt_array_extended,
@@ -189,27 +170,23 @@ def _mop_helper(
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    measurements = dmeasure(ys[i], particlesP, theta_nat, covars_t, t)
+    measurements = dmeasure(ys[i], particlesP, theta_nat, covars_t, t)  # NEW
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
 
-    # Likelihood increment (self-normalized importance sampling)
     loglik = (
         loglik
         + jax.scipy.special.logsumexp(weightsP + measurements)
         - jax.scipy.special.logsumexp(weightsP)
     )
 
-    # Compute normalized weights for resampling using a detached measurement term
     norm_weights, _ = _normalize_weights(jax.lax.stop_gradient(measurements))
 
-    # Multinomial/systematic resampler (depending on _resampler impl)
     key, subkey = jax.random.split(key)
     counts, particlesF, norm_weightsF = _resampler(
         counts, particlesP, norm_weights, subkey=subkey
     )
 
-    # Update filter weights post-resampling (carry the "phi" term left inside graph)
     weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[counts]
 
     return (t, particlesF, loglik, weightsF, counts, key, t_idx)

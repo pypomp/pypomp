@@ -13,6 +13,7 @@ from .mif import _jv_panel_mif_internal
 from .util import logmeanexp
 import numpy as np
 import time
+from .rw_sd_class import RWSigma
 
 
 class PanelPomp:
@@ -45,6 +46,12 @@ class PanelPomp:
         self.unit_specific = unit_specific
         self.results_history = []
         self.fresh_key = None
+        shared_param_names, unit_param_names = self._get_param_names(
+            shared, unit_specific
+        )
+        self.shared_param_names = shared_param_names
+        self.unit_param_names = unit_param_names
+        self.param_names = shared_param_names + unit_param_names
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
@@ -436,8 +443,7 @@ class PanelPomp:
         self,
         J: int,
         M: int,
-        sigmas: float | jax.Array,
-        sigmas_init: float | jax.Array,
+        rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
         shared: pd.DataFrame | list[pd.DataFrame] | None = None,
@@ -452,9 +458,8 @@ class PanelPomp:
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            sigmas (float | jax.Array): Perturbation factor for parameters.
-            sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            a (float): Decay factor for sigmas.
+            rw_sd (RWSigma): Random walk sigma object.
+            a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array): The random key for reproducibility.
             shared (pd.DataFrame | list[pd.DataFrame], optional): Shared parameters
                 involved in the POMP model. If provided, overrides the shared
@@ -475,6 +480,9 @@ class PanelPomp:
         shared, unit_specific, _ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
+        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
+            param_names=self.param_names
+        )
         key, old_key = self._update_fresh_key(key)
         if J < 1:
             raise ValueError("J should be greater than 0.")
@@ -484,7 +492,6 @@ class PanelPomp:
             raise ValueError("a should be between 0 and 1.")
         if block is False:
             raise NotImplementedError("block=False is not supported yet.")
-
         unit_names = list(self.unit_objects.keys())
         U = len(unit_names)
         # Use a representative unit for structural arrays and static callables
@@ -598,8 +605,8 @@ class PanelPomp:
             rinitializers,
             rprocesses_interp,
             dmeasures,
-            sigmas,
-            sigmas_init,
+            sigmas_array,
+            sigmas_init_array,
             accumvars,
             covars_per_unit,
             rep_unit.partrans,
@@ -677,8 +684,7 @@ class PanelPomp:
                 "unit_specific": unit_specific,
                 "J": J,
                 "thresh": thresh,
-                "sigmas": sigmas,
-                "sigmas_init": sigmas_init,
+                "rw_sd": rw_sd,
                 "M": M,
                 "a": a,
                 "block": block,

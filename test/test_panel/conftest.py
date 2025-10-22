@@ -28,46 +28,79 @@ def measles_panel_setup_module():
     shared = panel.shared
     unit_specific = panel.unit_specific
     fresh_key = panel.fresh_key
-    return panel, key, shared, unit_specific, fresh_key
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "gamma": 0.02,
+            "cohort": 0.02,
+            "amplitude": 0.02,
+            "sigmaSE": 0.02,
+            "psi": 0.02,
+            "iota": 0.02,
+            "rho": 0.02,
+            "R0": 0.02,
+            "sigma": 0.02,
+            "S_0": 0.01,
+            "E_0": 0.01,
+            "I_0": 0.01,
+            "R_0": 0.01,
+        },
+        init_names=["S_0", "E_0", "I_0", "R_0"],
+    )
+    return panel, rw_sd, key, shared, unit_specific, fresh_key
 
 
 @pytest.fixture(scope="function")
 def measles_panel_setup(measles_panel_setup_module):
-    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
+    panel, rw_sd, key, shared, unit_specific, fresh_key = measles_panel_setup_module
     panel.results_history.clear()
     panel.shared = shared
     panel.unit_specific = unit_specific
     panel.fresh_key = fresh_key
-    return panel, key
+    return panel, rw_sd, key
 
 
 @pytest.fixture(scope="function")
 def measles_panel_setup2(measles_panel_setup):
-    panel, key = measles_panel_setup
+    panel, rw_sd, key = measles_panel_setup
     panel.unit_specific = panel.unit_specific * 2
-    return panel, key
+    return panel, rw_sd, key
 
 
 @pytest.fixture(scope="module")
 def measles_panel_mp_module(measles_panel_setup_module):
-    panel, key, shared, unit_specific, fresh_key = measles_panel_setup_module
+    panel, rw_sd, key, shared, unit_specific, fresh_key = measles_panel_setup_module
     J = 2
     M = 2
     a = 0.5
-    sigmas = 0.02
-    sigmas_init = 0.1
-    panel.mif(J=J, key=key, sigmas=sigmas, sigmas_init=sigmas_init, M=M, a=a)
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "gamma": 0.02,
+            "cohort": 0.02,
+            "amplitude": 0.02,
+            "sigmaSE": 0.02,
+            "psi": 0.02,
+            "iota": 0.02,
+            "rho": 0.02,
+            "R0": 0.02,
+            "sigma": 0.02,
+            "S_0": 0.01,
+            "E_0": 0.01,
+            "I_0": 0.01,
+            "R_0": 0.01,
+        },
+        init_names=["S_0", "E_0", "I_0", "R_0"],
+    )
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
     panel.pfilter(J=J)
     results_history = panel.results_history
     fresh_key = panel.fresh_key
     return (
         panel,
+        rw_sd,
         key,
         J,
         M,
         a,
-        sigmas,
-        sigmas_init,
         shared,
         unit_specific,
         fresh_key,
@@ -79,12 +112,11 @@ def measles_panel_mp_module(measles_panel_setup_module):
 def measles_panel_mp(measles_panel_mp_module):
     (
         panel,
+        rw_sd,
         key,
         J,
         M,
         a,
-        sigmas,
-        sigmas_init,
         shared,
         unit_specific,
         fresh_key,
@@ -94,4 +126,4 @@ def measles_panel_mp(measles_panel_mp_module):
     panel.shared = shared
     panel.unit_specific = unit_specific
     panel.fresh_key = fresh_key
-    return panel, key, J, M, a, sigmas, sigmas_init
+    return panel, rw_sd, key, J, M, a

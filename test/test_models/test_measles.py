@@ -32,44 +32,59 @@ def london():
         },
         # dt=7 / 365.25,
     )
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "R0": 0.02,
+            "sigma": 0.02,
+            "gamma": 0.02,
+            "iota": 0.02,
+            "rho": 0.02,
+            "sigmaSE": 0.02,
+            "psi": 0.02,
+            "cohort": 0.02,
+            "amplitude": 0.02,
+            "S_0": 0.01,
+            "E_0": 0.01,
+            "I_0": 0.01,
+            "R_0": 0.01,
+        },
+        init_names=["S_0", "E_0", "I_0", "R_0"],
+    )
     J = 3
     key = jax.random.key(1)
     M = 2
-    sigmas = 0.02
-    sigmas_init = 0.1
     a = 0.5
-    return measles, J, key, M, sigmas, sigmas_init, a
+    return measles, rw_sd, J, key, M, a
 
 
 def test_measles_sim(london):
-    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, rw_sd, J, key, M, a = london
     measles.simulate(key=key, nsim=1)
 
 
 def test_measles_pfilter(london):
-    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, rw_sd, J, key, M, a = london
     measles.pfilter(J=J, key=key)
 
 
 def test_measles_mif(london):
-    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, rw_sd, J, key, M, a = london
     measles.mif(
         J=J,
         key=key,
         M=M,
-        sigmas=sigmas,
-        sigmas_init=sigmas_init,
+        rw_sd=rw_sd,
         a=a,
     )
 
 
 def test_measles_mop(london):
-    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, rw_sd, J, key, M, a = london
     measles.mop(J=J, key=key)
 
 
 def test_measles_train(london):
-    measles, J, key, M, sigmas, sigmas_init, a = london
+    measles, rw_sd, J, key, M, a = london
     measles.train(M=1, J=J, key=key)
 
 

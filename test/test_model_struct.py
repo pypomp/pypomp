@@ -13,12 +13,15 @@ def test_RInit_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RInit(fn, statenames=["state_0"], param_names=["param_0"])
+            pp.RInit(
+                fn, statenames=["state_0"], param_names=["param_0"], covar_names=[]
+            )
     # Test that correct arguments run without error
     pp.RInit(
         lambda theta_, key, covars, t0: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
+        covar_names=[],
     )
 
 
@@ -34,13 +37,20 @@ def test_RProc_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RProc(fn, statenames=["state_0"], param_names=["param_0"], nstep=1)
+            pp.RProc(
+                fn,
+                statenames=["state_0"],
+                param_names=["param_0"],
+                covar_names=[],
+                nstep=1,
+            )
     # Test that correct arguments run without error
     pp.RProc(
         lambda X_, theta_, key, covars, t, dt: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
         nstep=1,
+        covar_names=[],
     )
 
 
@@ -55,12 +65,15 @@ def test_DMeas_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.DMeas(fn, statenames=["state_0"], param_names=["param_0"])
+            pp.DMeas(
+                fn, statenames=["state_0"], param_names=["param_0"], covar_names=[]
+            )
     # Test that correct arguments run without error
     pp.DMeas(
         lambda Y_, X_, theta_, covars, t: 0.0,
         statenames=["state_0"],
         param_names=["param_0"],
+        covar_names=[],
     )
 
 
@@ -75,11 +88,18 @@ def test_RMeas_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RMeas(fn, ydim=1, statenames=["state_0"], param_names=["param_0"])
+            pp.RMeas(
+                fn,
+                ydim=1,
+                statenames=["state_0"],
+                param_names=["param_0"],
+                covar_names=[],
+            )
     # Test that correct arguments run without error
     pp.RMeas(
         lambda X_, theta_, key, covars, t: jnp.array([0]),
         ydim=1,
         statenames=["state_0"],
         param_names=["param_0"],
+        covar_names=[],
     )

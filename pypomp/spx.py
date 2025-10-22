@@ -62,7 +62,7 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
         theta_["rho"],
         theta_["V_0"],
     )
-    y_prev = covars
+    y_prev = covars["y_prev"]
     # Transform parameters onto natural scale
     mu = jnp.exp(mu)
     kappa = jnp.exp(kappa)
@@ -83,7 +83,7 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    V, S = X_["V"], X_["S"]
+    V = X_["V"]
     # Transform mu onto the natural scale
     mu = jnp.exp(theta_["mu"])
     return jax.scipy.stats.norm.logpdf(Y_, mu - 0.5 * V, jnp.sqrt(V))

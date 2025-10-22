@@ -8,33 +8,50 @@ import pypomp as pp
 def simple_setup():
     # Set default values for tests
     LG = pp.LG()
-    sigmas = 0.02
-    sigmas_init = 0.1
-    sigmas_long = jnp.array([0.02] * (len(LG.theta[0]) - 1) + [0])
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "A1": 0.02,
+            "A2": 0.02,
+            "A3": 0.02,
+            "A4": 0.02,
+            "C1": 0.02,
+            "C2": 0.02,
+            "C3": 0.02,
+            "C4": 0.02,
+            "Q1": 0.02,
+            "Q2": 0.02,
+            "Q3": 0.02,
+            "Q4": 0.02,
+            "R1": 0.02,
+            "R2": 0.02,
+            "R3": 0.02,
+            "R4": 0.0,
+        },
+        init_names=[],
+    )
     J = 2
     key = jax.random.key(111)
     a = 0.5
     M = 2
     theta = LG.theta
-    return LG, sigmas, sigmas_init, sigmas_long, J, key, a, M, theta
+    return LG, rw_sd, J, key, a, M, theta
 
 
 @pytest.fixture(scope="function")
 def simple(simple_setup):
-    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M, theta = simple_setup
+    LG, rw_sd, J, key, a, M, theta = simple_setup
     LG.results_history.clear()
     LG.theta = theta
-    return LG, sigmas, sigmas_init, sigmas_long, J, key, a, M
+    return LG, rw_sd, J, key, a, M
 
 
 def test_class_mif_basic(simple):
-    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M = simple
+    LG, rw_sd, J, key, a, M = simple
     for J, M in [(J, 2), (100, 10)]:
         LG.mif(
             J=J,
             M=M,
-            sigmas=sigmas,
-            sigmas_init=1e-20,
+            rw_sd=rw_sd,
             a=a,
             key=key,
         )
@@ -50,25 +67,19 @@ def test_class_mif_basic(simple):
         for param in LG.theta[0].keys():
             assert param in list(traces.coords["variable"].values)
 
-    # check that sigmas isn't modified by mif
-    assert sigmas == 0.02
-
 
 def test_class_mif_sigmas_array(simple):
-    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M = simple
+    LG, rw_sd, J, key, a, M = simple
     # check that sigmas array input works
     LG.mif(
-        sigmas=sigmas_long,
-        sigmas_init=1e-20,
+        rw_sd=rw_sd,
         J=J,
-        M=2,
-        a=0.9,
+        M=M,
+        a=a,
         key=key,
     )
     mif_out2 = LG.results_history[-1]
     traces2 = mif_out2["traces"]
-    # check that sigmas isn't modified by mif when passed as an array
-    assert (sigmas_long == jnp.array([0.02] * (len(LG.theta[0]) - 1) + [0])).all()
     # check that the last parameter is never perturbed (assuming it's the 16th parameter)
     param_names = list(LG.theta[0].keys())
     last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
@@ -80,8 +91,61 @@ def test_class_mif_sigmas_array(simple):
     assert (first_param_trace != first_param_trace[0]).any()
 
 
+def test_mif_order_of_sigmas_consistency(simple):
+    LG, rw_sd, J, key, a, M = simple
+    theta = LG.theta
+
+    param_names = LG.param_names
+
+    base_sigma = 0.01
+    unique_sigmas = [base_sigma + 0.001 * i for i in range(len(param_names))]
+    sigmas_dict = {k: v for k, v in zip(param_names, unique_sigmas)}
+    rw_sd_orig = pp.RWSigma(sigmas=sigmas_dict, init_names=[])
+
+    reversed_param_names = list(reversed(param_names))
+    sigmas_dict_reversed = {k: sigmas_dict[k] for k in reversed_param_names}
+    rw_sd_reversed = pp.RWSigma(sigmas=sigmas_dict_reversed, init_names=[])
+    LG.mif(
+        theta=theta,
+        J=J,
+        M=M,
+        rw_sd=rw_sd_orig,
+        a=a,
+        key=key,
+    )
+    traces_ref = LG.results_history[-1]["traces"]
+
+    LG.results_history.clear()
+
+    LG.mif(
+        theta=theta,
+        J=J,
+        M=M,
+        rw_sd=rw_sd_reversed,
+        a=a,
+        key=key,
+    )
+    traces_rev = LG.results_history[-1]["traces"]
+
+    for param in param_names:
+        arr1 = traces_ref.sel(replicate=0, variable=param).values
+        arr2 = traces_rev.sel(replicate=0, variable=param).values
+        assert jnp.allclose(arr1, arr2), (
+            f"Traces for param {param} differed after reordering sigmas dict keys:\n"
+            f"default: {arr1}\nreversed: {arr2}"
+        )
+    arr1 = traces_ref.sel(replicate=0, variable="logLik").values
+    arr2 = traces_rev.sel(replicate=0, variable="logLik").values
+    nan_mask1 = jnp.isnan(arr1)
+    nan_mask2 = jnp.isnan(arr2)
+    assert jnp.array_equal(nan_mask1, nan_mask2), (
+        f"NaN positions for logLik differed after reordering sigmas dict keys:\n"
+        f"default NaN mask: {nan_mask1}\nreversed NaN mask: {nan_mask2}"
+    )
+
+
 def test_order_of_parameters_consistency(simple):
-    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M = simple
+    LG, rw_sd, J, key, a, M = simple
     # check that the order of parameters in the theta dict does not affect the results
     theta_orig = LG.theta[0]
 
@@ -92,8 +156,7 @@ def test_order_of_parameters_consistency(simple):
     LG.mif(
         J=J,
         M=M,
-        sigmas=sigmas,
-        sigmas_init=sigmas_init,
+        rw_sd=rw_sd,
         a=a,
         key=key,
         theta=theta_orig,
@@ -105,8 +168,7 @@ def test_order_of_parameters_consistency(simple):
     LG.mif(
         J=J,
         M=M,
-        sigmas=sigmas,
-        sigmas_init=sigmas_init,
+        rw_sd=rw_sd,
         a=a,
         key=key,
         theta=theta_reordered,
@@ -139,11 +201,10 @@ def test_order_of_parameters_consistency(simple):
 
 
 def test_invalid_mif_input(simple):
-    LG, sigmas, sigmas_init, sigmas_long, J, key, a, M = simple
+    LG, rw_sd, J, key, a, M = simple
     with pytest.raises(ValueError):
         LG.mif(
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
+            rw_sd=rw_sd,
             M=M,
             a=a,
             J=-1,

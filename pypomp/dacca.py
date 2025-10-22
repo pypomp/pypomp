@@ -104,7 +104,23 @@ with open(covars_path, "r") as f:
     reader = csv.reader(f)
     next(reader)
     covars_data = [[float(value) for value in row[1:]] for row in reader]
-    covars = pd.DataFrame(covars_data, index=np.array(covart_index))
+    covars = pd.DataFrame(
+        covars_data,
+        index=np.array(covart_index),
+        columns=pd.Index(
+            [
+                "trend",
+                "dpopdt",
+                "pop",
+                "seas1",
+                "seas2",
+                "seas3",
+                "seas4",
+                "seas5",
+                "seas6",
+            ]
+        ),
+    )
 
 key = jax.random.key(111)
 theta_names = (
@@ -141,7 +157,7 @@ def rinit(theta_, key, covars, t0=None):
     R1_0 = 0.000843
     R2_0 = 0.000972
     R3_0 = 1.16e-07
-    pop = covars[2]
+    pop = covars["pop"]
     S = pop * S_0
     I = pop * I_0
     Y = pop * Y_0
@@ -169,10 +185,19 @@ def rproc(X_, theta_, key, covars, t, dt):
     deaths = X_["Mn"]
     pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
     count = X_["count"]
-    trend = covars[0]
-    dpopdt = covars[1]
-    pop = covars[2]
-    seas = covars[3:]
+    trend = covars["trend"]
+    dpopdt = covars["dpopdt"]
+    pop = covars["pop"]
+    seas = jnp.array(
+        [
+            covars["seas1"],
+            covars["seas2"],
+            covars["seas3"],
+            covars["seas4"],
+            covars["seas5"],
+            covars["seas6"],
+        ]
+    )
     (
         gamma,
         deltaI,
@@ -252,10 +277,19 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     deaths = X_["Mn"]
     pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
     count = X_["count"]
-    trend = covars[0]
-    dpopdt = covars[1]
-    pop = covars[2]
-    seas = covars[3:]
+    trend = covars["trend"]
+    dpopdt = covars["dpopdt"]
+    pop = covars["pop"]
+    seas = jnp.array(
+        [
+            covars["seas1"],
+            covars["seas2"],
+            covars["seas3"],
+            covars["seas4"],
+            covars["seas5"],
+            covars["seas6"],
+        ]
+    )
     (
         gamma,
         deltaI,

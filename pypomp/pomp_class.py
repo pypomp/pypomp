@@ -20,6 +20,7 @@ from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
+from .rw_sd_class import RWSigma
 from .parameter_trans import parameter_trans, materialize_partrans
 
 
@@ -166,18 +167,27 @@ class Pomp:
         self.results_history = []
         self.fresh_key = None
 
-        self.rinit = RInit(rinit, statenames, self.param_names)
-        self.rproc = RProc(rproc, statenames, self.param_names, nstep, dt, accumvars)
+        if covars is not None:
+            self.covar_names = list(covars.columns)
+        else:
+            self.covar_names = []
+
+        self.rinit = RInit(rinit, statenames, self.param_names, self.covar_names)
+        self.rproc = RProc(
+            rproc, statenames, self.param_names, self.covar_names, nstep, dt, accumvars
+        )
 
         if dmeas is not None:
-            self.dmeas = DMeas(dmeas, statenames, self.param_names)
+            self.dmeas = DMeas(dmeas, statenames, self.param_names, self.covar_names)
         else:
             self.dmeas = None
 
         if rmeas is not None:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
-            self.rmeas = RMeas(rmeas, ydim, statenames, self.param_names)
+            self.rmeas = RMeas(
+                rmeas, ydim, statenames, self.param_names, self.covar_names
+            )
         else:
             self.rmeas = None
 
@@ -453,8 +463,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        sigmas: float | jax.Array,
-        sigmas_init: float | jax.Array,
+        rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
@@ -469,10 +478,8 @@ class Pomp:
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            sigmas (float | jax.Array): Perturbation factor for parameters.
-            sigmas_init (float | jax.Array): Initial perturbation factor for parameters.
-            a (float): A fraction specifying the amount to cool sigmas and sigmas_init
-                over 50 iterations.
+            rw_sd (RWSigma): Random walk sigma object.
+            a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, list[dict], optional): Initial parameters for the POMP model.
@@ -489,6 +496,9 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
+        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
+            param_names=self.param_names
+        )
         theta_array = jnp.array(
             [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
         )
@@ -510,8 +520,8 @@ class Pomp:
             self.rinit.struct_per,
             self.rproc.struct_per_interp,
             self.dmeas.struct_per,
-            sigmas,
-            sigmas_init,
+            sigmas_array,
+            sigmas_init_array,
             self.rproc.accumvars,
             self._covars_extended,
             self.partrans,
@@ -571,8 +581,7 @@ class Pomp:
                 "theta": theta_list,
                 "J": J,
                 "M": M,
-                "sigmas": sigmas,
-                "sigmas_init": sigmas_init,
+                "rw_sd": rw_sd,
                 "a": a,
                 "thresh": thresh,
                 "key": old_key,
@@ -1183,7 +1192,9 @@ class Pomp:
             if isinstance(obj, RInit):
                 self.rinit = obj
             else:
-                self.rinit = RInit(obj, self.statenames, self.param_names)
+                self.rinit = RInit(
+                    obj, self.statenames, self.param_names, self.covar_names
+                )
 
         # Reconstruct rproc
         if "_rproc_func_name" in state:
@@ -1201,7 +1212,9 @@ class Pomp:
                     kwargs["nstep"] = state["_rproc_nstep"]
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
-                self.rproc = RProc(obj, self.statenames, self.param_names, **kwargs)
+                self.rproc = RProc(
+                    obj, self.statenames, self.param_names, self.covar_names, **kwargs
+                )
 
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:
@@ -1210,7 +1223,9 @@ class Pomp:
             if isinstance(obj, DMeas):
                 self.dmeas = obj
             else:
-                self.dmeas = DMeas(obj, self.statenames, self.param_names)
+                self.dmeas = DMeas(
+                    obj, self.statenames, self.param_names, self.covar_names
+                )
 
         # Reconstruct rmeas
         if "_rmeas_func_name" in state:
@@ -1220,7 +1235,11 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = RMeas(
-                    obj, state["_rmeas_ydim"], self.statenames, self.param_names
+                    obj,
+                    state["_rmeas_ydim"],
+                    self.statenames,
+                    self.param_names,
+                    self.covar_names,
                 )
 
         # Set rmeas or dmeas to None if not set

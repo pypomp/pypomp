@@ -13,3 +13,4 @@ from .fast_random import (
     fast_approx_loggamma,
 )
 from .panelPomp_class import PanelPomp
+from .rw_sd_class import RWSigma

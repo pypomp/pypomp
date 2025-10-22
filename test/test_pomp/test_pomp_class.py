@@ -8,29 +8,68 @@ import pytest
 def simple_setup():
     LG = pp.LG()
     J = 2
-    sigmas = 0.02
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "A1": 0.02,
+            "A2": 0.02,
+            "A3": 0.02,
+            "A4": 0.02,
+            "C1": 0.02,
+            "C2": 0.02,
+            "C3": 0.02,
+            "C4": 0.02,
+            "Q1": 0.02,
+            "Q2": 0.02,
+            "Q3": 0.02,
+            "Q4": 0.02,
+            "R1": 0.02,
+            "R2": 0.02,
+            "R3": 0.02,
+            "R4": 0.0,
+        },
+        init_names=[],
+    )
     a = 0.5
     M = 2
     key = jax.random.key(111)
     theta = LG.theta
     fresh_key = LG.fresh_key
-    return LG, J, sigmas, a, M, key, theta, fresh_key
+    return LG, rw_sd, J, a, M, key, theta, fresh_key
 
 
 @pytest.fixture(scope="module")
 def neapolitan_setup():
     LG = pp.LG()
     J = 2
-    sigmas = 0.02
     a = 0.5
     M = 2
     key = jax.random.key(111)
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "A1": 0.02,
+            "A2": 0.02,
+            "A3": 0.02,
+            "A4": 0.02,
+            "C1": 0.02,
+            "C2": 0.02,
+            "C3": 0.02,
+            "C4": 0.02,
+            "Q1": 0.02,
+            "Q2": 0.02,
+            "Q3": 0.02,
+            "Q4": 0.02,
+            "R1": 0.02,
+            "R2": 0.02,
+            "R3": 0.02,
+            "R4": 0.0,
+        },
+        init_names=[],
+    )
 
     LG.pfilter(J=J, reps=1, key=key)
     LG.mif(
         J=J,
-        sigmas=sigmas,
-        sigmas_init=sigmas,
+        rw_sd=rw_sd,
         M=M,
         a=a,
         key=key,
@@ -39,7 +78,7 @@ def neapolitan_setup():
     results_history = LG.results_history
     theta = LG.theta
     fresh_key = LG.fresh_key
-    return LG, J, sigmas, a, M, key, theta, results_history, fresh_key
+    return LG, rw_sd, J, a, M, key, theta, results_history, fresh_key
 
 
 @pytest.fixture(scope="function")
@@ -55,11 +94,11 @@ def simple(simple_setup):
 @pytest.fixture(scope="function")
 def neapolitan(neapolitan_setup):
     # Reset results history and theta to prevent carryover from other tests.
-    LG, J, sigmas, a, M, key, theta, results_history, fresh_key = neapolitan_setup
+    LG, rw_sd, J, a, M, key, theta, results_history, fresh_key = neapolitan_setup
     LG.results_history = results_history
     LG.theta = theta
     LG.fresh_key = fresh_key
-    return LG, J, sigmas, a, M, key
+    return LG, rw_sd, J, a, M, key
 
 
 def test_invalid_initialization(simple):
@@ -78,7 +117,7 @@ def test_invalid_initialization(simple):
 
 
 def test_results(neapolitan):
-    LG, J, sigmas, a, M, key = neapolitan
+    LG, rw_sd, J, a, M, key = neapolitan
     # Check that results() returns one row per parameter set and correct columns
     # pfilter: should be one row per parameter set (len(theta))
     n_paramsets = len(LG.theta)
@@ -118,13 +157,12 @@ def test_sample_params():
 
 
 def test_theta_carryover_mif(simple):
-    LG, J, sigmas, a, M, key = simple
+    LG, rw_sd, J, a, M, key = simple
     # Check that theta estimate from mif is correctly carried over to attribute and traces
     theta_order = list(LG.theta[0].keys())
     LG.mif(
         J=J,
-        sigmas=sigmas,
-        sigmas_init=sigmas,
+        rw_sd=rw_sd,
         M=M,
         a=a,
         key=key,
@@ -146,7 +184,7 @@ def test_theta_carryover_mif(simple):
 
 # TODO: merge mif and train tests
 def test_theta_carryover_train(simple):
-    LG, J, sigmas, a, M, key = simple
+    LG, rw_sd, J, a, M, key = simple
     # Check that theta estimate from train is correctly carried over to attribute and traces
     theta_order = list(LG.theta[0].keys())
     LG.train(
@@ -170,7 +208,7 @@ def test_theta_carryover_train(simple):
 
 
 def test_pickle(simple):
-    LG, J, sigmas, a, M, key = simple
+    LG, rw_sd, J, a, M, key = simple
     # Generate results to pickle
     LG.pfilter(J=J, reps=1, key=key)
     # Pickle the object
@@ -199,7 +237,7 @@ def test_pickle(simple):
 
 
 def test_prune(simple):
-    LG, J, sigmas, a, M, key = simple
+    LG, rw_sd, J, a, M, key = simple
     # Run pfilter with multiple replicates to generate results
     LG.pfilter(J=J, reps=5, key=key)
     # Save the original theta list length

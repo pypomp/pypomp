@@ -176,6 +176,24 @@ class PanelPomp:
         )
         return shared_lst, unit_specific_lst
 
+    def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
+        """
+        Get permutation indices to reorder from PanelPomp canonical order
+        to a specific unit's canonical order.
+
+        Args:
+            unit_name: Name of the unit
+
+        Returns:
+            Array of indices for reordering parameters
+        """
+        unit_canonical = self.unit_objects[unit_name].canonical_param_names
+        panel_canonical = self.canonical_param_names
+
+        # Create mapping from panel order to unit order
+        permutation = [panel_canonical.index(name) for name in unit_canonical]
+        return jnp.array(permutation, dtype=jnp.int32)
+
     def _dataframe_to_array_canonical(
         self, df: pd.DataFrame, param_names: list[str], column_name: str
     ) -> jnp.ndarray:
@@ -539,6 +557,12 @@ class PanelPomp:
         # Use a representative unit for structural arrays and static callables
         rep_unit = self.unit_objects[unit_names[0]]
 
+        # Compute permutation indices to reorder from PanelPomp canonical order
+        # to each unit's canonical order
+        unit_param_permutations = jnp.stack(
+            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
+        )  # shape: (U, n_params)
+
         # TODO: make this more flexible
         # Assume all units share the same dt_array_extended, nstep_array, t0, and times
         dt_array_extended = rep_unit._dt_array_extended
@@ -651,6 +675,7 @@ class PanelPomp:
             sigmas_init_array,
             accumvars,
             covars_per_unit,
+            unit_param_permutations,
             M,
             a,
             J,

@@ -246,6 +246,7 @@ def _panel_mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_per_unit: jax.Array | None,  # (U, ...) or None
+    unit_param_permutations: jax.Array,  # (U, n_params)
     M: int,
     a: float,
     J: int,
@@ -304,13 +305,13 @@ def _panel_mif_internal(
                 key_u,
             ) = inner_carry
 
-            # Build per-unit thetas: (J, n_shared + n_spec).
-            # shared MUST come first for dictionary keys to line up with correct values later.
-            thetas_u = (
+            # Build per-unit thetas: (J, n_params) in unit's canonical order
+            thetas_u_panel_order = (
                 jnp.concatenate([shared_array_u.T, unit_array_u[:, :, u].T], axis=1)
                 if (n_shared + n_spec) > 0
                 else jnp.zeros((J, 0))
             )
+            thetas_u = thetas_u_panel_order[:, unit_param_permutations[u]]
 
             key_u, subkey = jax.random.split(key_u)
 
@@ -397,10 +398,10 @@ def _panel_mif_internal(
             unit_logliks_m,
             key_m,
         ) = jax.lax.fori_loop(
-            0,
-            U,
-            unit_body,
-            (
+            lower=0,
+            upper=U,
+            body_fun=unit_body,
+            init_val=(
                 shared_array_m,
                 unit_array_m,
                 sum_loglik_iter,
@@ -447,7 +448,7 @@ def _panel_mif_internal(
 
 
 _vmapped_panel_mif_internal = jax.vmap(
-    _panel_mif_internal, in_axes=((0, 0) + (None,) * 17 + (0,))
+    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,))
 )
 
 _jv_panel_mif_internal = jit(
@@ -456,8 +457,8 @@ _jv_panel_mif_internal = jit(
         7,  # rinitializers
         8,  # rprocesses_interp
         9,  # dmeasures
-        14,  # M
-        16,  # J
-        17,  # U
+        15,  # M
+        17,  # J
+        18,  # U
     ),
 )

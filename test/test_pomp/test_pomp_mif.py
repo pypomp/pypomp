@@ -95,7 +95,7 @@ def test_mif_order_of_sigmas_consistency(simple):
     LG, rw_sd, J, key, a, M = simple
     theta = LG.theta
 
-    param_names = LG.param_names
+    param_names = LG.canonical_param_names
 
     base_sigma = 0.01
     unique_sigmas = [base_sigma + 0.001 * i for i in range(len(param_names))]

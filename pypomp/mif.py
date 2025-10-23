@@ -261,7 +261,7 @@ def _panel_mif_internal(
     U: int,
     thresh: float,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compiled Panel IF2 across M iterations and U units.
 
@@ -270,7 +270,6 @@ def _panel_mif_internal(
         unit_array_final: (n_spec, J, U)
         shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
         unit_traces: (M+1, n_spec+1, U) where [:,0,:] is per-unit logLik per iter, [:,1:,:] are means
-        unit_logliks: (U,) sum of logLik across M iterations
     """
     n_shared = shared_array.shape[0]
     n_spec = unit_array.shape[0]
@@ -289,15 +288,12 @@ def _panel_mif_internal(
     unit_traces = unit_traces.at[0, 1:, :].set(unit_means0)
     unit_traces = unit_traces.at[0, 0, :].set(jnp.nan)
 
-    unit_logliks = jnp.zeros((U,))
-
     def iter_body(m: int, carry):
         (
             shared_array_m,
             unit_array_m,
             shared_traces_m,
             unit_traces_m,
-            unit_logliks_m,
             key_m,
         ) = carry
 
@@ -309,7 +305,6 @@ def _panel_mif_internal(
                 unit_array_u,
                 sum_loglik_u,
                 unit_traces_u,
-                unit_logliks_u,
                 key_u,
             ) = inner_carry
 
@@ -386,7 +381,6 @@ def _panel_mif_internal(
 
             loglik_u = -nLL_u
             sum_loglik_u = sum_loglik_u + loglik_u
-            unit_logliks_u = unit_logliks_u.at[u].add(loglik_u)
             unit_traces_u = unit_traces_u.at[m + 1, 0, u].set(loglik_u)
 
             return (
@@ -394,7 +388,6 @@ def _panel_mif_internal(
                 unit_array_u,
                 sum_loglik_u,
                 unit_traces_u,
-                unit_logliks_u,
                 key_u,
             )
 
@@ -403,7 +396,6 @@ def _panel_mif_internal(
             unit_array_m,
             sum_loglik_iter,
             unit_traces_m,
-            unit_logliks_m,
             key_m,
         ) = jax.lax.fori_loop(
             lower=0,
@@ -414,7 +406,6 @@ def _panel_mif_internal(
                 unit_array_m,
                 sum_loglik_iter,
                 unit_traces_m,
-                unit_logliks_m,
                 key_m,
             ),
         )
@@ -434,7 +425,6 @@ def _panel_mif_internal(
             unit_array_m,
             shared_traces_m,
             unit_traces_m,
-            unit_logliks_m,
             key_m,
         )
 
@@ -443,16 +433,15 @@ def _panel_mif_internal(
         unit_array,
         shared_traces,
         unit_traces,
-        unit_logliks,
         key,
     ) = jax.lax.fori_loop(
         0,
         M,
         iter_body,
-        (shared_array, unit_array, shared_traces, unit_traces, unit_logliks, key),
+        (shared_array, unit_array, shared_traces, unit_traces, key),
     )
 
-    return shared_array, unit_array, shared_traces, unit_traces, unit_logliks
+    return (shared_array, unit_array, shared_traces, unit_traces)
 
 
 _vmapped_panel_mif_internal = jax.vmap(

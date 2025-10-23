@@ -659,7 +659,6 @@ class PanelPomp:
             unit_array_f,
             shared_traces,
             unit_traces,
-            unit_logliks,
         ) = _jv_panel_mif_internal(
             shared_array,
             unit_array,
@@ -707,9 +706,12 @@ class PanelPomp:
             },
         )
 
+        shared_final_logliks = shared_traces[:, -1, 0]  # shape: (n_reps,)
+        unit_final_logliks = unit_traces[:, -1, 0, :]  # shape: (n_reps, n_units)
+
         full_logliks = xr.DataArray(
             jnp.concatenate(
-                [np.sum(unit_logliks, axis=1).reshape(-1, 1), unit_logliks], axis=1
+                [shared_final_logliks.reshape(-1, 1), unit_final_logliks], axis=1
             ),
             dims=["replicate", "unit"],
             coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},

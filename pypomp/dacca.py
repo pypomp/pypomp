@@ -186,16 +186,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
-    seas = jnp.array(
-        [
-            covars["seas1"],
-            covars["seas2"],
-            covars["seas3"],
-            covars["seas4"],
-            covars["seas5"],
-            covars["seas6"],
-        ]
-    )
+    seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
     (
         gamma,
         deltaI,
@@ -278,16 +269,7 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
-    seas = jnp.array(
-        [
-            covars["seas1"],
-            covars["seas2"],
-            covars["seas3"],
-            covars["seas4"],
-            covars["seas5"],
-            covars["seas6"],
-        ]
-    )
+    seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
     (
         gamma,
         deltaI,

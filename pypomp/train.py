@@ -10,9 +10,8 @@ from .pfilter import (
 )
 from .mop import _mop_internal_mean
 
-# NEW: minimal parameter-transform integration
+# Parameter-transform integration
 from .parameter_trans import ParTrans, _pt_inverse
-_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)  # identity
 
 
 @partial(
@@ -33,7 +32,7 @@ _IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)  # identity
         "alpha",
         "n_monitors",
         "n_obs",
-        "partrans",  # NEW
+        "partrans",  # treat transform as static
     ),
 )
 def _train_internal(
@@ -61,7 +60,7 @@ def _train_internal(
     key: jax.Array,
     n_monitors: int,  # static
     n_obs: int,  # static
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW: optional transform
+    partrans: ParTrans,  # explicit transform (no default)
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -95,7 +94,7 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
-                partrans=partrans,  # NEW
+                partrans=partrans,
             )
             # _mop_internal_mean returns (neg-LL)/T; convert to total neg-LL
             loglik *= ylen
@@ -116,11 +115,11 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
-                partrans=partrans,  # NEW
+                partrans=partrans,
             )
             if n_monitors > 0:
                 key, *subkeys = jax.random.split(key, n_monitors + 1)
-                # NEW: PF monitors are evaluated on *natural scale*
+                # PF monitors are evaluated on natural scale
                 theta_nat = _pt_inverse(theta_ests, partrans)
                 loglik = jnp.mean(
                     _vmapped_pfilter_internal(
@@ -164,7 +163,7 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
-                partrans=partrans,  # NEW
+                partrans=partrans,
             )
             direction = -jnp.linalg.pinv(hess) @ grad
 
@@ -185,7 +184,7 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
-                partrans=partrans,  # NEW
+                partrans=partrans,
             )
 
             def dir_weighted(_):
@@ -235,7 +234,7 @@ def _train_internal(
         if ls:
 
             def _obj_neg_loglik(theta_est):
-                # NEW: line search objective must be evaluated on natural scale
+                # Line search objective must be evaluated on natural scale
                 theta_nat = _pt_inverse(theta_est, partrans)
                 neg_loglik = _pfilter_internal(
                     theta_nat,
@@ -311,7 +310,7 @@ def _train_internal(
     # Final evaluation (PF monitor on natural scale)
     if n_monitors > 0:
         final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
-        theta_nat_final = _pt_inverse(final_theta, partrans)  # NEW
+        theta_nat_final = _pt_inverse(final_theta, partrans)
         final_loglik = jnp.mean(
             _vmapped_pfilter_internal(
                 theta_nat_final,
@@ -345,10 +344,10 @@ def _train_internal(
 
 
 # Map over theta and key
-# NEW: we added one more trailing arg ('partrans'); append one more None to keep alignment.
+# Align in_axes with 25 arguments (theta, +20 None, key, +3 None, partrans):
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,  # NEW: 24 -> 25 args
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
 )
 
 
@@ -407,7 +406,7 @@ def _jgrad_mop(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW
+    partrans: ParTrans,  # explicit
 ):
     """
     Calculates the gradient of a mean MOP objective (function 'mop_internal_mean')
@@ -428,7 +427,7 @@ def _jgrad_mop(
         covars_extended=covars_extended,
         alpha=alpha,
         key=key,
-        partrans=partrans,  # NEW
+        partrans=partrans,
     )
 
 
@@ -447,7 +446,7 @@ def _jvg_mop(
     accumvars: tuple[int, ...] | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW
+    partrans: ParTrans,  # explicit
 ) -> tuple:
     """
     Calculates (value, gradient) of a mean MOP objective w.r.t. estimation-scale parameters.
@@ -467,7 +466,7 @@ def _jvg_mop(
         accumvars=accumvars,
         alpha=alpha,
         key=key,
-        partrans=partrans,  # NEW
+        partrans=partrans,
     )
 
 
@@ -487,7 +486,7 @@ def _jhess_mop(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW
+    partrans: ParTrans,  # explicit
 ):
     """
     Calculates the Hessian of a mean MOP objective w.r.t. estimation-scale parameters.
@@ -507,5 +506,5 @@ def _jhess_mop(
         covars_extended=covars_extended,
         alpha=alpha,
         key=key,
-        partrans=partrans,  # NEW
+        partrans=partrans,
     )

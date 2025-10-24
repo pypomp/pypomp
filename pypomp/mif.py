@@ -12,8 +12,8 @@ from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
 
 # ---- Parameter transforms: minimal integration ----
+# Import ParTrans and helpers; do not define a local identity here.
 from .parameter_trans import ParTrans, _pt_forward, _pt_inverse
-_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)
 
 
 def _mif_internal(
@@ -30,12 +30,13 @@ def _mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
-    partrans: ParTrans = _IDENTITY_PARTRANS,   # optional parameter transform (identity by default)
-    M: int = 1,                      # static
-    a: float = 1.0,
-    J: int = 1,                      # static
-    thresh: float = 0.0,
-    key: jax.Array | None = None,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,              # optional parameter transform (identity chosen by outer wrapper)
+    M: int,                          # static
+    a: float,
+    J: int,                          # static
+    thresh: float,
+    key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """
     IF2 core for a single set of parameters (shape (J, n_theta)).
@@ -111,7 +112,8 @@ def _perfilter_internal(
     covars_extended: jax.Array | None,
     thresh: float,
     a: float,
-    partrans: ParTrans = _IDENTITY_PARTRANS,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ):
     """
     One IF2 iteration: run a perturbed particle filter once over the observation times.
@@ -190,7 +192,8 @@ def _perfilter_helper(
     thresh: float,
     m: int,
     a: float,
-    partrans: ParTrans = _IDENTITY_PARTRANS,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ) -> tuple[
     jax.Array,
     jax.Array,
@@ -275,13 +278,14 @@ def _panel_mif_internal(
     sigmas_init: float | jax.Array,
     accumvars: jax.Array | None,
     covars_per_unit: jax.Array | None,  # (U, ...) or None
-    partrans: ParTrans = _IDENTITY_PARTRANS,
-    M: int = 1,
-    a: float = 1.0,
-    J: int = 1,
-    U: int = 1,
-    thresh: float = 0.0,
-    key: jax.Array | None = None,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
+    M: int,
+    a: float,
+    J: int,
+    U: int,
+    thresh: float,
+    key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compiled Panel IF2 across M iterations and U units.

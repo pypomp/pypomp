@@ -11,14 +11,14 @@ from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
-# NEW: minimal parameter-transform integration
-from .parameter_trans import ParTrans, _pt_inverse  # only need inverse here
-_IDENTITY_PARTRANS = ParTrans(False, (), (), (), None, None)  # NEW: identity
+# Import ParTrans type and inverse transform; do not define a local identity here.
+# (Centralized identity lives in parameter_trans.py if an outer wrapper needs it.)
+from .parameter_trans import ParTrans, _pt_inverse
 
 
 @partial(
     jit,
-    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),  # NEW
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),
 )
 def _mop_internal(
     theta: jax.Array,  # estimation-scale parameter
@@ -35,7 +35,8 @@ def _mop_internal(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW: optional transform
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ) -> jax.Array:
     """
     Internal function for the MOP algorithm, which calls function 'mop_helper'
@@ -48,7 +49,7 @@ def _mop_internal(
     """
     times = times.astype(float)
 
-    # NEW: estimation-scale -> natural-scale (used throughout this run)
+    # Map estimation-scale -> natural-scale once for this run
     theta_nat = _pt_inverse(theta, partrans)
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
@@ -66,7 +67,7 @@ def _mop_internal(
             dt_array_extended=dt_array_extended,
             nstep_array=nstep_array,
             times=times,
-            theta_nat=theta_nat,  # NEW: pass natural-scale theta
+            theta_nat=theta_nat,
             rprocess_interp=rprocess_interp,
             dmeasure=dmeasure,
             covars_extended=covars_extended,
@@ -87,7 +88,7 @@ def _mop_internal(
 
 @partial(
     jit,
-    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),  # NEW
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),
 )
 def _mop_internal_mean(
     theta: jax.Array,  # estimation-scale
@@ -104,7 +105,8 @@ def _mop_internal_mean(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
-    partrans: ParTrans = _IDENTITY_PARTRANS,  # NEW
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ) -> jax.Array:
     """
     Internal function for calculating the MOP estimate of the log likelihood divided by
@@ -125,7 +127,7 @@ def _mop_internal_mean(
         accumvars=accumvars,
         alpha=alpha,
         key=key,
-        partrans=partrans,  # NEW
+        partrans=partrans,
     ) / len(ys)
 
 
@@ -138,7 +140,7 @@ def _mop_helper(
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     times: jax.Array,
-    theta_nat: jax.Array,  # NEW: natural-scale parameter
+    theta_nat: jax.Array,
     rprocess_interp: Callable,
     dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
@@ -158,7 +160,7 @@ def _mop_helper(
     nstep = nstep_array[i].astype(int)
     particlesP, t_idx = rprocess_interp(
         particlesF,
-        theta_nat,  # NEW: always use natural-scale theta
+        theta_nat,  # always use natural-scale theta
         keys,
         covars_extended,
         dt_array_extended,
@@ -170,7 +172,7 @@ def _mop_helper(
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    measurements = dmeasure(ys[i], particlesP, theta_nat, covars_t, t)  # NEW
+    measurements = dmeasure(ys[i], particlesP, theta_nat, covars_t, t)
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
 

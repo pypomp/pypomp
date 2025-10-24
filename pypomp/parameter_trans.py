@@ -1,83 +1,124 @@
-# pypomp/parameter_trans.py
-from typing import Callable, NamedTuple, Optional, Tuple, Sequence
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional, Tuple, Sequence, Union
 import jax
 import jax.numpy as jnp
 
-class ParTrans(NamedTuple):
-    is_custom: bool
-    log_idx: Tuple[int, ...]
-    logit_idx: Tuple[int, ...]
-    custom_idx: Tuple[int, ...]
-    to_est_custom: Optional[Callable] = None
-    from_est_custom: Optional[Callable] = None
+
+# NOTE: Users can now construct transforms directly via ParTrans(...)
+# or ParTrans.from_names(...). The previous two-step helper
+# `materialize_partrans(...)` has been removed.
+@dataclass(frozen=True)
+class ParTrans:
+    log_idx: Tuple[int, ...] = ()
+    logit_idx: Tuple[int, ...] = ()
+    custom_idx: Tuple[int, ...] = ()
+    to_est_custom: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None
+    from_est_custom: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None
+
+    @property
+    def is_custom(self) -> bool:
+        """Backward-compatible flag: True if any custom indices are present."""
+        return len(self.custom_idx) > 0
+
+    @classmethod
+    def from_names(
+        cls,
+        paramnames: Sequence[str],
+        *,
+        log: Union[str, Sequence[str], None] = None,
+        logit: Union[str, Sequence[str], None] = None,
+        custom: Union[str, Sequence[str], None] = None,
+        to_est: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        from_est: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+    ) -> "ParTrans":
+        """Construct a transform using parameter *names*."""
+        def _as_list(x):
+            if x is None:
+                return []
+            return [x] if isinstance(x, str) else list(x)
+
+        def _idx(xs):
+            return tuple(paramnames.index(n) for n in _as_list(xs))
+
+        if (to_est is None) ^ (from_est is None):
+            raise ValueError("Both to_est and from_est must be provided (or both None).")
+
+        log_idx = _idx(log)
+        logit_idx = _idx(logit)
+        custom_idx = _idx(custom)
+        _ensure_disjoint(log_idx, logit_idx, custom_idx)
+        if custom_idx and (to_est is None or from_est is None):
+            raise ValueError("Custom indices provided but to_est/from_est missing.")
+
+        return cls(log_idx, logit_idx, custom_idx, to_est, from_est)
 
 
 def parameter_trans(
-    log: str | int | Sequence[str] | Sequence[int] | None = None,
-    logit: str | int | Sequence[str] | Sequence[int] | None = None,
+    log: Union[str, int, Sequence[str], Sequence[int], None] = None,
+    logit: Union[str, int, Sequence[str], Sequence[int], None] = None,
     *,
-    custom: str | int | Sequence[str] | Sequence[int] | None = None,
+    custom: Union[str, int, Sequence[str], Sequence[int], None] = None,
     to_est: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
     from_est: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-) -> dict:
-    def _tolist(x):
-        if x is None:
-            return []
-        if isinstance(x, (str, int)):
-            return [x]
-        return list(x)
+    paramnames: Sequence[str] | None = None,
+) -> ParTrans:
+    """
+    Convenience wrapper returning a ParTrans directly.
+    This replaces the previous two-step API (materialize_partrans was removed).
+    - If `paramnames` is provided, you may pass *names* (str) in log/logit/custom.
+    - Otherwise log/logit/custom must be indices (int / Sequence[int]).
+    """
     if (to_est is None) ^ (from_est is None):
         raise ValueError("Both to_est and from_est must be provided (or both None).")
-    return {
-        "log_names": tuple(_tolist(log)),
-        "logit_names": tuple(_tolist(logit)),
-        "custom_names": tuple(_tolist(custom)),
-        "to_est_custom": to_est,
-        "from_est_custom": from_est,
-    }
 
+    def _as_list(x):
+        if x is None:
+            return []
+        if isinstance(x, (list, tuple)):
+            return list(x)
+        return [x]
 
-def materialize_partrans(spec: dict | ParTrans | None,
-                         paramnames: Sequence[str] | None) -> ParTrans:
-    if spec is None:
-        return ParTrans(False, (), (), (), None, None)
-    if isinstance(spec, ParTrans):
-        return spec
-    names = list(paramnames) if paramnames is not None else None
+    # Detect whether the user is giving names or indices
+    has_str = any(
+        isinstance(v, str) or (isinstance(v, (list, tuple)) and v and isinstance(v[0], str))
+        for v in (log, logit, custom) if v is not None
+    )
 
-    def _to_index(x):
-        if isinstance(x, int):
-            return int(x)
-        if names is None:
-            raise TypeError("paramnames is None but the spec contains parameter names.")
-        try:
-            return int(names.index(x))
-        except ValueError as e:
-            raise ValueError(f"Unknown parameter name {x!r} in {names}") from e
-
-    log_idx = tuple(_to_index(x) for x in spec.get("log_names", ()))
-    logit_idx = tuple(_to_index(x) for x in spec.get("logit_names", ()))
-    custom_idx = tuple(_to_index(x) for x in spec.get("custom_names", ()))
-
-    def _overlap(a, b): return set(a).intersection(b)
-    ov1 = _overlap(log_idx, logit_idx)
-    ov2 = _overlap(log_idx, custom_idx)
-    ov3 = _overlap(logit_idx, custom_idx)
-    if ov1 or ov2 or ov3:
-        raise ValueError(
-            f"parameter_trans sets must be disjoint. Overlaps found: "
-            f"log∩logit={sorted(ov1)}, log∩custom={sorted(ov2)}, logit∩custom={sorted(ov3)}"
+    if has_str:
+        if paramnames is None:
+            raise TypeError(
+                "When using parameter *names*, supply `paramnames` or call "
+                "ParTrans.from_names(paramnames=..., ...)."
+            )
+        return ParTrans.from_names(
+            paramnames,
+            log=log if isinstance(log, (str, list, tuple)) else None,
+            logit=logit if isinstance(logit, (str, list, tuple)) else None,
+            custom=custom if isinstance(custom, (str, list, tuple)) else None,
+            to_est=to_est,
+            from_est=from_est,
         )
 
-    to_custom = spec.get("to_est_custom", None)
-    from_custom = spec.get("from_est_custom", None)
-    has_custom = len(custom_idx) > 0
-    if has_custom and ((to_custom is None) or (from_custom is None)):
-        raise ValueError("You specified custom indices but did not provide to_est/from_est for them.")
-    if (to_custom is not None or from_custom is not None) and not has_custom:
-        raise ValueError("to_est/from_est were provided but 'custom' indices are empty.")
+    # Treat inputs as indices
+    def _to_idx_tuple(x) -> Tuple[int, ...]:
+        xs = _as_list(x)
+        return tuple(int(i) for i in xs)
 
-    return ParTrans(has_custom, log_idx, logit_idx, custom_idx, to_custom, from_custom)
+    log_idx = _to_idx_tuple(log)
+    logit_idx = _to_idx_tuple(logit)
+    custom_idx = _to_idx_tuple(custom)
+    _ensure_disjoint(log_idx, logit_idx, custom_idx)
+    if custom_idx and (to_est is None or from_est is None):
+        raise ValueError("Custom indices provided but to_est/from_est missing.")
+
+    return ParTrans(log_idx, logit_idx, custom_idx, to_est, from_est)
+
+
+def _ensure_disjoint(a: Tuple[int, ...], b: Tuple[int, ...], c: Tuple[int, ...]) -> None:
+    """Ensure three index sets are pairwise disjoint."""
+    if (set(a) & set(b)) or (set(a) & set(c)) or (set(b) & set(c)):
+        raise ValueError("parameter_trans sets must be disjoint.")
 
 
 def _pt_forward(theta_nat: jnp.ndarray, pt: ParTrans) -> jnp.ndarray:
@@ -92,7 +133,7 @@ def _pt_forward(theta_nat: jnp.ndarray, pt: ParTrans) -> jnp.ndarray:
         u = jnp.clip(cols, 1e-12, 1.0 - 1e-12)
         logits = jnp.log(u) - jnp.log1p(-u)
         z = z.at[..., qi].set(logits)
-    if pt.is_custom:
+    if pt.custom_idx and pt.to_est_custom is not None:
         ci = jnp.array(pt.custom_idx, dtype=jnp.int32)
         sub = jnp.take(z, ci, axis=-1)
         sub_t = pt.to_est_custom(sub)
@@ -104,7 +145,7 @@ def _pt_forward(theta_nat: jnp.ndarray, pt: ParTrans) -> jnp.ndarray:
 
 def _pt_inverse(z_est: jnp.ndarray, pt: ParTrans) -> jnp.ndarray:
     x = z_est
-    if pt.is_custom:
+    if pt.custom_idx and pt.from_est_custom is not None:
         ci = jnp.array(pt.custom_idx, dtype=jnp.int32)
         sub = jnp.take(x, ci, axis=-1)
         sub_x = pt.from_est_custom(sub)
@@ -121,3 +162,7 @@ def _pt_inverse(z_est: jnp.ndarray, pt: ParTrans) -> jnp.ndarray:
         vals = jax.nn.sigmoid(cols)
         x = x.at[..., qi].set(vals)
     return x
+
+
+# Provide a single, shared identity transform for import across modules.
+IDENTITY_PARTRANS = ParTrans()

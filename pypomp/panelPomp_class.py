@@ -235,7 +235,7 @@ class PanelPomp:
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
         tll = self._get_theta_list_len(shared, unit_specific)
-        params = [{}] * tll
+        params = [{} for _ in range(tll)]
 
         for i in range(tll):
             if shared is not None:

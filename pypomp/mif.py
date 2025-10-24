@@ -11,7 +11,7 @@ from .internal_functions import _geometric_cooling
 
 
 def _mif_internal(
-    theta: jax.Array,
+    theta_Jd: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     t0: float,
@@ -31,10 +31,12 @@ def _mif_internal(
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     times = times.astype(float)
-    n_theta = theta.shape[-1]
+    n_theta = theta_Jd.shape[-1]
     logliks_M = jnp.zeros(M)
     thetas_MJd = jnp.zeros((M, J, n_theta))
-    thetas_MJd = jnp.concatenate([theta.reshape((1, J, n_theta)), thetas_MJd], axis=0)
+    thetas_MJd = jnp.concatenate(
+        [theta_Jd.reshape((1, J, n_theta)), thetas_MJd], axis=0
+    )
 
     _perfilter_internal_2 = partial(
         _perfilter_internal,
@@ -55,13 +57,13 @@ def _mif_internal(
         a=a,
     )
 
-    (thetas_Md, logliks_M, key) = jax.lax.fori_loop(
+    (thetas_MJd, logliks_M, key) = jax.lax.fori_loop(
         lower=0,
         upper=M,
         body_fun=_perfilter_internal_2,
         init_val=(thetas_MJd, logliks_M, key),
     )
-    return logliks_M, thetas_Md
+    return logliks_M, thetas_MJd
 
 
 _vmapped_mif_internal = jax.vmap(

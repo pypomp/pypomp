@@ -28,7 +28,9 @@ def test_ParTrans_to_est_panel():
     unit_specific = pd.DataFrame(
         index=pd.Index(["pos_param_unit", "standard_param_unit"])
     ).assign(unit1=[1.0, 2.0], unit2=[3.0, 4.0])
-    shared_out, unit_specific_out = par_trans.to_est_panel(shared, unit_specific)
+    shared_out, unit_specific_out = par_trans.panel_transform(
+        shared, unit_specific, direction="to_est"
+    )
 
     # Test that shared parameters are transformed correctly
     assert shared_out is not None
@@ -64,20 +66,26 @@ def test_ParTrans_to_est_panel_none_cases():
     par_trans = pp.ParTrans(to_est, from_est)
 
     # Test both None
-    shared_out, unit_specific_out = par_trans.to_est_panel(None, None)
+    shared_out, unit_specific_out = par_trans.panel_transform(
+        None, None, direction="to_est"
+    )
     assert shared_out is None
     assert unit_specific_out is None
 
     # Test shared only
     shared = pd.DataFrame(index=pd.Index(["param1"])).assign(shared=[5.0])
-    shared_out, unit_specific_out = par_trans.to_est_panel(shared, None)
+    shared_out, unit_specific_out = par_trans.panel_transform(
+        shared, None, direction="to_est"
+    )
     assert shared_out is not None
     assert unit_specific_out is None
     assert abs(shared_out.loc["param1", shared_out.columns[0]] - 10.0) < 1e-10
 
     # Test unit-specific only
     unit_specific = pd.DataFrame(index=pd.Index(["param2"])).assign(unit1=[3.0])
-    shared_out, unit_specific_out = par_trans.to_est_panel(None, unit_specific)
+    shared_out, unit_specific_out = par_trans.panel_transform(
+        None, unit_specific, direction="to_est"
+    )
     assert shared_out is None
     assert unit_specific_out is not None
     assert abs(unit_specific_out.loc["param2", "unit1"] - 6.0) < 1e-10

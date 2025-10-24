@@ -21,6 +21,7 @@ from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
 from .rw_sd_class import RWSigma
+from .ParTrans_class import ParTrans
 
 
 def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
@@ -62,6 +63,7 @@ class Pomp:
         rproc (RProc): Simulator for the process model
         dmeas (DMeas | None): Density evaluation for the measurement model
         rmeas (RMeas | None): Measurement simulator
+        par_trans (ParTrans | None): Parameter transformation object
         covars (pd.DataFrame | None): Covariates for the model if applicable
         results_history (list | None): History of the results for the pfilter, mif, and train
             methods run on the object. This includes the algorithmic parameters used.
@@ -101,6 +103,7 @@ class Pomp:
         rproc: Callable,
         dmeas: Callable | None = None,
         rmeas: Callable | None = None,
+        par_trans: ParTrans | None = None,
         nstep: int | None = None,
         dt: float | None = None,
         ydim: int | None = None,
@@ -119,6 +122,8 @@ class Pomp:
             rproc (Callable): Process simulator function.
             dmeas (Callable, optional): Measurement density function.
             rmeas (Callable, optional): Measurement simulator function.
+            par_trans (ParTrans, optional): Parameter transformation object.
+                If provided, the parameters will be transformed to and from the estimation parameter space. Defaults to the identity transformation.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
             statenames (list[str], optional): List of state variable names.
@@ -168,22 +173,32 @@ class Pomp:
         else:
             self.covar_names: list[str] = []
 
+        self.par_trans: ParTrans = par_trans or ParTrans()
         self.rinit: RInit = RInit(
-            rinit, statenames, self.canonical_param_names, self.covar_names
+            struct=rinit,
+            statenames=statenames,
+            param_names=self.canonical_param_names,
+            covar_names=self.covar_names,
+            par_trans=self.par_trans,
         )
         self.rproc: RProc = RProc(
-            rproc,
-            statenames,
-            self.canonical_param_names,
-            self.covar_names,
-            nstep,
-            dt,
-            accumvars,
+            struct=rproc,
+            statenames=statenames,
+            param_names=self.canonical_param_names,
+            covar_names=self.covar_names,
+            par_trans=self.par_trans,
+            nstep=nstep,
+            dt=dt,
+            accumvars=accumvars,
         )
 
         if dmeas is not None:
             self.dmeas: DMeas | None = DMeas(
-                dmeas, statenames, self.canonical_param_names, self.covar_names
+                struct=dmeas,
+                statenames=statenames,
+                param_names=self.canonical_param_names,
+                covar_names=self.covar_names,
+                par_trans=self.par_trans,
             )
         else:
             self.dmeas: DMeas | None = None
@@ -192,7 +207,12 @@ class Pomp:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
             self.rmeas: RMeas | None = RMeas(
-                rmeas, ydim, statenames, self.canonical_param_names, self.covar_names
+                struct=rmeas,
+                ydim=ydim,
+                statenames=statenames,
+                param_names=self.canonical_param_names,
+                covar_names=self.covar_names,
+                par_trans=self.par_trans,
             )
         else:
             self.rmeas: RMeas | None = None
@@ -289,6 +309,7 @@ class Pomp:
         theta = theta or self.theta
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -299,7 +320,7 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list))
         results = []
-        for theta_i, k in zip(theta_list, keys):
+        for theta_i, k in zip(theta_list_trans, keys):
             results.append(
                 -_mop_internal(
                     theta=_theta_dict_to_array(theta_i, self.canonical_param_names),
@@ -500,13 +521,14 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
         )
         theta_array = jnp.array(
             [
                 _theta_dict_to_array(theta_i, self.canonical_param_names)
-                for theta_i in theta_list
+                for theta_i in theta_list_trans
             ]
         )
 
@@ -515,7 +537,7 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        keys = jax.random.split(new_key, len(theta_list))
+        keys = jax.random.split(new_key, len(theta_list_trans))
 
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
@@ -539,12 +561,12 @@ class Pomp:
         )
 
         final_theta_ests = []
-        n_paramsets = len(theta_list)
+        n_paramsets = len(theta_list_trans)
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
         trace_data = np.zeros((n_paramsets, M + 1, len(trace_vars)), dtype=float)
 
-        for i, theta_i in enumerate(theta_list):
+        for i, theta_i in enumerate(theta_list_trans):
             # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
             # Average parameter estimates over particles for each iteration
@@ -570,7 +592,14 @@ class Pomp:
         )
 
         self.theta = [
-            dict(zip(theta_list[0].keys(), np.mean(theta_ests[-1], axis=0).tolist()))
+            self.par_trans.from_est(
+                dict(
+                    zip(
+                        self.canonical_param_names,
+                        np.mean(theta_ests[-1], axis=0).tolist(),
+                    )
+                )
+            )
             for theta_ests in final_theta_ests
         ]
 
@@ -652,7 +681,7 @@ class Pomp:
         theta = theta or self.theta
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-
+        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -665,7 +694,7 @@ class Pomp:
         theta_array = jnp.array(
             [
                 _theta_dict_to_array(theta_i, self.canonical_param_names)
-                for theta_i in theta_list
+                for theta_i in theta_list_trans
             ]
         )
 
@@ -709,15 +738,17 @@ class Pomp:
             ),
             dims=["replicate", "iteration", "variable"],
             coords={
-                "replicate": range(0, len(theta_list)),
+                "replicate": range(0, len(theta_list_trans)),
                 "iteration": range(0, M + 1),
                 "variable": ["logLik"] + self.canonical_param_names,
             },
         )
 
         self.theta = [
-            dict(zip(self.canonical_param_names, theta_ests[i, -1, :].tolist()))
-            for i in range(len(theta_list))
+            self.par_trans.from_est(
+                dict(zip(self.canonical_param_names, theta_ests[i, -1, :].tolist()))
+            )
+            for i in range(len(theta_list_trans))
         ]
 
         if track_time is True:
@@ -776,7 +807,6 @@ class Pomp:
         theta = theta or self.theta
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
-
         if self.rmeas is None:
             raise ValueError(
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
@@ -1199,7 +1229,11 @@ class Pomp:
                 self.rinit = obj
             else:
                 self.rinit = RInit(
-                    obj, self.statenames, self.canonical_param_names, self.covar_names
+                    struct=obj,
+                    statenames=self.statenames,
+                    param_names=self.canonical_param_names,
+                    covar_names=self.covar_names,
+                    par_trans=self.par_trans,
                 )
 
         # Reconstruct rproc
@@ -1219,10 +1253,11 @@ class Pomp:
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = RProc(
-                    obj,
-                    self.statenames,
-                    self.canonical_param_names,
-                    self.covar_names,
+                    struct=obj,
+                    statenames=self.statenames,
+                    param_names=self.canonical_param_names,
+                    covar_names=self.covar_names,
+                    par_trans=self.par_trans,
                     **kwargs,
                 )
 
@@ -1234,7 +1269,11 @@ class Pomp:
                 self.dmeas = obj
             else:
                 self.dmeas = DMeas(
-                    obj, self.statenames, self.canonical_param_names, self.covar_names
+                    struct=obj,
+                    statenames=self.statenames,
+                    param_names=self.canonical_param_names,
+                    covar_names=self.covar_names,
+                    par_trans=self.par_trans,
                 )
 
         # Reconstruct rmeas
@@ -1245,11 +1284,12 @@ class Pomp:
                 self.rmeas = obj
             else:
                 self.rmeas = RMeas(
-                    obj,
-                    state["_rmeas_ydim"],
-                    self.statenames,
-                    self.canonical_param_names,
-                    self.covar_names,
+                    struct=obj,
+                    ydim=state["_rmeas_ydim"],
+                    statenames=self.statenames,
+                    param_names=self.canonical_param_names,
+                    covar_names=self.covar_names,
+                    par_trans=self.par_trans,
                 )
 
         # Set rmeas or dmeas to None if not set

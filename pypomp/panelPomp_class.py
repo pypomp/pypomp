@@ -14,6 +14,7 @@ from .util import logmeanexp
 import numpy as np
 import time
 from .rw_sd_class import RWSigma
+from .ParTrans_class import ParTrans
 
 
 class PanelPomp:
@@ -599,8 +600,12 @@ class PanelPomp:
         spec_list = unit_specific if isinstance(unit_specific, list) else []
         n_reps = self._get_theta_list_len(shared, unit_specific)
 
+        shared_trans_list, spec_trans_list = rep_unit.par_trans.panel_transform_list(
+            shared_list, spec_list, direction="to_est"
+        )
+
         # Shared parameters
-        if len(shared_list) == 0:
+        if len(shared_trans_list) == 0:
             n_shared = 0
             shared_array = jnp.zeros((n_reps, 0, J))
             shared_index: list[str] = []
@@ -615,13 +620,13 @@ class PanelPomp:
                         ).reshape(n_shared, 1),
                         (1, J),
                     )
-                    for df in shared_list
+                    for df in shared_trans_list
                 ],
                 axis=0,
             )
 
         # Unit-specific parameters
-        if len(spec_list) == 0:
+        if len(spec_trans_list) == 0:
             n_spec = 0
             unit_array = jnp.zeros((n_reps, 0, J, U))
             spec_index: list[str] = []
@@ -642,7 +647,7 @@ class PanelPomp:
                         ],
                         axis=2,
                     )  # shape: (n_spec, J, U)
-                    for df in spec_list
+                    for df in spec_trans_list
                 ],
                 axis=0,
             )  # shape: (R, n_spec, J, U)

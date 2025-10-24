@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Callable, Literal
+from .ParTrans_class import ParTrans
 
 
 def _create_dict_wrapper(
@@ -14,6 +15,7 @@ def _create_dict_wrapper(
     statenames: list[str],
     covar_names: list[str],
     function_type: Literal["RProc", "DMeas", "RInit", "RMeas"],
+    par_trans: ParTrans,
 ):
     """
     Create a wrapper that converts arrays to/from dicts for user functions.
@@ -24,14 +26,16 @@ def _create_dict_wrapper(
         statenames: List of state variable names in canonical order
         covar_names: List of covariate names in canonical order
         function_type: The type of function to wrap
+        par_trans: Parameter transformation object
     """
     if function_type == "RProc":
         # RProc case: X_dict, theta_dict -> state_dict
         def wrapped(X_array, theta_array, key, covars, t, dt):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = par_trans.from_est(theta_dict)
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            result_dict = user_func(X_dict, theta_dict, key, covars_dict, t, dt)
+            result_dict = user_func(X_dict, theta_dict_trans, key, covars_dict, t, dt)
             result_array = jnp.array(
                 [result_dict[name] for name in statenames]
             ).reshape(-1)
@@ -40,15 +44,17 @@ def _create_dict_wrapper(
         # DMeas case: X_dict, theta_dict -> scalar
         def wrapped(Y_array, X_array, theta_array, covars, t):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = par_trans.from_est(theta_dict)
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            return user_func(Y_array, X_dict, theta_dict, covars_dict, t)
+            return user_func(Y_array, X_dict, theta_dict_trans, covars_dict, t)
     elif function_type == "RInit":
         # RInit case: theta_dict -> state_dict
         def wrapped(theta_array, key, covars, t0):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = par_trans.from_est(theta_dict)
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            result_dict = user_func(theta_dict, key, covars_dict, t0)
+            result_dict = user_func(theta_dict_trans, key, covars_dict, t0)
             result_array = jnp.array(
                 [result_dict[name] for name in statenames]
             ).reshape(-1)
@@ -57,9 +63,10 @@ def _create_dict_wrapper(
         # RMeas case: X_dict, theta_dict -> observation_array
         def wrapped(X_array, theta_array, key, covars, t):
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = par_trans.from_est(theta_dict)
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            return user_func(X_dict, theta_dict, key, covars_dict, t)
+            return user_func(X_dict, theta_dict_trans, key, covars_dict, t)
     else:
         raise ValueError(f"Invalid function type: {function_type}")
 
@@ -130,6 +137,7 @@ class RInit:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the RInit class with the required function structure for simulating
@@ -141,7 +149,8 @@ class RInit:
                 in that order. The function must return a dict mapping state names to values.
             statenames (list[str]): List of state variable names in canonical order.
             param_names (list[str]): List of parameter names in canonical order.
-
+            covar_names (list[str]): List of covariate names in canonical order.
+            par_trans (ParTrans): Parameter transformation object.
         Note:
             While this function can check that the arguments of struct are in the
             correct order, it cannot check that the output is correct. The user must
@@ -166,7 +175,7 @@ class RInit:
 
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RInit"
+            struct, param_names, statenames, covar_names, "RInit", par_trans
         )
 
         self.struct = wrapped_struct
@@ -192,6 +201,7 @@ class RProc:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
         nstep: int | None = None,
         dt: float | None = None,
         accumvars: tuple[int, ...] | None = None,
@@ -239,7 +249,7 @@ class RProc:
 
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RProc"
+            struct, param_names, statenames, covar_names, "RProc", par_trans
         )
 
         self.struct = wrapped_struct
@@ -318,6 +328,7 @@ class DMeas:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the DMeas class with the required function structure.
@@ -351,7 +362,7 @@ class DMeas:
         self.covar_names = covar_names
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "DMeas"
+            struct, param_names, statenames, covar_names, "DMeas", par_trans
         )
 
         self.struct = wrapped_struct
@@ -378,6 +389,7 @@ class RMeas:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the RMeas class with the required function structure.
@@ -414,7 +426,7 @@ class RMeas:
         self.covar_names = covar_names
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RMeas"
+            struct, param_names, statenames, covar_names, "RMeas", par_trans
         )
 
         self.struct = wrapped_struct

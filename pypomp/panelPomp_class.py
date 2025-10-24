@@ -46,12 +46,14 @@ class PanelPomp:
         self.unit_specific: list[pd.DataFrame] | None = unit_specific
         self.results_history = []
         self.fresh_key: jax.Array | None = None
-        shared_param_names, unit_param_names = self._get_param_names(
-            shared, unit_specific
+        canonical_shared_param_names, canonical_unit_param_names = (
+            self._get_param_names(shared, unit_specific)
         )
-        self.canonical_shared_param_names: list[str] = shared_param_names
-        self.canonical_unit_param_names: list[str] = unit_param_names
-        self.canonical_param_names: list[str] = shared_param_names + unit_param_names
+        self.canonical_shared_param_names: list[str] = canonical_shared_param_names
+        self.canonical_unit_param_names: list[str] = canonical_unit_param_names
+        self.canonical_param_names: list[str] = (
+            canonical_shared_param_names + canonical_unit_param_names
+        )
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
@@ -59,11 +61,24 @@ class PanelPomp:
     def _validate_unit_objects(self, unit_objects: dict[str, Pomp]) -> dict[str, Pomp]:
         if not isinstance(unit_objects, dict):
             raise TypeError("unit_objects must be a dictionary")
-        for value in unit_objects.values():
-            if not isinstance(value, Pomp):
+        unit_objs = list(unit_objects.values())
+        for unit_obj in unit_objs:
+            if not isinstance(unit_obj, Pomp):
                 raise TypeError(
                     "Every element of unit_objects must be an instance of the class Pomp"
                 )
+            # TODO: loosen these constraints
+            if unit_obj.t0 != unit_objs[0].t0:
+                raise ValueError("All units must have the same t0")
+            if any(unit_obj._dt_array_extended != unit_objs[0]._dt_array_extended):
+                raise ValueError("All units must have the same _dt_array_extended")
+            if any(unit_obj._nstep_array != unit_objs[0]._nstep_array):
+                raise ValueError("All units must have the same _nstep_array")
+            if any(unit_obj.ys.index != unit_objs[0].ys.index):
+                raise ValueError("All units must have the same ys index")
+            if any(unit_obj.ys.columns != unit_objs[0].ys.columns):
+                raise ValueError("All units must have the same ys columns")
+
         return unit_objects
 
     def _validate_shared(
@@ -116,17 +131,17 @@ class PanelPomp:
         shared: pd.DataFrame | list[pd.DataFrame] | None,
         unit_specific: pd.DataFrame | list[pd.DataFrame] | None,
         unit_objects: dict[str, Pomp],
-    ) -> tuple[
-        list[pd.DataFrame] | None,
-        list[pd.DataFrame] | None,
-        dict[str, Pomp],
-    ]:
+    ) -> tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None, dict[str, Pomp]]:
         unit_objects = self._validate_unit_objects(unit_objects)
         shared = self._validate_shared(shared)
         units = list(unit_objects.keys())
         unit_specific = self._validate_unit_specific(unit_specific, units)
         if shared is not None and unit_specific is not None:
-            assert len(shared) == len(unit_specific)
+            if len(shared) != len(unit_specific):
+                raise ValueError(
+                    "shared and unit_specific lists must have the same length if both are provided. "
+                    f"shared length: {len(shared)}, unit_specific length: {len(unit_specific)}"
+                )
         return shared, unit_specific, unit_objects
 
     def _update_fresh_key(
@@ -160,6 +175,24 @@ class PanelPomp:
             [] if unit_specific is None else list(unit_specific[0].index)
         )
         return shared_lst, unit_specific_lst
+
+    def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
+        """
+        Get permutation indices to reorder from PanelPomp canonical order
+        to a specific unit's canonical order.
+
+        Args:
+            unit_name: Name of the unit
+
+        Returns:
+            Array of indices for reordering parameters
+        """
+        unit_canonical = self.unit_objects[unit_name].canonical_param_names
+        panel_canonical = self.canonical_param_names
+
+        # Create mapping from panel order to unit order
+        permutation = [panel_canonical.index(name) for name in unit_canonical]
+        return jnp.array(permutation, dtype=jnp.int32)
 
     def _dataframe_to_array_canonical(
         self, df: pd.DataFrame, param_names: list[str], column_name: str
@@ -217,15 +250,24 @@ class PanelPomp:
         shared: list[pd.DataFrame] | None,
         unit_specific: list[pd.DataFrame] | None,
     ) -> int:
+        """
+        Get the number of parameter sets (i.e., replicates) from the two lists of parameters.
+        """
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
-        return (
-            len(shared)
-            if shared is not None
-            else len(unit_specific)
-            if unit_specific is not None
-            else 0
-        )
+        if shared is None and unit_specific is not None:
+            return len(unit_specific)
+        elif shared is not None and unit_specific is None:
+            return len(shared)
+        elif shared is not None and unit_specific is not None:
+            if len(shared) == len(unit_specific):
+                return len(shared)
+            else:
+                raise ValueError(
+                    "shared and unit_specific must have the same length if both are provided"
+                )
+        else:
+            raise ValueError("At least one of shared or unit_specific must be provided")
 
     @staticmethod
     def sample_params(
@@ -362,7 +404,7 @@ class PanelPomp:
         """
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, _ = self._validate_params_and_units(
+        shared, unit_specific, *_ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
 
@@ -416,7 +458,7 @@ class PanelPomp:
         start_time = time.time()
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, _ = self._validate_params_and_units(
+        shared, unit_specific, *_ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
         key, old_key = self._update_fresh_key(key)
@@ -495,7 +537,7 @@ class PanelPomp:
         start_time = time.time()
         shared = shared or self.shared
         unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, _ = self._validate_params_and_units(
+        shared, unit_specific, *_ = self._validate_params_and_units(
             shared, unit_specific, self.unit_objects
         )
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
@@ -514,6 +556,12 @@ class PanelPomp:
         U = len(unit_names)
         # Use a representative unit for structural arrays and static callables
         rep_unit = self.unit_objects[unit_names[0]]
+
+        # Compute permutation indices to reorder from PanelPomp canonical order
+        # to each unit's canonical order
+        unit_param_permutations = jnp.stack(
+            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
+        )  # shape: (U, n_params)
 
         # TODO: make this more flexible
         # Assume all units share the same dt_array_extended, nstep_array, t0, and times
@@ -611,7 +659,6 @@ class PanelPomp:
             unit_array_f,
             shared_traces,
             unit_traces,
-            unit_logliks,
         ) = _jv_panel_mif_internal(
             shared_array,
             unit_array,
@@ -628,6 +675,7 @@ class PanelPomp:
             accumvars,
             covars_per_unit,
             rep_unit.partrans,
+            unit_param_permutations,
             M,
             a,
             J,
@@ -659,9 +707,12 @@ class PanelPomp:
             },
         )
 
+        shared_final_logliks = shared_traces[:, -1, 0]  # shape: (n_reps,)
+        unit_final_logliks = unit_traces[:, -1, 0, :]  # shape: (n_reps, n_units)
+
         full_logliks = xr.DataArray(
             jnp.concatenate(
-                [np.sum(unit_logliks, axis=1).reshape(-1, 1), unit_logliks], axis=1
+                [shared_final_logliks.reshape(-1, 1), unit_final_logliks], axis=1
             ),
             dims=["replicate", "unit"],
             coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},

@@ -1,6 +1,5 @@
 import xarray as xr
 import jax.numpy as jnp
-import pandas as pd
 
 
 def test_mif(measles_panel_setup_some_shared):

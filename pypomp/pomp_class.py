@@ -144,11 +144,11 @@ class Pomp:
             raise TypeError("theta must be a dictionary or a list of dictionaries")
 
         # Extract parameter names from first theta dict
-        self.param_names: list[str] = list(self.theta[0].keys())
+        self.canonical_param_names: list[str] = list(self.theta[0].keys())
 
         # Validate that all theta dicts have the same keys
         for theta_dict in self.theta:
-            if set(theta_dict.keys()) != set(self.param_names):
+            if set(theta_dict.keys()) != set(self.canonical_param_names):
                 raise ValueError("All theta dictionaries must have the same keys")
 
         # If statenames not provided, we need to infer them
@@ -174,14 +174,22 @@ class Pomp:
         else:
             self.covar_names: list[str] = []
 
-        self.rinit: RInit = RInit(rinit, statenames, self.param_names, self.covar_names)
+        self.rinit: RInit = RInit(
+            rinit, statenames, self.canonical_param_names, self.covar_names
+        )
         self.rproc: RProc = RProc(
-            rproc, statenames, self.param_names, self.covar_names, nstep, dt, accumvars
+            rproc,
+            statenames,
+            self.canonical_param_names,
+            self.covar_names,
+            nstep,
+            dt,
+            accumvars,
         )
 
         if dmeas is not None:
             self.dmeas: DMeas | None = DMeas(
-                dmeas, statenames, self.param_names, self.covar_names
+                dmeas, statenames, self.canonical_param_names, self.covar_names
             )
         else:
             self.dmeas: DMeas | None = None
@@ -190,7 +198,7 @@ class Pomp:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
             self.rmeas: RMeas | None = RMeas(
-                rmeas, ydim, statenames, self.param_names, self.covar_names
+                rmeas, ydim, statenames, self.canonical_param_names, self.covar_names
             )
         else:
             self.rmeas: RMeas | None = None
@@ -301,7 +309,7 @@ class Pomp:
         keys = jax.random.split(new_key, len(theta_list))
         results = []
         for theta_i, k in zip(theta_list, keys):
-            theta_vec_nat = _theta_dict_to_array(theta_i, self.param_names)   # natural
+            theta_vec_nat = _theta_dict_to_array(theta_i, self.canonical_param_names)   # natural
             theta_vec_est = _pt_forward(theta_vec_nat, self.partrans)         # to estimation scale
 
             results.append(
@@ -381,7 +389,9 @@ class Pomp:
 
         thetas_repl = jnp.vstack(
             [
-                jnp.tile(_theta_dict_to_array(theta_i, self.param_names), (reps, 1))
+                jnp.tile(
+                    _theta_dict_to_array(theta_i, self.canonical_param_names), (reps, 1)
+                )
                 for theta_i in theta_list
             ]
         )
@@ -504,10 +514,13 @@ class Pomp:
         self._validate_theta(theta)
         theta_list = theta if isinstance(theta, list) else [theta]
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
-            param_names=self.param_names
+            param_names=self.canonical_param_names
         )
         theta_array = jnp.array(
-            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+            [
+                _theta_dict_to_array(theta_i, self.canonical_param_names)
+                for theta_i in theta_list
+            ]
         )
 
         if self.dmeas is None:
@@ -542,7 +555,7 @@ class Pomp:
 
         final_theta_ests = []
         n_paramsets = len(theta_list)
-        param_names = self.param_names
+        param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
         trace_data = np.zeros((n_paramsets, M + 1, len(trace_vars)), dtype=float)
 
@@ -665,7 +678,7 @@ class Pomp:
 
         # Convert theta_list to array format for vmapping (estimation scale)
         theta_array_nat = jnp.array(
-            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+            [_theta_dict_to_array(theta_i, self.canonical_param_names) for theta_i in theta_list]
         )
         theta_array_est = _pt_forward(theta_array_nat, self.partrans)
 
@@ -715,13 +728,13 @@ class Pomp:
             coords={
                 "replicate": range(0, len(theta_list)),
                 "iteration": range(0, M + 1),
-                "variable": ["logLik"] + self.param_names,
+                "variable": ["logLik"] + self.canonical_param_names,
             },
         )
 
         # Store final theta back on natural scale
         self.theta = [
-            dict(zip(self.param_names, np.asarray(theta_ests_nat[i, -1, :]).tolist()))
+            dict(zip(self.canonical_param_names, np.asarray(theta_ests_nat[i, -1, :]).tolist()))
             for i in range(len(theta_list))
         ]
 
@@ -788,7 +801,10 @@ class Pomp:
             )
 
         thetas_array = jnp.vstack(
-            [_theta_dict_to_array(theta_i, self.param_names) for theta_i in theta_list]
+            [
+                _theta_dict_to_array(theta_i, self.canonical_param_names)
+                for theta_i in theta_list
+            ]
         )
 
         new_key, old_key = self._update_fresh_key(key)
@@ -1204,7 +1220,7 @@ class Pomp:
                 self.rinit = obj
             else:
                 self.rinit = RInit(
-                    obj, self.statenames, self.param_names, self.covar_names
+                    obj, self.statenames, self.canonical_param_names, self.covar_names
                 )
 
         # Reconstruct rproc
@@ -1224,7 +1240,11 @@ class Pomp:
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = RProc(
-                    obj, self.statenames, self.param_names, self.covar_names, **kwargs
+                    obj,
+                    self.statenames,
+                    self.canonical_param_names,
+                    self.covar_names,
+                    **kwargs,
                 )
 
         # Reconstruct dmeas
@@ -1235,7 +1255,7 @@ class Pomp:
                 self.dmeas = obj
             else:
                 self.dmeas = DMeas(
-                    obj, self.statenames, self.param_names, self.covar_names
+                    obj, self.statenames, self.canonical_param_names, self.covar_names
                 )
 
         # Reconstruct rmeas
@@ -1249,7 +1269,7 @@ class Pomp:
                     obj,
                     state["_rmeas_ydim"],
                     self.statenames,
-                    self.param_names,
+                    self.canonical_param_names,
                     self.covar_names,
                 )
 

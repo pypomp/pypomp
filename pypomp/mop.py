@@ -11,10 +11,17 @@ from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
+# Import ParTrans type and inverse transform; do not define a local identity here.
+# (Centralized identity lives in parameter_trans.py if an outer wrapper needs it.)
+from .parameter_trans import ParTrans, _pt_inverse
 
-@partial(jit, static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure"))
+
+@partial(
+    jit,
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),
+)
 def _mop_internal(
-    theta: jax.Array,
+    theta: jax.Array,  # estimation-scale parameter
     ys: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -28,15 +35,26 @@ def _mop_internal(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ) -> jax.Array:
     """
     Internal function for the MOP algorithm, which calls function 'mop_helper'
     iteratively.
+
+    Notes
+    -----
+    - 'theta' is on the *estimation scale*; we map it once to the *natural scale*
+      before passing into model components.
     """
     times = times.astype(float)
+
+    # Map estimation-scale -> natural-scale once for this run
+    theta_nat = _pt_inverse(theta, partrans)
+
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF = rinitializer(theta, keys, covars0, t0)
+    particlesF = rinitializer(theta_nat, keys, covars0, t0)  # use natural-scale theta
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
@@ -49,7 +67,7 @@ def _mop_internal(
             dt_array_extended=dt_array_extended,
             nstep_array=nstep_array,
             times=times,
-            theta=theta,
+            theta_nat=theta_nat,
             rprocess_interp=rprocess_interp,
             dmeasure=dmeasure,
             covars_extended=covars_extended,
@@ -68,9 +86,12 @@ def _mop_internal(
     return -loglik
 
 
-@partial(jit, static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure"))
+@partial(
+    jit,
+    static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure", "partrans"),
+)
 def _mop_internal_mean(
-    theta: jax.Array,
+    theta: jax.Array,  # estimation-scale
     ys: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -84,6 +105,8 @@ def _mop_internal_mean(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
+    # NOTE: internal functions should not rely on defaults; pass partrans explicitly.
+    partrans: ParTrans,
 ) -> jax.Array:
     """
     Internal function for calculating the MOP estimate of the log likelihood divided by
@@ -104,6 +127,7 @@ def _mop_internal_mean(
         accumvars=accumvars,
         alpha=alpha,
         key=key,
+        partrans=partrans,
     ) / len(ys)
 
 
@@ -116,7 +140,7 @@ def _mop_helper(
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     times: jax.Array,
-    theta: jax.Array,
+    theta_nat: jax.Array,
     rprocess_interp: Callable,
     dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
@@ -136,7 +160,7 @@ def _mop_helper(
     nstep = nstep_array[i].astype(int)
     particlesP, t_idx = rprocess_interp(
         particlesF,
-        theta,
+        theta_nat,  # always use natural-scale theta
         keys,
         covars_extended,
         dt_array_extended,
@@ -148,7 +172,7 @@ def _mop_helper(
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t)
+    measurements = dmeasure(ys[i], particlesP, theta_nat, covars_t, t)
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
 
@@ -157,11 +181,8 @@ def _mop_helper(
         + jax.scipy.special.logsumexp(weightsP + measurements)
         - jax.scipy.special.logsumexp(weightsP)
     )
-    # test different, logsumexp - source code (floating point arithmetic issue)
-    # make a little note in the code, discuss it in the quant test about the small difference
-    # logsumexp source code
 
-    norm_weights, loglik_phi_t = _normalize_weights(jax.lax.stop_gradient(measurements))
+    norm_weights, _ = _normalize_weights(jax.lax.stop_gradient(measurements))
 
     key, subkey = jax.random.split(key)
     counts, particlesF, norm_weightsF = _resampler(

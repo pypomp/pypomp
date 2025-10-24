@@ -22,6 +22,9 @@ from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
 from .rw_sd_class import RWSigma
 
+# Parameter-transform support: import transform helpers and a shared identity instance.
+from .parameter_trans import ParTrans, _pt_inverse, _pt_forward, IDENTITY_PARTRANS
+
 
 def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
     """
@@ -69,6 +72,7 @@ class Pomp:
             store a fresh, unused key in this attribute. Subsequent calls to a method
             that requires a key will use this key unless a new key is provided as an
             argument.
+        partrans (ParTrans): Parameter transform used to map between estimation and natural scales.
     """
 
     @staticmethod
@@ -106,6 +110,7 @@ class Pomp:
         ydim: int | None = None,
         accumvars: tuple[int, ...] | None = None,
         covars: pd.DataFrame | None = None,
+        partrans: ParTrans | None = None,  # optional parameter transform
     ):
         """
         Initializes the necessary components for a specific POMP model.
@@ -122,6 +127,7 @@ class Pomp:
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
             statenames (list[str], optional): List of state variable names.
+            partrans (ParTrans, optional): Parameter transform (defaults to identity).
         """
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -217,6 +223,9 @@ class Pomp:
         )
         self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
 
+        # Store parameter transform (identity by default)
+        self.partrans: ParTrans = partrans if partrans is not None else IDENTITY_PARTRANS
+
     def _update_fresh_key(
         self, key: jax.Array | None = None
     ) -> tuple[jax.Array, jax.Array]:
@@ -300,9 +309,12 @@ class Pomp:
         keys = jax.random.split(new_key, len(theta_list))
         results = []
         for theta_i, k in zip(theta_list, keys):
+            theta_vec_nat = _theta_dict_to_array(theta_i, self.canonical_param_names)   # natural
+            theta_vec_est = _pt_forward(theta_vec_nat, self.partrans)         # to estimation scale
+
             results.append(
                 -_mop_internal(
-                    theta=_theta_dict_to_array(theta_i, self.canonical_param_names),
+                    theta=theta_vec_est,
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     nstep_array=self._nstep_array,
@@ -316,6 +328,7 @@ class Pomp:
                     accumvars=self.rproc.accumvars,
                     alpha=alpha,
                     key=k,
+                    partrans=self.partrans,  # pass transform (static)
                 )
             )
         return results
@@ -517,6 +530,7 @@ class Pomp:
 
         keys = jax.random.split(new_key, len(theta_list))
 
+        # Keep original call signature; mif.py expects partrans passed explicitly.
         nLLs, theta_ests = _jv_mif_internal(
             jnp.tile(theta_array, (J, 1, 1)),
             self._dt_array_extended,
@@ -531,6 +545,7 @@ class Pomp:
             sigmas_init_array,
             self.rproc.accumvars,
             self._covars_extended,
+            self.partrans,
             M,
             a,
             J,
@@ -661,19 +676,17 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
-        # Convert theta_list to array format for vmapping
-        theta_array = jnp.array(
-            [
-                _theta_dict_to_array(theta_i, self.canonical_param_names)
-                for theta_i in theta_list
-            ]
+        # Convert theta_list to array format for vmapping (estimation scale)
+        theta_array_nat = jnp.array(
+            [_theta_dict_to_array(theta_i, self.canonical_param_names) for theta_i in theta_list]
         )
+        theta_array_est = _pt_forward(theta_array_nat, self.partrans)
 
         n_obs = len(self.ys)
 
         # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
-            theta_array,
+            theta_array_est,
             jnp.array(self.ys),
             self._dt_array_extended,
             self._nstep_array,
@@ -697,13 +710,17 @@ class Pomp:
             keys,
             n_monitors,
             n_obs,
+            self.partrans,  # pass transform (static)
         )
+
+        # Map full (replicate, iteration, param) tensor back to natural scale
+        theta_ests_nat = _pt_inverse(theta_ests, self.partrans)
 
         joined_array = xr.DataArray(
             np.concatenate(
                 [
                     -nLLs[..., np.newaxis],  # shape: (replicate, iteration, 1)
-                    theta_ests,  # shape: (replicate, iteration, n_theta)
+                    np.asarray(theta_ests_nat),  # shape: (replicate, iteration, n_theta)
                 ],
                 axis=-1,
             ),
@@ -715,8 +732,9 @@ class Pomp:
             },
         )
 
+        # Store final theta back on natural scale
         self.theta = [
-            dict(zip(self.canonical_param_names, theta_ests[i, -1, :].tolist()))
+            dict(zip(self.canonical_param_names, np.asarray(theta_ests_nat[i, -1, :]).tolist()))
             for i in range(len(theta_list))
         ]
 
@@ -1180,6 +1198,9 @@ class Pomp:
         state.pop("rproc", None)
         state.pop("dmeas", None)
         state.pop("rmeas", None)
+
+        # We keep 'partrans' in state. ParTrans is a small frozen dataclass;
+        # ensure any custom callables inside are picklable at top-level.
 
         return state
 

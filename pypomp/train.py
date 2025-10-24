@@ -10,6 +10,9 @@ from .pfilter import (
 )
 from .mop import _mop_internal_mean
 
+# Parameter-transform integration
+from .parameter_trans import ParTrans, _pt_inverse
+
 
 @partial(
     jit,
@@ -29,10 +32,11 @@ from .mop import _mop_internal_mean
         "alpha",
         "n_monitors",
         "n_obs",
+        "partrans",  # treat transform as static
     ),
 )
 def _train_internal(
-    theta_ests: jax.Array,
+    theta_ests: jax.Array,  # estimation-scale parameter (P,)
     ys: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -56,9 +60,14 @@ def _train_internal(
     key: jax.Array,
     n_monitors: int,  # static
     n_obs: int,  # static
+    partrans: ParTrans,  # explicit transform (no default)
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
+
+    All updates happen on the *estimation scale*. Whenever we need a PF-based
+    objective (monitor / line search), we map parameters to the *natural scale*
+    via the provided 'partrans'.
     """
     times = times.astype(float)
     ylen = ys.shape[0]
@@ -85,7 +94,9 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
+                partrans=partrans,
             )
+            # _mop_internal_mean returns (neg-LL)/T; convert to total neg-LL
             loglik *= ylen
         else:
             key, subkey = jax.random.split(key)
@@ -104,12 +115,15 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
+                partrans=partrans,
             )
             if n_monitors > 0:
                 key, *subkeys = jax.random.split(key, n_monitors + 1)
+                # PF monitors are evaluated on natural scale
+                theta_nat = _pt_inverse(theta_ests, partrans)
                 loglik = jnp.mean(
                     _vmapped_pfilter_internal(
-                        theta_ests,
+                        theta_nat,  # keep shape (P,), vmaps over keys only
                         dt_array_extended,
                         nstep_array,
                         t0,
@@ -149,6 +163,7 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
+                partrans=partrans,
             )
             direction = -jnp.linalg.pinv(hess) @ grad
 
@@ -169,6 +184,7 @@ def _train_internal(
                 covars_extended=covars_extended,
                 alpha=alpha,
                 key=subkey,
+                partrans=partrans,
             )
 
             def dir_weighted(_):
@@ -217,9 +233,11 @@ def _train_internal(
 
         if ls:
 
-            def _obj_neg_loglik(theta):
+            def _obj_neg_loglik(theta_est):
+                # Line search objective must be evaluated on natural scale
+                theta_nat = _pt_inverse(theta_est, partrans)
                 neg_loglik = _pfilter_internal(
-                    theta,
+                    theta_nat,
                     dt_array_extended=dt_array_extended,
                     nstep_array=nstep_array,
                     t0=t0,
@@ -289,12 +307,13 @@ def _train_internal(
         )
     )
 
-    # Final evaluation
+    # Final evaluation (PF monitor on natural scale)
     if n_monitors > 0:
         final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
+        theta_nat_final = _pt_inverse(final_theta, partrans)
         final_loglik = jnp.mean(
             _vmapped_pfilter_internal(
-                final_theta,
+                theta_nat_final,
                 dt_array_extended,
                 nstep_array,
                 t0,
@@ -325,9 +344,10 @@ def _train_internal(
 
 
 # Map over theta and key
+# Align in_axes with 25 arguments (theta, +20 None, key, +3 None, partrans):
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
 )
 
 
@@ -349,32 +369,8 @@ def _line_search(
     Conducts line search algorithm to determine the step size under stochastic
     Quasi-Newton methods. The implentation of the algorithm refers to
     https://arxiv.org/pdf/1909.01238.pdf.
-
-    Args:
-        obj (function): The objective function aiming to minimize
-        curr_obj (jax.Array): The value of the objective function at the current
-            point.
-        pt (jax.Array): The array containing current parameter values.
-        grad (jax.Array): The gradient of the objective function at the current
-            point.
-        direction (jax.Array): The direction to update the parameters.
-        k (int, optional): Iteration index.
-        eta (float, optional): Initial step size.
-        xi (int, optional): Reduction limit.
-        tau (int, optional): The maximum number of iterations.
-        c (float, optional): The user-defined Armijo condition constant.
-        frac (float, optional): The fraction of the step size to reduce by each
-            iteration.
-        stoch (bool, optional): Boolean argument controlling whether to adjust
-            the initial step size.
-
-    Returns:
-        jax.Array: optimal step size
     """
     eta = jnp.where(stoch, jnp.minimum(eta, xi / k), eta)
-    # check whether the new point(new_obj)satisfies the stochastic Armijo condition
-    # if not, repeat until the condition is met
-    # previous: grad.T @ direction
 
     def line_search_body(carry):
         eta_val, itn, should_continue = carry
@@ -392,115 +388,9 @@ def _line_search(
     return eta_final
 
 
-def _jgrad(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    calculates the gradient of a mean particle filter objective (function
-    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the gradient of the pfilter_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return jax.grad(_pfilter_internal_mean)(
-        theta_ests,  # for some reason this needs to be given as a positional argument
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
-    )
-
-
-def _jvg(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    Calculates the both the value and gradient of a mean particle filter
-    objective (function 'pfilter_internal_mean') w.r.t. the current estimated
-    parameter value using JAX's automatic differentiation.
-
-    Args:
-        theta_ests (array-like): Estimated parameter.
-        ys (array-like): The measurements.
-        J (int): Number of particles.
-        rinit (function): Simulator for the initial-state distribution.
-        rprocess (function): Simulator for the process model.
-        dmeasure (function): Density evaluation for the measurement model.
-        covars (array-like): Covariates or None if not applicable.
-        thresh (float): Threshold value to determine whether to resample
-            particles.
-        key (jax.random.PRNGKey, optional): The random key. Defaults to None.
-
-    Returns:
-        tuple: A tuple containing:
-        - The mean of negative log-likelihood value across the measurements
-            using pfilter_internal_mean function.
-        - The gradient of the function pfilter_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return jax.value_and_grad(_pfilter_internal_mean)(
-        theta_ests,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
-    )
-
-
+# -------------------------
+# MOP-based AD helpers with partrans (estimation scale)
+# -------------------------
 def _jgrad_mop(
     theta_ests: jax.Array,
     ys: jax.Array,
@@ -516,15 +406,11 @@ def _jgrad_mop(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
+    partrans: ParTrans,  # explicit
 ):
     """
-    Calculates the gradient of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the gradient of the mop_internal_mean function w.r.t.
-            theta_ests.
+    Calculates the gradient of a mean MOP objective (function 'mop_internal_mean')
+    w.r.t. estimation-scale parameters using JAX AD.
     """
     return jax.grad(_mop_internal_mean)(
         theta_ests,
@@ -541,6 +427,7 @@ def _jgrad_mop(
         covars_extended=covars_extended,
         alpha=alpha,
         key=key,
+        partrans=partrans,
     )
 
 
@@ -559,18 +446,10 @@ def _jvg_mop(
     accumvars: tuple[int, ...] | None,
     alpha: float,
     key: jax.Array,
+    partrans: ParTrans,  # explicit
 ) -> tuple:
     """
-    Calculates the both the value and gradient of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        tuple: A tuple containing:
-        - The mean of negative log-likelihood value across the measurements
-            using mop_internal_mean function.
-        - The gradient of the function mop_internal_mean function w.r.t.
-            theta_ests.
+    Calculates (value, gradient) of a mean MOP objective w.r.t. estimation-scale parameters.
     """
     return jax.value_and_grad(_mop_internal_mean)(
         theta_ests,
@@ -587,53 +466,7 @@ def _jvg_mop(
         accumvars=accumvars,
         alpha=alpha,
         key=key,
-    )
-
-
-def _jhess(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    calculates the Hessian matrix of a mean particle filter objective (function
-    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the Hessian matrix of the pfilter_internal_mean function
-            w.r.t. theta_ests.
-    """
-    return jax.hessian(_pfilter_internal_mean)(
-        theta_ests,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
+        partrans=partrans,
     )
 
 
@@ -653,15 +486,10 @@ def _jhess_mop(
     covars_extended: jax.Array | None,
     alpha: float,
     key: jax.Array,
+    partrans: ParTrans,  # explicit
 ):
     """
-    calculates the Hessian matrix of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the Hessian matrix of the mop_internal_mean function w.r.t.
-            theta_ests.
+    Calculates the Hessian of a mean MOP objective w.r.t. estimation-scale parameters.
     """
     return jax.hessian(_mop_internal_mean)(
         theta_ests,
@@ -678,4 +506,5 @@ def _jhess_mop(
         covars_extended=covars_extended,
         alpha=alpha,
         key=key,
+        partrans=partrans,
     )

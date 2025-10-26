@@ -37,7 +37,7 @@ def test_mif_partrans_zero_noise_identity_vs_custom_same_result():
 
     pt_id = ParTrans()
     nll_id, trace_id = _mif_internal(
-        theta=theta_nat,
+        theta_nat,
         dt_array_extended=dt_ext,
         nstep_array=nstep_arr,
         t0=t0,
@@ -61,7 +61,7 @@ def test_mif_partrans_zero_noise_identity_vs_custom_same_result():
     # Custom linear transform z = 2x + 1, x = 0.5(z - 1)
     pt = parameter_trans(custom=[0, 1, 2], to_est=lambda x: 2 * x + 1, from_est=lambda z: 0.5 * (z - 1))
     nll_pt, trace_pt = _mif_internal(
-        theta=theta_nat,
+        theta_nat,
         dt_array_extended=dt_ext,
         nstep_array=nstep_arr,
         t0=t0,
@@ -106,7 +106,7 @@ def test_mif_log_and_logit_indices_enforce_constraints_with_noise():
 
     pt = parameter_trans(log=[0], logit=[2])
     nll, trace = _mif_internal(
-        theta=theta_nat,
+        theta_nat,
         dt_array_extended=dt_ext,
         nstep_array=nstep_arr,
         t0=t0,

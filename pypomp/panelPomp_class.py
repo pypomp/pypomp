@@ -674,6 +674,7 @@ class PanelPomp:
             sigmas_init_array,
             accumvars,
             covars_per_unit,
+            rep_unit.partrans,
             unit_param_permutations,
             M,
             a,

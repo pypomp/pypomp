@@ -20,35 +20,25 @@ def simple():
             "beta_trend": 0.02,
             "sigma": 0.02,
             "tau": 0.02,
-            "b1": 0.02,
-            "b2": 0.02,
-            "b3": 0.02,
-            "b4": 0.02,
-            "b5": 0.02,
-            "b6": 0.02,
-            "omega1": 0.02,
-            "omega2": 0.02,
-            "omega3": 0.02,
-            "omega4": 0.02,
-            "omega5": 0.02,
-            "omega6": 0.02,
+            **{f"bs{i}": 0.02 for i in range(1, 7)},
+            **{f"omegas{i}": 0.02 for i in range(1, 7)},
         },
         init_names=[],
     )
     return dacca, rw_sd, J, key, ys
 
 
-def test_dacca_basic(simple):
-    # Check whether dacca.mif() finishes running.
+def test_dacca_pfilter(simple):
     dacca, rw_sd, J, key, ys = simple
-    dacca.mif(
-        rw_sd=rw_sd,
-        J=J,
-        thresh=-1,
-        key=key,
-        M=1,
-        a=0.9,
-    )
+    dacca.pfilter(J=1000, key=key)
+    logLik = dacca.results_history[-1]["logLiks"]
+    assert abs(logLik.item() - -3750) < 2
+
+
+def test_dacca_basic(simple):
+    # Check whether dacca.mif() runs without error.
+    dacca, rw_sd, J, key, ys = simple
+    dacca.mif(rw_sd=rw_sd, J=J, key=key, M=1, a=0.5)
 
 
 def test_dacca_nstep():

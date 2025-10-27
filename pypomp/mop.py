@@ -11,6 +11,8 @@ from .internal_functions import _keys_helper
 from .internal_functions import _normalize_weights
 from .internal_functions import _resampler
 
+SHOULD_TRANS = True  # Should transformations be applied to the parameters?
+
 
 @partial(jit, static_argnames=("J", "rinitializer", "rprocess_interp", "dmeasure"))
 def _mop_internal(
@@ -36,7 +38,7 @@ def _mop_internal(
     times = times.astype(float)
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF = rinitializer(theta, keys, covars0, t0)
+    particlesF = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
     weightsF = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
@@ -144,11 +146,12 @@ def _mop_helper(
         t_idx,
         nstep,
         accumvars,
+        SHOULD_TRANS,
     )
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t)
+    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS)
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)
 

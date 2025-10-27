@@ -8,75 +8,28 @@ import jax.scipy.special as jspecial
 import numpy as np
 
 
-def get_thetas(theta):
-    gamma = jnp.exp(theta["gamma"])
-    m = jnp.exp(theta["m"])
-    rho = jnp.exp(theta["rho"])
-    epsilon = jnp.exp(theta["epsilon"])
-    omega = jnp.exp(theta["omega"])
-    c = jspecial.expit(theta["c"])
-    beta_trend = theta["beta_trend"] / 100
-    sigma = jnp.exp(theta["sigma"])
-    tau = jnp.exp(theta["tau"])
-    bs = jnp.array([theta[f"b{i}"] for i in range(1, 7)])
-    omegas = jnp.array([theta[f"omega{i}"] for i in range(1, 7)])
-    k = 3
-    delta = 0.02
-    return (
-        gamma,
-        m,
-        rho,
-        epsilon,
-        omega,
-        c,
-        beta_trend,
-        sigma,
-        tau,
-        bs,
-        omegas,
-        k,
-        delta,
-    )
+theta = {
+    "gamma": 20.8,  # recovery rate
+    "epsilon": 19.1,  # rate of waning of immunity for severe infections
+    "rho": 0.0,  # rate of waning of immunity for inapparent infections
+    "m": 0.06,  # cholera mortality rate
+    "c": 1.0,  # fraction of infections that lead to severe infection
+    "beta_trend": -0.00498,  # slope of secular trend in transmission
+    **{
+        f"bs{i + 1}": float(b)
+        for i, b in enumerate([0.747, 6.38, -3.44, 4.23, 3.33, 4.55])
+    },  # seasonal transmission rates
+    "sigma": 3.13,  # 3.13 # 0.77 # environmental noise intensity
+    "tau": 0.23,  # measurement error s.d.
+    "omega": float(jnp.exp(-4.5)),
+    **{
+        f"omegas{i + 1}": float(omega)
+        for i, omega in enumerate(
+            jnp.log(jnp.array([0.184, 0.0786, 0.0584, 0.00917, 0.000208, 0.0124]))
+        )
+    },  # seasonal environmental reservoir parameters
+}
 
-
-def transform_thetas(
-    gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
-):
-    return jnp.concatenate(
-        [
-            jnp.array(
-                [
-                    jnp.log(gamma),
-                    jnp.log(m),
-                    jnp.log(rho),
-                    jnp.log(epsilon),
-                    jnp.log(omega),
-                    jspecial.logit(c),
-                    beta_trend * 100,
-                    jnp.log(sigma),
-                    jnp.log(tau),
-                ]
-            ),
-            bs,
-            omegas,
-        ]
-    )
-
-
-gamma = 20.8  # recovery rate
-epsilon = 19.1  # rate of waning of immunity for severe infections
-rho = 0  # rate of waning of immunity for inapparent infections
-delta = 0.02  # baseline mortality rate
-m = 0.06  # cholera mortality rate
-c = jnp.array(1)  # fraction of infections that lead to severe infection
-beta_trend = -0.00498  # slope of secular trend in transmission
-bs = jnp.array([0.747, 6.38, -3.44, 4.23, 3.33, 4.55])  # seasonal transmission rates
-sigma = 3.13  # 3.13 # 0.77 # environmental noise intensity
-tau = 0.23  # measurement error s.d.
-omega = jnp.exp(-4.5)
-omegas = jnp.log(
-    jnp.array([0.184, 0.0786, 0.0584, 0.00917, 0.000208, 0.0124])
-)  # seasonal environmental reservoir parameters
 
 test_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(test_dir, "data/dacca")
@@ -136,14 +89,7 @@ theta_names = (
     + [f"b{i}" for i in range(1, 7)]
     + [f"omega{i}" for i in range(1, 7)]
 )
-theta = dict(
-    zip(
-        theta_names,
-        transform_thetas(
-            gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas
-        ).tolist(),
-    )
-)
+
 
 statenames = ["S", "I", "Y", "Mn", "R1", "R2", "R3", "count"]
 
@@ -187,21 +133,18 @@ def rproc(X_, theta_, key, covars, t, dt):
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
     seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
-    (
-        gamma,
-        deltaI,
-        rho,
-        eps,
-        omega,
-        clin,
-        beta_trend,
-        sd_beta,
-        tau,
-        bs,
-        omegas,
-        nrstage,
-        delta,
-    ) = get_thetas(theta_)
+    gamma = theta_["gamma"]
+    deltaI = theta_["m"]
+    rho = theta_["rho"]
+    eps = theta_["epsilon"]
+    omega = theta_["omega"]
+    clin = theta_["c"]
+    beta_trend = theta_["beta_trend"]
+    sd_beta = theta_["sigma"]
+    omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
+    bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
+
+    delta = 0.02
     nrstage = 3
     clin = 1  # HARDCODED SEIR
     rho = 0  # HARDCODED INAPPARENT INFECTIONS
@@ -270,21 +213,18 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
     seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
-    (
-        gamma,
-        deltaI,
-        rho,
-        eps,
-        omega,
-        clin,
-        beta_trend,
-        sd_beta,
-        tau,
-        bs,
-        omegas,
-        nrstage,
-        delta,
-    ) = get_thetas(theta_)
+    gamma = theta_["gamma"]
+    deltaI = theta_["m"]
+    rho = theta_["rho"]
+    eps = theta_["epsilon"]
+    omega = theta_["omega"]
+    clin = theta_["c"]
+    beta_trend = theta_["beta_trend"]
+    sd_beta = theta_["sigma"]
+    omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
+    bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
+
+    delta = 0.02
     nrstage = 3
     clin = 1  # HARDCODED SEIR
     rho = 0  # HARDCODED INAPPARENT INFECTIONS
@@ -298,7 +238,7 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     omega = jnp.exp(jnp.dot(omegas, seas))
 
     subkey, key = jax.random.split(key)
-    dw = jax.random.normal(subkey) * std
+    # dw = jax.random.normal(subkey) * std
 
     effI = I / pop
     births = dpopdt + delta * pop
@@ -369,9 +309,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     count = X_["count"]
     tol = 1.0e-18
     ltol = jnp.log(tol)
-    (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
-        get_thetas(theta_)
-    )
+    tau = theta_["tau"]
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
     return jax.lax.cond(
@@ -386,11 +324,41 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 def rmeas(X_, theta_, key, covars=None, t=None):
     deaths = X_["Mn"]
-    (gamma, m, rho, epsilon, omega, c, beta_trend, sigma, tau, bs, omegas, k, delta) = (
-        get_thetas(theta_)
-    )
+    tau = theta_["tau"]
     v = tau * deaths
     return jax.random.normal(key) * v + deaths
+
+
+def to_est(theta):
+    return {
+        "gamma": jnp.log(theta["gamma"]),
+        "m": jnp.log(theta["m"]),
+        "rho": jnp.log(theta["rho"]),
+        "epsilon": jnp.log(theta["epsilon"]),
+        "omega": jnp.log(theta["omega"]),
+        "c": jspecial.logit(theta["c"]),
+        "beta_trend": theta["beta_trend"] * 100,
+        "sigma": jnp.log(theta["sigma"]),
+        "tau": jnp.log(theta["tau"]),
+        **{f"b{i}": theta[f"b{i}"] for i in range(1, 7)},
+        **{f"omega{i}": theta[f"omega{i}"] for i in range(1, 7)},
+    }
+
+
+def from_est(theta):
+    return {
+        "gamma": jnp.exp(theta["gamma"]),
+        "m": jnp.exp(theta["m"]),
+        "rho": jnp.exp(theta["rho"]),
+        "epsilon": jnp.exp(theta["epsilon"]),
+        "omega": jnp.exp(theta["omega"]),
+        "c": jspecial.expit(theta["c"]),
+        "beta_trend": theta["beta_trend"] / 100,
+        "sigma": jnp.exp(theta["sigma"]),
+        "tau": jnp.exp(theta["tau"]),
+        **{f"b{i}": theta[f"b{i}"] for i in range(1, 7)},
+        **{f"omega{i}": theta[f"omega{i}"] for i in range(1, 7)},
+    }
 
 
 def dacca(

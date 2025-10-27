@@ -1,16 +1,11 @@
 """This module implements a linear Gaussian model for POMP."""
 
-from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from pypomp.pomp_class import Pomp
-from pypomp.model_struct import RInit
-from pypomp.model_struct import RProc
-from pypomp.model_struct import DMeas
-from pypomp.model_struct import RMeas
 
 
 def get_thetas(theta):

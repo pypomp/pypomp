@@ -8,6 +8,8 @@ import jax.numpy as jnp
 from typing import Callable
 from .internal_functions import _keys_helper
 
+SHOULD_TRANS = False  # Should transformations be applied to the parameters?
+
 
 def _simulate_internal(
     rinitializer: Callable,  # static
@@ -29,7 +31,7 @@ def _simulate_internal(
 
     covars0 = None if covars_extended is None else covars_extended[0]
     key, keys = _keys_helper(key=key, J=nsim, covars=covars0)
-    X_sims = rinitializer(theta, keys, covars0, t0)
+    X_sims = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
 
     n_obs = times.shape[0]
     X_array = jnp.zeros((n_obs + 1, X_sims.shape[1], nsim))
@@ -114,13 +116,14 @@ def _simulate_helper(
         t_idx,
         nstep,
         accumvars,
+        SHOULD_TRANS,
     )
     t = times0[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     key, *keys = jax.random.split(key, num=nsim + 1)
     keys = jnp.array(keys)
-    Y_sims = rmeasure(X_sims, theta, keys, covars_t, t)
+    Y_sims = rmeasure(X_sims, theta, keys, covars_t, t, SHOULD_TRANS)
 
     X_array = X_array.at[i + 1].set(X_sims.T)
     Y_array = Y_array.at[i].set(Y_sims.T)

@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from typing import Callable, Literal
+from .ParTrans_class import ParTrans
 
 
 def _create_dict_wrapper(
@@ -14,6 +15,7 @@ def _create_dict_wrapper(
     statenames: list[str],
     covar_names: list[str],
     function_type: Literal["RProc", "DMeas", "RInit", "RMeas"],
+    par_trans: ParTrans,
 ):
     """
     Create a wrapper that converts arrays to/from dicts for user functions.
@@ -24,42 +26,55 @@ def _create_dict_wrapper(
         statenames: List of state variable names in canonical order
         covar_names: List of covariate names in canonical order
         function_type: The type of function to wrap
+        par_trans: Parameter transformation object
     """
     if function_type == "RProc":
         # RProc case: X_dict, theta_dict -> state_dict
-        def wrapped(X_array, theta_array, key, covars, t, dt):  # pyright: ignore[reportRedeclaration]
+        def wrapped(X_array, theta_array, key, covars, t, dt, should_trans):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = (
+                par_trans.from_est(theta_dict) if should_trans else theta_dict
+            )
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            result_dict = user_func(X_dict, theta_dict, key, covars_dict, t, dt)
+            result_dict = user_func(X_dict, theta_dict_trans, key, covars_dict, t, dt)
             result_array = jnp.array(
                 [result_dict[name] for name in statenames]
             ).reshape(-1)
             return result_array
     elif function_type == "DMeas":
         # DMeas case: X_dict, theta_dict -> scalar
-        def wrapped(Y_array, X_array, theta_array, covars, t):  # pyright: ignore[reportRedeclaration]
+        def wrapped(Y_array, X_array, theta_array, covars, t, should_trans):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = (
+                par_trans.from_est(theta_dict) if should_trans else theta_dict
+            )
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            return user_func(Y_array, X_dict, theta_dict, covars_dict, t)
+            return user_func(Y_array, X_dict, theta_dict_trans, covars_dict, t)
     elif function_type == "RInit":
         # RInit case: theta_dict -> state_dict
-        def wrapped(theta_array, key, covars, t0):  # pyright: ignore[reportRedeclaration]
+        def wrapped(theta_array, key, covars, t0, should_trans):  # pyright: ignore[reportRedeclaration]
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = (
+                par_trans.from_est(theta_dict) if should_trans else theta_dict
+            )
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            result_dict = user_func(theta_dict, key, covars_dict, t0)
+            result_dict = user_func(theta_dict_trans, key, covars_dict, t0)
             result_array = jnp.array(
                 [result_dict[name] for name in statenames]
             ).reshape(-1)
             return result_array
     elif function_type == "RMeas":
         # RMeas case: X_dict, theta_dict -> observation_array
-        def wrapped(X_array, theta_array, key, covars, t):
+        def wrapped(X_array, theta_array, key, covars, t, should_trans):
             theta_dict = {name: theta_array[i] for i, name in enumerate(param_names)}
+            theta_dict_trans = (
+                par_trans.from_est(theta_dict) if should_trans else theta_dict
+            )
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            return user_func(X_dict, theta_dict, key, covars_dict, t)
+            return user_func(X_dict, theta_dict_trans, key, covars_dict, t)
     else:
         raise ValueError(f"Invalid function type: {function_type}")
 
@@ -80,13 +95,14 @@ def _time_interp(
         inputs: tuple[jax.Array, jax.Array, jax.Array, jax.Array, int],
         covars_extended: jax.Array,
         dt_array_extended: jax.Array,
+        should_trans: bool,
     ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, int]:
         # keys is a (J,) array when rproc is vmap'd
         X_, theta_, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         vkeys = vsplit(keys, 2)
-        X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt)
+        X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt, should_trans)
         t = t + dt
         t_idx = t_idx + 1
         return (X_, theta_, vkeys[:, 1], t, t_idx)
@@ -101,6 +117,7 @@ def _time_interp(
         t_idx: int,
         nstep_dynamic: int,
         accumvars: tuple[int, ...] | None,
+        should_trans: bool,
     ) -> tuple[jax.Array, int]:
         # Reset accumulated variables at the start of each observation interval
         if accumvars is not None:
@@ -111,6 +128,7 @@ def _time_interp(
             _interp_body,
             covars_extended=covars_extended,
             dt_array_extended=dt_array_extended,
+            should_trans=should_trans,
         )
         X_, theta_, keys, t, t_idx = jax.lax.fori_loop(
             lower=0,
@@ -130,6 +148,7 @@ class RInit:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the RInit class with the required function structure for simulating
@@ -141,7 +160,8 @@ class RInit:
                 in that order. The function must return a dict mapping state names to values.
             statenames (list[str]): List of state variable names in canonical order.
             param_names (list[str]): List of parameter names in canonical order.
-
+            covar_names (list[str]): List of covariate names in canonical order.
+            par_trans (ParTrans): Parameter transformation object.
         Note:
             While this function can check that the arguments of struct are in the
             correct order, it cannot check that the output is correct. The user must
@@ -166,12 +186,12 @@ class RInit:
 
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RInit"
+            struct, param_names, statenames, covar_names, "RInit", par_trans
         )
 
         self.struct = wrapped_struct
-        self.struct_pf = jax.vmap(wrapped_struct, (None, 0, None, None))
-        self.struct_per = jax.vmap(wrapped_struct, (0, 0, None, None))
+        self.struct_pf = jax.vmap(wrapped_struct, (None, 0, None, None, None))
+        self.struct_per = jax.vmap(wrapped_struct, (0, 0, None, None, None))
         self.original_func = struct
 
     def __eq__(self, other):
@@ -192,6 +212,7 @@ class RProc:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
         nstep: int | None = None,
         dt: float | None = None,
         accumvars: tuple[int, ...] | None = None,
@@ -239,12 +260,12 @@ class RProc:
 
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RProc"
+            struct, param_names, statenames, covar_names, "RProc", par_trans
         )
 
         self.struct = wrapped_struct
-        self.struct_pf = jax.vmap(wrapped_struct, (0, None, 0, None, None, None))
-        self.struct_per = jax.vmap(wrapped_struct, (0, 0, 0, None, None, None))
+        self.struct_pf = jax.vmap(wrapped_struct, (0, None, 0, None, None, None, None))
+        self.struct_per = jax.vmap(wrapped_struct, (0, 0, 0, None, None, None, None))
 
         self.struct_interp = _time_interp(
             wrapped_struct,
@@ -252,12 +273,12 @@ class RProc:
             max_steps_bound=None,
         )
         self.struct_pf_interp = _time_interp(
-            jax.vmap(wrapped_struct, (0, None, 0, None, None, None)),
+            jax.vmap(wrapped_struct, (0, None, 0, None, None, None, None)),
             nstep_fixed=nstep,
             max_steps_bound=None,
         )
         self.struct_per_interp = _time_interp(
-            jax.vmap(wrapped_struct, (0, 0, 0, None, None, None)),
+            jax.vmap(wrapped_struct, (0, 0, 0, None, None, None, None)),
             nstep_fixed=nstep,
             max_steps_bound=None,
         )
@@ -318,6 +339,7 @@ class DMeas:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the DMeas class with the required function structure.
@@ -351,12 +373,12 @@ class DMeas:
         self.covar_names = covar_names
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "DMeas"
+            struct, param_names, statenames, covar_names, "DMeas", par_trans
         )
 
         self.struct = wrapped_struct
-        self.struct_pf = jax.vmap(wrapped_struct, (None, 0, None, None, None))
-        self.struct_per = jax.vmap(wrapped_struct, (None, 0, 0, None, None))
+        self.struct_pf = jax.vmap(wrapped_struct, (None, 0, None, None, None, None))
+        self.struct_per = jax.vmap(wrapped_struct, (None, 0, 0, None, None, None))
         self.original_func = struct
 
     def __eq__(self, other):
@@ -378,6 +400,7 @@ class RMeas:
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
+        par_trans: ParTrans,
     ):
         """
         Initializes the RMeas class with the required function structure.
@@ -414,12 +437,12 @@ class RMeas:
         self.covar_names = covar_names
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "RMeas"
+            struct, param_names, statenames, covar_names, "RMeas", par_trans
         )
 
         self.struct = wrapped_struct
-        self.struct_pf = jax.vmap(wrapped_struct, (0, None, 0, None, None))
-        self.struct_per = jax.vmap(wrapped_struct, (0, 0, 0, None, None))
+        self.struct_pf = jax.vmap(wrapped_struct, (0, None, 0, None, None, None))
+        self.struct_per = jax.vmap(wrapped_struct, (0, 0, 0, None, None, None))
         self.ydim = ydim
         self.original_func = struct
 

@@ -31,6 +31,7 @@ def test_class_GD_basic(optimizer, simple):
     # Check that all parameter names are in variable coordinate
     for param in LG.theta[0].keys():
         assert param in list(traces.coords["variable"].values)
+    assert all(isinstance(v, float) for v in LG.theta[0].values())
 
 
 def test_class_GD_ls(simple):

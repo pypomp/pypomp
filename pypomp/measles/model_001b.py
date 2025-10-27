@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import jax
-from pypomp.util import expit
+import jax.scipy.special as jspecial
 from pypomp.fast_random import (
     fast_approx_multinomial,
     fast_approx_poisson,
@@ -30,10 +30,11 @@ statenames = ["S", "E", "I", "R", "W", "C"]
 
 
 def rinit(theta_, key, covars, t0=None):
-    exp_theta_9_13 = jnp.exp(
-        jnp.array([theta_["S_0"], theta_["E_0"], theta_["I_0"], theta_["R_0"]])
-    )
-    S_0, E_0, I_0, R_0 = exp_theta_9_13 / jnp.sum(exp_theta_9_13)
+    S_0 = theta_["S_0"]
+    E_0 = theta_["E_0"]
+    I_0 = theta_["I_0"]
+    R_0 = theta_["R_0"]
+
     m = covars["pop"] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
     E = jnp.round(m * E_0)
@@ -46,24 +47,13 @@ def rinit(theta_, key, covars, t0=None):
 
 def rproc(X_, theta_, key, covars, t, dt):
     S, E, I, R, W, C = X_["S"], X_["E"], X_["I"], X_["R"], X_["W"], X_["C"]
-    exp_theta = jnp.exp(
-        jnp.array(
-            [
-                theta_["R0"],
-                theta_["sigma"],
-                theta_["gamma"],
-                theta_["iota"],
-                theta_["sigmaSE"],
-            ]
-        )
-    )
-    R0 = exp_theta[0]
-    sigma = exp_theta[1]
-    gamma = exp_theta[2]
-    iota = exp_theta[3]
-    sigmaSE = exp_theta[4]
-    cohort = expit(theta_["cohort"])
-    amplitude = expit(theta_["amplitude"])
+    R0 = theta_["R0"]
+    sigma = theta_["sigma"]
+    gamma = theta_["gamma"]
+    iota = theta_["iota"]
+    sigmaSE = theta_["sigmaSE"]
+    cohort = theta_["cohort"]
+    amplitude = theta_["amplitude"]
     pop = covars["pop"]
     birthrate = covars["birthrate"]
     mu = 0.02
@@ -138,8 +128,8 @@ def rproc(X_, theta_, key, covars, t, dt):
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    rho = expit(theta_["rho"])
-    psi = jnp.exp(theta_["psi"])
+    rho = theta_["rho"]
+    psi = theta_["psi"]
     C = X_["C"]
     tol = 1.0e-18
 
@@ -165,11 +155,53 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
-    rho = expit(theta_["rho"])
-    psi = jnp.exp(theta_["psi"])
+    rho = theta_["rho"]
+    psi = theta_["psi"]
     C = X_["C"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-18  # 1.0e-18 in He10 model; 0.0 is 'correct'
     cases = jax.random.normal(key) * (jnp.sqrt(v) + tol) + m
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)
+
+
+def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
+    S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
+    return {
+        "R0": jnp.log(theta["R0"]),
+        "sigma": jnp.log(theta["sigma"]),
+        "gamma": jnp.log(theta["gamma"]),
+        "iota": jnp.log(theta["iota"]),
+        "sigmaSE": jnp.log(theta["sigmaSE"]),
+        "psi": jnp.log(theta["psi"]),
+        "cohort": jspecial.logit(theta["cohort"]),
+        "amplitude": jspecial.logit(theta["amplitude"]),
+        "rho": jspecial.logit(theta["rho"]),
+        "S_0": S_0,
+        "E_0": E_0,
+        "I_0": I_0,
+        "R_0": R_0,
+    }
+
+
+def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    SEIR_0 = jnp.exp(
+        jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
+    )
+    S_0, E_0, I_0, R_0 = SEIR_0 / jnp.sum(SEIR_0)
+    return {
+        "R0": jnp.exp(theta["R0"]),
+        "sigma": jnp.exp(theta["sigma"]),
+        "gamma": jnp.exp(theta["gamma"]),
+        "iota": jnp.exp(theta["iota"]),
+        "sigmaSE": jnp.exp(theta["sigmaSE"]),
+        "psi": jnp.exp(theta["psi"]),
+        "cohort": jspecial.expit(theta["cohort"]),
+        "amplitude": jspecial.expit(theta["amplitude"]),
+        "rho": jspecial.expit(theta["rho"]),
+        "S_0": S_0,
+        "E_0": E_0,
+        "I_0": I_0,
+        "R_0": R_0,
+    }

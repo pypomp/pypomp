@@ -1,5 +1,6 @@
-from typing import Callable
+from typing import Callable, Literal
 import pandas as pd
+import jax
 
 
 class ParTrans:
@@ -9,17 +10,20 @@ class ParTrans:
 
     def __init__(
         self,
-        to_est: Callable[[dict[str, float]], dict[str, float]] | None = None,
-        from_est: Callable[[dict[str, float]], dict[str, float]] | None = None,
+        to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
+        from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
     ):
         self.to_est = to_est or to_est_default
         self.from_est = from_est or from_est_default
 
-    def to_est_panel(
-        self, shared: pd.DataFrame | None, unit_specific: pd.DataFrame | None
+    def panel_transform(
+        self,
+        shared: pd.DataFrame | None,
+        unit_specific: pd.DataFrame | None,
+        direction: Literal["to_est", "from_est"],
     ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
         """
-        Transform shared and unit-specific parameters to the estimation parameter space.
+        Transform shared and unit-specific parameters to or from the estimation parameter space.
         """
         if shared is None and unit_specific is None:
             return None, None
@@ -44,7 +48,11 @@ class ParTrans:
                 unit_values = unit_specific[first_unit].to_dict()
                 complete_input.update(unit_values)
 
-            shared_transformed = self.to_est(complete_input)
+            shared_transformed = (
+                self.to_est(complete_input)
+                if direction == "to_est"
+                else self.from_est(complete_input)
+            )
             shared_out = pd.DataFrame(
                 index=pd.Index(shared_names),
                 data={"shared": [shared_transformed[name] for name in shared_names]},
@@ -69,7 +77,11 @@ class ParTrans:
                 unit_values = unit_specific[unit].to_dict()
                 input_dict.update(unit_values)
 
-                output_dict = self.to_est(input_dict)
+                output_dict = (
+                    self.to_est(input_dict)
+                    if direction == "to_est"
+                    else self.from_est(input_dict)
+                )
 
                 unit_specific_transformed = {
                     name: output_dict[name] for name in unit_specific_names
@@ -80,10 +92,67 @@ class ParTrans:
 
         return shared_out, unit_specific_out
 
+    def panel_transform_list(
+        self,
+        shared_list: list[pd.DataFrame] | None,
+        unit_specific_list: list[pd.DataFrame] | None,
+        direction: Literal["to_est", "from_est"],
+    ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
+        if shared_list is None and unit_specific_list is None:
+            return [], []
 
-def to_est_default(theta: dict[str, float]) -> dict[str, float]:
+        # Convert None inputs to list of Nones with appropriate length
+        if shared_list is None and unit_specific_list is not None:
+            length = len(unit_specific_list)
+            shared_list = [None] * length  # type: ignore
+        elif shared_list is not None and unit_specific_list is None:
+            length = len(shared_list)
+            unit_specific_list = [None] * length  # type: ignore
+
+        # Both lists should now be non-None for easy iteration
+        assert shared_list is not None
+        assert unit_specific_list is not None
+
+        if len(shared_list) != len(unit_specific_list):
+            raise ValueError(
+                "shared_list and unit_specific_list must have the same length"
+            )
+
+        param_trans_list: list[tuple[pd.DataFrame | None, pd.DataFrame | None]] = [
+            self.panel_transform(shared, spec, direction=direction)
+            for shared, spec in zip(shared_list, unit_specific_list)
+        ]
+        shared_trans_list = [
+            shared_trans.apply(pd.to_numeric, errors="coerce").astype(float)
+            for shared_trans, _ in param_trans_list
+            if shared_trans is not None
+        ]
+        spec_trans_list = [
+            spec_trans.apply(pd.to_numeric, errors="coerce").astype(float)
+            for _, spec_trans in param_trans_list
+            if spec_trans is not None
+        ]
+        return shared_trans_list, spec_trans_list  # type: ignore
+
+    def to_floats(
+        self, theta: dict[str, jax.Array], direction: Literal["to_est", "from_est"]
+    ) -> dict[str, float]:
+        """
+        Convert the theta dictionary values from jax.Array to float.
+        """
+        if direction == "to_est":
+            theta = self.to_est(theta)
+            return {k: float(v) for k, v in theta.items()}
+        elif direction == "from_est":
+            theta = self.from_est(theta)
+            return {k: float(v) for k, v in theta.items()}
+        else:
+            raise ValueError(f"Invalid direction: {direction}")
+
+
+def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return theta
 
 
-def from_est_default(theta: dict[str, float]) -> dict[str, float]:
+def from_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return theta

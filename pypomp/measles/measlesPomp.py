@@ -8,6 +8,7 @@ from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
 import copy
+from pypomp.ParTrans_class import ParTrans
 
 
 # Not sure if this is the best way to implement this.
@@ -230,4 +231,5 @@ class UKMeasles:
             rproc=mod.rproc,
             dmeas=mod.dmeas,
             rmeas=mod.rmeas,
+            par_trans=ParTrans(to_est=mod.to_est, from_est=mod.from_est),
         )

@@ -14,7 +14,11 @@ def test_RInit_value_error():
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
             pp.RInit(
-                fn, statenames=["state_0"], param_names=["param_0"], covar_names=[]
+                fn,
+                statenames=["state_0"],
+                param_names=["param_0"],
+                covar_names=[],
+                par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
     pp.RInit(
@@ -22,6 +26,7 @@ def test_RInit_value_error():
         statenames=["state_0"],
         param_names=["param_0"],
         covar_names=[],
+        par_trans=pp.ParTrans(),
     )
 
 
@@ -43,6 +48,7 @@ def test_RProc_value_error():
                 param_names=["param_0"],
                 covar_names=[],
                 nstep=1,
+                par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
     pp.RProc(
@@ -51,6 +57,7 @@ def test_RProc_value_error():
         param_names=["param_0"],
         nstep=1,
         covar_names=[],
+        par_trans=pp.ParTrans(),
     )
 
 
@@ -66,7 +73,11 @@ def test_DMeas_value_error():
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
             pp.DMeas(
-                fn, statenames=["state_0"], param_names=["param_0"], covar_names=[]
+                fn,
+                statenames=["state_0"],
+                param_names=["param_0"],
+                covar_names=[],
+                par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
     pp.DMeas(
@@ -74,6 +85,7 @@ def test_DMeas_value_error():
         statenames=["state_0"],
         param_names=["param_0"],
         covar_names=[],
+        par_trans=pp.ParTrans(),
     )
 
 
@@ -94,6 +106,7 @@ def test_RMeas_value_error():
                 statenames=["state_0"],
                 param_names=["param_0"],
                 covar_names=[],
+                par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
     pp.RMeas(
@@ -102,4 +115,5 @@ def test_RMeas_value_error():
         statenames=["state_0"],
         param_names=["param_0"],
         covar_names=[],
+        par_trans=pp.ParTrans(),
     )

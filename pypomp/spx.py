@@ -4,9 +4,8 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as random
 import jax
-from functools import partial
-from pypomp.model_struct import RInit, RProc, DMeas
 from pypomp.pomp_class import Pomp
+from pypomp.ParTrans_class import ParTrans
 
 module_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(module_dir, "data")
@@ -28,47 +27,34 @@ covars = covars.sort_index()
 covars = covars.rename(columns={"y": "y_prev"})
 
 
-def _rho_transform(x):
-    """Transform rho to perturbation scale"""
-    return float(jnp.log((1 + x) / (1 - x)))
-
-
-# Transformed scale parameters
 theta = {
-    "mu": float(jnp.log(3.68e-4)),
-    "kappa": float(jnp.log(3.14e-2)),
-    "theta": float(jnp.log(1.12e-4)),
-    "xi": float(jnp.log(2.27e-3)),
-    "rho": _rho_transform(-7.38e-1),
-    "V_0": float(jnp.log(7.66e-3**2)),
+    "mu": 3.68e-4,
+    "kappa": 3.14e-2,
+    "theta": 1.12e-4,
+    "xi": 2.27e-3,
+    "rho": -7.38e-1,
+    "V_0": 7.66e-3**2,
 }
 
 statenames = ["V", "S"]
 
 
 def rinit(theta_, key, covars=None, t0=None):
-    V_0 = jnp.exp(theta_["V_0"])
+    V_0 = theta_["V_0"]
     S_0 = 1105  # Initial price
     return {"V": V_0, "S": S_0}
 
 
 def rproc(X_, theta_, key, covars, t=None, dt=None):
     V, S = X_["V"], X_["S"]
-    mu, kappa, theta_val, xi, rho, V_0 = (
+    mu, kappa, theta_val, xi, rho = (
         theta_["mu"],
         theta_["kappa"],
         theta_["theta"],
         theta_["xi"],
         theta_["rho"],
-        theta_["V_0"],
     )
     y_prev = covars["y_prev"]
-    # Transform parameters onto natural scale
-    mu = jnp.exp(mu)
-    kappa = jnp.exp(kappa)
-    theta_val = jnp.exp(theta_val)
-    xi = jnp.exp(xi)
-    rho = -1 + 2 / (1 + jnp.exp(-rho))
     # Wiener process generation (Gaussian noise)
     dZ = random.normal(key)
     dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
@@ -84,9 +70,30 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
     V = X_["V"]
-    # Transform mu onto the natural scale
-    mu = jnp.exp(theta_["mu"])
+    mu = theta_["mu"]
     return jax.scipy.stats.norm.logpdf(Y_, mu - 0.5 * V, jnp.sqrt(V))
+
+
+def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    return {
+        "mu": jnp.log(theta["mu"]),
+        "kappa": jnp.log(theta["kappa"]),
+        "theta": jnp.log(theta["theta"]),
+        "xi": jnp.log(theta["xi"]),
+        "rho": jnp.log((1 + theta["rho"]) / (1 - theta["rho"])),
+        "V_0": jnp.log(theta["V_0"]),
+    }
+
+
+def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    return {
+        "mu": jnp.exp(theta["mu"]),
+        "kappa": jnp.exp(theta["kappa"]),
+        "theta": jnp.exp(theta["theta"]),
+        "xi": jnp.exp(theta["xi"]),
+        "rho": -1 + 2 / (1 + jnp.exp(-theta["rho"])),
+        "V_0": jnp.exp(theta["V_0"]),
+    }
 
 
 def spx():
@@ -123,4 +130,5 @@ def spx():
         dmeas=dmeas,
         covars=covars,
         statenames=statenames,
+        par_trans=ParTrans(to_est=to_est, from_est=from_est),
     )

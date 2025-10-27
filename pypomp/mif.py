@@ -9,6 +9,8 @@ from .internal_functions import _resampler_thetas
 from .internal_functions import _no_resampler_thetas
 from .internal_functions import _geometric_cooling
 
+SHOULD_TRANS = True  # Should transformations be applied to the parameters?
+
 
 def _mif_internal(
     theta_Jd: jax.Array,
@@ -110,7 +112,7 @@ def _perfilter_internal(
 
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF_Jx = rinitializers(thetas_Jd, keys, covars0, t0)
+    particlesF_Jx = rinitializers(thetas_Jd, keys, covars0, t0, SHOULD_TRANS)
 
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
@@ -213,13 +215,14 @@ def _perfilter_helper(
         t_idx,
         nstep,
         accumvars,
+        SHOULD_TRANS,
     )
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
 
     measurements = jnp.nan_to_num(
-        dmeasures(ys[i], particlesP_Jx, thetas_Jd, covars_t, t).squeeze(),
+        dmeasures(ys[i], particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
         nan=jnp.log(1e-18),
     )
     if len(measurements.shape) > 1:

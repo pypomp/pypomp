@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import jax.scipy.special as jspecial
 import pytest
 import pypomp as pp
 import jax
@@ -11,24 +12,22 @@ import numpy as np
 
 @pytest.fixture(scope="function")
 def london():
-    init_params = jnp.array([2.97e-02, 5.17e-05, 5.14e-05, 9.70e-01])
-    init_params_T = jnp.log(init_params / jnp.sum(init_params))
     measles = pp.UKMeasles.Pomp(
         unit=["London"],
         theta={
-            "R0": float(jnp.log(56.8)),
-            "sigma": float(jnp.log(28.9)),
-            "gamma": float(jnp.log(30.4)),
-            "iota": float(jnp.log(2.9)),
-            "rho": float(pp.logit(0.488)),
-            "sigmaSE": float(jnp.log(0.0878)),
-            "psi": float(jnp.log(0.116)),
-            "cohort": float(pp.logit(0.557)),
-            "amplitude": float(pp.logit(0.554)),
-            "S_0": float(init_params_T[0]),
-            "E_0": float(init_params_T[1]),
-            "I_0": float(init_params_T[2]),
-            "R_0": float(init_params_T[3]),
+            "R0": 56.8,
+            "sigma": 28.9,
+            "gamma": 30.4,
+            "iota": 2.9,
+            "rho": 0.488,
+            "sigmaSE": 0.0878,
+            "psi": 0.116,
+            "cohort": 0.557,
+            "amplitude": 0.554,
+            "S_0": 2.97e-02,
+            "E_0": 5.17e-05,
+            "I_0": 5.14e-05,
+            "R_0": 9.70e-01,
         },
         # dt=7 / 365.25,
     )

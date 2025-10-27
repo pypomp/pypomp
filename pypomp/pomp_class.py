@@ -73,25 +73,25 @@ class Pomp:
             argument.
     """
 
-    @staticmethod
-    def _validate_theta(theta):
+    def _validate_theta(self, theta: dict | list[dict]) -> list[dict]:
         """
         Validates that theta is a dict or a list of dicts, and all values are floats.
         Raises TypeError if invalid.
         """
         if isinstance(theta, dict):
-            if not all(isinstance(val, float) for val in theta.values()):
-                raise TypeError("Each value of theta must be a float")
-        elif isinstance(theta, list):
-            if not all(isinstance(t, dict) for t in theta):
-                raise TypeError("Each element of the theta list must be a dictionary")
-            for t in theta:
-                if not all(isinstance(val, float) for val in t.values()):
-                    raise TypeError(
-                        "Each value in the theta dictionaries must be a float"
-                    )
-        else:
+            theta = [theta]
+        elif not isinstance(theta, list):
             raise TypeError("theta must be a dictionary or a list of dictionaries")
+        if not all(isinstance(t, dict) for t in theta):
+            raise TypeError("Each element of the theta list must be a dictionary")
+
+        canonical_param_names = getattr(self, "canonical_param_names", theta[0].keys())
+        for t in theta:
+            if set(t.keys()) != set(canonical_param_names):
+                raise ValueError("All theta dictionaries must have the same keys")
+            if not all(isinstance(val, float) for val in t.values()):
+                raise TypeError("Each value in the theta dictionaries must be a float")
+        return theta
 
     def __init__(
         self,
@@ -133,22 +133,10 @@ class Pomp:
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        self._validate_theta(theta)
-
-        if isinstance(theta, dict):
-            self.theta: list[dict] = [theta]
-        elif isinstance(theta, list):
-            self.theta: list[dict] = theta
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        self.theta = self._validate_theta(theta)
 
         # Extract parameter names from first theta dict
         self.canonical_param_names: list[str] = list(self.theta[0].keys())
-
-        # Validate that all theta dicts have the same keys
-        for theta_dict in self.theta:
-            if set(theta_dict.keys()) != set(self.canonical_param_names):
-                raise ValueError("All theta dictionaries must have the same keys")
 
         # If statenames not provided, we need to infer them
         if statenames is None:
@@ -307,8 +295,7 @@ class Pomp:
                 parameters. Always a list, even if only one theta is provided.
         """
         theta = theta or self.theta
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list = self._validate_theta(theta)
         theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
 
         if self.dmeas is None:
@@ -386,8 +373,7 @@ class Pomp:
 
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list = self._validate_theta(theta)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -519,8 +505,7 @@ class Pomp:
 
         theta = theta or self.theta
         new_key, old_key = self._update_fresh_key(key)
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list = self._validate_theta(theta)
         theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
@@ -591,7 +576,7 @@ class Pomp:
             },
         )
 
-        self.theta = [
+        theta = [
             self.par_trans.to_floats(
                 theta=dict(
                     zip(
@@ -603,6 +588,7 @@ class Pomp:
             )
             for theta_ests in final_theta_ests
         ]
+        self.theta = self._validate_theta(theta)
 
         if track_time is True:
             nLLs.block_until_ready()
@@ -680,8 +666,7 @@ class Pomp:
         start_time = time.time()
 
         theta = theta or self.theta
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list = self._validate_theta(theta)
         theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -745,7 +730,7 @@ class Pomp:
             },
         )
 
-        self.theta = [
+        theta = [
             self.par_trans.to_floats(
                 theta=dict(
                     zip(self.canonical_param_names, theta_ests[i, -1, :].tolist())
@@ -754,6 +739,7 @@ class Pomp:
             )
             for i in range(len(theta_list_trans))
         ]
+        self.theta = self._validate_theta(theta)
 
         if track_time is True:
             nLLs.block_until_ready()
@@ -809,8 +795,7 @@ class Pomp:
             - Remaining columns contain the features of the state and observation processes.
         """
         theta = theta or self.theta
-        self._validate_theta(theta)
-        theta_list = theta if isinstance(theta, list) else [theta]
+        theta_list = self._validate_theta(theta)
         if self.rmeas is None:
             raise ValueError(
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"

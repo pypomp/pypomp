@@ -1,5 +1,3 @@
-import jax.numpy as jnp
-import jax.scipy.special as jspecial
 import pytest
 import pypomp as pp
 import jax

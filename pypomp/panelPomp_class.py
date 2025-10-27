@@ -14,7 +14,6 @@ from .util import logmeanexp
 import numpy as np
 import time
 from .rw_sd_class import RWSigma
-from .ParTrans_class import ParTrans
 
 
 class PanelPomp:

@@ -110,6 +110,21 @@ class ParTrans:
         ]
         return shared_trans_list, spec_trans_list
 
+    def to_floats(
+        self, theta: dict[str, jax.Array], direction: Literal["to_est", "from_est"]
+    ) -> dict[str, float]:
+        """
+        Convert the theta dictionary values from jax.Array to float.
+        """
+        if direction == "to_est":
+            theta = self.to_est(theta)
+            return {k: float(v) for k, v in theta.items()}
+        elif direction == "from_est":
+            theta = self.from_est(theta)
+            return {k: float(v) for k, v in theta.items()}
+        else:
+            raise ValueError(f"Invalid direction: {direction}")
+
 
 def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return theta

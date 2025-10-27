@@ -592,13 +592,14 @@ class Pomp:
         )
 
         self.theta = [
-            self.par_trans.from_est(
-                dict(
+            self.par_trans.to_floats(
+                theta=dict(
                     zip(
                         self.canonical_param_names,
                         np.mean(theta_ests[-1], axis=0).tolist(),
                     )
-                )
+                ),
+                direction="from_est",
             )
             for theta_ests in final_theta_ests
         ]
@@ -745,8 +746,11 @@ class Pomp:
         )
 
         self.theta = [
-            self.par_trans.from_est(
-                dict(zip(self.canonical_param_names, theta_ests[i, -1, :].tolist()))
+            self.par_trans.to_floats(
+                theta=dict(
+                    zip(self.canonical_param_names, theta_ests[i, -1, :].tolist())
+                ),
+                direction="from_est",
             )
             for i in range(len(theta_list_trans))
         ]

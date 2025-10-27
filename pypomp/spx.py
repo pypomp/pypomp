@@ -130,5 +130,5 @@ def spx():
         dmeas=dmeas,
         covars=covars,
         statenames=statenames,
-        par_trans=ParTrans(to_est, from_est),
+        par_trans=ParTrans(to_est=to_est, from_est=from_est),
     )

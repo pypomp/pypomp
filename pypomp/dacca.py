@@ -6,7 +6,7 @@ import pandas as pd
 from pypomp.pomp_class import Pomp
 import jax.scipy.special as jspecial
 import numpy as np
-
+from pypomp.ParTrans_class import ParTrans
 
 theta = {
     "gamma": 20.8,  # recovery rate
@@ -340,8 +340,8 @@ def to_est(theta):
         "beta_trend": theta["beta_trend"] * 100,
         "sigma": jnp.log(theta["sigma"]),
         "tau": jnp.log(theta["tau"]),
-        **{f"b{i}": theta[f"b{i}"] for i in range(1, 7)},
-        **{f"omega{i}": theta[f"omega{i}"] for i in range(1, 7)},
+        **{f"bs{i}": theta[f"bs{i}"] for i in range(1, 7)},
+        **{f"omegas{i}": theta[f"omegas{i}"] for i in range(1, 7)},
     }
 
 
@@ -356,8 +356,8 @@ def from_est(theta):
         "beta_trend": theta["beta_trend"] / 100,
         "sigma": jnp.exp(theta["sigma"]),
         "tau": jnp.exp(theta["tau"]),
-        **{f"b{i}": theta[f"b{i}"] for i in range(1, 7)},
-        **{f"omega{i}": theta[f"omega{i}"] for i in range(1, 7)},
+        **{f"bs{i}": theta[f"bs{i}"] for i in range(1, 7)},
+        **{f"omegas{i}": theta[f"omegas{i}"] for i in range(1, 7)},
     }
 
 
@@ -413,5 +413,6 @@ def dacca(
         theta=theta,
         covars=covars,
         statenames=statenames,
+        par_trans=ParTrans(to_est=to_est, from_est=from_est),
     )
     return dacca_obj

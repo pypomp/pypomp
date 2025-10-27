@@ -29,6 +29,7 @@ def london():
             "I_0": 5.14e-05,
             "R_0": 9.70e-01,
         },
+        clean=True,
         # dt=7 / 365.25,
     )
     rw_sd = pp.RWSigma(

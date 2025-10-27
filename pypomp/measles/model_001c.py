@@ -4,7 +4,6 @@ import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from pypomp.fast_random import (
-    fast_approx_multinomial,
     fast_approx_poisson,
     fast_approx_gamma,
     fast_approx_binomial,
@@ -31,12 +30,11 @@ statenames = ["S", "E", "I", "R", "W", "C"]
 
 
 def rinit(theta_, key, covars, t0=None):
-    SEIR_0 = jnp.exp(
-        jnp.array([theta_["S_0"], theta_["E_0"], theta_["I_0"], theta_["R_0"]])
-    )
-    S_0, E_0, I_0, R_0 = SEIR_0 / jnp.sum(
-        SEIR_0
-    )  # always normalize; partrans is only run for some methods
+    S_0 = theta_["S_0"]
+    E_0 = theta_["E_0"]
+    I_0 = theta_["I_0"]
+    R_0 = theta_["R_0"]
+
     m = covars["pop"] / (S_0 + E_0 + I_0 + R_0)
     S = jnp.round(m * S_0)
     E = jnp.round(m * E_0)
@@ -161,6 +159,8 @@ def rmeas(X_, theta_, key, covars=None, t=None):
 
 
 def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
+    S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
     return {
         "R0": jnp.log(theta["R0"]),
         "sigma": jnp.log(theta["sigma"]),
@@ -171,14 +171,18 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "cohort": jspecial.logit(theta["cohort"]),
         "amplitude": jspecial.logit(theta["amplitude"]),
         "rho": jspecial.logit(theta["rho"]),
-        "S_0": theta["S_0"],
-        "E_0": theta["E_0"],
-        "I_0": theta["I_0"],
-        "R_0": theta["R_0"],
+        "S_0": S_0,
+        "E_0": E_0,
+        "I_0": I_0,
+        "R_0": R_0,
     }
 
 
 def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    SEIR_0 = jnp.exp(
+        jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
+    )
+    S_0, E_0, I_0, R_0 = SEIR_0 / jnp.sum(SEIR_0)
     return {
         "R0": jnp.exp(theta["R0"]),
         "sigma": jnp.exp(theta["sigma"]),
@@ -189,8 +193,8 @@ def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "cohort": jspecial.expit(theta["cohort"]),
         "amplitude": jspecial.expit(theta["amplitude"]),
         "rho": jspecial.expit(theta["rho"]),
-        "S_0": theta["S_0"],
-        "E_0": theta["E_0"],
-        "I_0": theta["I_0"],
-        "R_0": theta["R_0"],
+        "S_0": S_0,
+        "E_0": E_0,
+        "I_0": I_0,
+        "R_0": R_0,
     }

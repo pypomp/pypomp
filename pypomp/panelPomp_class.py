@@ -595,10 +595,10 @@ class PanelPomp:
         else:
             covars_per_unit = None
 
-        shared_list = shared if isinstance(shared, list) else []
-        spec_list = unit_specific if isinstance(unit_specific, list) else []
         n_reps = self._get_theta_list_len(shared, unit_specific)
 
+        shared_list = shared if isinstance(shared, list) else None
+        spec_list = unit_specific if isinstance(unit_specific, list) else None
         shared_trans_list, spec_trans_list = rep_unit.par_trans.panel_transform_list(
             shared_list, spec_list, direction="to_est"
         )
@@ -722,7 +722,7 @@ class PanelPomp:
         )
 
         if shared is not None:
-            self.shared = [
+            shared_list_out = [
                 pd.DataFrame(
                     shared_traces[rep, -1, 1:].reshape(-1, 1),
                     index=pd.Index(shared_index),
@@ -731,10 +731,10 @@ class PanelPomp:
                 for rep in range(shared_traces.shape[0])
             ]
         else:
-            self.shared = None
+            shared_list_out = None
 
         if unit_specific is not None:
-            self.unit_specific = [
+            specific_list_out = [
                 pd.DataFrame(
                     unit_traces[rep, -1, 1:, :],
                     index=pd.Index(spec_index),
@@ -743,7 +743,18 @@ class PanelPomp:
                 for rep in range(unit_traces.shape[0])
             ]
         else:
-            self.unit_specific = None
+            specific_list_out = None
+
+        shared_list_out_nat, specific_list_out_nat = (
+            rep_unit.par_trans.panel_transform_list(
+                shared_list_out, specific_list_out, direction="from_est"
+            )
+        )
+
+        self.shared = shared_list_out_nat if shared_list_out_nat != [] else None
+        self.unit_specific = (
+            specific_list_out_nat if specific_list_out_nat != [] else None
+        )
 
         execution_time = time.time() - start_time
         self.results_history.append(

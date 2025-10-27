@@ -98,17 +98,41 @@ class ParTrans:
         unit_specific_list: list[pd.DataFrame] | None,
         direction: Literal["to_est", "from_est"],
     ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
+        if shared_list is None and unit_specific_list is None:
+            return [], []
+
+        # Convert None inputs to list of Nones with appropriate length
+        if shared_list is None and unit_specific_list is not None:
+            length = len(unit_specific_list)
+            shared_list = [None] * length  # type: ignore
+        elif shared_list is not None and unit_specific_list is None:
+            length = len(shared_list)
+            unit_specific_list = [None] * length  # type: ignore
+
+        # Both lists should now be non-None for easy iteration
+        assert shared_list is not None
+        assert unit_specific_list is not None
+
+        if len(shared_list) != len(unit_specific_list):
+            raise ValueError(
+                "shared_list and unit_specific_list must have the same length"
+            )
+
         param_trans_list: list[tuple[pd.DataFrame | None, pd.DataFrame | None]] = [
             self.panel_transform(shared, spec, direction=direction)
-            for shared, spec in zip(shared_list, spec_list)
+            for shared, spec in zip(shared_list, unit_specific_list)
         ]
-        shared_trans_list: list[pd.DataFrame] = [
-            shared_trans for shared_trans, _ in param_trans_list
+        shared_trans_list = [
+            shared_trans.apply(pd.to_numeric, errors="coerce").astype(float)
+            for shared_trans, _ in param_trans_list
+            if shared_trans is not None
         ]
-        spec_trans_list: list[pd.DataFrame] = [
-            spec_trans for _, spec_trans in param_trans_list
+        spec_trans_list = [
+            spec_trans.apply(pd.to_numeric, errors="coerce").astype(float)
+            for _, spec_trans in param_trans_list
+            if spec_trans is not None
         ]
-        return shared_trans_list, spec_trans_list
+        return shared_trans_list, spec_trans_list  # type: ignore
 
     def to_floats(
         self, theta: dict[str, jax.Array], direction: Literal["to_est", "from_est"]

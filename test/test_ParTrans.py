@@ -1,23 +1,24 @@
 import pandas as pd
 import pypomp as pp
+import jax
 import jax.numpy as jnp
 
 
 def test_ParTrans_to_est_panel():
-    def to_est(theta: dict[str, float]) -> dict[str, float]:
+    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         return {
-            "pos_param_shared": float(jnp.log(theta["pos_param_shared"])),
-            "standard_param_shared": float(theta["standard_param_shared"]),
-            "pos_param_unit": float(jnp.log(theta["pos_param_unit"])),
-            "standard_param_unit": float(theta["standard_param_unit"]),
+            "pos_param_shared": jnp.log(theta["pos_param_shared"]),
+            "standard_param_shared": theta["standard_param_shared"],
+            "pos_param_unit": jnp.log(theta["pos_param_unit"]),
+            "standard_param_unit": theta["standard_param_unit"],
         }
 
-    def from_est(theta: dict[str, float]) -> dict[str, float]:
+    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         return {
-            "pos_param_shared": float(jnp.exp(theta["pos_param_shared"])),
-            "standard_param_shared": float(theta["standard_param_shared"]),
-            "pos_param_unit": float(jnp.exp(theta["pos_param_unit"])),
-            "standard_param_unit": float(theta["standard_param_unit"]),
+            "pos_param_shared": jnp.exp(theta["pos_param_shared"]),
+            "standard_param_shared": theta["standard_param_shared"],
+            "pos_param_unit": jnp.exp(theta["pos_param_unit"]),
+            "standard_param_unit": theta["standard_param_unit"],
         }
 
     par_trans = pp.ParTrans(to_est, from_est)
@@ -57,11 +58,11 @@ def test_ParTrans_to_est_panel():
 
 
 def test_ParTrans_to_est_panel_none_cases():
-    def to_est(theta: dict[str, float]) -> dict[str, float]:
-        return {k: v * 2 for k, v in theta.items()}
+    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+        return {k: jnp.array(v * 2) for k, v in theta.items()}
 
-    def from_est(theta: dict[str, float]) -> dict[str, float]:
-        return {k: v / 2 for k, v in theta.items()}
+    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+        return {k: jnp.array(v / 2) for k, v in theta.items()}
 
     par_trans = pp.ParTrans(to_est, from_est)
 

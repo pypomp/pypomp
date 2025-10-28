@@ -31,28 +31,28 @@ def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     result = jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
-    return {"state_0": result[0], "state_1": result[1]}
+    return {"X1": result[0], "X2": result[1]}
 
 
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    X_array = jnp.array([X_["X1"], X_["X2"]])
     result = jax.random.multivariate_normal(key=key, mean=A @ X_array, cov=Q)
-    return {"state_0": result[0], "state_1": result[1]}
+    return {"X1": result[0], "X2": result[1]}
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    X_array = jnp.array([X_["X1"], X_["X2"]])
     return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_array, R)
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
-    X_array = jnp.array([X_["state_0"], X_["state_1"]])
+    X_array = jnp.array([X_["X1"], X_["X2"]])
     return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
 
 
@@ -112,7 +112,7 @@ def LG(
         ydim=2,
         theta=theta,
         covars=None,
-        statenames=["state_0", "state_1"],
+        statenames=["X1", "X2"],
     )
     _, Y_sims = LG_obj_temp.simulate(key=key)
     Y_sims = Y_sims.rename(columns={"obs_0": "Y1", "obs_1": "Y2"})
@@ -132,7 +132,7 @@ def LG(
         ydim=2,
         theta=theta,
         covars=None,
-        statenames=["state_0", "state_1"],
+        statenames=["X1", "X2"],
     )
 
     return LG_obj

@@ -1,6 +1,6 @@
 import pytest
 import jax.numpy as jnp
-from pypomp.rw_sd_class import RWSigma
+import pypomp as pp
 
 
 class TestRWSigma:
@@ -33,7 +33,7 @@ class TestRWSigma:
         self, sigmas, init_names, expected_not_init, expected_all
     ):
         """Test initialization with valid inputs."""
-        rw_sigma = RWSigma(sigmas, init_names)
+        rw_sigma = pp.RWSigma(sigmas, init_names)
 
         assert rw_sigma.sigmas == sigmas
         assert rw_sigma.init_names == init_names
@@ -71,7 +71,7 @@ class TestRWSigma:
     def test_init_invalid_cases(self, sigmas, init_names, expected_error):
         """Test initialization with invalid inputs."""
         with pytest.raises(ValueError, match=expected_error):
-            RWSigma(sigmas, init_names)
+            pp.RWSigma(sigmas, init_names)
 
     @pytest.mark.parametrize(
         "sigmas,init_names,param_names,expected_sigmas,expected_sigmas_init",
@@ -116,7 +116,7 @@ class TestRWSigma:
         self, sigmas, init_names, param_names, expected_sigmas, expected_sigmas_init
     ):
         """Test _return_arrays with valid inputs."""
-        rw_sigma = RWSigma(sigmas, init_names)
+        rw_sigma = pp.RWSigma(sigmas, init_names)
         sigmas_array, sigmas_init_array = rw_sigma._return_arrays(param_names)
 
         assert jnp.allclose(sigmas_array, expected_sigmas)
@@ -143,7 +143,7 @@ class TestRWSigma:
         self, sigmas, init_names, param_names, expected_error
     ):
         """Test _return_arrays with invalid param_names."""
-        rw_sigma = RWSigma(sigmas, init_names)
+        rw_sigma = pp.RWSigma(sigmas, init_names)
         with pytest.raises(ValueError, match=expected_error):
             rw_sigma._return_arrays(param_names)
 
@@ -170,7 +170,7 @@ class TestRWSigma:
         self, sigmas, init_names, expected_sigmas, expected_sigmas_init
     ):
         """Test _return_arrays with edge case values."""
-        rw_sigma = RWSigma(sigmas, init_names)
+        rw_sigma = pp.RWSigma(sigmas, init_names)
         sigmas_array, sigmas_init_array = rw_sigma._return_arrays()
 
         assert jnp.allclose(sigmas_array, expected_sigmas)
@@ -178,7 +178,7 @@ class TestRWSigma:
 
     def test_validate_attributes_private_method_valid(self):
         """Test the private _validate_attributes method directly for valid cases."""
-        rw_sigma = RWSigma({"param1": 0.1}, ["param1"])
+        rw_sigma = pp.RWSigma({"param1": 0.1}, ["param1"])
         sigmas, init_names, not_init_names, all_names = rw_sigma._validate_attributes(
             {"a": 1.0, "b": 2.0}, ["a"]
         )
@@ -207,6 +207,6 @@ class TestRWSigma:
         self, sigmas, init_names, expected_error
     ):
         """Test the _validate_attributes method directly for invalid cases."""
-        rw_sigma = RWSigma({"param1": 0.1}, ["param1"])
+        rw_sigma = pp.RWSigma({"param1": 0.1}, ["param1"])
         with pytest.raises(ValueError, match=expected_error):
             rw_sigma._validate_attributes(sigmas, init_names)

@@ -20,7 +20,7 @@ from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars
 from .util import logmeanexp, logmeanexp_se
-from .rw_sd_class import RWSigma
+from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
 
 

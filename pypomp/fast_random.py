@@ -54,6 +54,54 @@ DTypeLikeFloat = DTypeLike
 Shape = Sequence[int]
 
 
+def poisson_anscombe(key, lam, shape=None):
+    if shape is not None:
+        shape = core.canonicalize_shape(shape)
+    else:
+        shape = np.shape(lam)
+    z = jax.random.normal(key, shape)
+    zs = z * 0.5 + jnp.sqrt(lam + 3 / 8)
+    x = jnp.round(zs**2 - 3 / 8)
+    return jnp.maximum(0, x)
+
+
+def poisson_hybrid(key, lam, shape=None):
+    """
+    Implements a hybrid fixed-step Poisson sampler in JAX.
+
+    - For lam < threshold, uses a fixed-step quantile method.
+    - For lam >= threshold, uses the Anscombe transform approximation.
+    - `lam` can be a scalar or an array that broadcasts to `shape`.
+    """
+    threshold = 3.0
+    if shape is not None:
+        shape = core.canonicalize_shape(shape)
+    else:
+        shape = np.shape(lam)
+
+    key_small, key_large = jax.random.split(key)
+
+    u = jax.random.uniform(key_small, shape)
+
+    p = jnp.exp(-lam)
+    pmf_vals = jnp.array([p])
+    for k in range(1, 13):
+        p = p * lam / k
+        pmf_vals = jnp.concatenate([pmf_vals, jnp.array([p])])
+
+    cdf_vals = jnp.cumsum(pmf_vals)
+
+    k_small = jnp.searchsorted(cdf_vals, u)
+    k_small = jnp.minimum(k_small, len(pmf_vals) - 1)
+    k_small = k_small.astype(jnp.int32)
+    k_large = poisson_anscombe(key_large, lam, shape)
+
+    is_small = lam < threshold
+    result = jnp.where(is_small, k_small, k_large)
+
+    return result
+
+
 @partial(jit, static_argnums=(3, 4))
 def normal_approx_binomial(
     key: jax.Array, n: jax.Array, p: jax.Array, shape: tuple, dtype: jax.Array

@@ -7,6 +7,8 @@ from pypomp.fast_random import (
     fast_approx_multinomial,
     fast_approx_poisson,
     fast_approx_gamma,
+    poisson_hybrid,
+    poisson_anscombe,
 )
 
 
@@ -92,6 +94,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
     births = fast_approx_poisson(keys[1], br * dt, max_rejections=1)
+    # births = poisson_hybrid(keys[1], br * dt)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))

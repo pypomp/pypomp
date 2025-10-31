@@ -11,6 +11,8 @@ from .fast_random import (
     fast_approx_poisson,
     fast_approx_gamma,
     fast_approx_loggamma,
+    poisson_anscombe,
+    poisson_hybrid,
 )
 from .panelPomp_class import PanelPomp
 from .RWSigma_class import RWSigma

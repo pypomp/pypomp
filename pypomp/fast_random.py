@@ -54,7 +54,7 @@ DTypeLikeFloat = DTypeLike
 Shape = Sequence[int]
 
 
-def poisson_anscombe(key, lam, shape=None):
+def poisson_anscombe(key, lam, shape=None, dtype=jnp.int32):
     if shape is not None:
         shape = core.canonicalize_shape(shape)
     else:
@@ -62,7 +62,7 @@ def poisson_anscombe(key, lam, shape=None):
     z = jax.random.normal(key, shape)
     zs = z * 0.5 + jnp.sqrt(lam + 3 / 8)
     x = jnp.round(zs**2 - 3 / 8)
-    return jnp.maximum(0, x)
+    return jnp.maximum(0, x).astype(dtype)
 
 
 def poisson_hybrid(key, lam, shape=None):
@@ -757,7 +757,7 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
 
     # k_init = lax.full_like(lam, -1, lam.dtype, shape)
     key1, key2 = split(key)
-    k_init = normal_approx_poisson(key1, lam, shape, lam.dtype)
+    k_init = poisson_anscombe(key1, lam, shape, lam.dtype)
     # k_init = jnp.round(lam).astype(lam.dtype).reshape(shape)
     accepted = lax.full_like(lam, False, np.dtype("bool"), shape)
     k = lax_control_flow.while_loop(cond_fn, body_fn, (0, k_init, accepted, key2))[1]

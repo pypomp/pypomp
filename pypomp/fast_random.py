@@ -503,8 +503,17 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
     )
 
 
-@partial(jit, static_argnums=(3, 4, 5), inline=True)
-def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
+@partial(jit, static_argnums=(3, 4, 5, 6, 7), inline=True)
+def _binomial(
+    key,
+    count,
+    prob,
+    shape,
+    dtype,
+    max_rejections_btrs,
+    max_rejections_inversion,
+    force_btrs,
+) -> Array:
     # The implementation matches TensorFlow and TensorFlow Probability:
     # https://github.com/tensorflow/tensorflow/blob/v2.2.0-rc3/tensorflow/core/kernels/random_binomial_op.cc
     # and tensorflow_probability.substrates.jax.distributions.Binomial
@@ -524,9 +533,10 @@ def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
     q_is_nan = _isnan(q)
     q_l_0 = q < 0.0
     q = lax.select(q_is_nan | q_l_0, lax.full_like(q, 0.01), q)
-    # use_inversion = count_nan_or_neg | (count * q <= 10.0)
-    # TODO: might want to add an argument to choose which method to use
-    use_inversion = False
+    if force_btrs:
+        use_inversion = False
+    else:
+        use_inversion = count_nan_or_neg | (count * q <= 10.0)
 
     # consistent with np.random.binomial behavior for float count input
     count = jnp.floor(count)
@@ -534,11 +544,12 @@ def _binomial(key, count, prob, shape, dtype, max_rejections) -> Array:
     count_inv = lax.select(use_inversion, count, lax.full_like(count, 0.0))
     count_btrs = lax.select(use_inversion, lax.full_like(count, 1e4), count)
     q_btrs = lax.select(use_inversion, lax.full_like(q, 0.5), q)
-    max_iters = max_rejections + 1
+    max_iters_btrs = max_rejections_btrs + 1
+    max_iters_inversion = max_rejections_inversion + 1
     samples = lax.select(
         use_inversion,
-        _binomial_inverse_cdf(key, count_inv, q, shape, dtype, max_iters),
-        _btrs(key, count_btrs, q_btrs, shape, dtype, max_iters),
+        _binomial_inversion(key, count_inv, q, shape, dtype, max_iters_inversion),
+        _btrs(key, count_btrs, q_btrs, shape, dtype, max_iters_btrs),
     )
     # ensure nan q always leads to nan output and nan or neg count leads to nan
     # as discussed in https://github.com/jax-ml/jax/pull/16134#pullrequestreview-1446642709
@@ -570,7 +581,9 @@ def fast_approx_binomial(
     p: RealArray,
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
-    max_rejections: int = 2,
+    max_rejections_btrs: int = 2,
+    max_rejections_inversion: int = 100,
+    force_btrs: bool = False,
 ) -> Array:
     r"""Sample Binomial random values with given shape and float dtype.
 
@@ -609,7 +622,16 @@ def fast_approx_binomial(
         )
     if shape is not None:
         shape = core.canonicalize_shape(shape)
-    return _binomial(key, n, p, shape, dtype, max_rejections)
+    return _binomial(
+        key,
+        n,
+        p,
+        shape,
+        dtype,
+        max_rejections_btrs,
+        max_rejections_inversion,
+        force_btrs,
+    )
 
 
 # Functions related to key reuse checking
@@ -628,7 +650,9 @@ def fast_approx_multinomial(
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
     unroll: int | bool = 1,
-    max_rejections: int = 2,
+    max_rejections_btrs: int = 2,
+    max_rejections_inversion: int = 100,
+    force_btrs: bool = False,
 ):
     r"""Sample from a multinomial distribution.
 
@@ -672,7 +696,9 @@ def fast_approx_multinomial(
             remainder,
             ratio.clip(0, 1),
             dtype=remainder.dtype,
-            max_rejections=max_rejections,
+            max_rejections_btrs=max_rejections_btrs,
+            max_rejections_inversion=max_rejections_inversion,
+            force_btrs=force_btrs,
         )
         return remainder - count, count
 

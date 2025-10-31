@@ -114,7 +114,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
     transitions = fast_approx_multinomial(
-        keys[2], populations, rt_final, max_rejections=1
+        keys[2], populations, rt_final, max_rejections_btrs=1, force_btrs=True
     )
 
     trans_S = transitions[0]

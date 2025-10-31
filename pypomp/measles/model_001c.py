@@ -103,7 +103,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
     transitions = fast_approx_binomial(
-        keys[2], populations, 1 - p0_values, max_rejections=1
+        keys[2], populations, 1 - p0_values, max_rejections_btrs=1, force_btrs=True
     )
 
     trans_S = transitions[0]

@@ -780,16 +780,8 @@ class PanelPomp:
         else:
             specific_list_out = None
 
-        shared_list_out_nat, specific_list_out_nat = (
-            rep_unit.par_trans.panel_transform_list(
-                shared_list_out, specific_list_out, direction="from_est"
-            )
-        )
-
-        self.shared = shared_list_out_nat if shared_list_out_nat != [] else None
-        self.unit_specific = (
-            specific_list_out_nat if specific_list_out_nat != [] else None
-        )
+        self.shared = shared_list_out
+        self.unit_specific = specific_list_out
 
         execution_time = time.time() - start_time
         self.results_history.append(

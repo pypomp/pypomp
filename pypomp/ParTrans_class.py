@@ -187,8 +187,8 @@ class ParTrans:
         # Apply transformation to each parameter set
         transformed_rows = []
         for row in param_array_2d:
-            # Convert array row to dict
-            param_dict = {name: jax.Array(val) for name, val in zip(param_names, row)}
+            # Convert array row to dict - values are already numeric
+            param_dict = {name: val for name, val in zip(param_names, row)}
             
             # Apply transformation
             if direction == "to_est":
@@ -263,12 +263,12 @@ class ParTrans:
                         shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
                         
                         # Build complete parameter dict for transformation
-                        param_dict = {name: jax.Array(val) for name, val in zip(shared_param_names, shared_vals)}
+                        param_dict = {name: val for name, val in zip(shared_param_names, shared_vals)}
                         
                         # If unit-specific params exist, include first unit's values for context
                         if unit_traces is not None and n_spec > 0:
                             unit_vals = unit_traces[rep, it, 1:, 0]  # First unit, skip loglik
-                            param_dict.update({name: jax.Array(val) for name, val in zip(unit_param_names, unit_vals)})
+                            param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
                         
                         # Apply transformation
                         if direction == "to_est":
@@ -296,10 +296,10 @@ class ParTrans:
                             # Include shared params if they exist
                             if shared_traces is not None and n_shared > 0:
                                 shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
-                                param_dict.update({name: jax.Array(val) for name, val in zip(shared_param_names, shared_vals)})
+                                param_dict.update({name: val for name, val in zip(shared_param_names, shared_vals)})
                             
                             # Add unit-specific params
-                            param_dict.update({name: jax.Array(val) for name, val in zip(unit_param_names, unit_vals)})
+                            param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
                             
                             # Apply transformation
                             if direction == "to_est":

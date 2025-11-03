@@ -4,16 +4,16 @@ This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple, Callable, cast
+from typing import Dict, Optional, Tuple, cast, Any
 
 import numpy as np
+import numpy.typing as npt
 from scipy.stats import chi2
-
-from .util import logmeanexp
-from .pfilter import _vmapped_pfilter_internal2
 
 # TODO list loess as install dependency in package description
 from loess.loess_1d import loess_1d
+
+FloatArray = npt.NDArray[np.floating[Any]]
 
 __all__ = ["MCAPResult", "mcap", "mcap_profile"]
 
@@ -21,15 +21,14 @@ __all__ = ["MCAPResult", "mcap", "mcap_profile"]
 def _qchisq(level: float, df: int = 1) -> float:
     return float(chi2.ppf(level, df))
 
-
 def _loess_smooth_1d(
-    x: np.ndarray,
-    y: np.ndarray,
-    grid: np.ndarray,
+    x: FloatArray,
+    y: FloatArray,
+    grid: FloatArray,
     *,
     span: float = 0.75,
     degree: int = 2,
-) -> np.ndarray:
+) -> FloatArray:
 
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -42,31 +41,37 @@ def _loess_smooth_1d(
     if x.size == 0:
         return np.full_like(grid, np.nan, dtype=float)
 
-    # loess_1d return: (xout, yout, wout)
-    res = loess_1d(
-        x,
-        y,
-        xnew=grid,
-        degree=int(degree),
-        frac=float(span),
-    )
+    sigy = np.ones_like(y) 
+
+    try:
+        res = loess_1d(
+            x, y,
+            xnew=grid,
+            degree=int(degree),
+            frac=float(span),
+            sigy=sigy,
+        )
+    except Exception:
+        coeff = np.polyfit(x, y, deg=min(degree, 2))
+        y_sm = np.polyval(coeff, grid)
+        return y_sm.astype(float, copy=False)
 
     if len(res) == 3:
-        _, y_sm, _ = cast(Tuple[np.ndarray, np.ndarray, np.ndarray], res)
+        _, y_sm, _ = cast(Tuple[FloatArray, FloatArray, FloatArray], res)
         return y_sm
     else:
         # if frac == 0 in loess_1d
-        y_raw, _ = cast(Tuple[np.ndarray, np.ndarray], res)
+        y_raw, _ = cast(Tuple[FloatArray, FloatArray], res)
         return np.interp(grid, x, y_raw)
 
 
 def _fit_local_quadratic(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: FloatArray,
+    y: FloatArray,
     *,
     center: float,
     span: float,
-) -> Tuple[float, float, float, np.ndarray]:
+) -> Tuple[float, float, float, FloatArray]:
 
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -78,7 +83,7 @@ def _fit_local_quadratic(
         included = np.ones_like(x, dtype=bool)
     else:
         kth = np.partition(dist, m - 1)[m - 1]
-        included = dist <= kth
+        included = dist < kth
 
     # tricube weights on chosen window
     w = np.zeros_like(x, dtype=float)
@@ -90,12 +95,7 @@ def _fit_local_quadratic(
             w[included] = 1.0
 
     # uncentered
-    X = np.column_stack([
-        np.ones_like(x),
-        -(x ** 2),
-        x            
-    ])
-
+    X = np.column_stack([np.ones_like(x), -(x ** 2), x])
 
     # weighted least squares
     sw = np.sqrt(w)
@@ -131,24 +131,23 @@ class MCAPResult:
     se_stat: float
     se_mc: float
     se_total: float
-    fit: Dict[str, np.ndarray]          
+    fit: Dict[str, FloatArray]          
     quadratic_max: float
     quadratic_coef: Dict[str, float]
-    vcov: np.ndarray         
+    vcov: FloatArray         
 
 
 def mcap_profile(
-    parameter: Sequence[float],
-    loglik: Sequence[float],
+    parameter: npt.ArrayLike,
+    loglik: npt.ArrayLike,
     *,
     level: float = 0.95,
     span: float = 0.75,
     n_grid: int = 1000,
     loess_degree: int = 2,
 ) -> MCAPResult:
-
-    x = np.asarray(parameter, dtype=float)
-    y = np.asarray(loglik, dtype=float)
+    x: FloatArray = np.asarray(parameter, dtype=float)
+    y: FloatArray = np.asarray(loglik, dtype=float)
 
     # grid over observed parameter range
     grid = np.linspace(float(np.min(x)), float(np.max(x)), int(n_grid))
@@ -156,7 +155,67 @@ def mcap_profile(
     # smooth noisy profile
     y_sm = _loess_smooth_1d(x, y, grid=grid, span=span, degree=loess_degree)
 
-    return MCAPResult(
-        level=level,
+    # MLE = argmax of smoothed profile
+    i_max = int(np.nanargmax(y_sm))
+    mle = float(grid[i_max])
 
+    # local quadratic at smoothed MLE with raw data
+    a, b, c, vc_ab = _fit_local_quadratic(x, y, center=mle, span=span)
+
+    # SE decomposition
+    se_stat2 = 1.0 / (2.0 * a)
+
+    # Monte Carlo variance from vcov(a, b)
+    var_a = float(vc_ab[0, 0])
+    var_b = float(vc_ab[1, 1])
+    cov_ab = float(vc_ab[0, 1])
+
+    se_mc2 = (
+        1.0 / (4.0 * a * a)
+         * (var_b - 2.0 * (b / a) * cov_ab + (b * b / (a * a)) * var_a)
     )
+
+    se_tot2 = se_stat2 + se_mc2
+
+    # MC-adjusted cutoff
+    q = _qchisq(level, df=1)
+    delta = float(q * (a * se_mc2 + 0.5))
+
+    # CI from smoothed profile
+    diff = float(np.nanmax(y_sm)) - y_sm
+    inside = diff < delta
+    if not np.any(inside):
+        ci = (None, None)
+    else:
+        idx = np.where(inside)[0]
+        ci = (float(grid[idx.min()]), float(grid[idx.max()]))
+
+    # quadratic curve on grid
+    quad = c - a * (grid ** 2) + b * grid
+
+    if a > 0.0:
+        quad_max = b / (2.0 * a)
+    else:
+    # fallback to smoothed MLE if curvature is non-positive
+        quad_max = mle
+
+    return MCAPResult(
+        level = level,
+        mle = mle,
+        ci = ci,
+        delta = delta,
+        se_stat = float(np.sqrt(se_stat2)),
+        se_mc = float(np.sqrt(se_mc2)),
+        se_total = float(np.sqrt(se_stat2 + se_mc2)),
+        fit = {
+            "parameter": grid,
+            "smoothed": y_sm,
+            "quadratic": quad,
+        },
+        quadratic_max = float(quad_max),
+        quadratic_coef = {"a": float(a), "b": float(b), "c": float(c)},
+        vcov = vc_ab,
+    )
+
+def mcap(*args, **kwargs) -> MCAPResult:
+    return mcap_profile(*args, **kwargs)

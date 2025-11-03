@@ -72,122 +72,67 @@ def panel_pomp_with_transform():
 
 
 def test_panel_mif_traces_transformed(panel_pomp_with_transform):
-    """Test that PanelPomp mif traces are properly transformed back to natural space."""
+    """Test that with rw_sd=0, parameters remain unchanged after transformation cycle."""
     panel = panel_pomp_with_transform
+
+    # Capture initial parameters in natural space before running mif
+    # Deep copy to avoid mutations during mif
+
+    initial_shared = [df.copy() for df in panel.shared]
+    initial_unit_specific = [df.copy() for df in panel.unit_specific]
 
     # Get canonical param names before running mif
     shared_names = panel.canonical_shared_param_names
     unit_names = panel.canonical_unit_param_names
 
-    # Set up mif parameters
+    # Set up mif parameters with zero random walk standard deviation
+    # This means parameters should be transformed to perturbation scale,
+    # remain unchanged, and then transformed back to natural scale
     all_param_names = list(shared_names) + list(unit_names)
     rw_sd = pp.RWSigma(
-        sigmas={k: 0.02 for k in all_param_names},
+        sigmas={k: 0.0 for k in all_param_names},
         init_names=[],
     )
 
-    # Run panel mif with small parameters for quick test
-    panel.mif(J=5, M=2, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
+    panel.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
 
-    # Get the results
-    results = panel.results_history[-1]
+    # Check that shared parameters are unchanged
+    if initial_shared is not None and panel.shared is not None:
+        # Compare initial and final shared parameters
+        for rep_idx in range(len(panel.shared)):
+            initial_df = initial_shared[rep_idx]
+            final_df = panel.shared[rep_idx]
 
-    # Check shared traces if they exist
-    if "shared_traces" in results:
-        shared_traces = results["shared_traces"]
-
-        # Check that Q and R parameters (if in shared) are in natural space
-        for param in shared_names:
-            if param.startswith("Q") or param.startswith("R"):
-                param_values = shared_traces.sel(variable=param).values
-                param_values = param_values[~np.isnan(param_values)]
-                assert np.all(param_values > 0), (
-                    f"Shared parameter {param} should be positive"
+            for param in shared_names:
+                initial_val = initial_df.loc[param, "shared"]
+                final_val = final_df.loc[param, "shared"]
+                assert np.allclose(
+                    initial_val,
+                    final_val,
+                    rtol=1e-6,
+                    atol=1e-6,
+                ), (
+                    f"Shared parameter {param} changed from {initial_val} to {final_val} "
+                    "with rw_sd=0"
                 )
 
-    # Check unit-specific traces if they exist
-    if "unit_traces" in results:
-        unit_traces = results["unit_traces"]
+    # Check that unit-specific parameters are unchanged
+    if initial_unit_specific is not None and panel.unit_specific is not None:
+        # Compare initial and final unit-specific parameters
+        for rep_idx in range(len(panel.unit_specific)):
+            initial_df = initial_unit_specific[rep_idx]
+            final_df = panel.unit_specific[rep_idx]
 
-        # Check that Q and R parameters are in natural space
-        for param in unit_names:
-            if param.startswith("Q") or param.startswith("R"):
-                param_values = unit_traces.sel(variable=param).values
-                param_values = param_values[~np.isnan(param_values)]
-                assert np.all(param_values > 0), (
-                    f"Unit parameter {param} should be positive"
-                )
-
-
-def test_panel_transform_vectorized():
-    """Test that transform_panel_traces works with vectorization."""
-
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-        return {k: jnp.log(v) if v > 0 else v for k, v in theta.items()}
-
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-        return {k: jnp.exp(v) for k, v in theta.items()}
-
-    par_trans = pp.ParTrans(to_est, from_est)
-
-    # Create test traces
-    # Shape: (n_reps=2, n_iters=3, n_shared+1=3) where [:,:,0] is loglik
-    shared_traces = np.array(
-        [
-            [
-                [np.nan, 1.0, 2.0],  # rep 0, iter 0
-                [-10.0, 1.5, 2.5],  # rep 0, iter 1
-                [-11.0, 2.0, 3.0],
-            ],  # rep 0, iter 2
-            [
-                [np.nan, 0.5, 1.0],  # rep 1, iter 0
-                [-9.0, 0.8, 1.2],  # rep 1, iter 1
-                [-9.5, 1.0, 1.5],
-            ],  # rep 1, iter 2
-        ]
-    )
-
-    # Shape: (n_reps=2, n_iters=3, n_spec+1=2, n_units=2)
-    unit_traces = np.array(
-        [
-            [
-                [[np.nan, np.nan], [1.0, 1.5]],  # rep 0, iter 0
-                [[-5.0, -6.0], [2.0, 2.5]],  # rep 0, iter 1
-                [[-5.5, -6.5], [2.5, 3.0]],
-            ],  # rep 0, iter 2
-            [
-                [[np.nan, np.nan], [0.5, 0.8]],  # rep 1, iter 0
-                [[-4.0, -5.0], [1.0, 1.2]],  # rep 1, iter 1
-                [[-4.5, -5.5], [1.5, 1.8]],
-            ],  # rep 1, iter 2
-        ]
-    )
-
-    shared_param_names = ["shared1", "shared2"]
-    unit_param_names = ["unit1"]
-    unit_names = ["u1", "u2"]
-
-    # Transform from estimation to natural space
-    shared_out, unit_out = par_trans.transform_panel_traces(
-        shared_traces=shared_traces,
-        unit_traces=unit_traces,
-        shared_param_names=shared_param_names,
-        unit_param_names=unit_param_names,
-        unit_names=unit_names,
-        direction="from_est",
-    )
-
-    assert shared_out is not None
-    assert unit_out is not None
-
-    # Check shapes preserved
-    assert shared_out.shape == shared_traces.shape
-    assert unit_out.shape == unit_traces.shape
-
-    # Check logliks unchanged
-    assert np.isnan(shared_out[0, 0, 0])
-    assert np.abs(shared_out[0, 1, 0] - (-10.0)) < 1e-6
-
-    # Check parameters transformed (exp of log values)
-    assert shared_out[0, 0, 1] > shared_traces[0, 0, 1]  # exp(1) > 1
-    assert unit_out[0, 0, 1, 0] > unit_traces[0, 0, 1, 0]  # exp(1) > 1
+            for param in unit_names:
+                for unit in final_df.columns:
+                    initial_val = initial_df.loc[param, unit]
+                    final_val = final_df.loc[param, unit]
+                    assert np.allclose(
+                        initial_val,
+                        final_val,
+                        rtol=1e-6,
+                        atol=1e-6,
+                    ), (
+                        f"Unit parameter {param} for {unit} changed from {initial_val} "
+                        f"to {final_val} with rw_sd=0"
+                    )

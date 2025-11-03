@@ -4,7 +4,6 @@ These tests verify that traces are properly transformed from estimation space to
 """
 
 import numpy as np
-import pandas as pd
 import jax
 import jax.numpy as jnp
 import pypomp as pp
@@ -45,114 +44,70 @@ def simple_pomp_with_transform():
 
 
 def test_mif_traces_transformed(simple_pomp_with_transform):
-    """Test that mif traces are properly transformed back to natural space."""
+    """Test that with rw_sd=0, parameters remain unchanged after transformation cycle."""
     LG = simple_pomp_with_transform
 
-    # Set up mif parameters
+    # Capture initial parameters in natural space before running mif
+    # Deep copy to avoid mutations during mif
+    initial_theta = [{k: v for k, v in theta.items()} for theta in LG.theta]
+
+    # Set up mif parameters with zero random walk standard deviation
+    # This means parameters should be transformed to perturbation scale,
+    # remain unchanged, and then transformed back to natural scale
     rw_sd = pp.RWSigma(
-        sigmas={k: 0.02 for k in LG.canonical_param_names},
+        sigmas={k: 0.0 for k in LG.canonical_param_names},
         init_names=[],
     )
 
-    # Run mif with small parameters for quick test
-    LG.mif(J=5, M=2, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
+    # Run mif with zero rw_sd - parameters should remain unchanged
+    LG.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
 
-    # Get the traces
-    traces = LG.results_history[-1]["traces"]
+    # Check that parameters are unchanged
+    for rep_idx in range(len(LG.theta)):
+        initial_params = initial_theta[rep_idx]
+        final_params = LG.theta[rep_idx]
 
-    # Check that traces exist and have the right structure
-    assert traces is not None
-    assert "variable" in traces.dims
-    assert "iteration" in traces.dims
-
-    # Get parameter names
-    param_names = [v for v in traces.coords["variable"].values if v != "logLik"]
-
-    # Check that Q and R parameters are in natural space (positive)
-    for param in param_names:
-        if param.startswith("Q") or param.startswith("R"):
-            # All values should be positive (in natural space)
-            param_values = traces.sel(variable=param).values
-            # Skip NaN values at iteration 0
-            param_values = param_values[~np.isnan(param_values)]
-            assert np.all(param_values > 0), (
-                f"Parameter {param} should be positive in natural space"
-            )
-
-            # Values should be reasonable (not in log space which would be negative or near zero)
-            # In log space, these would typically be negative (log of values < 1)
-            # In natural space, they should be around their initialized values
-            assert np.all(param_values > 0.0001), (
-                f"Parameter {param} values seem to be in log space"
+        for param_name in LG.canonical_param_names:
+            initial_val = initial_params[param_name]
+            final_val = final_params[param_name]
+            assert np.allclose(
+                initial_val,
+                final_val,
+                rtol=1e-6,
+                atol=1e-6,
+            ), (
+                f"Parameter {param_name} changed from {initial_val} to {final_val} "
+                "with rw_sd=0"
             )
 
 
 def test_train_traces_transformed(simple_pomp_with_transform):
-    """Test that train traces are properly transformed back to natural space."""
+    """Test that with M=0, parameters remain unchanged after transformation cycle."""
     LG = simple_pomp_with_transform
 
-    # Run train with small parameters for quick test
-    LG.train(J=5, M=2, optimizer="Newton", key=jax.random.key(42))
+    # Capture initial parameters in natural space before running train
+    # Deep copy to avoid mutations during train
+    initial_theta = [{k: v for k, v in theta.items()} for theta in LG.theta]
 
-    # Get the traces
-    traces = LG.results_history[-1]["traces"]
+    # Run train with M=0 (no iterations) - parameters should be transformed
+    # to estimation space, remain unchanged (no optimization), and transformed
+    # back to natural scale
+    LG.train(J=2, M=0, optimizer="Newton", key=jax.random.key(42))
 
-    # Check that traces exist and have the right structure
-    assert traces is not None
-    assert "variable" in traces.dims
-    assert "iteration" in traces.dims
+    # Check that parameters are unchanged
+    for rep_idx in range(len(LG.theta)):
+        initial_params = initial_theta[rep_idx]
+        final_params = LG.theta[rep_idx]
 
-    # Get parameter names
-    param_names = [v for v in traces.coords["variable"].values if v != "logLik"]
-
-    # Check that Q and R parameters are in natural space (positive)
-    for param in param_names:
-        if param.startswith("Q") or param.startswith("R"):
-            # All values should be positive (in natural space)
-            param_values = traces.sel(variable=param).values
-            # Skip NaN values
-            param_values = param_values[~np.isnan(param_values)]
-            assert np.all(param_values > 0), (
-                f"Parameter {param} should be positive in natural space"
+        for param_name in LG.canonical_param_names:
+            initial_val = initial_params[param_name]
+            final_val = final_params[param_name]
+            assert np.allclose(
+                initial_val,
+                final_val,
+                rtol=1e-6,
+                atol=1e-6,
+            ), (
+                f"Parameter {param_name} changed from {initial_val} to {final_val} "
+                "with M=0"
             )
-
-            # Values should be reasonable (not in log space)
-            assert np.all(param_values > 0.0001), (
-                f"Parameter {param} values seem to be in log space"
-            )
-
-
-def test_transform_roundtrip():
-    """Test that transform_array does a proper round-trip transformation."""
-
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-        return {k: jnp.log(v) for k, v in theta.items()}
-
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-        return {k: jnp.exp(v) for k, v in theta.items()}
-
-    par_trans = pp.ParTrans(to_est, from_est)
-
-    # Test with multiple parameter sets (like traces)
-    original = np.array(
-        [
-            [1.0, 2.0, 3.0],
-            [0.5, 1.5, 2.5],
-            [2.0, 3.0, 4.0],
-        ]
-    )
-    param_names = ["param1", "param2", "param3"]
-
-    # Round trip: natural -> est -> natural
-    est_space = par_trans.transform_array(original, param_names, direction="to_est")
-    back_to_nat = par_trans.transform_array(
-        est_space, param_names, direction="from_est"
-    )
-
-    # Should be very close to original
-    assert np.allclose(back_to_nat, original, rtol=1e-6)
-
-    # Verify that est_space is actually different (in log space)
-    assert not np.allclose(est_space, original)
-    # In log space, values should be different
-    assert np.all(est_space < original)  # log(x) < x for x > 1

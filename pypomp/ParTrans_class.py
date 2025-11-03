@@ -285,8 +285,9 @@ class ParTrans:
                 # Use first unit's values for context
                 unit_context = jnp.array(unit_traces[:, :, 1:, 0])  # (n_reps, n_iters, n_spec)
             else:
-                # Create dummy context (won't be used if n_spec == 0)
-                unit_context = jnp.zeros((n_reps, n_iters, max(1, n_spec)))
+                # No unit-specific params - create empty array that won't affect the transformation
+                # (the transformation function will only see shared params)
+                unit_context = jnp.zeros((n_reps, n_iters, 0))
             
             # Apply transformation
             transformed_shared = transform_shared_vectorized(shared_params_only, unit_context)
@@ -309,15 +310,20 @@ class ParTrans:
                 # Extract unit-specific params only
                 return jnp.array([transformed[name] for name in unit_param_names])
             
-            # Vectorize over reps, iters, and units
-            transform_unit_vectorized = jax.vmap(jax.vmap(jax.vmap(transform_unit_single, in_axes=(None, 2)), in_axes=(0, 0)), in_axes=(0, 0))
+            # Vectorize over reps, iters, and units using nested vmap
+            # Innermost: vmap over units (axis 2 of unit_vals)
+            vmap_over_units = jax.vmap(transform_unit_single, in_axes=(None, 2))
+            # Middle: vmap over iterations (axis 0 of both inputs after reshaping)
+            vmap_over_iters = jax.vmap(vmap_over_units, in_axes=(0, 0))
+            # Outermost: vmap over replicates (axis 0 of both inputs)
+            transform_unit_vectorized = jax.vmap(vmap_over_iters, in_axes=(0, 0))
             
             # Prepare inputs
             if shared_traces is not None and n_shared > 0:
                 shared_context = jnp.array(shared_traces[:, :, 1:])  # (n_reps, n_iters, n_shared)
             else:
-                # Create dummy context
-                shared_context = jnp.zeros((n_reps, n_iters, max(1, n_shared)))
+                # No shared params - create empty array that won't affect the transformation
+                shared_context = jnp.zeros((n_reps, n_iters, 0))
             
             unit_params_only = jnp.array(unit_traces[:, :, 1:, :])  # (n_reps, n_iters, n_spec, n_units)
             

@@ -183,14 +183,16 @@ class ParTrans:
         else:
             param_array_2d = param_array.reshape(-1, original_shape[-1])
         
-        transformed_rows = []
-        for row in param_array_2d:
-            param_dict = {name: val for name, val in zip(param_names, row)}
+        def transform_single_row(row):
+            param_dict = {name: row[i] for i, name in enumerate(param_names)}
             transformed_dict = transform_fn(param_dict)
-            transformed_row = np.array([float(transformed_dict[name]) for name in param_names])
-            transformed_rows.append(transformed_row)
+            return jnp.array([transformed_dict[name] for name in param_names])
         
-        transformed_array = np.stack(transformed_rows, axis=0)
+        transform_vectorized = jax.vmap(transform_single_row)
+        
+        param_jax = jnp.array(param_array_2d)
+        transformed_jax = transform_vectorized(param_jax)
+        transformed_array = np.array(transformed_jax)
         
         if len(original_shape) == 1:
             return transformed_array.reshape(original_shape)
@@ -245,38 +247,50 @@ class ParTrans:
             n_reps, n_iters, _ = shared_traces.shape
             shared_out = shared_traces.copy()
             
-            for rep in range(n_reps):
-                for it in range(n_iters):
-                    shared_vals = shared_traces[rep, it, 1:]
-                    
-                    param_dict = {name: val for name, val in zip(shared_param_names, shared_vals)}
-                    
-                    if unit_traces is not None and n_spec > 0:
-                        unit_vals = unit_traces[rep, it, 1:, 0]
-                        param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
-                    
-                    transformed = transform_fn(param_dict)
-                    shared_out[rep, it, 1:] = np.array([float(transformed[name]) for name in shared_param_names])
+            def transform_shared_single(shared_vals, unit_vals_for_context):
+                param_dict = {name: shared_vals[i] for i, name in enumerate(shared_param_names)}
+                if n_spec > 0:
+                    param_dict.update({name: unit_vals_for_context[i] for i, name in enumerate(unit_param_names)})
+                transformed = transform_fn(param_dict)
+                return jnp.array([transformed[name] for name in shared_param_names])
+            
+            transform_shared_vectorized = jax.vmap(jax.vmap(transform_shared_single))
+            
+            shared_params_only = jnp.array(shared_traces[:, :, 1:])
+            
+            if unit_traces is not None and n_spec > 0:
+                unit_context = jnp.array(unit_traces[:, :, 1:, 0])
+            else:
+                unit_context = jnp.zeros((n_reps, n_iters, max(1, n_spec)))
+            
+            transformed_shared = transform_shared_vectorized(shared_params_only, unit_context)
+            shared_out[:, :, 1:] = np.array(transformed_shared)
         
         if unit_traces is not None and n_spec > 0:
             n_reps, n_iters, _, n_units = unit_traces.shape
             unit_out = unit_traces.copy()
             
-            for rep in range(n_reps):
-                for it in range(n_iters):
-                    for u_idx in range(n_units):
-                        unit_vals = unit_traces[rep, it, 1:, u_idx]
-                        
-                        param_dict = {}
-                        
-                        if shared_traces is not None and n_shared > 0:
-                            shared_vals = shared_traces[rep, it, 1:]
-                            param_dict.update({name: val for name, val in zip(shared_param_names, shared_vals)})
-                        
-                        param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
-                        
-                        transformed = transform_fn(param_dict)
-                        unit_out[rep, it, 1:, u_idx] = np.array([float(transformed[name]) for name in unit_param_names])
+            def transform_unit_single(shared_vals_for_context, unit_vals):
+                param_dict = {}
+                if n_shared > 0:
+                    param_dict.update({name: shared_vals_for_context[i] for i, name in enumerate(shared_param_names)})
+                param_dict.update({name: unit_vals[i] for i, name in enumerate(unit_param_names)})
+                transformed = transform_fn(param_dict)
+                return jnp.array([transformed[name] for name in unit_param_names])
+            
+            vmap_over_units = jax.vmap(transform_unit_single, in_axes=(None, 2))
+            vmap_over_iters = jax.vmap(vmap_over_units, in_axes=(0, 0))
+            transform_unit_vectorized = jax.vmap(vmap_over_iters, in_axes=(0, 0))
+            
+            if shared_traces is not None and n_shared > 0:
+                shared_context = jnp.array(shared_traces[:, :, 1:])
+            else:
+                shared_context = jnp.zeros((n_reps, n_iters, max(1, n_shared)))
+            
+            unit_params_only = jnp.array(unit_traces[:, :, 1:, :])
+            
+            transformed_unit = transform_unit_vectorized(shared_context, unit_params_only)
+            unit_out[:, :, 1:, :] = np.array(transformed_unit)
         elif unit_traces is not None:
             unit_out = unit_traces.copy()
         

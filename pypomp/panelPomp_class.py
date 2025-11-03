@@ -191,7 +191,15 @@ class PanelPomp:
         panel_canonical = self.canonical_param_names
 
         # Create mapping from panel order to unit order
-        permutation = [panel_canonical.index(name) for name in unit_canonical]
+        # All unit parameters should be present in the panel
+        try:
+            permutation = [panel_canonical.index(name) for name in unit_canonical]
+        except ValueError as e:
+            missing = set(unit_canonical) - set(panel_canonical)
+            raise ValueError(
+                f"Unit '{unit_name}' has parameters {missing} that are not in the panel's parameter list. "
+                f"Panel parameters: {panel_canonical}, Unit parameters: {unit_canonical}"
+            ) from e
         return jnp.array(permutation, dtype=jnp.int32)
 
     def _dataframe_to_array_canonical(
@@ -687,7 +695,6 @@ class PanelPomp:
             keys,
         )
 
-        # Transform traces from estimation space to natural space
         shared_traces, unit_traces = rep_unit.par_trans.transform_panel_traces(
             shared_traces=np.array(shared_traces),
             unit_traces=np.array(unit_traces),
@@ -696,6 +703,24 @@ class PanelPomp:
             unit_names=unit_names,
             direction="from_est",
         )
+
+        if shared_traces is None:
+            # unit_traces shape: (R, M+1, n_spec+1, U) where [:, :, 0, :] is per-unit loglik
+            if unit_traces is None:
+                raise ValueError(
+                    "Both shared_traces and unit_traces are None; cannot build traces."
+                )
+            n_reps = unit_traces.shape[0]
+            shared_ll = np.sum(
+                unit_traces[:, :, 0, :], axis=-1, keepdims=True
+            )  # (R, M+1, 1)
+            shared_traces = shared_ll  # only 'logLik' column when no shared params
+            shared_index = []
+        if unit_traces is None:
+            # Construct empty unit traces with just unit logliks if missing
+            n_reps = shared_traces.shape[0]
+            unit_ll = np.zeros((n_reps, M + 1, 1, U), dtype=float)
+            unit_traces = unit_ll
 
         shared_vars = ["logLik"] + shared_index
         unit_vars = ["unitLogLik"] + spec_index

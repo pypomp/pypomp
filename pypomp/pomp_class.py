@@ -133,7 +133,7 @@ class Pomp:
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        self.theta = self._validate_theta(theta)
+        self.theta: list[dict] = self._validate_theta(theta)
 
         # Extract parameter names from first theta dict
         self.canonical_param_names: list[str] = list(self.theta[0].keys())
@@ -372,8 +372,8 @@ class Pomp:
         start_time = time.time()
 
         theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
         theta_list = self._validate_theta(theta)
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -680,7 +680,6 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
-        # Convert theta_list to array format for vmapping
         theta_array = jnp.array(
             [
                 _theta_dict_to_array(theta_i, self.canonical_param_names)
@@ -690,7 +689,6 @@ class Pomp:
 
         n_obs = len(self.ys)
 
-        # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
             jnp.array(self.ys),
@@ -718,7 +716,6 @@ class Pomp:
             n_obs,
         )
 
-        # Transform theta_ests from estimation space to natural space for each replicate
         theta_ests_natural = np.stack(
             [
                 self.par_trans.transform_array(
@@ -1060,7 +1057,7 @@ class Pomp:
         else:
             new_theta = top_thetas
 
-        self.theta = new_theta
+        self.theta = self._validate_theta(new_theta)
 
     def plot_traces(self, show: bool = True):
         """

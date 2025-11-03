@@ -133,7 +133,7 @@ class Pomp:
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        self.theta = self._validate_theta(theta)
+        self.theta: list[dict] = self._validate_theta(theta)
 
         # Extract parameter names from first theta dict
         self.canonical_param_names: list[str] = list(self.theta[0].keys())
@@ -372,8 +372,8 @@ class Pomp:
         start_time = time.time()
 
         theta = theta or self.theta
-        new_key, old_key = self._update_fresh_key(key)
         theta_list = self._validate_theta(theta)
+        new_key, old_key = self._update_fresh_key(key)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -562,6 +562,10 @@ class Pomp:
                 ],
                 axis=1,
             )  # shape: (M+1, n_params)
+            # Transform traces from estimation space to natural space
+            param_traces = self.par_trans.transform_array(
+                param_traces, param_names, direction="from_est"
+            )
             trace_data[i, :, 0] = logliks_with_nan
             trace_data[i, :, 1:] = param_traces
             final_theta_ests.append(theta_ests[i])
@@ -676,7 +680,6 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, len(theta_list)))
 
-        # Convert theta_list to array format for vmapping
         theta_array = jnp.array(
             [
                 _theta_dict_to_array(theta_i, self.canonical_param_names)
@@ -686,7 +689,6 @@ class Pomp:
 
         n_obs = len(self.ys)
 
-        # Use vmapped version instead of for loop
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
             jnp.array(self.ys),
@@ -714,11 +716,21 @@ class Pomp:
             n_obs,
         )
 
+        theta_ests_natural = np.stack(
+            [
+                self.par_trans.transform_array(
+                    theta_ests[i], self.canonical_param_names, direction="from_est"
+                )
+                for i in range(len(theta_list_trans))
+            ],
+            axis=0,
+        )
+
         joined_array = xr.DataArray(
             np.concatenate(
                 [
                     -nLLs[..., np.newaxis],  # shape: (replicate, iteration, 1)
-                    theta_ests,  # shape: (replicate, iteration, n_theta)
+                    theta_ests_natural,  # shape: (replicate, iteration, n_theta)
                 ],
                 axis=-1,
             ),
@@ -1045,7 +1057,7 @@ class Pomp:
         else:
             new_theta = top_thetas
 
-        self.theta = new_theta
+        self.theta = self._validate_theta(new_theta)
 
     def plot_traces(self, show: bool = True):
         """

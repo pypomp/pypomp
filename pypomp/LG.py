@@ -62,7 +62,7 @@ def LG(
         [[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]
     ),
     C: jax.Array = jnp.eye(2),
-    Q: jax.Array = jnp.array([[1, 1e-4], [1e-4, 1]]) / 100,
+    Q: jax.Array = jnp.array([[1, 2e-2], [2e-2, 1]]) / 100,
     R: jax.Array = jnp.array([[1, 0.1], [0.1, 1]]) / 10,
     key: jax.Array = jax.random.key(111),
 ):

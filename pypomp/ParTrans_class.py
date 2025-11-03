@@ -1,6 +1,7 @@
 from typing import Callable, Literal
 import pandas as pd
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 
@@ -161,6 +162,7 @@ class ParTrans:
         
         This wrapper converts an array of parameters to a dict, applies the 
         dict-to-dict transformation function, and converts back to an array.
+        Uses JAX vmap for efficient vectorization over multiple parameter sets.
         
         Args:
             param_array: Array of parameter values with shape (..., n_params)
@@ -172,6 +174,8 @@ class ParTrans:
         """
         if direction not in ["to_est", "from_est"]:
             raise ValueError(f"Invalid direction: {direction}")
+        
+        transform_fn = self.to_est if direction == "to_est" else self.from_est
             
         # Store original shape to restore later
         original_shape = param_array.shape
@@ -184,24 +188,22 @@ class ParTrans:
             # Multiple parameter sets: reshape to (n_samples, n_params)
             param_array_2d = param_array.reshape(-1, original_shape[-1])
         
-        # Apply transformation to each parameter set
-        transformed_rows = []
-        for row in param_array_2d:
-            # Convert array row to dict - values are already numeric
+        # Define a function that transforms a single row (parameter set)
+        def transform_single_row(row):
+            # Convert array row to dict
             param_dict = {name: val for name, val in zip(param_names, row)}
-            
             # Apply transformation
-            if direction == "to_est":
-                transformed_dict = self.to_est(param_dict)
-            else:
-                transformed_dict = self.from_est(param_dict)
-            
+            transformed_dict = transform_fn(param_dict)
             # Convert back to array in the same order
-            transformed_row = np.array([float(transformed_dict[name]) for name in param_names])
-            transformed_rows.append(transformed_row)
+            return jnp.array([transformed_dict[name] for name in param_names])
         
-        # Stack and reshape to original shape
-        transformed_array = np.stack(transformed_rows, axis=0)
+        # Use vmap to vectorize over the first dimension (rows)
+        transform_vectorized = jax.vmap(transform_single_row)
+        
+        # Convert to jax array, apply transformation, convert back to numpy
+        param_jax = jnp.array(param_array_2d)
+        transformed_jax = transform_vectorized(param_jax)
+        transformed_array = np.array(transformed_jax)
         
         if len(original_shape) == 1:
             # Return single parameter set as 1D array
@@ -209,6 +211,7 @@ class ParTrans:
         else:
             # Return with original shape
             return transformed_array.reshape(original_shape)
+
 
     def transform_panel_traces(
         self,
@@ -224,6 +227,7 @@ class ParTrans:
         
         For panel models, shared and unit-specific parameters may be interdependent
         in the transformation, so they need to be transformed together.
+        Uses JAX vmap for efficient vectorization.
         
         Args:
             shared_traces: Array of shared parameter traces, shape (n_reps, n_iters, n_shared+1)
@@ -244,6 +248,8 @@ class ParTrans:
         
         if shared_traces is None and unit_traces is None:
             return None, None
+        
+        transform_fn = self.to_est if direction == "to_est" else self.from_est
             
         # Get dimensions
         n_shared = len(shared_param_names)
@@ -252,65 +258,78 @@ class ParTrans:
         shared_out = None
         unit_out = None
         
-        if shared_traces is not None:
+        # Transform shared parameters
+        if shared_traces is not None and n_shared > 0:
             n_reps, n_iters, _ = shared_traces.shape
             shared_out = shared_traces.copy()
             
-            # For each replicate and iteration, transform shared params
-            for rep in range(n_reps):
-                for it in range(n_iters):
-                    if n_shared > 0:
-                        shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
-                        
-                        # Build complete parameter dict for transformation
-                        param_dict = {name: val for name, val in zip(shared_param_names, shared_vals)}
-                        
-                        # If unit-specific params exist, include first unit's values for context
-                        if unit_traces is not None and n_spec > 0:
-                            unit_vals = unit_traces[rep, it, 1:, 0]  # First unit, skip loglik
-                            param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
-                        
-                        # Apply transformation
-                        if direction == "to_est":
-                            transformed = self.to_est(param_dict)
-                        else:
-                            transformed = self.from_est(param_dict)
-                        
-                        # Extract transformed shared params
-                        shared_out[rep, it, 1:] = np.array([float(transformed[name]) for name in shared_param_names])
+            # Define function to transform a single (rep, iter) shared parameter set
+            def transform_shared_single(shared_vals, unit_vals_for_context):
+                # Build complete parameter dict
+                param_dict = {name: val for name, val in zip(shared_param_names, shared_vals)}
+                # Add unit-specific params for context if they exist
+                if n_spec > 0:
+                    param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals_for_context)})
+                # Transform
+                transformed = transform_fn(param_dict)
+                # Extract shared params only
+                return jnp.array([transformed[name] for name in shared_param_names])
+            
+            # Vectorize over reps and iters
+            transform_shared_vectorized = jax.vmap(jax.vmap(transform_shared_single))
+            
+            # Prepare inputs
+            shared_params_only = jnp.array(shared_traces[:, :, 1:])  # (n_reps, n_iters, n_shared)
+            
+            if unit_traces is not None and n_spec > 0:
+                # Use first unit's values for context
+                unit_context = jnp.array(unit_traces[:, :, 1:, 0])  # (n_reps, n_iters, n_spec)
+            else:
+                # Create dummy context (won't be used if n_spec == 0)
+                unit_context = jnp.zeros((n_reps, n_iters, max(1, n_spec)))
+            
+            # Apply transformation
+            transformed_shared = transform_shared_vectorized(shared_params_only, unit_context)
+            shared_out[:, :, 1:] = np.array(transformed_shared)
         
-        if unit_traces is not None:
+        # Transform unit-specific parameters
+        if unit_traces is not None and n_spec > 0:
             n_reps, n_iters, _, n_units = unit_traces.shape
             unit_out = unit_traces.copy()
             
-            # For each replicate, iteration, and unit, transform unit-specific params
-            for rep in range(n_reps):
-                for it in range(n_iters):
-                    for u_idx, u_name in enumerate(unit_names):
-                        if n_spec > 0:
-                            unit_vals = unit_traces[rep, it, 1:, u_idx]  # Skip loglik
-                            
-                            # Build complete parameter dict
-                            param_dict = {}
-                            
-                            # Include shared params if they exist
-                            if shared_traces is not None and n_shared > 0:
-                                shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
-                                param_dict.update({name: val for name, val in zip(shared_param_names, shared_vals)})
-                            
-                            # Add unit-specific params
-                            param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
-                            
-                            # Apply transformation
-                            if direction == "to_est":
-                                transformed = self.to_est(param_dict)
-                            else:
-                                transformed = self.from_est(param_dict)
-                            
-                            # Extract transformed unit-specific params
-                            unit_out[rep, it, 1:, u_idx] = np.array([float(transformed[name]) for name in unit_param_names])
+            # Define function to transform a single (rep, iter, unit) parameter set
+            def transform_unit_single(shared_vals_for_context, unit_vals):
+                # Build complete parameter dict
+                param_dict = {}
+                if n_shared > 0:
+                    param_dict.update({name: val for name, val in zip(shared_param_names, shared_vals_for_context)})
+                param_dict.update({name: val for name, val in zip(unit_param_names, unit_vals)})
+                # Transform
+                transformed = transform_fn(param_dict)
+                # Extract unit-specific params only
+                return jnp.array([transformed[name] for name in unit_param_names])
+            
+            # Vectorize over reps, iters, and units
+            transform_unit_vectorized = jax.vmap(jax.vmap(jax.vmap(transform_unit_single, in_axes=(None, 2)), in_axes=(0, 0)), in_axes=(0, 0))
+            
+            # Prepare inputs
+            if shared_traces is not None and n_shared > 0:
+                shared_context = jnp.array(shared_traces[:, :, 1:])  # (n_reps, n_iters, n_shared)
+            else:
+                # Create dummy context
+                shared_context = jnp.zeros((n_reps, n_iters, max(1, n_shared)))
+            
+            unit_params_only = jnp.array(unit_traces[:, :, 1:, :])  # (n_reps, n_iters, n_spec, n_units)
+            
+            # Apply transformation
+            transformed_unit = transform_unit_vectorized(shared_context, unit_params_only)
+            unit_out[:, :, 1:, :] = np.array(transformed_unit)
+        elif unit_traces is not None:
+            # If n_spec == 0, just copy
+            unit_out = unit_traces.copy()
         
         return shared_out, unit_out
+
 
 
 def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

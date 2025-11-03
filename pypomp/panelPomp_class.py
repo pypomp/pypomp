@@ -687,6 +687,16 @@ class PanelPomp:
             keys,
         )
 
+        # Transform traces from estimation space to natural space
+        shared_traces, unit_traces = rep_unit.par_trans.transform_panel_traces(
+            shared_traces=np.array(shared_traces),
+            unit_traces=np.array(unit_traces),
+            shared_param_names=shared_index,
+            unit_param_names=spec_index,
+            unit_names=unit_names,
+            direction="from_est",
+        )
+
         shared_vars = ["logLik"] + shared_index
         unit_vars = ["unitLogLik"] + spec_index
 

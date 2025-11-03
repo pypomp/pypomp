@@ -562,6 +562,10 @@ class Pomp:
                 ],
                 axis=1,
             )  # shape: (M+1, n_params)
+            # Transform traces from estimation space to natural space
+            param_traces = self.par_trans.transform_array(
+                param_traces, param_names, direction="from_est"
+            )
             trace_data[i, :, 0] = logliks_with_nan
             trace_data[i, :, 1:] = param_traces
             final_theta_ests.append(theta_ests[i])
@@ -714,11 +718,22 @@ class Pomp:
             n_obs,
         )
 
+        # Transform theta_ests from estimation space to natural space for each replicate
+        theta_ests_natural = np.stack(
+            [
+                self.par_trans.transform_array(
+                    theta_ests[i], self.canonical_param_names, direction="from_est"
+                )
+                for i in range(len(theta_list_trans))
+            ],
+            axis=0,
+        )
+
         joined_array = xr.DataArray(
             np.concatenate(
                 [
                     -nLLs[..., np.newaxis],  # shape: (replicate, iteration, 1)
-                    theta_ests,  # shape: (replicate, iteration, n_theta)
+                    theta_ests_natural,  # shape: (replicate, iteration, n_theta)
                 ],
                 axis=-1,
             ),

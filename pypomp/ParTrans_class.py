@@ -1,6 +1,7 @@
 from typing import Callable, Literal
 import pandas as pd
 import jax
+import numpy as np
 
 
 class ParTrans:
@@ -148,6 +149,168 @@ class ParTrans:
             return {k: float(v) for k, v in theta.items()}
         else:
             raise ValueError(f"Invalid direction: {direction}")
+
+    def transform_array(
+        self,
+        param_array: np.ndarray,
+        param_names: list[str],
+        direction: Literal["to_est", "from_est"],
+    ) -> np.ndarray:
+        """
+        Transform a parameter array to or from the estimation parameter space.
+        
+        This wrapper converts an array of parameters to a dict, applies the 
+        dict-to-dict transformation function, and converts back to an array.
+        
+        Args:
+            param_array: Array of parameter values with shape (..., n_params)
+            param_names: List of parameter names in the same order as the array
+            direction: Direction of transformation ("to_est" or "from_est")
+            
+        Returns:
+            Transformed parameter array with the same shape as input
+        """
+        if direction not in ["to_est", "from_est"]:
+            raise ValueError(f"Invalid direction: {direction}")
+            
+        # Store original shape to restore later
+        original_shape = param_array.shape
+        
+        # Flatten to 2D: (n_samples, n_params) for easier processing
+        if len(original_shape) == 1:
+            # Single parameter set: (n_params,)
+            param_array_2d = param_array.reshape(1, -1)
+        else:
+            # Multiple parameter sets: reshape to (n_samples, n_params)
+            param_array_2d = param_array.reshape(-1, original_shape[-1])
+        
+        # Apply transformation to each parameter set
+        transformed_rows = []
+        for row in param_array_2d:
+            # Convert array row to dict
+            param_dict = {name: jax.Array(val) for name, val in zip(param_names, row)}
+            
+            # Apply transformation
+            if direction == "to_est":
+                transformed_dict = self.to_est(param_dict)
+            else:
+                transformed_dict = self.from_est(param_dict)
+            
+            # Convert back to array in the same order
+            transformed_row = np.array([float(transformed_dict[name]) for name in param_names])
+            transformed_rows.append(transformed_row)
+        
+        # Stack and reshape to original shape
+        transformed_array = np.stack(transformed_rows, axis=0)
+        
+        if len(original_shape) == 1:
+            # Return single parameter set as 1D array
+            return transformed_array.reshape(original_shape)
+        else:
+            # Return with original shape
+            return transformed_array.reshape(original_shape)
+
+    def transform_panel_traces(
+        self,
+        shared_traces: np.ndarray | None,
+        unit_traces: np.ndarray | None,
+        shared_param_names: list[str],
+        unit_param_names: list[str],
+        unit_names: list[str],
+        direction: Literal["to_est", "from_est"],
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """
+        Transform panel traces from estimation space to natural space.
+        
+        For panel models, shared and unit-specific parameters may be interdependent
+        in the transformation, so they need to be transformed together.
+        
+        Args:
+            shared_traces: Array of shared parameter traces, shape (n_reps, n_iters, n_shared+1)
+                where [:, :, 0] is loglik and [:, :, 1:] are shared params
+            unit_traces: Array of unit-specific parameter traces, 
+                shape (n_reps, n_iters, n_spec+1, n_units) where [:, :, 0, :] is per-unit loglik
+                and [:, :, 1:, :] are unit-specific params
+            shared_param_names: List of shared parameter names
+            unit_param_names: List of unit-specific parameter names  
+            unit_names: List of unit names
+            direction: Direction of transformation ("to_est" or "from_est")
+            
+        Returns:
+            Tuple of (transformed_shared_traces, transformed_unit_traces) with same shapes as inputs
+        """
+        if direction not in ["to_est", "from_est"]:
+            raise ValueError(f"Invalid direction: {direction}")
+        
+        if shared_traces is None and unit_traces is None:
+            return None, None
+            
+        # Get dimensions
+        n_shared = len(shared_param_names)
+        n_spec = len(unit_param_names)
+        
+        shared_out = None
+        unit_out = None
+        
+        if shared_traces is not None:
+            n_reps, n_iters, _ = shared_traces.shape
+            shared_out = shared_traces.copy()
+            
+            # For each replicate and iteration, transform shared params
+            for rep in range(n_reps):
+                for it in range(n_iters):
+                    if n_shared > 0:
+                        shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
+                        
+                        # Build complete parameter dict for transformation
+                        param_dict = {name: jax.Array(val) for name, val in zip(shared_param_names, shared_vals)}
+                        
+                        # If unit-specific params exist, include first unit's values for context
+                        if unit_traces is not None and n_spec > 0:
+                            unit_vals = unit_traces[rep, it, 1:, 0]  # First unit, skip loglik
+                            param_dict.update({name: jax.Array(val) for name, val in zip(unit_param_names, unit_vals)})
+                        
+                        # Apply transformation
+                        if direction == "to_est":
+                            transformed = self.to_est(param_dict)
+                        else:
+                            transformed = self.from_est(param_dict)
+                        
+                        # Extract transformed shared params
+                        shared_out[rep, it, 1:] = np.array([float(transformed[name]) for name in shared_param_names])
+        
+        if unit_traces is not None:
+            n_reps, n_iters, _, n_units = unit_traces.shape
+            unit_out = unit_traces.copy()
+            
+            # For each replicate, iteration, and unit, transform unit-specific params
+            for rep in range(n_reps):
+                for it in range(n_iters):
+                    for u_idx, u_name in enumerate(unit_names):
+                        if n_spec > 0:
+                            unit_vals = unit_traces[rep, it, 1:, u_idx]  # Skip loglik
+                            
+                            # Build complete parameter dict
+                            param_dict = {}
+                            
+                            # Include shared params if they exist
+                            if shared_traces is not None and n_shared > 0:
+                                shared_vals = shared_traces[rep, it, 1:]  # Skip loglik
+                                param_dict.update({name: jax.Array(val) for name, val in zip(shared_param_names, shared_vals)})
+                            
+                            # Add unit-specific params
+                            param_dict.update({name: jax.Array(val) for name, val in zip(unit_param_names, unit_vals)})
+                            
+                            # Apply transformation
+                            if direction == "to_est":
+                                transformed = self.to_est(param_dict)
+                            else:
+                                transformed = self.from_est(param_dict)
+                            
+                            # Extract transformed unit-specific params
+                            unit_out[rep, it, 1:, u_idx] = np.array([float(transformed[name]) for name in unit_param_names])
+        
+        return shared_out, unit_out
 
 
 def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

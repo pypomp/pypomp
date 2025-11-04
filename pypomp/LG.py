@@ -46,7 +46,8 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
-    return jax.scipy.stats.multivariate_normal.logpdf(Y_, X_array, R)
+    Y_array = jnp.array([Y_["Y1"], Y_["Y2"]])
+    return jax.scipy.stats.multivariate_normal.logpdf(Y_array, X_array, R)
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):

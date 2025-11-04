@@ -125,16 +125,17 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     C = X_["C"]
     tol = 1.0e-18
 
+    y = Y_["cases"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
     sqrt_v_tol = jnp.sqrt(v) + tol
 
-    upper_cdf = jax.scipy.stats.norm.cdf(Y_ + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(Y_ - 0.5, m, sqrt_v_tol)
+    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
+    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
 
     lik = (
         jnp.where(
-            Y_ > tol,
+            y > tol,
             upper_cdf - lower_cdf,
             upper_cdf,
         )
@@ -142,7 +143,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     )
 
     lik = jnp.where(C < 0, 0.0, lik)
-    lik = jnp.where(jnp.isnan(Y_), 1.0, lik)
+    lik = jnp.where(jnp.isnan(y), 1.0, lik)
     return jnp.log(lik)
 
 

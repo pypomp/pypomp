@@ -187,6 +187,7 @@ class Pomp:
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
+                y_names=list(self.ys.columns),
             )
         else:
             self.dmeas: DMeas | None = None
@@ -1275,6 +1276,7 @@ class Pomp:
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
+                    y_names=list(self.ys.columns) if hasattr(self, "ys") else None,
                 )
 
         # Reconstruct rmeas

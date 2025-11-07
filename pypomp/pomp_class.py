@@ -622,7 +622,7 @@ class Pomp:
         M: int,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
-        optimizer: str = "Newton",
+        optimizer: str = "SGD",
         eta: float = 0.0025,
         alpha: float = 0.97,
         thresh: int = 0,
@@ -644,8 +644,8 @@ class Pomp:
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "Newton", "WeightedNewton", and "BFGS".
-                Defaults to "Newton".
+                to use. Options include "SGD", "Newton", "WeightedNewton", and "BFGS".
+                Defaults to "SGD".
             eta (float, optional): Learning rate.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample

@@ -40,29 +40,43 @@ def _loess_smooth_1d(
 
     if x.size == 0:
         return np.full_like(grid, np.nan, dtype=float)
+    
+    # normalize predictor
+    xmin = float(np.min(x))
+    xmax = float(np.max(x))
+    scale = xmax - xmin
 
-    sigy = np.ones_like(y) 
+    if scale <= 0.0 or not np.isfinite(scale):
+        # degenerate predictor: return flat line at mean(y)
+        return np.full_like(grid, float(np.mean(y)), dtype=float)
+
+    x_norm = (x - xmin) / scale
+    grid_norm = (grid - xmin) / scale
+
+    # neutralize robustness by making all biweights 1
+    HUGE_SIGY = 1e9
+    sigy = np.full_like(y, HUGE_SIGY, dtype=float)
 
     try:
         res = loess_1d(
-            x, y,
-            xnew=grid,
+            x_norm, y,
+            xnew=grid_norm,
             degree=int(degree),
             frac=float(span),
             sigy=sigy,
         )
     except Exception:
-        coeff = np.polyfit(x, y, deg=min(degree, 2))
-        y_sm = np.polyval(coeff, grid)
+        coeff = np.polyfit(x_norm, y, deg=min(degree, 2))
+        y_sm = np.polyval(coeff, grid_norm)
         return y_sm.astype(float, copy=False)
 
     if len(res) == 3:
-        _, y_sm, _ = cast(Tuple[FloatArray, FloatArray, FloatArray], res)
-        return y_sm
+        _, y_sm, _ = res
+        return y_sm.astype(float, copy=False)
     else:
         # if frac == 0 in loess_1d
-        y_raw, _ = cast(Tuple[FloatArray, FloatArray], res)
-        return np.interp(grid, x, y_raw)
+        y_raw, _ = res
+        return np.interp(grid_norm, x_norm, y_raw).astype(float, copy=False)
 
 
 def _fit_local_quadratic(

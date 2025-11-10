@@ -620,10 +620,10 @@ class Pomp:
         self,
         J: int,
         M: int,
+        eta: float,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         optimizer: str = "SGD",
-        eta: float = 0.0025,
         alpha: float = 0.97,
         thresh: int = 0,
         scale: bool = False,
@@ -639,21 +639,21 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
+            eta (float): Learning rate.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "SGD", "Newton", "WeightedNewton", and "BFGS".
-                Defaults to "SGD".
-            eta (float, optional): Learning rate.
+                Note: options other than "SGD" might be quite slow.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
             scale (bool, optional): Boolean flag controlling whether to normalize the
                 search direction.
             ls (bool, optional): Boolean flag controlling whether to use the line
-                search algorithm.
+                search algorithm. Note: the line search algorithm can be quite slow.
             Line Search Parameters (only used when ls=True):
                 c (float, optional): The Armijo condition constant for line search,
                     which controls how much the negative log-likelihood needs to

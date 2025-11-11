@@ -7,8 +7,6 @@ from pypomp.fast_random import (
     fast_approx_multinomial,
     fast_approx_poisson,
     fast_approx_gamma,
-    poisson_hybrid,
-    poisson_anscombe,
 )
 
 
@@ -93,7 +91,13 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_approx_poisson(keys[1], br * dt, max_rejections=1)
+    births = fast_approx_poisson(
+        keys[1],
+        br * dt,
+        max_rejections_ptrs=1,
+        max_rejections_knuth=10,
+        lam_cutoff=5.0,
+    )
     # births = poisson_hybrid(keys[1], br * dt)
 
     # transitions between classes
@@ -114,7 +118,12 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
     transitions = fast_approx_multinomial(
-        keys[2], populations, rt_final, max_rejections_btrs=1, force_btrs=True
+        keys[2],
+        populations,
+        rt_final,
+        max_rejections_btrs=1,
+        max_rejections_inversion=50,
+        np_cutoff=5.0,
     )
 
     trans_S = transitions[0]
@@ -136,16 +145,17 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     C = X_["C"]
     tol = 1.0e-18
 
+    y = Y_["cases"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
     sqrt_v_tol = jnp.sqrt(v) + tol
 
-    upper_cdf = jax.scipy.stats.norm.cdf(Y_ + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(Y_ - 0.5, m, sqrt_v_tol)
+    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
+    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
 
     lik = (
         jnp.where(
-            Y_ > tol,
+            y > tol,
             upper_cdf - lower_cdf,
             upper_cdf,
         )
@@ -153,7 +163,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     )
 
     lik = jnp.where(C < 0, 0.0, lik)
-    lik = jnp.where(jnp.isnan(Y_), 1.0, lik)
+    lik = jnp.where(jnp.isnan(y), 1.0, lik)
     return jnp.log(lik)
 
 

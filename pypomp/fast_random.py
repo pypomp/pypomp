@@ -457,6 +457,7 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
     stddev = jnp.sqrt(count * prob * (1 - prob))
     b = 1.15 + 2.53 * stddev
     a = -0.0873 + 0.0248 * b + 0.01 * prob
+    # a = jnp.where(a0 > 0, a0, a0 + 0.0873 - 0.0285)
     c = count * prob + 0.5
     v_r = 0.92 - 4.2 / b
     r = prob / (1 - prob)
@@ -503,7 +504,7 @@ def _btrs(key, count, prob, shape, dtype, max_iters):
     )
 
 
-@partial(jit, static_argnums=(3, 4, 5, 6, 7), inline=True)
+@partial(jit, static_argnums=(3, 4, 5, 6, 7, 8), inline=True)
 def _binomial(
     key,
     count,
@@ -512,6 +513,7 @@ def _binomial(
     dtype,
     max_rejections_btrs,
     max_rejections_inversion,
+    np_cutoff,
     force_btrs,
 ) -> Array:
     # The implementation matches TensorFlow and TensorFlow Probability:
@@ -536,7 +538,7 @@ def _binomial(
     if force_btrs:
         use_inversion = False
     else:
-        use_inversion = count_nan_or_neg | (count * q <= 10.0)
+        use_inversion = count_nan_or_neg | (count * q <= np_cutoff)
 
     # consistent with np.random.binomial behavior for float count input
     count = jnp.floor(count)
@@ -582,7 +584,8 @@ def fast_approx_binomial(
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
     max_rejections_btrs: int = 2,
-    max_rejections_inversion: int = 100,
+    max_rejections_inversion: int = 10000,
+    np_cutoff: float = 10.0,
     force_btrs: bool = False,
 ) -> Array:
     r"""Sample Binomial random values with given shape and float dtype.
@@ -607,7 +610,11 @@ def fast_approx_binomial(
         The default (None) produces a result shape equal to ``np.broadcast(n, p).shape``.
       dtype: optional, a float dtype for the returned values (default float64 if
         jax_enable_x64 is true, otherwise float32).
-      max_rejections: the maximum number of rejections allowed.
+      max_rejections_btrs: the maximum number of rejections allowed for the btrs algorithm.
+      max_rejections_inversion: the maximum number of rejections allowed for the inversion algorithm.
+      np_cutoff: the cutoff for using the binomial inverse algorithm. If n * p < np_cutoff, use the binomial inverse algorithm.
+      force_btrs: whether to force the use of the btrs algorithm.
+
 
     Returns:
       A random array with the specified dtype and with shape given by
@@ -630,6 +637,7 @@ def fast_approx_binomial(
         dtype,
         max_rejections_btrs,
         max_rejections_inversion,
+        np_cutoff,
         force_btrs,
     )
 
@@ -652,6 +660,7 @@ def fast_approx_multinomial(
     unroll: int | bool = 1,
     max_rejections_btrs: int = 2,
     max_rejections_inversion: int = 100,
+    np_cutoff: float = 10.0,
     force_btrs: bool = False,
 ):
     r"""Sample from a multinomial distribution.
@@ -673,7 +682,10 @@ def fast_approx_multinomial(
         jax_enable_x64 is true, otherwise float32).
       unroll: optional, unroll parameter passed to :func:`jax.lax.scan` inside the
         implementation of this function.
-      max_rejections: the maximum number of rejections allowed.
+      max_rejections_btrs: the maximum number of rejections allowed for the btrs algorithm.
+      max_rejections_inversion: the maximum number of rejections allowed for the inversion algorithm.
+      np_cutoff: the cutoff for using the binomial inverse algorithm. If n * p < np_cutoff, use the binomial inverse algorithm.
+      force_btrs: whether to force the use of the btrs algorithm.
 
     Returns:
       An array of counts for each outcome with the specified dtype and with shape
@@ -698,6 +710,7 @@ def fast_approx_multinomial(
             dtype=remainder.dtype,
             max_rejections_btrs=max_rejections_btrs,
             max_rejections_inversion=max_rejections_inversion,
+            np_cutoff=np_cutoff,
             force_btrs=force_btrs,
         )
         return remainder - count, count
@@ -751,6 +764,7 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
     log_lam = lax.log(lam)
     b = 0.931 + 2.53 * lax.sqrt(lam)
     a = -0.059 + 0.02483 * b
+    # a = jnp.where(a0 > 0, a0, a0 + 0.059 - 0.035)
     inv_alpha = 1.1239 + 1.1328 / (b - 3.4)
     v_r = 0.9277 - 3.6224 / (b - 2)
 
@@ -790,25 +804,36 @@ def _poisson_rejection(key, lam, shape, dtype, max_iters) -> Array:
     return k.astype(dtype)
 
 
-@partial(jit, static_argnums=(2, 3, 4))
-def _poisson(key, lam, shape, dtype, max_rejections) -> Array:
+@partial(jit, static_argnums=(2, 3, 4, 5, 6, 7))
+def _poisson(
+    key,
+    lam,
+    shape,
+    dtype,
+    max_rejections_ptrs,
+    max_rejections_knuth,
+    lam_cutoff,
+    force_ptrs,
+) -> Array:
     # The implementation matches TensorFlow and NumPy:
     # https://github.com/tensorflow/tensorflow/blob/v2.2.0-rc3/tensorflow/core/kernels/random_poisson_op.cc
     # https://github.com/numpy/numpy/blob/v1.18.3/numpy/random/src/distributions/distributions.c#L574
     # For lambda < 10, we use the Knuth algorithm; otherwise, we use transformed
     # rejection sampling.
-    # use_knuth = _isnan(lam) | (lam < 10)
-    use_knuth = False
-    # TODO: might want to add an argument to choose which method to use
+    if force_ptrs:
+        use_knuth = False
+    else:
+        use_knuth = _isnan(lam) | (lam < lam_cutoff)
     lam_knuth = lax.select(use_knuth, lam, lax.full_like(lam, 0.0))
     # The acceptance probability for rejection sampling maxes out at 89% as
     # λ -> ∞, so pick some arbitrary large value.
     lam_rejection = lax.select(use_knuth, lax.full_like(lam, 1e5), lam)
-    max_iters = max_rejections + 1
+    max_iters_knuth = max_rejections_knuth + 1
+    max_iters_ptrs = max_rejections_ptrs + 1
     result = lax.select(
         use_knuth,
-        _poisson_rejection(key, lam_rejection, shape, dtype, max_iters),
-        _poisson_rejection(key, lam_rejection, shape, dtype, max_iters),
+        _poisson_knuth(key, lam_knuth, shape, dtype, max_iters_knuth),
+        _poisson_rejection(key, lam_rejection, shape, dtype, max_iters_ptrs),
     )
     result = jnp.clip(result, 0, jnp.inf)
     return lax.select(lam == 0, jnp.zeros_like(result), result)
@@ -819,7 +844,10 @@ def fast_approx_poisson(
     lam: RealArray,
     shape: Shape | None = None,
     dtype: DTypeLikeInt | None = None,
-    max_rejections: int = 2,
+    max_rejections_ptrs: int = 2,
+    max_rejections_knuth: int = 30,
+    lam_cutoff: float = 10.0,
+    force_ptrs: bool = False,
 ) -> Array:
     r"""Sample Poisson random values with given shape and integer dtype.
 
@@ -837,7 +865,10 @@ def fast_approx_poisson(
         shape. Default (None) produces a result shape equal to ``lam.shape``.
       dtype: optional, a integer dtype for the returned values (default int64 if
         jax_enable_x64 is true, otherwise int32).
-      max_rejections: the maximum number of rejections allowed.
+      max_rejections_ptrs: the maximum number of rejections allowed for the PTRS (Poisson Transformed Rejection with Squeeze) algorithm.
+      max_rejections_knuth: the maximum number of rejections allowed for the Knuth algorithm.
+      lambda_cutoff: the cutoff for using the PTRS algorithm. If lambda < lambda_cutoff, use the Knuth algorithm.
+      force_ptrs: whether to force the use of the PTRS algorithm.
 
     Returns:
       A random array with the specified dtype and with shape given by ``shape`` if
@@ -858,7 +889,16 @@ def fast_approx_poisson(
         shape = np.shape(lam)
     lam = jnp.broadcast_to(lam, shape)
     lam = lax.convert_element_type(lam, np.float32)
-    return _poisson(key, lam, shape, dtype, max_rejections)
+    return _poisson(
+        key,
+        lam,
+        shape,
+        dtype,
+        max_rejections_ptrs,
+        max_rejections_knuth,
+        lam_cutoff,
+        force_ptrs,
+    )
 
 
 ### JAX code follows

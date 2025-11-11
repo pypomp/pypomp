@@ -74,7 +74,7 @@ def neapolitan_setup():
         a=a,
         key=key,
     )
-    LG.train(J=J, M=1, key=key)
+    LG.train(J=J, M=1, eta=0.2, key=key)
     results_history = LG.results_history
     theta = LG.theta
     fresh_key = LG.fresh_key
@@ -190,6 +190,7 @@ def test_theta_carryover_train(simple):
     LG.train(
         J=J,
         M=1,
+        eta=0.2,
         key=key,
     )
     assert theta_order == list(LG.theta[0].keys())

@@ -83,7 +83,7 @@ def test_measles_mop(london):
 
 def test_measles_train(london):
     measles, rw_sd, J, key, M, a = london
-    measles.train(M=1, J=J, key=key)
+    measles.train(M=1, J=J, eta=0.2, key=key)
 
 
 def test_measles_clean():

@@ -20,7 +20,14 @@ def simple():
 @pytest.mark.parametrize("optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS"])
 def test_class_GD_basic(optimizer, simple):
     LG, ys, covars, theta, J, key, M = simple
-    LG.train(J=J, M=M, optimizer=optimizer, scale=True, ls=False, n_monitors=0, key=key)
+    LG.train(
+        J=J,
+        M=M,
+        eta=0.2,
+        optimizer=optimizer,
+        scale=True,
+        key=key,
+    )
     GD_out = LG.results_history[-1]
     traces = GD_out["traces"]
     # Check shape for first replicate
@@ -36,7 +43,9 @@ def test_class_GD_basic(optimizer, simple):
 
 def test_class_GD_ls(simple):
     LG, ys, covars, theta, J, key, M = simple
-    LG.train(J=J, M=M, optimizer="SGD", scale=True, ls=True, n_monitors=1, key=key)
+    LG.train(
+        J=J, M=M, eta=0.2, optimizer="SGD", scale=True, ls=True, n_monitors=1, key=key
+    )
     GD_out = LG.results_history[-1]
     traces = GD_out["traces"]
     assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
@@ -47,9 +56,7 @@ def test_invalid_GD_input(simple):
     LG, ys, covars, theta, J, key, M = simple
     with pytest.raises(ValueError):
         # Check that an error is thrown when J is not positive
-        LG.train(J=0, M=M, scale=True, ls=True, key=key)
-
-        # INSERT_YOUR_CODE
+        LG.train(J=0, M=M, eta=0.2, scale=True, ls=True, key=key)
 
 
 def test_train_param_order_invariance(simple):
@@ -57,10 +64,9 @@ def test_train_param_order_invariance(simple):
     LG.train(
         J=J,
         M=M,
+        eta=0.2,
         optimizer="Newton",
         scale=True,
-        ls=False,
-        n_monitors=0,
         key=key,
         theta=theta,
     )
@@ -71,9 +77,9 @@ def test_train_param_order_invariance(simple):
     LG.train(
         J=J,
         M=M,
+        eta=0.2,
         optimizer="Newton",
         scale=True,
-        ls=False,
         n_monitors=0,
         key=key,
         theta=permuted_theta,

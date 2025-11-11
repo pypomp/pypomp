@@ -208,9 +208,10 @@ def _train_internal(
 
             hess, direction = jax.lax.cond(i > 1, bfgs_true, bfgs_false, operand=None)
 
-        else:
-            # For BFGS when i <= 1, or other optimizers, use gradient descent
+        elif optimizer == "SGD":
             direction = -grad
+        else:
+            raise ValueError(f"Optimizer '{optimizer}' not supported")
 
         if scale:
             direction = direction / jnp.linalg.norm(direction)

@@ -71,7 +71,8 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
 def dmeas(Y_, X_, theta_, covars=None, t=None):
     V = X_["V"]
     mu = theta_["mu"]
-    return jax.scipy.stats.norm.logpdf(Y_, mu - 0.5 * V, jnp.sqrt(V))
+    y = Y_["y"]
+    return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
 
 def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

@@ -16,6 +16,7 @@ def _create_dict_wrapper(
     covar_names: list[str],
     function_type: Literal["RProc", "DMeas", "RInit", "RMeas"],
     par_trans: ParTrans,
+    y_names: list[str] | None = None,
 ):
     """
     Create a wrapper that converts arrays to/from dicts for user functions.
@@ -51,7 +52,8 @@ def _create_dict_wrapper(
             )
             X_dict = {name: X_array[i] for i, name in enumerate(statenames)}
             covars_dict = {name: covars[i] for i, name in enumerate(covar_names)}
-            return user_func(Y_array, X_dict, theta_dict_trans, covars_dict, t)
+            Y_dict = {name: Y_array[i] for i, name in enumerate(y_names)}  # pyright: ignore[reportArgumentType]
+            return user_func(Y_dict, X_dict, theta_dict_trans, covars_dict, t)
     elif function_type == "RInit":
         # RInit case: theta_dict -> state_dict
         def wrapped(theta_array, key, covars, t0, should_trans):  # pyright: ignore[reportRedeclaration]
@@ -340,6 +342,7 @@ class DMeas:
         param_names: list[str],
         covar_names: list[str],
         par_trans: ParTrans,
+        y_names: list[str] | None = None,
     ):
         """
         Initializes the DMeas class with the required function structure.
@@ -371,9 +374,16 @@ class DMeas:
         self.statenames = statenames
         self.param_names = param_names
         self.covar_names = covar_names
+        self.y_names = y_names or []
         # Create wrapped function that converts arrays to/from dicts
         wrapped_struct = _create_dict_wrapper(
-            struct, param_names, statenames, covar_names, "DMeas", par_trans
+            struct,
+            param_names,
+            statenames,
+            covar_names,
+            "DMeas",
+            par_trans,
+            self.y_names,
         )
 
         self.struct = wrapped_struct

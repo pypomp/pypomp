@@ -40,7 +40,7 @@ def _loess_smooth_1d(
 
     if x.size == 0:
         return np.full_like(grid, np.nan, dtype=float)
-    
+
     # normalize predictor
     xmin = float(np.min(x))
     xmax = float(np.max(x))
@@ -52,10 +52,13 @@ def _loess_smooth_1d(
 
     x_norm = (x - xmin) / scale
     grid_norm = (grid - xmin) / scale
-
+    grid_norm = np.clip(grid_norm, 0.0, 1.0)
+    
     # neutralize robustness by making all biweights 1
-    HUGE_SIGY = 1e9
+    HUGE_SIGY = 1e12
     sigy = np.full_like(y, HUGE_SIGY, dtype=float)
+
+    npoints = int(np.trunc(float(span) * x.size))
 
     try:
         res = loess_1d(
@@ -63,6 +66,8 @@ def _loess_smooth_1d(
             xnew=grid_norm,
             degree=int(degree),
             frac=float(span),
+            npoints=npoints,
+            rotate=False,
             sigy=sigy,
         )
     except Exception:
@@ -92,12 +97,15 @@ def _fit_local_quadratic(
 
     dist = np.abs(x - center)
 
-    m = max(3, int(np.floor(span * len(x))))
-    if m >= len(x):
-        included = np.ones_like(x, dtype=bool)
-    else:
-        kth = np.partition(dist, m - 1)[m - 1]
-        included = dist < kth
+    m = int(np.trunc(span * len(x)))
+    m = max(3, min(m, len(x)))
+
+    # always compute kth distance
+    kth = np.sort(dist)[m - 1]
+    included = dist < kth
+
+    if np.count_nonzero(included) < 3:
+        included = dist <= kth
 
     # tricube weights on chosen window
     w = np.zeros_like(x, dtype=float)
@@ -128,10 +136,14 @@ def _fit_local_quadratic(
     else:
         s2 = 0.0
     XtWX = Xw.T @ Xw
-    cov_full = s2 * np.linalg.pinv(XtWX)
+
+    try:
+        cov_full = s2 * np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+    # if singular
+        cov_full = s2 * np.linalg.pinv(XtWX)
 
     vc_ab = cov_full[1:3, 1:3]
-
     return a, b, c, vc_ab
 
 

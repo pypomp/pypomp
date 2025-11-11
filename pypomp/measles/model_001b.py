@@ -122,7 +122,7 @@ def rproc(X_, theta_, key, covars, t, dt):
         populations,
         rt_final,
         max_rejections_btrs=1,
-        max_rejections_inversion=5,
+        max_rejections_inversion=50,
         np_cutoff=5.0,
     )
 

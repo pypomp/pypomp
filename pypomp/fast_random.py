@@ -584,7 +584,7 @@ def fast_approx_binomial(
     shape: Shape | None = None,
     dtype: DTypeLikeFloat | None = None,
     max_rejections_btrs: int = 2,
-    max_rejections_inversion: int = 12,
+    max_rejections_inversion: int = 10000,
     np_cutoff: float = 10.0,
     force_btrs: bool = False,
 ) -> Array:

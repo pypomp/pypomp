@@ -1,25 +1,26 @@
 """
 This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, cast, Any
+from typing import Dict, Optional, Tuple, Any
 
 import numpy as np
 import numpy.typing as npt
 from scipy.stats import chi2
 
-# TODO list loess as install dependency in package description
 from loess.loess_1d import loess_1d
 
 FloatArray = npt.NDArray[np.floating[Any]]
 
-__all__ = ["MCAPResult", "mcap", "mcap_profile"]
+__all__ = ["MCAPResult", "mcap"]
 
 
 def _qchisq(level: float, df: int = 1) -> float:
     return float(chi2.ppf(level, df))
+
 
 def _loess_smooth_1d(
     x: FloatArray,
@@ -29,7 +30,6 @@ def _loess_smooth_1d(
     span: float = 0.75,
     degree: int = 2,
 ) -> FloatArray:
-
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     grid = np.asarray(grid, dtype=float)
@@ -53,7 +53,7 @@ def _loess_smooth_1d(
     x_norm = (x - xmin) / scale
     grid_norm = (grid - xmin) / scale
     grid_norm = np.clip(grid_norm, 0.0, 1.0)
-    
+
     # neutralize robustness by making all biweights 1
     HUGE_SIGY = 1e12
     sigy = np.full_like(y, HUGE_SIGY, dtype=float)
@@ -62,7 +62,8 @@ def _loess_smooth_1d(
 
     try:
         res = loess_1d(
-            x_norm, y,
+            x_norm,
+            y,
             xnew=grid_norm,
             degree=int(degree),
             frac=float(span),
@@ -91,7 +92,6 @@ def _fit_local_quadratic(
     center: float,
     span: float,
 ) -> Tuple[float, float, float, FloatArray]:
-
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -117,7 +117,7 @@ def _fit_local_quadratic(
             w[included] = 1.0
 
     # uncentered
-    X = np.column_stack([np.ones_like(x), -(x ** 2), x])
+    X = np.column_stack([np.ones_like(x), -(x**2), x])
 
     # weighted least squares
     sw = np.sqrt(w)
@@ -132,7 +132,7 @@ def _fit_local_quadratic(
     resid = (y - yhat) * sw
     df = int(np.sum(w > 0) - X.shape[1])
     if df > 0:
-        s2 = float(np.sum(resid ** 2) / df)
+        s2 = float(np.sum(resid**2) / df)
     else:
         s2 = 0.0
     XtWX = Xw.T @ Xw
@@ -140,7 +140,7 @@ def _fit_local_quadratic(
     try:
         cov_full = s2 * np.linalg.inv(XtWX)
     except np.linalg.LinAlgError:
-    # if singular
+        # if singular
         cov_full = s2 * np.linalg.pinv(XtWX)
 
     vc_ab = cov_full[1:3, 1:3]
@@ -157,13 +157,13 @@ class MCAPResult:
     se_stat: float
     se_mc: float
     se_total: float
-    fit: Dict[str, FloatArray]          
+    fit: Dict[str, FloatArray]
     quadratic_max: float
     quadratic_coef: Dict[str, float]
-    vcov: FloatArray         
+    vcov: FloatArray
 
 
-def mcap_profile(
+def mcap(
     parameter: npt.ArrayLike,
     loglik: npt.ArrayLike,
     *,
@@ -172,6 +172,31 @@ def mcap_profile(
     n_grid: int = 1000,
     loess_degree: int = 2,
 ) -> MCAPResult:
+    """
+    Monte Carlo adjusted profile.
+
+    Given a collection of points maximizing the likelihood over a range of fixed values of a focal parameter, this function constructs a profile likelihood confidence interval accommodating both Monte Carlo error in the profile and statistical uncertainty present in the likelihood function.
+
+    Parameters
+    ----------
+    parameter : npt.ArrayLike
+        The parameter values at which the log-likelihood was evaluated.
+    loglik : npt.ArrayLike
+        The log-likelihood values corresponding to the parameter values.
+    level : float, optional
+        The confidence level to construct the profile likelihood confidence interval for.
+    span : float, optional
+        The span parameter for the loess smoother.
+    n_grid : int, optional
+        The number of grid points to evaluate the smoothed log-likelihood at.
+    loess_degree : int, optional
+        The degree of the loess smoother.
+
+    Returns
+    -------
+    MCAPResult : MCAPResult
+        The MCAP result object containing the profile likelihood confidence interval and other statistics.
+    """
     x: FloatArray = np.asarray(parameter, dtype=float)
     y: FloatArray = np.asarray(loglik, dtype=float)
 
@@ -197,11 +222,12 @@ def mcap_profile(
     cov_ab = float(vc_ab[0, 1])
 
     se_mc2 = (
-        1.0 / (4.0 * a * a)
-         * (var_b - 2.0 * (b / a) * cov_ab + (b * b / (a * a)) * var_a)
+        1.0
+        / (4.0 * a * a)
+        * (var_b - 2.0 * (b / a) * cov_ab + (b * b / (a * a)) * var_a)
     )
 
-    se_tot2 = se_stat2 + se_mc2
+    # se_tot2 = se_stat2 + se_mc2
 
     # MC-adjusted cutoff
     q = _qchisq(level, df=1)
@@ -217,31 +243,28 @@ def mcap_profile(
         ci = (float(grid[idx.min()]), float(grid[idx.max()]))
 
     # quadratic curve on grid
-    quad = c - a * (grid ** 2) + b * grid
+    quad = c - a * (grid**2) + b * grid
 
     if a > 0.0:
         quad_max = b / (2.0 * a)
     else:
-    # fallback to smoothed MLE if curvature is non-positive
+        # fallback to smoothed MLE if curvature is non-positive
         quad_max = mle
 
     return MCAPResult(
-        level = level,
-        mle = mle,
-        ci = ci,
-        delta = delta,
-        se_stat = float(np.sqrt(se_stat2)),
-        se_mc = float(np.sqrt(se_mc2)),
-        se_total = float(np.sqrt(se_stat2 + se_mc2)),
-        fit = {
+        level=level,
+        mle=mle,
+        ci=ci,
+        delta=delta,
+        se_stat=float(np.sqrt(se_stat2)),
+        se_mc=float(np.sqrt(se_mc2)),
+        se_total=float(np.sqrt(se_stat2 + se_mc2)),
+        fit={
             "parameter": grid,
             "smoothed": y_sm,
             "quadratic": quad,
         },
-        quadratic_max = float(quad_max),
-        quadratic_coef = {"a": float(a), "b": float(b), "c": float(c)},
-        vcov = vc_ab,
+        quadratic_max=float(quad_max),
+        quadratic_coef={"a": float(a), "b": float(b), "c": float(c)},
+        vcov=vc_ab,
     )
-
-def mcap(*args, **kwargs) -> MCAPResult:
-    return mcap_profile(*args, **kwargs)

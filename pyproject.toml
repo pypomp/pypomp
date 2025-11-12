@@ -25,6 +25,7 @@ dependencies = [
     "typing_extensions",
     "seaborn",
     "matplotlib",
+    "loess"
 ]
 
 

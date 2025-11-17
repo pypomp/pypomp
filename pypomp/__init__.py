@@ -19,3 +19,4 @@ from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
 from .mcap import mcap
 from .poissoninvf import rpoisson
+from .binominvf import multinomial, rbinom

@@ -9,6 +9,7 @@ from pypomp.fast_random import (
     fast_approx_gamma,
 )
 from pypomp.poissoninvf import rpoisson
+from pypomp.binominvf import multinomial, rbinom
 
 
 param_names = (
@@ -118,14 +119,15 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_approx_multinomial(
-        keys[2],
-        populations,
-        rt_final,
-        max_rejections_btrs=1,
-        max_rejections_inversion=50,
-        np_cutoff=5.0,
-    )
+    # transitions = fast_approx_multinomial(
+    #     keys[2],
+    #     populations,
+    #     rt_final,
+    #     max_rejections_btrs=1,
+    #     max_rejections_inversion=50,
+    #     np_cutoff=5.0,
+    # )
+    transitions = multinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

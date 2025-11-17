@@ -158,7 +158,7 @@ class ParTrans:
         direction: Literal["to_est", "from_est"],
     ) -> np.ndarray:
         """
-        Transform a parameter array to or from the estimation parameter space.
+        Transform a parameter array to or from the (unconstrained) estimation parameter space.
 
         This wrapper converts an array of parameters to a dict, applies the
         dict-to-dict transformation function, and converts back to an array.

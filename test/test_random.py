@@ -17,7 +17,8 @@ def test_poissoninvf_performance():
     # Prepare parameters
     n = 100_000
     key = jax.random.PRNGKey(42)
-    lam = jnp.array([0.2, 1.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
+    lam = jnp.array([0.01, 0.2, 1.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
+    # lam = jnp.array([100.0], dtype=jnp.float32)
     lam_samples = jnp.repeat(lam, n // len(lam))
     key1, key2 = jax.random.split(key)
 

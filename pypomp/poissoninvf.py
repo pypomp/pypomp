@@ -89,22 +89,25 @@ def _newton_region(s: Array, lam: Array) -> Array:
     dtype = s.dtype
 
     def cond_fun(state):
-        r, r_prev, first = state
+        MAX_LOOPS = 5
+        r, r_prev, first, counter = state
         diff = jnp.abs(r - r_prev)
-        return jnp.logical_or(first, diff > jnp.float32(1e-5))
+        not_done = jnp.logical_or(first, diff > jnp.float32(1e-5))
+        not_max_loops = counter < MAX_LOOPS
+        return jnp.logical_and(not_done, not_max_loops)
 
     def body_fun(state):
-        r, _, _ = state
+        r, r_prev, first, counter = state
         t = jnp.log(r)
         s2 = jnp.sqrt(jnp.float32(2.0) * ((jnp.float32(1.0) - r) + r * t))
         s2 = jnp.where(r < jnp.float32(1.0), -s2, s2)
         next_r = r - (s2 - s) * s2 / t
         next_r = jnp.maximum(next_r, jnp.float32(0.1) * r)
-        return (next_r, r, jnp.array(False, dtype=jnp.bool_))
+        return (next_r, r, jnp.array(False, dtype=jnp.bool_), counter + 1)
 
     r0 = jnp.maximum(jnp.float32(0.1), jnp.float32(1.0) + s)
-    r, _, _ = lax.while_loop(
-        cond_fun, body_fun, (r0, r0, jnp.array(True, dtype=jnp.bool_))
+    r, _, _, _ = lax.while_loop(
+        cond_fun, body_fun, (r0, r0, jnp.array(True, dtype=jnp.bool_), 0)
     )
 
     t = jnp.log(r)
@@ -127,19 +130,24 @@ def _bottom_up(u: Array, lam: Array) -> Array:
     s0 = jnp.float32(1.0) - t0 * (u * t0) + del0
 
     def cond1(state):
-        _, s, _, _ = state
-        return s < jnp.float32(0.0)
+        MAX_LOOPS = 10
+        _, s, _, _, counter = state
+        not_done = s < jnp.float32(0.0)
+        not_max_loops = counter < MAX_LOOPS
+        return jnp.logical_and(not_done, not_max_loops)
 
     def body1(state):
-        x, s, delta, _ = state
+        x, s, delta, _, counter = state
         x_next = x + jnp.float32(1.0)
         t_next = x_next * lami
         delta_next = t_next * delta
         s_next = t_next * s + jnp.float32(1.0)
-        return (x_next, s_next, delta_next, t_next)
+        return (x_next, s_next, delta_next, t_next, counter + 1)
 
     x_init = jnp.float32(0.0)
-    x, s, delta, _ = lax.while_loop(cond1, body1, (x_init, s0, del0, jnp.float32(0.0)))
+    x, s, delta, _, _ = lax.while_loop(
+        cond1, body1, (x_init, s0, del0, jnp.float32(0.0), 0)
+    )
 
     def top_down_branch(state):
         x_val, delta_val = state
@@ -148,29 +156,37 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         delta_scaled = (jnp.float32(1.0) - u) * delta_scaled
 
         def cond2(inner_state):
-            _, delta_inner = inner_state
-            return delta_inner < t_thresh
+            MAX_LOOPS = 10
+            _, delta_inner, counter = inner_state
+            not_done = delta_inner < t_thresh
+            not_max_loops = counter < MAX_LOOPS
+            return jnp.logical_and(not_done, not_max_loops)
 
         def body2(inner_state):
-            x_inner, delta_inner = inner_state
+            x_inner, delta_inner, counter = inner_state
             x_next = x_inner + jnp.float32(1.0)
             delta_next = delta_inner * (x_next * lami)
-            return (x_next, delta_next)
+            return (x_next, delta_next, counter + 1)
 
-        x_hi, delta_hi = lax.while_loop(cond2, body2, (x_val, delta_scaled))
+        x_hi, delta_hi, _ = lax.while_loop(cond2, body2, (x_val, delta_scaled, 0))
 
         def cond3(inner_state):
-            _, s_inner, _ = inner_state
-            return s_inner > jnp.float32(0.0)
+            MAX_LOOPS = 10
+            _, s_inner, _, counter = inner_state
+            not_done = s_inner > jnp.float32(0.0)
+            not_max_loops = counter < MAX_LOOPS
+            return jnp.logical_and(not_done, not_max_loops)
 
         def body3(inner_state):
-            x_inner, s_inner, t_inner = inner_state
+            x_inner, s_inner, t_inner, counter = inner_state
             t_next = t_inner * (x_inner * lami)
             s_next = s_inner - t_next
             x_next = x_inner - jnp.float32(1.0)
-            return (x_next, s_next, t_next)
+            return (x_next, s_next, t_next, counter + 1)
 
-        x_lo, _, _ = lax.while_loop(cond3, body3, (x_hi, delta_hi, jnp.float32(1.0)))
+        x_lo, _, _, _ = lax.while_loop(
+            cond3, body3, (x_hi, delta_hi, jnp.float32(1.0), 0)
+        )
         return x_lo
 
     return lax.cond(
@@ -224,6 +240,14 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
         return _bottom_up(u, lam_safe)
 
     bottom_up = x_large < jnp.float32(10.0)
+    # not_large_bottom_up = jnp.logical_and(jnp.logical_not(large_lambda), bottom_up)
+    # x = x_large
+    # x = lax.cond(
+    #     not_large_bottom_up,
+    #     bottom_up_branch,
+    #     lambda _: x_large,
+    #     operand=jnp.float32(0.0),
+    # )
     x = lax.cond(
         bottom_up,
         bottom_up_branch,
@@ -239,6 +263,7 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
     x = cast(Array, jnp.where(u == jnp.float32(1.0), inf, x))
     x = cast(Array, jnp.where(u > jnp.float32(1.0), nan, x))
     x = cast(Array, jnp.where(lam_invalid, nan, x))
+    x = cast(Array, jnp.where(x < 0.0, jnp.float32(0.0), x))
     return x
 
 

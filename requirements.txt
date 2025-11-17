@@ -10,3 +10,4 @@ scipy
 typing_extensions
 seaborn
 matplotlib
+loess

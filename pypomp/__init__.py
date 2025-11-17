@@ -17,3 +17,4 @@ from .fast_random import (
 from .panelPomp_class import PanelPomp
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
+from .mcap import mcap

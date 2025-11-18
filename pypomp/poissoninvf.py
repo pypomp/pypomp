@@ -89,7 +89,7 @@ def _newton_region(s: Array, lam: Array) -> Array:
     dtype = s.dtype
 
     def cond_fun(state):
-        MAX_LOOPS = 5
+        MAX_LOOPS = 20
         r, r_prev, first, counter = state
         diff = jnp.abs(r - r_prev)
         not_done = jnp.logical_or(first, diff > jnp.float32(1e-5))
@@ -130,7 +130,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
     s0 = jnp.float32(1.0) - t0 * (u * t0) + del0
 
     def cond1(state):
-        MAX_LOOPS = 10
+        MAX_LOOPS = 20
         _, s, _, _, counter = state
         not_done = s < jnp.float32(0.0)
         not_max_loops = counter < MAX_LOOPS
@@ -156,7 +156,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         delta_scaled = (jnp.float32(1.0) - u) * delta_scaled
 
         def cond2(inner_state):
-            MAX_LOOPS = 10
+            MAX_LOOPS = 20
             _, delta_inner, counter = inner_state
             not_done = delta_inner < t_thresh
             not_max_loops = counter < MAX_LOOPS
@@ -171,7 +171,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         x_hi, delta_hi, _ = lax.while_loop(cond2, body2, (x_val, delta_scaled, 0))
 
         def cond3(inner_state):
-            MAX_LOOPS = 10
+            MAX_LOOPS = 20
             _, s_inner, _, counter = inner_state
             not_done = s_inner > jnp.float32(0.0)
             not_max_loops = counter < MAX_LOOPS

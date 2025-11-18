@@ -257,6 +257,52 @@ def _q_n2(
     return q_n1 + term3
 
 
+def _binom_bottom_up(
+    u: Array, n: Array, p: Array, approx: Array, max_k: int = 10
+) -> Array:
+    """
+    Compute the exact inverse CDF for small k by accumulating the binomial CDF
+    from k = 0 using a stable probability recurrence. This avoids repeated
+    incomplete beta evaluations while preserving accuracy for the first few
+    masses.
+    """
+    dtype = jnp.float32
+    tiny = jnp.finfo(dtype).tiny
+    q = jnp.clip(jnp.float32(1.0) - p, tiny, jnp.float32(1.0))
+    p_safe = jnp.clip(p, jnp.float32(0.0), jnp.float32(1.0))
+    q_safe = jnp.clip(q, tiny, jnp.float32(1.0))
+
+    log_q = jnp.log(q_safe)
+    pmf0 = jnp.where(
+        n == jnp.float32(0.0),
+        jnp.float32(1.0),
+        jnp.exp(n * log_q),
+    )
+    cdf0 = pmf0
+    found0 = cdf0 >= u
+    result0 = jnp.where(found0, jnp.float32(0.0), approx)
+
+    def body(i, state):
+        cdf, pmf, found, result = state
+        k_prev = jnp.float32(i - 1)
+        num = jnp.maximum(n - k_prev, jnp.float32(0.0))
+        den = jnp.float32(i)
+        ratio = num / jnp.maximum(den, jnp.float32(1.0))
+        pmf_next = pmf * ratio * p_safe / q_safe
+        cdf_next = cdf + pmf_next
+        found_now = cdf_next >= u
+        take_value = jnp.float32(i)
+        result_next = jnp.where(jnp.logical_and(~found, found_now), take_value, result)
+        found_next = jnp.logical_or(found, found_now)
+        return (cdf_next, pmf_next, found_next, result_next)
+
+    init_state = (cdf0, pmf0, found0, result0)
+    final_state = lax.fori_loop(1, max_k, body, init_state)
+    _, _, found_final, result_final = final_state
+    k_exact = cast(Array, jnp.where(found_final, result_final, approx))
+    return cast(Array, jnp.clip(k_exact, jnp.float32(0.0), n))
+
+
 def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     """
     Scalar version of inverse binomial CDF approximation using Giles and Beentjes (2024).
@@ -334,6 +380,14 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # The paper states \overline{C}^{-1}(u) = floor(C^{-1}(u))
     # Clip to valid range [0, n] and take floor
     k_approx = jnp.clip(jnp.floor(q_u), jnp.float32(0.0), n_safe)
+
+    # Compute x from the bottom up if it is less than 10
+    u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
+    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx)
+    k_very_small = k_approx < 10.0
+    npq_very_small = npq_ < 0.05
+    use_bottom_up = k_very_small | npq_very_small
+    k_approx = cast(Array, jnp.where(use_bottom_up, k_small, k_approx))
 
     # Apply symmetry flip if needed
     k_flipped = cast(Array, jnp.where(flip, n_safe - k_approx, k_approx))

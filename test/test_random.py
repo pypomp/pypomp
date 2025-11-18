@@ -77,8 +77,8 @@ def test_binominvf_performance():
 
 # Convenience function for examining the distributions of the Poisson random variables.
 # Remove test_ when actually testing.
-def compare_rpoisson_and_jax_poisson(
-    seed=42, lam_vals=[0.01, 0.1, 1.0, 4.0, 10.0, 70.0, 100.0, 500.0]
+def test_compare_rpoisson_and_jax_poisson(
+    seed=42, lam_vals=[0.0001, 0.01, 0.1, 1.0, 4.0, 10.0, 70.0, 100.0, 500.0]
 ):
     """
     Compare distributions of pypomp.rpoisson (inverse CDF, continuous-valued Poisson)
@@ -145,7 +145,7 @@ def compare_rpoisson_and_jax_poisson(
 
 # Convenience function for examining the distributions of the binomial random variables.
 # Remove test_ when actually testing.
-def compare_rbinom_and_jax_binom(
+def test_compare_rbinom_and_jax_binom(
     seed=42,
     n_trials_list=[3, 20, 100, 2000],
     prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95],

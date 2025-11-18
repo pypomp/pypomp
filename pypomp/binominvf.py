@@ -285,8 +285,7 @@ def _binom_bottom_up(
         return (cdf_next, pmf_next, found_next, result_next)
 
     init_state = (cdf0, pmf0, found0, result0)
-    final_state = lax.fori_loop(1, max_k, body, init_state)
-    _, _, found_final, result_final = final_state
+    _, _, found_final, result_final = lax.fori_loop(1, max_k, body, init_state)
     k_exact = cast(Array, jnp.where(found_final, result_final, approx))
     return cast(Array, jnp.clip(k_exact, jnp.float32(0.0), n))
 

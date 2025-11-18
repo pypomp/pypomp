@@ -2,14 +2,24 @@ import jax
 import jax.numpy as jnp
 import pypomp as pp
 from pypomp.binominvf import rbinom
+from pypomp.gammainvf import rgamma
 import time
 import matplotlib.pyplot as plt
 
 
 def test_poissoninvf():
-    key = jax.random.PRNGKey(0)
+    key = jax.random.key(0)
     lam = jnp.array([1.0, 2.0, 3.0])
     x = pp.rpoisson(key, lam)
+    assert x.shape == (3,)
+    assert x.dtype == jnp.float32
+    assert x.min() >= 0
+
+
+def test_gammainvf():
+    key = jax.random.key(0)
+    alpha = jnp.array([1.0, 2.0, 3.0])
+    x = rgamma(key, alpha)
     assert x.shape == (3,)
     assert x.dtype == jnp.float32
     assert x.min() >= 0
@@ -72,6 +82,32 @@ def binominvf_performance():
 
     print(f"rbinom: {t1 - t0:.4f} seconds for {n_samples} samples")
     print(f"jax.random.binomial: {t2 - t1:.4f} seconds for {n_samples} samples")
+    pass
+
+
+def gammainvf_performance():
+    # Prepare parameters
+    n = 100_000
+    key = jax.random.PRNGKey(44)
+    alpha = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
+    # alpha = jnp.array([100.0], dtype=jnp.float32)
+    alpha_samples = jnp.repeat(alpha, n // len(alpha))
+    key1, key2 = jax.random.split(key)
+
+    # Warmup to trigger JITs
+    _ = rgamma(key1, alpha_samples).block_until_ready()
+    _ = jax.random.gamma(key2, alpha_samples).block_until_ready()
+
+    # JAX's .block_until_ready() ensures we measure actual compute time
+    key1, key2 = jax.random.split(key)
+    t0 = time.time()
+    x_pp = rgamma(key1, alpha_samples).block_until_ready()
+    t1 = time.time()
+    x_jax = jax.random.gamma(key2, alpha_samples).block_until_ready()
+    t2 = time.time()
+
+    print(f"rgamma: {t1 - t0:.4f} seconds for {n} samples")
+    print(f"jax.random.gamma: {t2 - t1:.4f} seconds for {n} samples")
     pass
 
 
@@ -218,5 +254,76 @@ def compare_rbinom_and_jax_binom(
                 ax.set_ylabel("Density")
             if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
                 ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+# Convenience function for examining the distributions of the Gamma random variables.
+# Remove test_ when actually testing.
+def compare_rgamma_and_jax_gamma(
+    seed=42, alpha_vals=[0.5, 1.0, 1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
+):
+    """
+    Compare distributions of pypomp.rgamma (inverse CDF, Gamma) and
+    jax.random.gamma for various shape parameters, using histograms.
+
+    This test compares the outputs of a custom gamma sampler and JAX's built-in gamma sampler.
+    """
+    # Activate .venv if running as script, per custom rules - this must be done outside of the script in bash.
+    key = jax.random.PRNGKey(seed)
+    n_samples = 10000
+
+    fig, axes = plt.subplots(
+        1, len(alpha_vals), figsize=(5 * len(alpha_vals), 4), sharey=True
+    )
+    if len(alpha_vals) == 1:
+        axes = [axes]
+
+    for i, alpha_val in enumerate(alpha_vals):
+        # Draw samples for the i-th alpha
+        alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
+        # Use a new PRNG split for each
+        key_rgamma, key = jax.random.split(key)
+        rgamma_samples = rgamma(key_rgamma, alpha_arr)
+        key_jax, key = jax.random.split(key)
+        jax_gamma_samples = jax.random.gamma(key_jax, alpha_arr)
+        # For comparison, plot histogram
+        ax = axes[i]
+        # Compute shared bin edges that span both sample sets (from min to max of both)
+        min_bin = min(
+            float(jnp.min(jax_gamma_samples)),
+            float(jnp.min(rgamma_samples)),
+        )
+        max_bin = max(
+            float(jnp.max(jax_gamma_samples)),
+            float(jnp.max(rgamma_samples)),
+        )
+        # Use continuous bins for gamma (not integer steps)
+        n_bins = 50
+        bin_edges = jnp.linspace(min_bin, max_bin, n_bins + 1)
+        ax.hist(
+            jax_gamma_samples,
+            bins=bin_edges,
+            alpha=0.5,
+            label="jax.random.gamma",
+            density=True,
+            color="C1",
+            edgecolor="k",
+        )
+        ax.hist(
+            rgamma_samples,
+            bins=bin_edges,
+            alpha=0.5,
+            label="pp.rgamma",
+            density=True,
+            color="C0",
+            edgecolor="k",
+        )
+        ax.set_title(r"$\alpha$ = {:.2f}".format(alpha_val))
+        ax.set_xlabel("Sample value")
+        if i == 0:
+            ax.set_ylabel("Density")
+        if i == len(alpha_vals) - 1:
+            ax.legend()
     plt.tight_layout()
     plt.show()

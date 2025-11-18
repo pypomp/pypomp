@@ -10,6 +10,7 @@ from pypomp.fast_random import (
 )
 from pypomp.poissoninvf import rpoisson
 from pypomp.binominvf import multinomial, rbinom
+from pypomp.gammainvf import rgamma
 
 
 param_names = (
@@ -87,7 +88,8 @@ def rproc(X_, theta_, key, covars, t, dt):
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
     # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-    dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=1) * sigmaSE**2
+    # dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=1) * sigmaSE**2
+    dw = rgamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 

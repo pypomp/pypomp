@@ -3,14 +3,9 @@
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.fast_random import (
-    fast_approx_multinomial,
-    fast_approx_poisson,
-    fast_approx_gamma,
-)
-from pypomp.poissoninvf import rpoisson
-from pypomp.binominvf import multinomial, rbinom
-from pypomp.gammainvf import rgamma
+from pypomp.random.poissoninvf import rpoisson
+from pypomp.random.binominvf import rmultinomial
+from pypomp.random.gammainvf import rgamma
 
 
 param_names = (
@@ -129,7 +124,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     #     max_rejections_inversion=50,
     #     np_cutoff=5.0,
     # )
-    transitions = multinomial(keys[2], populations, rt_final)
+    transitions = rmultinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

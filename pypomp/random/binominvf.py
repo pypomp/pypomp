@@ -449,7 +449,7 @@ def rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
     return x.astype(n.dtype)
 
 
-def multinomial(key: Array, n: Array, p: Array) -> Array:
+def rmultinomial(key: Array, n: Array, p: Array) -> Array:
     """
     Generate multinomial random variables using the inverse CDF method with rbinom.
 

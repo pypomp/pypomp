@@ -8,8 +8,7 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import pypomp as pp
-from pypomp.binominvf import rbinom
-from pypomp.gammainvf import rgamma
+import pypomp.random as ppr
 
 
 def poissoninvf_performance():
@@ -22,13 +21,13 @@ def poissoninvf_performance():
     key1, key2 = jax.random.split(key)
 
     # Warmup to trigger JITs
-    _ = pp.rpoisson(key1, lam_samples).block_until_ready()
+    _ = ppr.rpoisson(key1, lam_samples).block_until_ready()
     _ = jax.random.poisson(key2, lam_samples).block_until_ready()
 
     # JAX's .block_until_ready() ensures we measure actual compute time
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    x_pp = pp.rpoisson(key1, lam_samples).block_until_ready()
+    x_pp = ppr.rpoisson(key1, lam_samples).block_until_ready()
     t1 = time.time()
     x_jax = jax.random.poisson(key2, lam_samples).block_until_ready()
     t2 = time.time()
@@ -56,13 +55,13 @@ def binominvf_performance():
     key1, key2 = jax.random.split(key)
 
     # Warmup to trigger JITs
-    _ = rbinom(key1, trial_samples, p_samples).block_until_ready()
+    _ = ppr.rbinom(key1, trial_samples, p_samples).block_until_ready()
     _ = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
 
     # JAX's .block_until_ready() ensures we measure actual compute time
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    x_pp = rbinom(key1, trial_samples, p_samples).block_until_ready()
+    x_pp = ppr.rbinom(key1, trial_samples, p_samples).block_until_ready()
     t1 = time.time()
     x_jax = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
     t2 = time.time()
@@ -82,13 +81,13 @@ def gammainvf_performance():
     key1, key2 = jax.random.split(key)
 
     # Warmup to trigger JITs
-    _ = rgamma(key1, alpha_samples).block_until_ready()
+    _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
     _ = jax.random.gamma(key2, alpha_samples).block_until_ready()
 
     # JAX's .block_until_ready() ensures we measure actual compute time
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    x_pp = rgamma(key1, alpha_samples).block_until_ready()
+    x_pp = ppr.rgamma(key1, alpha_samples).block_until_ready()
     t1 = time.time()
     x_jax = jax.random.gamma(key2, alpha_samples).block_until_ready()
     t2 = time.time()
@@ -120,7 +119,7 @@ def compare_rpoisson_and_jax_poisson(
         lam_arr = jnp.full((n_samples,), lam_val)
         # Use a new PRNG split for each
         key_rpoisson, key = jax.random.split(key)
-        rpoisson_samples = pp.rpoisson(key_rpoisson, lam_arr)
+        rpoisson_samples = ppr.rpoisson(key_rpoisson, lam_arr)
         key_jax, key = jax.random.split(key)
         jax_poisson_samples = jax.random.poisson(key_jax, lam_arr)
 
@@ -214,7 +213,7 @@ def compare_rbinom_and_jax_binom(
             n_arr = jnp.full((n_samples,), n, dtype=jnp.int32)
             # Use a new PRNG split for each
             key_rbinom, key = jax.random.split(key)
-            rbinom_samples = rbinom(key_rbinom, n_arr, p_arr)
+            rbinom_samples = ppr.rbinom(key_rbinom, n_arr, p_arr)
             key_jax, key = jax.random.split(key)
             jax_binom_samples = jax.random.binomial(key_jax, n=n_arr, p=p_arr)
             all_samples[(row, col)] = (rbinom_samples, jax_binom_samples, n, p_val)
@@ -330,7 +329,7 @@ def compare_rgamma_and_jax_gamma(
         alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
         # Use a new PRNG split for each
         key_rgamma, key = jax.random.split(key)
-        rgamma_samples = rgamma(key_rgamma, alpha_arr)
+        rgamma_samples = ppr.rgamma(key_rgamma, alpha_arr)
         key_jax, key = jax.random.split(key)
         jax_gamma_samples = jax.random.gamma(key_jax, alpha_arr)
 

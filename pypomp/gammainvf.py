@@ -2,7 +2,6 @@
 JAX implementation of the single-precision inverse Gamma CDF approximation.
 
 The implementation uses the asymptotic inversion method described in Temme (1992).
-This method is accurate for large shape parameters (alpha > 1).
 """
 
 from __future__ import annotations

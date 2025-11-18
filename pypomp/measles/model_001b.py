@@ -8,6 +8,8 @@ from pypomp.fast_random import (
     fast_approx_poisson,
     fast_approx_gamma,
 )
+from pypomp.poissoninvf import rpoisson
+from pypomp.binominvf import multinomial, rbinom
 
 
 param_names = (
@@ -91,14 +93,14 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_approx_poisson(
-        keys[1],
-        br * dt,
-        max_rejections_ptrs=1,
-        max_rejections_knuth=10,
-        lam_cutoff=5.0,
-    )
-    # births = poisson_hybrid(keys[1], br * dt)
+    # births = fast_approx_poisson(
+    #     keys[1],
+    #     br * dt,
+    #     max_rejections_ptrs=1,
+    #     max_rejections_knuth=10,
+    #     lam_cutoff=5.0,
+    # )
+    births = rpoisson(keys[1], br * dt)
 
     # transitions between classes
     rt_final = jnp.zeros((3, 3))
@@ -117,14 +119,15 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_approx_multinomial(
-        keys[2],
-        populations,
-        rt_final,
-        max_rejections_btrs=1,
-        max_rejections_inversion=50,
-        np_cutoff=5.0,
-    )
+    # transitions = fast_approx_multinomial(
+    #     keys[2],
+    #     populations,
+    #     rt_final,
+    #     max_rejections_btrs=1,
+    #     max_rejections_inversion=50,
+    #     np_cutoff=5.0,
+    # )
+    transitions = multinomial(keys[2], populations, rt_final)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

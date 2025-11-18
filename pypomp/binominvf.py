@@ -2,9 +2,7 @@
 JAX implementation of the inverse incomplete beta function approximation.
 
 The implementation follows the methodology from Giles and Beentjes (2024)
-"Approximation of an Inverse of the Incomplete Beta Function". The structure
-matches the pattern used in poissoninvf.py: polynomial approximations for
-different regions, and proper handling of edge cases.
+"Approximation of an Inverse of the Incomplete Beta Function".
 
 This implements the normal asymptotic expansion formulas Q_N0, Q_N1, Q_N2
 from Section 2 of the paper.
@@ -21,14 +19,6 @@ from jax import Array, lax
 import jax.numpy as jnp
 from jax.scipy import special as jsp_special
 from jax.scipy.stats import norm
-
-
-def _horner(coeffs: Sequence[float], x: Array) -> Array:
-    """Evaluate polynomial using Horner's method."""
-    acc = jnp.array(coeffs[0], dtype=jnp.float32)
-    for c in coeffs[1:]:
-        acc = jnp.array(c, dtype=jnp.float32) + acc * x
-    return acc
 
 
 def _newton_incomplete_beta(
@@ -262,9 +252,7 @@ def _binom_bottom_up(
 ) -> Array:
     """
     Compute the exact inverse CDF for small k by accumulating the binomial CDF
-    from k = 0 using a stable probability recurrence. This avoids repeated
-    incomplete beta evaluations while preserving accuracy for the first few
-    masses.
+    from k = 0 using a stable probability recurrence.
     """
     dtype = jnp.float32
     tiny = jnp.finfo(dtype).tiny
@@ -381,10 +369,11 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Clip to valid range [0, n] and take floor
     k_approx = jnp.clip(jnp.floor(q_u), jnp.float32(0.0), n_safe)
 
-    # Compute x from the bottom up if it is less than 10
+    # Compute x from the bottom up if it is less than the cutoff
+    cutoff = 5
     u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx)
-    k_very_small = k_approx < 10.0
+    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=cutoff)
+    k_very_small = k_approx < cutoff
     npq_very_small = npq_ < 0.05
     use_bottom_up = k_very_small | npq_very_small
     k_approx = cast(Array, jnp.where(use_bottom_up, k_small, k_approx))

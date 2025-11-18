@@ -15,7 +15,7 @@ def test_poissoninvf():
     assert x.min() >= 0
 
 
-def test_poissoninvf_performance():
+def poissoninvf_performance():
     # Prepare parameters
     n = 100_000
     key = jax.random.PRNGKey(42)
@@ -41,7 +41,7 @@ def test_poissoninvf_performance():
     pass
 
 
-def test_binominvf_performance():
+def binominvf_performance():
     # Prepare parameters
     n = 100_000
     key = jax.random.PRNGKey(43)
@@ -77,7 +77,7 @@ def test_binominvf_performance():
 
 # Convenience function for examining the distributions of the Poisson random variables.
 # Remove test_ when actually testing.
-def test_compare_rpoisson_and_jax_poisson(
+def compare_rpoisson_and_jax_poisson(
     seed=42, lam_vals=[0.0001, 0.01, 0.1, 1.0, 4.0, 10.0, 70.0, 100.0, 500.0]
 ):
     """
@@ -138,14 +138,15 @@ def test_compare_rpoisson_and_jax_poisson(
         ax.set_xlabel("Sample value")
         if i == 0:
             ax.set_ylabel("Density")
-        ax.legend()
+        if i == len(lam_vals) - 1:
+            ax.legend()
     plt.tight_layout()
     plt.show()
 
 
 # Convenience function for examining the distributions of the binomial random variables.
 # Remove test_ when actually testing.
-def test_compare_rbinom_and_jax_binom(
+def compare_rbinom_and_jax_binom(
     seed=42,
     n_trials_list=[3, 20, 100, 2000],
     prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95],
@@ -215,6 +216,7 @@ def test_compare_rbinom_and_jax_binom(
             ax.set_xlabel("Sample value")
             if col == 0:
                 ax.set_ylabel("Density")
-            ax.legend()
+            if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
+                ax.legend()
     plt.tight_layout()
     plt.show()

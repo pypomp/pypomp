@@ -118,37 +118,17 @@ def rgamma(key: Array, alpha: Array) -> Array:
     # Split key for uniform draws
     key_base, key_adj = jax.random.split(key)
 
-    needs_extra_trick = alpha_f32 <= 1.0
-    needs_primary_trick = alpha_f32 <= 2.0
-
-    # Apply the Gamma(alpha + 1) trick once for 1 <= alpha < 2 and twice for alpha < 1
-    alpha_base = jnp.where(
-        needs_extra_trick,
-        alpha_f32 + 2.0,
-        jnp.where(needs_primary_trick, alpha_f32 + 1.0, alpha_f32),
-    )
+    # Always apply the two-step Gamma(alpha + 2) trick for better accuracy
+    alpha_base = alpha_f32 + 2.0
 
     u_base = jax.random.uniform(key_base, shape)
     x = gammainvf(u_base, alpha_base)
 
-    # First adjustment reduces from alpha + 2 -> alpha + 1 when needed (alpha < 1)
+    # Two uniform adjustments bring the shape down to alpha
     u_adj = jax.random.uniform(key_adj, (2,) + shape)
-    u_extra = u_adj[0]
-    extra_adjustment = jnp.where(
-        needs_extra_trick,
-        jnp.power(u_extra, 1.0 / (alpha_f32 + 1.0)),
-        1.0,
-    )
-    x = x * extra_adjustment
-
-    # Primary adjustment reduces to the target alpha whenever alpha < 2
-    u_primary = u_adj[1]
-    primary_adjustment = jnp.where(
-        needs_primary_trick,
-        jnp.power(u_primary, 1.0 / alpha_f32),
-        1.0,
-    )
-    x = x * primary_adjustment
+    extra_adjustment = jnp.power(u_adj[0], 1.0 / (alpha_f32 + 1.0))
+    primary_adjustment = jnp.power(u_adj[1], 1.0 / alpha_f32)
+    x = x * extra_adjustment * primary_adjustment
 
     return x.astype(alpha_orig_dtype)
 

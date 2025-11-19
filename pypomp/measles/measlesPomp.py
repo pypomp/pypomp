@@ -97,6 +97,18 @@ class UKMeasles:
                 "cases",
             ] = np.nan
 
+            # Hull 1956-06-22    72
+            # Hull 1956-06-29    94
+            # Hull 1956-07-06     0
+            # Hull 1956-07-13    91
+            # Hull 1956-07-20    87
+
+            data["measles"].loc[
+                (data["measles"]["unit"] == "Hull")
+                & (data["measles"]["date"] == "1956-07-06"),
+                "cases",
+            ] = np.nan
+
         if units is None:
             return data
         else:

@@ -10,13 +10,12 @@ small.
 
 from __future__ import annotations
 
-from typing import Sequence, Tuple, cast
+from typing import Tuple, cast
 
 import jax
 from jax import Array, lax
 import jax.numpy as jnp
 from jax.scipy import special as jsp_special
-from functools import partial
 
 _RM_COEFFS: Tuple[float, ...] = (
     2.82298751e-07,
@@ -66,20 +65,23 @@ _X_COEFFS: Tuple[float, ...] = (
 
 _SQRT2 = jnp.sqrt(jnp.float32(2.0))
 
+# Pre-reverse coefficients for polyval (expects highest degree first)
+_RM_COEFFS_REV = jnp.array(_RM_COEFFS[::-1], dtype=jnp.float32)
+_T_COEFFS_REV = jnp.array(_T_COEFFS[::-1], dtype=jnp.float32)
+_X_COEFFS_REV = jnp.array(_X_COEFFS[::-1], dtype=jnp.float32)
 
-def _horner(coeffs: Sequence[float], x: Array) -> Array:
-    acc = jnp.array(coeffs[0], dtype=jnp.float32)
-    for c in coeffs[1:]:
-        acc = jnp.array(c, dtype=jnp.float32) + acc * x
-    return acc
+
+def _horner(coeffs_arr: Array, x: Array) -> Array:
+    # Use pre-reversed coefficients array
+    return jnp.polyval(coeffs_arr, x)
 
 
 def _central_region(s: Array, lam: Array) -> Array:
-    rm = _horner(_RM_COEFFS, s)
+    rm = _horner(_RM_COEFFS_REV, s)
     rm = s + s * (rm * s)
 
-    t = _horner(_T_COEFFS, rm)
-    x = _horner(_X_COEFFS, rm) / lam
+    t = _horner(_T_COEFFS_REV, rm)
+    x = _horner(_X_COEFFS_REV, rm) / lam
 
     total = lam + (x + t) + lam * rm
     return jnp.floor(total)
@@ -92,68 +94,64 @@ def _newton_region(s: Array, lam: Array) -> Array:
         MAX_LOOPS = 5
         r, r_prev, first, counter = state
         diff = jnp.abs(r - r_prev)
-        not_done = jnp.logical_or(first, diff > jnp.float32(1e-5))
+        not_done = jnp.logical_or(first, diff > 1e-5)
         not_max_loops = counter < MAX_LOOPS
         return jnp.logical_and(not_done, not_max_loops)
 
     def body_fun(state):
         r, r_prev, first, counter = state
         t = jnp.log(r)
-        s2 = jnp.sqrt(jnp.float32(2.0) * ((jnp.float32(1.0) - r) + r * t))
-        s2 = jnp.where(r < jnp.float32(1.0), -s2, s2)
+        s2 = jnp.sqrt(2.0 * ((1.0 - r) + r * t))
+        s2 = jnp.where(r < 1.0, -s2, s2)
         next_r = r - (s2 - s) * s2 / t
-        next_r = jnp.maximum(next_r, jnp.float32(0.1) * r)
+        next_r = jnp.maximum(next_r, 0.1 * r)
         return (next_r, r, jnp.array(False, dtype=jnp.bool_), counter + 1)
 
-    r0 = jnp.maximum(jnp.float32(0.1), jnp.float32(1.0) + s)
+    r0 = jnp.maximum(0.1, 1.0 + s)
     r, _, _, _ = lax.while_loop(
         cond_fun, body_fun, (r0, r0, jnp.array(True, dtype=jnp.bool_), 0)
     )
 
     t = jnp.log(r)
-    sqrt_term = jnp.sqrt(jnp.float32(2.0) * r * ((jnp.float32(1.0) - r) + r * t))
+    sqrt_term = jnp.sqrt(2.0 * r * ((1.0 - r) + r * t))
     log_correction = jnp.log(
-        sqrt_term / jnp.maximum(jnp.abs(r - jnp.float32(1.0)), jnp.finfo(dtype).tiny)
+        sqrt_term / jnp.maximum(jnp.abs(r - 1.0), jnp.finfo(dtype).tiny)
     )
     x = lam * r + log_correction / t
-    x -= jnp.float32(0.0218) / (x + jnp.float32(0.065) * lam)
+    x -= 0.0218 / (x + 0.065 * lam)
     return jnp.floor(x)
 
 
 def _bottom_up(u: Array, lam: Array) -> Array:
-    lami = jnp.float32(1.0) / lam
+    lami = 1.0 / lam
 
-    t0 = jnp.exp(jnp.float32(0.5) * lam)
-    del0 = jnp.where(
-        u > jnp.float32(0.5), t0 * (jnp.float32(1e-6) * t0), jnp.float32(0.0)
-    )
-    s0 = jnp.float32(1.0) - t0 * (u * t0) + del0
+    t0 = jnp.exp(0.5 * lam)
+    del0 = jnp.where(u > 0.5, t0 * (1e-6 * t0), 0.0)
+    s0 = 1.0 - t0 * (u * t0) + del0
 
     def cond1(state):
         MAX_LOOPS = 10
         _, s, _, _, counter = state
-        not_done = s < jnp.float32(0.0)
+        not_done = s < 0.0
         not_max_loops = counter < MAX_LOOPS
         return jnp.logical_and(not_done, not_max_loops)
 
     def body1(state):
         x, s, delta, _, counter = state
-        x_next = x + jnp.float32(1.0)
+        x_next = x + 1.0
         t_next = x_next * lami
         delta_next = t_next * delta
-        s_next = t_next * s + jnp.float32(1.0)
+        s_next = t_next * s + 1.0
         return (x_next, s_next, delta_next, t_next, counter + 1)
 
-    x_init = jnp.float32(0.0)
-    x, s, delta, _, _ = lax.while_loop(
-        cond1, body1, (x_init, s0, del0, jnp.float32(0.0), 0)
-    )
+    x_init = 0.0
+    x, s, delta, _, _ = lax.while_loop(cond1, body1, (x_init, s0, del0, 0.0, 0))
 
     def top_down_branch(state):
         x_val, delta_val = state
-        delta_scaled = jnp.float32(1e6) * delta_val
-        t_thresh = jnp.float32(1e7) * delta_scaled
-        delta_scaled = (jnp.float32(1.0) - u) * delta_scaled
+        delta_scaled = 1e6 * delta_val
+        t_thresh = 1e7 * delta_scaled
+        delta_scaled = (1.0 - u) * delta_scaled
 
         def cond2(inner_state):
             MAX_LOOPS = 10
@@ -164,7 +162,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
 
         def body2(inner_state):
             x_inner, delta_inner, counter = inner_state
-            x_next = x_inner + jnp.float32(1.0)
+            x_next = x_inner + 1.0
             delta_next = delta_inner * (x_next * lami)
             return (x_next, delta_next, counter + 1)
 
@@ -173,7 +171,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         def cond3(inner_state):
             MAX_LOOPS = 10
             _, s_inner, _, counter = inner_state
-            not_done = s_inner > jnp.float32(0.0)
+            not_done = s_inner > 0.0
             not_max_loops = counter < MAX_LOOPS
             return jnp.logical_and(not_done, not_max_loops)
 
@@ -181,16 +179,14 @@ def _bottom_up(u: Array, lam: Array) -> Array:
             x_inner, s_inner, t_inner, counter = inner_state
             t_next = t_inner * (x_inner * lami)
             s_next = s_inner - t_next
-            x_next = x_inner - jnp.float32(1.0)
+            x_next = x_inner - 1.0
             return (x_next, s_next, t_next, counter + 1)
 
-        x_lo, _, _, _ = lax.while_loop(
-            cond3, body3, (x_hi, delta_hi, jnp.float32(1.0), 0)
-        )
+        x_lo, _, _, _ = lax.while_loop(cond3, body3, (x_hi, delta_hi, 1.0, 0))
         return x_lo
 
     return lax.cond(
-        s < jnp.float32(2.0) * delta,
+        s < 2.0 * delta,
         top_down_branch,
         lambda state: state[0],
         operand=(x, delta),
@@ -202,10 +198,10 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
     u = jnp.asarray(u, dtype=dtype)
     lam = jnp.asarray(lam, dtype=dtype)
 
-    x0 = jnp.float32(0.0)
+    x0 = 0.0
 
-    lam_invalid = lam <= jnp.float32(0.0)
-    lam_safe = cast(Array, jnp.where(lam_invalid, jnp.float32(1.0), lam))
+    lam_invalid = lam <= 0.0
+    lam_safe = cast(Array, jnp.where(lam_invalid, 1.0, lam))
 
     def large_lambda_case(_):
         s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
@@ -218,28 +214,28 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
                 s > -_SQRT2,
                 lambda __: _newton_region(s, lam_safe),
                 lambda __: x0,
-                operand=jnp.float32(0.0),
+                operand=0.0,
             )
 
         return lax.cond(
-            jnp.logical_and(s > jnp.float32(-0.6833501), s < jnp.float32(1.777993)),
+            jnp.logical_and(s > -0.6833501, s < 1.777993),
             central,
             non_central,
-            operand=jnp.float32(0.0),
+            operand=0.0,
         )
 
-    large_lambda = lam_safe > jnp.float32(4.0)
+    large_lambda = lam_safe > 4.0
     x_large = lax.cond(
         large_lambda,
         large_lambda_case,
         lambda _: x0,
-        operand=jnp.float32(0.0),
+        operand=0.0,
     )
 
     def bottom_up_branch(_):
         return _bottom_up(u, lam_safe)
 
-    bottom_up = x_large < jnp.float32(10.0)
+    bottom_up = x_large < 10.0
     # not_large_bottom_up = jnp.logical_and(jnp.logical_not(large_lambda), bottom_up)
     # x = x_large
     # x = lax.cond(
@@ -252,18 +248,18 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
         bottom_up,
         bottom_up_branch,
         lambda _: x_large,
-        operand=jnp.float32(0.0),
+        operand=0.0,
     )
 
     nan = jnp.array(jnp.nan, dtype=dtype)
     inf = jnp.array(jnp.inf, dtype=dtype)
 
-    x = cast(Array, jnp.where(u < jnp.float32(0.0), nan, x))
-    x = cast(Array, jnp.where(u == jnp.float32(0.0), jnp.float32(0.0), x))
-    x = cast(Array, jnp.where(u == jnp.float32(1.0), inf, x))
-    x = cast(Array, jnp.where(u > jnp.float32(1.0), nan, x))
+    x = cast(Array, jnp.where(u < 0.0, nan, x))
+    x = cast(Array, jnp.where(u == 0.0, 0.0, x))
+    x = cast(Array, jnp.where(u == 1.0, inf, x))
+    x = cast(Array, jnp.where(u > 1.0, nan, x))
     x = cast(Array, jnp.where(lam_invalid, nan, x))
-    x = cast(Array, jnp.where(x < 0.0, jnp.float32(0.0), x))
+    x = cast(Array, jnp.where(x < 0.0, 0.0, x))
     return x
 
 
@@ -304,5 +300,13 @@ def rpoisson(key: Array, lam: Array) -> Array:
     """
     shape = lam.shape
     u = jax.random.uniform(key, shape)
+    # Clamp u to be slightly less than 1.0 to avoid inf output
+    # Use nextafter to get the largest float < 1.0
+    u_max = jnp.nextafter(jnp.array(1.0, dtype=u.dtype), jnp.array(0.0, dtype=u.dtype))
+    u = jnp.minimum(u, u_max)
     x = poissinvf(u, lam)
+    # Cap the output to a reasonable maximum to prevent overflow
+    max_val = lam + 20.0 * jnp.sqrt(jnp.maximum(lam, 1.0))
+    x = jnp.minimum(x, max_val)
+    return x.astype(lam.dtype)
     return x.astype(lam.dtype)

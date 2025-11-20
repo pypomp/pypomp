@@ -100,13 +100,17 @@ def gammainvf(u: Array, alpha: Array) -> Array:
 
 
 @jax.jit
-def rgamma(key: Array, alpha: Array) -> Array:
+def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
     """
     Generate a Gamma random variable with given shape parameter.
 
     Args:
         key: a PRNG key used as the random key.
         alpha: shape parameters for the Gamma(alpha, 1) distribution.
+        adjustment_size: number of uniform adjustments to apply (default: 3).
+            The function generates Gamma(alpha + adjustment_size) and reduces
+            it to Gamma(alpha) using adjustment_size uniform adjustments. The larger the value, the more accurate the approximation at low alpha values (e.g.,
+            alpha < 2).
 
     Returns:
         A Gamma random variable.
@@ -115,20 +119,26 @@ def rgamma(key: Array, alpha: Array) -> Array:
     alpha_orig_dtype = alpha.dtype
     alpha_f32 = jnp.asarray(alpha, dtype=jnp.float32)
 
-    # Split key for uniform draws
     key_base, key_adj = jax.random.split(key)
 
-    # Always apply the two-step Gamma(alpha + 2) trick for better accuracy
-    alpha_base = alpha_f32 + 2.0
+    # Apply the multi-step Gamma(alpha + adjustment_size) trick for better accuracy
+    alpha_base = alpha_f32 + float(adjustment_size)
 
     u_base = jax.random.uniform(key_base, shape)
     x = gammainvf(u_base, alpha_base)
 
-    # Two uniform adjustments bring the shape down to alpha
-    u_adj = jax.random.uniform(key_adj, (2,) + shape)
-    extra_adjustment = jnp.power(u_adj[0], 1.0 / (alpha_f32 + 1.0))
-    primary_adjustment = jnp.power(u_adj[1], 1.0 / alpha_f32)
-    x = x * extra_adjustment * primary_adjustment
+    u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape)
+
+    adjustment_indices = jnp.arange(adjustment_size - 1, -1, -1, dtype=jnp.float32)
+
+    adjustment_indices = adjustment_indices.reshape(
+        (adjustment_size,) + (1,) * len(shape)
+    )
+    adjustment_powers = 1.0 / (alpha_f32 + adjustment_indices)
+    adjustments = jnp.power(u_adj, adjustment_powers)
+
+    # Multiply all adjustments together
+    x = x * jnp.prod(adjustments, axis=0)
 
     return x.astype(alpha_orig_dtype)
 

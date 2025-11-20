@@ -11,7 +11,7 @@ from Section 2 of the paper.
 from __future__ import annotations
 
 import math
-from typing import Sequence, cast
+from typing import cast
 from functools import partial
 
 import jax
@@ -31,15 +31,9 @@ def _newton_incomplete_beta(
     """
     dtype = x0.dtype
 
-    def cond_fun(state):
-        x, x_prev, first, counter = state
-        diff = jnp.abs(x - x_prev)
-        not_done = jnp.logical_or(first, diff > jnp.float32(1e-6))
-        not_max_loops = counter < max_iter
-        return jnp.logical_and(not_done, not_max_loops)
+    x = jnp.clip(x0, jnp.float32(0.0), jnp.float32(1.0))
 
-    def body_fun(state):
-        x, x_prev, first, counter = state
+    for _ in range(max_iter):
         # Compute I_x(a, b) and its derivative
         # The derivative of I_x(a, b) with respect to x is:
         # x^(a-1) * (1-x)^(b-1) / B(a, b)
@@ -55,19 +49,12 @@ def _newton_incomplete_beta(
 
         # Newton step: x_new = x - (I_x(a,b) - y) / pdf
         f = ibeta - y
-        x_next = x - f / jnp.maximum(pdf, jnp.finfo(dtype).tiny)
+        x = x - f / jnp.maximum(pdf, jnp.finfo(dtype).tiny)
 
         # Clamp to valid range [0, 1]
-        x_next = jnp.clip(x_next, jnp.float32(0.0), jnp.float32(1.0))
+        x = jnp.clip(x, jnp.float32(0.0), jnp.float32(1.0))
 
-        return (x_next, x, jnp.array(False, dtype=jnp.bool_), counter + 1)
-
-    x_init = jnp.clip(x0, jnp.float32(0.0), jnp.float32(1.0))
-    x_final, _, _, _ = lax.while_loop(
-        cond_fun, body_fun, (x_init, x_init, jnp.array(True, dtype=jnp.bool_), 0)
-    )
-
-    return x_final
+    return x
 
 
 def _initial_guess_betaincinv(a: Array, b: Array, y: Array) -> Array:
@@ -253,41 +240,51 @@ def _binom_bottom_up(
     """
     Compute the exact inverse CDF for small k by accumulating the binomial CDF
     from k = 0 using a stable probability recurrence.
+
+    Optimized: Uses a Python loop (static unroll) instead of lax.fori_loop.
     """
     dtype = jnp.float32
     tiny = jnp.finfo(dtype).tiny
+
     q = jnp.clip(jnp.float32(1.0) - p, tiny, jnp.float32(1.0))
     p_safe = jnp.clip(p, jnp.float32(0.0), jnp.float32(1.0))
     q_safe = jnp.clip(q, tiny, jnp.float32(1.0))
+    ratio_multiplier = p_safe / q_safe
 
     log_q = jnp.log(q_safe)
-    pmf0 = jnp.where(
+    pmf = jnp.where(
         n == jnp.float32(0.0),
         jnp.float32(1.0),
         jnp.exp(n * log_q),
     )
-    cdf0 = pmf0
-    found0 = cdf0 >= u
-    result0 = jnp.where(found0, jnp.float32(0.0), approx)
+    cdf = pmf
 
-    def body(i, state):
-        cdf, pmf, found, result = state
+    found = cdf >= u
+
+    # If found at k=0, result is 0. Otherwise, initialize with 'approx'
+    # so that if the loop finishes without finding a solution, we fall back to approx.
+    result = cast(Array, jnp.where(found, jnp.float32(0.0), approx))
+
+    for i in range(1, max_k):
+        k_curr_val = jnp.float32(i)
+        k_curr = jnp.full_like(result, k_curr_val)
         k_prev = jnp.float32(i - 1)
-        num = jnp.maximum(n - k_prev, jnp.float32(0.0))
-        den = jnp.float32(i)
-        ratio = num / jnp.maximum(den, jnp.float32(1.0))
-        pmf_next = pmf * ratio * p_safe / q_safe
-        cdf_next = cdf + pmf_next
-        found_now = cdf_next >= u
-        take_value = jnp.float32(i)
-        result_next = jnp.where(jnp.logical_and(~found, found_now), take_value, result)
-        found_next = jnp.logical_or(found, found_now)
-        return (cdf_next, pmf_next, found_next, result_next)
 
-    init_state = (cdf0, pmf0, found0, result0)
-    _, _, found_final, result_final = lax.fori_loop(1, max_k, body, init_state)
-    k_exact = cast(Array, jnp.where(found_final, result_final, approx))
-    return cast(Array, jnp.clip(k_exact, jnp.float32(0.0), n))
+        # Calculate recurrence: P(k) = P(k-1) * ((n - k + 1) / k) * (p / q)
+        num = jnp.maximum(n - k_prev, jnp.float32(0.0))
+        den = k_curr_val
+
+        pmf = pmf * (num / den) * ratio_multiplier
+        cdf = cdf + pmf
+
+        found_now = cdf >= u
+
+        is_new_discovery = jnp.logical_and(~found, found_now)
+        result = cast(Array, jnp.where(is_new_discovery, k_curr, result))
+
+        found = jnp.logical_or(found, found_now)
+
+    return cast(Array, jnp.clip(result, jnp.float32(0.0), n))
 
 
 def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:

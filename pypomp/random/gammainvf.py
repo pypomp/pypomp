@@ -7,6 +7,7 @@ The implementation uses the asymptotic inversion method described in Temme (1992
 from __future__ import annotations
 
 from typing import cast
+from functools import partial
 
 import jax
 from jax import Array
@@ -99,7 +100,7 @@ def gammainvf(u: Array, alpha: Array) -> Array:
     return flat_res.reshape(u_arr.shape)
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=["adjustment_size"])
 def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
     """
     Generate a Gamma random variable with given shape parameter.
@@ -122,7 +123,7 @@ def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
     key_base, key_adj = jax.random.split(key)
 
     # Apply the multi-step Gamma(alpha + adjustment_size) trick for better accuracy
-    alpha_base = alpha_f32 + float(adjustment_size)
+    alpha_base = alpha_f32 + jnp.full(shape, adjustment_size, dtype=jnp.float32)
 
     u_base = jax.random.uniform(key_base, shape)
     x = gammainvf(u_base, alpha_base)

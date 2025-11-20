@@ -134,7 +134,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
     s0 = 1.0 - t0 * (u * t0) + del0
 
     def unrolled_computation(x_init, s0, del0, lami):
-        MAX_LOOPS = 10
+        MAX_LOOPS = 20
 
         # Initialize state
         x, s, delta = x_init, s0, del0
@@ -180,7 +180,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         delta_scaled = (1.0 - u) * delta_scaled
 
         # Unrolled first loop (finding x_hi, delta_hi)
-        MAX_LOOPS_2 = 10
+        MAX_LOOPS_2 = 20
         x_hi = x_val
         delta_hi = delta_scaled
         for _ in range(MAX_LOOPS_2):
@@ -191,7 +191,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
             delta_hi = jnp.where(cond, delta_next, delta_hi)
 
         # Unrolled second loop (finding x_lo)
-        MAX_LOOPS_3 = 10
+        MAX_LOOPS_3 = 20
         x_lo = x_hi
         s_lo = delta_hi
         t_lo = jnp.float32(1.0)
@@ -244,7 +244,7 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
             operand=0.0,
         )
 
-    large_lambda = lam_safe > 4.0
+    large_lambda = lam_safe > 20.0
     x_large = lax.cond(
         large_lambda,
         large_lambda_case,

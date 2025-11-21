@@ -350,3 +350,70 @@ def test_performance_comprehensive():
     )
     assert isinstance(traces_df, pd.DataFrame)
     assert len(traces_df) > 0
+
+
+def test_prune(measles_panel_mp):
+    panel, rw_sd, key, J, M, a = measles_panel_mp
+
+    # Get initial state from the last result
+    results_df = panel.results()
+    initial_n_reps = results_df["replicate"].nunique()
+    assert initial_n_reps > 1, "Need multiple replicates to test prune"
+
+    # Store initial parameter lists
+    initial_shared_len = len(panel.shared) if panel.shared is not None else 0
+    initial_unit_specific_len = (
+        len(panel.unit_specific) if panel.unit_specific is not None else 0
+    )
+
+    # Store original parameters from results_history for comparison
+    original_results = panel.results_history[-1]
+    original_shared = original_results.get("shared")
+    original_unit_specific = original_results.get("unit_specific")
+
+    # Test pruning to top 1 replicate without refill
+    panel.prune(n=1, refill=False)
+
+    # Check that shared and unit_specific have been updated to length 1
+    if panel.shared is not None:
+        assert len(panel.shared) == 1
+    if panel.unit_specific is not None:
+        assert len(panel.unit_specific) == 1
+
+    # Verify that the pruned parameters match the top replicate
+    # Get the top replicate index from original results
+    if original_results.get("method") == "mif":
+        logLiks = original_results["logLiks"]
+        # Get shared log-likelihoods (first column is "shared")
+        shared_lls = logLiks[:, 0].values  # shape: (n_reps,)
+        top_idx = int(np.argmax(shared_lls))
+
+        # Check that pruned parameters match the top replicate
+        if original_shared is not None and panel.shared is not None:
+            pd.testing.assert_frame_equal(panel.shared[0], original_shared[top_idx])
+        if original_unit_specific is not None and panel.unit_specific is not None:
+            pd.testing.assert_frame_equal(
+                panel.unit_specific[0], original_unit_specific[top_idx]
+            )
+
+    # Test refill functionality
+    # Restore to initial state from results_history
+    panel.shared = original_shared
+    panel.unit_specific = original_unit_specific
+
+    # Prune with refill=True
+    panel.prune(n=1, refill=True)
+
+    # Check that lists are refilled to original length
+    if panel.shared is not None:
+        assert len(panel.shared) == initial_shared_len
+        # All entries should be the same (repeated top replicate)
+        for i in range(1, len(panel.shared)):
+            pd.testing.assert_frame_equal(panel.shared[0], panel.shared[i])
+    if panel.unit_specific is not None:
+        assert len(panel.unit_specific) == initial_unit_specific_len
+        # All entries should be the same (repeated top replicate)
+        for i in range(1, len(panel.unit_specific)):
+            pd.testing.assert_frame_equal(
+                panel.unit_specific[0], panel.unit_specific[i]
+            )

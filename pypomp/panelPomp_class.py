@@ -803,6 +803,77 @@ class PanelPomp:
             }
         )
 
+    def prune(self, n: int = 1, index: int = -1, refill: bool = True):
+        """
+        Replace self.shared and self.unit_specific with lists of the top n parameter sets
+        based on the most recent available log-likelihood estimates.
+        Optionally, refill the lists to the previous length by repeating the top n parameter sets.
+
+        Args:
+            n (int): Number of top parameter sets to keep.
+            index (int): The index of the result to use for pruning. Defaults to -1 (the last result).
+            refill (bool): If True, repeat the top n parameter sets to match the previous number of sets.
+        """
+        df = self.results(index)
+        if df.empty or "shared logLik" not in df.columns:
+            raise ValueError("No log-likelihoods found in results(index).")
+
+        # Get unique replicates and their shared log-likelihoods
+        # The shared logLik should be the same for all units in a replicate
+        replicate_logliks = df.groupby("replicate")["shared logLik"].first()
+        top_indices = replicate_logliks.to_numpy().argsort()[-n:][::-1]
+        index_list = list(replicate_logliks.index)
+        top_replicates = [index_list[i] for i in top_indices]
+
+        # Get the corresponding entry from results_history
+        res = self.results_history[index]
+        shared_list = res.get("shared")
+        unit_specific_list = res.get("unit_specific")
+
+        # Extract top n shared parameter sets
+        if shared_list is not None:
+            top_shared = [shared_list[rep_idx] for rep_idx in top_replicates]
+        else:
+            top_shared = None
+
+        # Extract top n unit_specific parameter sets
+        if unit_specific_list is not None:
+            top_unit_specific = [
+                unit_specific_list[rep_idx] for rep_idx in top_replicates
+            ]
+        else:
+            top_unit_specific = None
+
+        # Refill if needed
+        if refill:
+            prev_shared_len = len(self.shared) if self.shared is not None else 0
+            prev_unit_specific_len = (
+                len(self.unit_specific) if self.unit_specific is not None else 0
+            )
+            prev_len = max(prev_shared_len, prev_unit_specific_len)
+
+            if prev_len > 0:
+                if top_shared is not None:
+                    repeats = (prev_len + n - 1) // n  # Ceiling division
+                    new_shared = (top_shared * repeats)[:prev_len]
+                else:
+                    new_shared = None
+
+                if top_unit_specific is not None:
+                    repeats = (prev_len + n - 1) // n  # Ceiling division
+                    new_unit_specific = (top_unit_specific * repeats)[:prev_len]
+                else:
+                    new_unit_specific = None
+            else:
+                new_shared = top_shared
+                new_unit_specific = top_unit_specific
+        else:
+            new_shared = top_shared
+            new_unit_specific = top_unit_specific
+
+        self.shared = new_shared
+        self.unit_specific = new_unit_specific
+
     # TODO: clean up results functions
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """

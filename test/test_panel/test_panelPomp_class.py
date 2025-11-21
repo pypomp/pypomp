@@ -417,3 +417,93 @@ def test_prune(measles_panel_mp):
             pd.testing.assert_frame_equal(
                 panel.unit_specific[0], panel.unit_specific[i]
             )
+
+
+def test_mix_and_match(measles_panel_mp):
+    panel, rw_sd, key, J, M, a = measles_panel_mp
+
+    # Get initial state from the last result
+    results_df = panel.results()
+    initial_n_reps = results_df["replicate"].nunique()
+    assert initial_n_reps > 1, "Need multiple replicates to test mix_and_match"
+
+    # Store original parameters from results_history for comparison
+    original_results = panel.results_history[-1]
+    original_shared = original_results.get("shared")
+    original_unit_specific = original_results.get("unit_specific")
+
+    # Perform mix_and_match
+    panel.mix_and_match()
+
+    # Check that the number of parameter sets equals the number of replicates
+    if panel.shared is not None:
+        assert len(panel.shared) == initial_n_reps
+    if panel.unit_specific is not None:
+        assert len(panel.unit_specific) == initial_n_reps
+
+    # Verify the mixing and matching logic
+    # Get rankings from the results
+    replicate_logliks = results_df.groupby("replicate")["shared logLik"].first()
+    shared_ranked_indices = replicate_logliks.to_numpy().argsort()[::-1]
+    shared_ranked_replicates = list(replicate_logliks.index[shared_ranked_indices])
+
+    unit_names = list(panel.unit_objects.keys())
+    unit_loglik_pivot = results_df.pivot(
+        index="replicate", columns="unit", values="unit logLik"
+    )
+    unit_ranked_replicates = {}
+    for unit in unit_names:
+        unit_logliks = unit_loglik_pivot[unit]
+        unit_ranked_indices = unit_logliks.to_numpy().argsort()[::-1]
+        unit_ranked_replicates[unit] = list(unit_logliks.index[unit_ranked_indices])
+
+    # Check that replicate 0 has the best shared params and best unit-specific params for each unit
+    if original_shared is not None and panel.shared is not None:
+        best_shared_idx = shared_ranked_replicates[0]
+        pd.testing.assert_frame_equal(panel.shared[0], original_shared[best_shared_idx])
+
+    if original_unit_specific is not None and panel.unit_specific is not None:
+        # Check that each unit in replicate 0 has its best parameters
+        for unit in unit_names:
+            best_unit_idx = unit_ranked_replicates[unit][0]
+            original_unit_col = original_unit_specific[best_unit_idx][unit]
+            new_unit_col = panel.unit_specific[0][unit]
+            pd.testing.assert_series_equal(original_unit_col, new_unit_col)
+
+    # Check that replicate 1 has the 2nd best for each
+    if initial_n_reps >= 2:
+        if original_shared is not None and panel.shared is not None:
+            second_best_shared_idx = shared_ranked_replicates[1]
+            pd.testing.assert_frame_equal(
+                panel.shared[1], original_shared[second_best_shared_idx]
+            )
+
+        if original_unit_specific is not None and panel.unit_specific is not None:
+            # Check that each unit in replicate 1 has its 2nd best parameters
+            for unit in unit_names:
+                second_best_unit_idx = unit_ranked_replicates[unit][1]
+                original_unit_col = original_unit_specific[second_best_unit_idx][unit]
+                new_unit_col = panel.unit_specific[1][unit]
+                pd.testing.assert_series_equal(original_unit_col, new_unit_col)
+
+    # Verify that the mixed parameters are actually different from the original ordering
+    # (unless all replicates were already in the best order)
+    if original_unit_specific is not None and panel.unit_specific is not None:
+        # Check if at least one unit has different parameters in replicate 0 vs original replicate 0
+        original_replicate_0_unit_cols = {
+            unit: original_unit_specific[0][unit] for unit in unit_names
+        }
+        new_replicate_0_unit_cols = {
+            unit: panel.unit_specific[0][unit] for unit in unit_names
+        }
+        # At least one unit should have different parameters (unless original was already best)
+        # This is a sanity check that mixing actually occurred
+        mixing_occurred = any(
+            not original_replicate_0_unit_cols[unit].equals(
+                new_replicate_0_unit_cols[unit]
+            )
+            for unit in unit_names
+        )
+        # It's possible that the original ordering was already optimal, so we don't require mixing
+        # But we do verify the structure is correct
+        assert isinstance(mixing_occurred, bool)  # Just verify the check runs

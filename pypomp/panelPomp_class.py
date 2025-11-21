@@ -874,6 +874,101 @@ class PanelPomp:
         self.shared = new_shared
         self.unit_specific = new_unit_specific
 
+    def mix_and_match(self, index: int = -1):
+        """
+        Create new parameter sets by mixing and matching the best shared and
+        unit-specific parameters based on their log-likelihood rankings.
+
+        For each replicate i:
+        - Uses the i-th best shared parameters (ranked by shared logLik)
+        - Uses the i-th best unit-specific parameters for each unit (ranked by unit logLik per unit)
+
+        The number of new parameter sets equals the number of available replicates.
+
+        Args:
+            index (int): The index of the result to use for ranking. Defaults to -1 (the last result).
+        """
+        df = self.results(index)
+        if df.empty or "shared logLik" not in df.columns:
+            raise ValueError("No log-likelihoods found in results(index).")
+
+        # Get the corresponding entry from results_history
+        res = self.results_history[index]
+        shared_list = res.get("shared")
+        unit_specific_list = res.get("unit_specific")
+
+        # Get unique replicates and their shared log-likelihoods
+        # The shared logLik should be the same for all units in a replicate
+        replicate_logliks = df.groupby("replicate")["shared logLik"].first()
+        n = len(replicate_logliks)
+
+        # Rank shared parameters by shared logLik (descending order)
+        shared_loglik_values = replicate_logliks.to_numpy()
+        shared_ranked_indices = shared_loglik_values.argsort()[::-1]
+        replicate_index_list = list(replicate_logliks.index)
+        shared_ranked_replicates = [
+            replicate_index_list[i] for i in shared_ranked_indices
+        ]
+
+        # Get unit names
+        unit_names = list(self.unit_objects.keys())
+
+        # Rank unit-specific parameters by unit logLik for each unit (more efficient)
+        if "unit logLik" not in df.columns:
+            raise ValueError("No unit logLik found in results.")
+
+        # Pivot to get unit logLik per replicate and unit
+        unit_loglik_pivot = df.pivot(
+            index="replicate", columns="unit", values="unit logLik"
+        )
+        unit_ranked_replicates = {}
+        for unit in unit_names:
+            if unit not in unit_loglik_pivot.columns:
+                raise ValueError(f"Unit '{unit}' not found in results.")
+            unit_logliks = unit_loglik_pivot[unit]
+            unit_ranked_indices = unit_logliks.to_numpy().argsort()[::-1]
+            unit_index_list = list(unit_logliks.index)
+            unit_ranked_replicates[unit] = [
+                unit_index_list[i] for i in unit_ranked_indices
+            ]
+
+        # Create new parameter sets by mixing and matching
+        new_shared_list: list[pd.DataFrame] | None = (
+            [] if shared_list is not None else None
+        )
+        new_unit_specific_list: list[pd.DataFrame] | None = (
+            [] if unit_specific_list is not None else None
+        )
+
+        for i in range(n):
+            # Get the i-th best shared parameters
+            if shared_list is not None and new_shared_list is not None:
+                shared_rep_idx = shared_ranked_replicates[i]
+                new_shared_list.append(shared_list[shared_rep_idx].copy())
+
+            # Get the i-th best unit-specific parameters for each unit
+            if unit_specific_list is not None and new_unit_specific_list is not None:
+                new_unit_df_data = {}
+                for unit in unit_names:
+                    unit_rep_idx = unit_ranked_replicates[unit][i]
+                    unit_df = unit_specific_list[unit_rep_idx]
+                    # Extract the column for this unit
+                    if unit in unit_df.columns:
+                        new_unit_df_data[unit] = unit_df[unit].copy()
+                    else:
+                        raise ValueError(
+                            f"Unit '{unit}' not found in unit_specific DataFrame for replicate {unit_rep_idx}."
+                        )
+
+                # Create new DataFrame with all units
+                new_unit_df = pd.DataFrame(
+                    new_unit_df_data, index=unit_specific_list[0].index
+                )
+                new_unit_specific_list.append(new_unit_df)
+
+        self.shared = new_shared_list
+        self.unit_specific = new_unit_specific_list
+
     # TODO: clean up results functions
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """

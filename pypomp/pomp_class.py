@@ -526,10 +526,14 @@ class Pomp:
 
         keys = jax.random.split(new_key, len(theta_list_trans))
 
-        theta_sharded = _shard_rows(theta_array)
+        theta_tiled = jnp.tile(theta_array, (J, 1, 1))
+
+        theta_tiled_T = jnp.transpose(theta_tiled, (1, 0, 2))
+        theta_sharded_T = _shard_rows(theta_tiled_T)
+        theta_sharded = jnp.transpose(theta_sharded_T, (1, 0, 2))
 
         nLLs, theta_ests = _jv_mif_internal(
-            jnp.tile(theta_sharded, (J, 1, 1)),
+            theta_sharded,
             self._dt_array_extended,
             self._nstep_array,
             self.t0,

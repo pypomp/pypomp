@@ -157,7 +157,7 @@ class Pomp:
         self.fresh_key: jax.Array | None = None
 
         if covars is not None:
-            self.covar_names: list[str] = list(covars.columns)
+            self.covar_names: list[str] = list(covars.columns)  # type: ignore[reportRedeclaration]
         else:
             self.covar_names: list[str] = []
 
@@ -181,7 +181,7 @@ class Pomp:
         )
 
         if dmeas is not None:
-            self.dmeas: DMeas | None = DMeas(
+            self.dmeas: DMeas | None = DMeas(  # type: ignore[reportRedeclaration]
                 struct=dmeas,
                 statenames=statenames,
                 param_names=self.canonical_param_names,
@@ -195,7 +195,7 @@ class Pomp:
         if rmeas is not None:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
-            self.rmeas: RMeas | None = RMeas(
+            self.rmeas: RMeas | None = RMeas(  # type: ignore[reportRedeclaration]
                 struct=rmeas,
                 ydim=ydim,
                 statenames=statenames,
@@ -531,6 +531,7 @@ class Pomp:
         theta_tiled_T = jnp.transpose(theta_tiled, (1, 0, 2))
         theta_sharded_T = _shard_rows(theta_tiled_T)
         theta_sharded = jnp.transpose(theta_sharded_T, (1, 0, 2))
+        keys_sharded = _shard_rows(keys)
 
         nLLs, theta_ests = _jv_mif_internal(
             theta_sharded,
@@ -550,7 +551,7 @@ class Pomp:
             a,
             J,
             thresh,
-            keys,
+            keys_sharded,
         )
 
         final_theta_ests = []

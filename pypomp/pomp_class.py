@@ -18,7 +18,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _calc_ys_covars
+from .internal_functions import _calc_ys_covars, _shard_rows
 from .util import logmeanexp, logmeanexp_se
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
@@ -390,11 +390,12 @@ class Pomp:
                 for theta_i in theta_list
             ]
         )
+        thetas_sharded = _shard_rows(thetas_repl)
 
-        rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
+        rep_keys = jax.random.split(new_key, thetas_sharded.shape[0])
 
         results = _vmapped_pfilter_internal2(
-            thetas_repl,
+            thetas_sharded,
             self._dt_array_extended,
             self._nstep_array,
             self.t0,
@@ -525,8 +526,10 @@ class Pomp:
 
         keys = jax.random.split(new_key, len(theta_list_trans))
 
+        theta_sharded = _shard_rows(theta_array)
+
         nLLs, theta_ests = _jv_mif_internal(
-            jnp.tile(theta_array, (J, 1, 1)),
+            jnp.tile(theta_sharded, (J, 1, 1)),
             self._dt_array_extended,
             self._nstep_array,
             self.t0,
@@ -690,8 +693,10 @@ class Pomp:
 
         n_obs = len(self.ys)
 
+        theta_sharded = _shard_rows(theta_array)
+
         nLLs, theta_ests = _vmapped_train_internal(
-            theta_array,
+            theta_sharded,
             jnp.array(self.ys),
             self._dt_array_extended,
             self._nstep_array,

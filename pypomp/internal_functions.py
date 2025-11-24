@@ -3,6 +3,7 @@ This module implements internal functions for POMP models.
 """
 
 import numpy as np
+import warnings
 import jax
 import jax.numpy as jnp
 
@@ -365,3 +366,42 @@ def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
     factor = a ** (1 / 50)
     alpha = factor ** (nt / ntimes + m - 1)
     return alpha
+
+
+def _shard_rows(array: jax.Array) -> jax.Array:
+    """
+    Evenly shard the rows of `array` across the available local JAX devices.
+    When the row count is not divisible by the device count, the function issues
+    a warning and distributes the remainder starting from the first device until
+    there are no rows left.
+    """
+    devices = jax.local_devices()
+    if not devices:
+        raise RuntimeError("No JAX devices available for sharding.")
+    if array.ndim == 0:
+        raise ValueError("Input array must have at least one dimension to shard rows.")
+
+    n_rows = array.shape[0]
+    n_devices = len(devices)
+    rows_per_device = n_rows // n_devices
+    remainder = n_rows % n_devices
+
+    if remainder:
+        warnings.warn(
+            (
+                f"Row count ({n_rows}) not divisible by device count ({n_devices}). "
+                "Assigning one extra row to the first devices until the remainder is exhausted."
+            ),
+            stacklevel=2,
+        )
+
+    shards: list[jax.Array] = []
+    start = 0
+    for device_idx in range(n_devices):
+        extra = 1 if device_idx < remainder else 0
+        stop = start + rows_per_device + extra
+        shards.append(array[start:stop])
+        start = stop
+
+    sharded = jax.device_put_sharded(shards, devices)
+    return jnp.reshape(sharded, array.shape)

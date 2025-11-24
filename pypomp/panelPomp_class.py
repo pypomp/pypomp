@@ -14,6 +14,7 @@ from .util import logmeanexp
 import numpy as np
 import time
 from .RWSigma_class import RWSigma
+from .internal_functions import _shard_rows
 
 
 class PanelPomp:
@@ -666,14 +667,17 @@ class PanelPomp:
 
         old_key = key
         keys = jax.random.split(key, n_reps)
+
+        shared_sharded = _shard_rows(shared_array)
+        unit_sharded = _shard_rows(unit_array)
         (
             shared_array_f,
             unit_array_f,
             shared_traces,
             unit_traces,
         ) = _jv_panel_mif_internal(
-            shared_array,
-            unit_array,
+            shared_sharded,
+            unit_sharded,
             dt_array_extended,
             nstep_array,
             t0,
@@ -913,7 +917,7 @@ class PanelPomp:
         # Get unit names
         unit_names = list(self.unit_objects.keys())
 
-        # Rank unit-specific parameters by unit logLik for each unit (more efficient)
+        # Rank unit-specific parameters by unit logLik for each unit
         if "unit logLik" not in df.columns:
             raise ValueError("No unit logLik found in results.")
 

@@ -3,6 +3,9 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh, PartitionSpec as P
+from jax.experimental import mesh_utils
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
@@ -68,12 +71,213 @@ def _mif_internal(
     return logliks_M, thetas_MJd
 
 
-_vmapped_mif_internal = jax.vmap(
-    _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,),
-)
+def _create_mif_mesh():
+    """Create a device mesh for sharding over replications."""
+    devices = jax.local_devices()
+    if not devices:
+        raise RuntimeError("No JAX devices available for sharding.")
+    # Create a 1D mesh for replication sharding
+    # Use all available devices
+    mesh_shape = (len(devices),)
+    try:
+        # Try with devices parameter (newer JAX versions)
+        device_mesh = mesh_utils.create_device_mesh(mesh_shape, devices=devices)
+    except TypeError:
+        # Fall back to shape-only (older JAX versions)
+        device_mesh = mesh_utils.create_device_mesh(mesh_shape)
+    return Mesh(device_mesh, axis_names=("replication",))
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
+
+def _sharded_mif_internal(
+    theta_reps_Jd: jax.Array,  # (n_reps_per_device, J, n_theta) - sharded over replication
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    rinitializers: Callable,  # static
+    rprocesses_interp: Callable,  # static
+    dmeasures: Callable,  # static
+    sigmas: float | jax.Array,
+    sigmas_init: float | jax.Array,
+    accumvars: jax.Array | None,
+    covars_extended: jax.Array | None,
+    M: int,  # static
+    a: float,
+    J: int,  # static
+    thresh: float,
+    keys_reps: jax.Array,  # (n_reps_per_device,) - sharded over replication
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Processes replications on a single device.
+    shard_map distributes replications across devices, so we process each replication
+    independently using vmap over the replication dimension (axis 0).
+    """
+    # vmap over the replication dimension (axis 0) for replications on this device
+    # theta_reps_Jd[i] has shape (J, n_theta), keys_reps[i] is a scalar key
+    vmapped_fn = jax.vmap(
+        _mif_internal,
+        in_axes=(0,) + (None,) * 16 + (0,),  # theta and key vmapped over axis 0
+    )
+    return vmapped_fn(
+        theta_reps_Jd,  # (n_reps_per_device, J, n_theta) -> vmap over axis 0 gives (J, n_theta)
+        dt_array_extended,
+        nstep_array,
+        t0,
+        times,
+        ys,
+        rinitializers,
+        rprocesses_interp,
+        dmeasures,
+        sigmas,
+        sigmas_init,
+        accumvars,
+        covars_extended,
+        M,
+        a,
+        J,
+        thresh,
+        keys_reps,  # (n_reps_per_device,) -> vmap over axis 0 gives scalar key
+    )
+
+
+def _get_sharded_mif_internal():
+    """
+    Returns a function that uses shard_map internally to distribute
+    computations across devices over the replication dimension.
+    Static arguments are handled via JIT's static_argnums.
+    """
+    try:
+        mesh = _create_mif_mesh()
+    except RuntimeError:
+        # Fall back to vmap if no devices available or mesh creation fails
+        return jit(
+            jax.vmap(_mif_internal, in_axes=(0,) + (None,) * 16 + (0,)),
+            static_argnums=(6, 7, 8, 13, 15),
+        )
+
+    # Define input and output specs for shard_map
+    # Only array arguments that need sharding - static args handled separately
+    # theta_reps_Jd: (n_reps, J, n_theta) - shard over replication dimension
+    # keys_reps: (n_reps,) - shard over replication dimension (array of keys)
+    in_specs = (
+        P("replication", None, None),  # theta_reps_Jd: (replication, J, n_theta)
+        P(),  # dt_array_extended: replicated
+        P(),  # nstep_array: replicated
+        P(),  # t0: replicated
+        P(),  # times: replicated
+        P(),  # ys: replicated
+        P(),  # sigmas: replicated
+        P(),  # sigmas_init: replicated
+        P(),  # accumvars: replicated or None
+        P(),  # covars_extended: replicated or None
+        P(),  # a: replicated
+        P(),  # thresh: replicated
+        P("replication"),  # keys_reps: (replication,) - array of keys
+    )
+
+    # Output specs: both outputs are sharded over replication
+    out_specs = (
+        P("replication", None),  # nLLs: (replication, M)
+        P(
+            "replication", None, None, None
+        ),  # theta_ests: (replication, M+1, J, n_theta)
+    )
+
+    def _make_sharded_fn(rinitializers, rprocesses_interp, dmeasures, M, J):
+        """Create a sharded function with static arguments bound via closure."""
+
+        def _sharded_fn_arrays_only(
+            theta_reps_Jd,  # (n_reps_per_device, J, n_theta)
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            sigmas,
+            sigmas_init,
+            accumvars,
+            covars_extended,
+            a,
+            thresh,
+            keys_reps,  # (n_reps_per_device,) - array of keys
+        ):
+            """Sharded function that only takes array arguments."""
+            return _sharded_mif_internal(
+                theta_reps_Jd,
+                dt_array_extended,
+                nstep_array,
+                t0,
+                times,
+                ys,
+                rinitializers,  # from closure
+                rprocesses_interp,  # from closure
+                dmeasures,  # from closure
+                sigmas,
+                sigmas_init,
+                accumvars,
+                covars_extended,
+                M,  # from closure
+                a,
+                J,  # from closure
+                thresh,
+                keys_reps,
+            )
+
+        return shard_map(
+            _sharded_fn_arrays_only,
+            mesh=mesh,
+            in_specs=in_specs,
+            out_specs=out_specs,
+            check_rep=False,
+        )
+
+    # Wrap to handle static arguments
+    def _jv_mif_internal_wrapper(
+        theta_sharded,
+        dt_array_extended,
+        nstep_array,
+        t0,
+        times,
+        ys,
+        rinitializers,
+        rprocesses_interp,
+        dmeasures,
+        sigmas_array,
+        sigmas_init_array,
+        accumvars,
+        covars_extended,
+        M,
+        a,
+        J,
+        thresh,
+        keys_sharded,
+    ):
+        # Create sharded function with static args bound via closure
+        sharded_fn = _make_sharded_fn(rinitializers, rprocesses_interp, dmeasures, M, J)
+        # Call with only array arguments
+        return sharded_fn(
+            theta_sharded,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            sigmas_array,
+            sigmas_init_array,
+            accumvars,
+            covars_extended,
+            a,
+            thresh,
+            keys_sharded,
+        )
+
+    # JIT compile with static arguments
+    return jit(_jv_mif_internal_wrapper, static_argnums=(6, 7, 8, 13, 15))
+
+
+# Create the sharded version
+_jv_mif_internal = _get_sharded_mif_internal()
 
 
 def _perfilter_internal(

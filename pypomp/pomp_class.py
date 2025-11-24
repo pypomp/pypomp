@@ -526,12 +526,11 @@ class Pomp:
 
         keys = jax.random.split(new_key, len(theta_list_trans))
 
+        # Tile theta for each particle: (J, n_reps, n_params)
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
-
-        theta_tiled_T = jnp.transpose(theta_tiled, (1, 0, 2))
-        theta_sharded_T = _shard_rows(theta_tiled_T)
-        theta_sharded = jnp.transpose(theta_sharded_T, (1, 0, 2))
-        keys_sharded = _shard_rows(keys)
+        # Transpose to (n_reps, J, n_params) for shard_map to shard over replications
+        theta_sharded = jnp.transpose(theta_tiled, (1, 0, 2))
+        keys_sharded = keys
 
         nLLs, theta_ests = _jv_mif_internal(
             theta_sharded,

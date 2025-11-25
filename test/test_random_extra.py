@@ -9,42 +9,59 @@ import time
 import matplotlib.pyplot as plt
 import pypomp as pp
 import pypomp.random as ppr
+import warnings
+from scipy import stats
 
 
 def poissoninvf_performance():
     # Prepare parameters
-    n = 100_000
+    n = 1_000_000
     key = jax.random.PRNGKey(42)
-    lam = jnp.array([0.01, 0.2, 1.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
-    # lam = jnp.array([100.0], dtype=jnp.float32)
+    lam = jnp.array([0.01, 0.2, 1.0, 8.0, 10.0, 12.0, 50.0, 100.0], dtype=jnp.float32)
     lam_samples = jnp.repeat(lam, n // len(lam))
-    key1, key2 = jax.random.split(key)
+    reps = 20
 
     # Warmup to trigger JITs
+    key1, key2 = jax.random.split(key)
     _ = ppr.rpoisson(key1, lam_samples).block_until_ready()
     _ = jax.random.poisson(key2, lam_samples).block_until_ready()
 
-    # JAX's .block_until_ready() ensures we measure actual compute time
-    key1, key2 = jax.random.split(key)
-    t0 = time.time()
-    x_pp = ppr.rpoisson(key1, lam_samples).block_until_ready()
-    t1 = time.time()
-    x_jax = jax.random.poisson(key2, lam_samples).block_until_ready()
-    t2 = time.time()
+    # Run rpoisson reps times
+    t_pp_total = 0.0
+    for i in range(reps):
+        key1, _ = jax.random.split(key1)
+        t0 = time.time()
+        _ = ppr.rpoisson(key1, lam_samples).block_until_ready()
+        t1 = time.time()
+        t_pp_total += t1 - t0
+    avg_t_pp = t_pp_total / reps
 
-    print(f"pp.rpoisson: {t1 - t0:.4f} seconds for {n} samples")
-    print(f"jax.random.poisson: {t2 - t1:.4f} seconds for {n} samples")
+    # Run jax.random.poisson reps times
+    t_jax_total = 0.0
+    for i in range(reps):
+        key2, _ = jax.random.split(key2)
+        t0 = time.time()
+        _ = jax.random.poisson(key2, lam_samples).block_until_ready()
+        t1 = time.time()
+        t_jax_total += t1 - t0
+    avg_t_jax = t_jax_total / reps
+
+    print(
+        f"pp.rpoisson: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n} samples each)"
+    )
+    print(
+        f"jax.random.poisson: {avg_t_jax:.4f} seconds (avg over {reps} runs, {n} samples each)"
+    )
+    print(f"ratio: {avg_t_jax / avg_t_pp:.4f}")
     pass
 
 
 def binominvf_performance():
     # Prepare parameters
-    n = 100_000
+    n = 1_000_000
     key = jax.random.PRNGKey(43)
     trials = jnp.array([1, 5, 20, 50, 100, 200], dtype=jnp.float32)
-    # trials = jnp.array([100], dtype=jnp.float32)
     p = jnp.array([0.01, 0.2, 0.5, 0.7, 0.9, 0.99], dtype=jnp.float32)
-    # Create all (trial, p) combinations and tile to reach n samples
     trial_grid, p_grid = jnp.meshgrid(trials, p, indexing="ij")
     trial_flat = trial_grid.reshape(-1)
     p_flat = p_grid.reshape(-1)
@@ -52,53 +69,94 @@ def binominvf_performance():
     n_samples = n_repeat * len(trial_flat)  # actual total count (may be just under n)
     trial_samples = jnp.tile(trial_flat, n_repeat)
     p_samples = jnp.tile(p_flat, n_repeat)
-    key1, key2 = jax.random.split(key)
+    reps = 20
 
     # Warmup to trigger JITs
+    key1, key2 = jax.random.split(key)
     _ = ppr.rbinom(key1, trial_samples, p_samples).block_until_ready()
     _ = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
 
-    # JAX's .block_until_ready() ensures we measure actual compute time
-    key1, key2 = jax.random.split(key)
-    t0 = time.time()
-    x_pp = ppr.rbinom(key1, trial_samples, p_samples).block_until_ready()
-    t1 = time.time()
-    x_jax = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
-    t2 = time.time()
+    # Run rbinom reps times
+    t_pp_total = 0.0
+    for i in range(reps):
+        key1, _ = jax.random.split(key1)
+        t0 = time.time()
+        _ = ppr.rbinom(key1, trial_samples, p_samples).block_until_ready()
+        t1 = time.time()
+        t_pp_total += t1 - t0
+    avg_t_pp = t_pp_total / reps
 
-    print(f"rbinom: {t1 - t0:.4f} seconds for {n_samples} samples")
-    print(f"jax.random.binomial: {t2 - t1:.4f} seconds for {n_samples} samples")
+    # Run jax.random.binomial reps times
+    t_jax_total = 0.0
+    for i in range(reps):
+        key2, _ = jax.random.split(key2)
+        t0 = time.time()
+        _ = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
+        t1 = time.time()
+        t_jax_total += t1 - t0
+    avg_t_jax = t_jax_total / reps
+
+    print(
+        f"rbinom: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n_samples} samples each)"
+    )
+    print(
+        f"jax.random.binomial: {avg_t_jax:.4f} seconds (avg over {reps} runs, {n_samples} samples each)"
+    )
+    print(f"ratio: {avg_t_jax / avg_t_pp:.4f}")
     pass
 
 
 def gammainvf_performance():
     # Prepare parameters
-    n = 100_000
+    n = 1_000_000
     key = jax.random.PRNGKey(44)
     alpha = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
-    # alpha = jnp.array([100.0], dtype=jnp.float32)
     alpha_samples = jnp.repeat(alpha, n // len(alpha))
-    key1, key2 = jax.random.split(key)
+    reps = 20
 
     # Warmup to trigger JITs
-    _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
-    _ = jax.random.gamma(key2, alpha_samples).block_until_ready()
-
-    # JAX's .block_until_ready() ensures we measure actual compute time
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    x_pp = ppr.rgamma(key1, alpha_samples).block_until_ready()
+    _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
     t1 = time.time()
-    x_jax = jax.random.gamma(key2, alpha_samples).block_until_ready()
-    t2 = time.time()
+    print(f"Warmup ppr.rgamma: {t1 - t0:.4f} seconds")
 
-    print(f"rgamma: {t1 - t0:.4f} seconds for {n} samples")
-    print(f"jax.random.gamma: {t2 - t1:.4f} seconds for {n} samples")
+    t2 = time.time()
+    _ = jax.random.gamma(key2, alpha_samples).block_until_ready()
+    t3 = time.time()
+    print(f"Warmup jax.random.gamma: {t3 - t2:.4f} seconds")
+
+    # Run rgamma reps times
+    t_pp_total = 0.0
+    for i in range(reps):
+        key1, _ = jax.random.split(key1)
+        t0 = time.time()
+        _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
+        t1 = time.time()
+        t_pp_total += t1 - t0
+    avg_t_pp = t_pp_total / reps
+
+    # Run jax.random.gamma reps times
+    t_jax_total = 0.0
+    for i in range(reps):
+        key2, _ = jax.random.split(key2)
+        t0 = time.time()
+        _ = jax.random.gamma(key2, alpha_samples).block_until_ready()
+        t1 = time.time()
+        t_jax_total += t1 - t0
+    avg_t_jax = t_jax_total / reps
+
+    print(f"rgamma: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n} samples each)")
+    print(
+        f"jax.random.gamma: {avg_t_jax:.4f} seconds (avg over {reps} runs, {n} samples each)"
+    )
+    print(f"ratio: {avg_t_jax / avg_t_pp:.4f}")
     pass
 
 
 def compare_rpoisson_and_jax_poisson(
-    seed=42, lam_vals=[0.0001, 0.01, 0.1, 1.0, 4.0, 10.0, 70.0, 100.0, 500.0]
+    seed=42,
+    lam_vals=[0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0],
 ):
     """
     Compare distributions of pypomp.rpoisson (inverse CDF, continuous-valued Poisson)
@@ -106,7 +164,7 @@ def compare_rpoisson_and_jax_poisson(
     """
     key = jax.random.PRNGKey(seed)
     lam = jnp.array(lam_vals)
-    n_samples = 10000
+    n_samples = 100000
 
     fig, axes = plt.subplots(2, len(lam_vals), figsize=(5 * len(lam_vals), 8))
     if len(lam_vals) == 1:
@@ -185,7 +243,7 @@ def compare_rpoisson_and_jax_poisson(
 def compare_rbinom_and_jax_binom(
     seed=42,
     n_trials_list=[3, 20, 100, 2000],
-    prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95],
+    prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99],
 ):
     """
     Compare distributions of pypomp.rbinom (inverse CDF, Binomial) and
@@ -198,7 +256,7 @@ def compare_rbinom_and_jax_binom(
     key = jax.random.PRNGKey(seed)
     probs = jnp.array(prob_vals, dtype=jnp.float32)
     n_trials_arr = jnp.array(n_trials_list, dtype=jnp.int32)
-    n_samples = 10000
+    n_samples = 100000
 
     n_rows = len(n_trials_list)
     n_cols = len(prob_vals)
@@ -218,11 +276,11 @@ def compare_rbinom_and_jax_binom(
             jax_binom_samples = jax.random.binomial(key_jax, n=n_arr, p=p_arr)
             all_samples[(row, col)] = (rbinom_samples, jax_binom_samples, n, p_val)
 
-    # Create separate figure for histograms
+    # Use smaller figure heights to reduce vertical space
     fig_hist, hist_axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(5 * n_cols, 4 * n_rows),
+        figsize=(4 * n_cols, 2 * n_rows),
         squeeze=False,
     )
 
@@ -261,8 +319,8 @@ def compare_rbinom_and_jax_binom(
                 color="C0",
                 edgecolor="k",
             )
-            ax_hist.set_title(r"$n$ = {}, $p$ = {:.2f}".format(n, p_val))
-            ax_hist.set_xlabel("Sample value")
+            ax_hist.set_title(r"$n$ = {}, $p$ = {:.2f}".format(n, p_val), fontsize=10)
+            ax_hist.set_xlabel("Sample value", fontsize=8)
             if col == 0:
                 ax_hist.set_ylabel("Density")
             if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
@@ -274,7 +332,7 @@ def compare_rbinom_and_jax_binom(
     fig_qq, qq_axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(5 * n_cols, 4 * n_rows),
+        figsize=(5 * n_cols, 2 * n_rows),
         squeeze=False,
     )
 
@@ -307,7 +365,7 @@ def compare_rbinom_and_jax_binom(
 
 
 def compare_rgamma_and_jax_gamma(
-    seed=42, alpha_vals=[0.5, 1.0, 1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
+    seed=42, alpha_vals=[0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
 ):
     """
     Compare distributions of pypomp.rgamma (inverse CDF, Gamma) and
@@ -316,7 +374,7 @@ def compare_rgamma_and_jax_gamma(
     This test compares the outputs of a custom gamma sampler and JAX's built-in gamma sampler.
     """
     key = jax.random.PRNGKey(seed)
-    n_samples = 10000
+    n_samples = 100000
 
     fig, axes = plt.subplots(2, len(alpha_vals), figsize=(5 * len(alpha_vals), 8))
     if len(alpha_vals) == 1:
@@ -391,3 +449,172 @@ def compare_rgamma_and_jax_gamma(
             ax_qq.legend()
     plt.tight_layout()
     plt.show()
+
+
+def rpoisson_goodness_of_fit():
+    """Goodness of fit test for rpoisson using chi-square test."""
+    lam = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
+    n_samples = 10000
+    significance_level = 0.1
+
+    for lam_val in lam:
+        key = jax.random.key(int(lam_val * 1000) % 2**31)
+        lam_arr = jnp.full((n_samples,), lam_val, dtype=jnp.float32)
+        samples = np.array(ppr.rpoisson(key, lam_arr))
+
+        # Convert to integers for chi-square test (round to nearest integer)
+        samples_int = np.round(samples).astype(int)
+        samples_int = np.maximum(samples_int, 0)  # Ensure non-negative
+
+        # Get observed frequencies - use a range that covers all samples
+        max_observed = int(np.max(samples_int))
+        # Extend range to include tail of distribution
+        max_val = max(max_observed + 1, int(lam_val * 3) + 10)
+        bin_edges = np.arange(-0.5, max_val + 0.5)
+        observed, _ = np.histogram(samples_int, bins=bin_edges)
+
+        # Calculate expected frequencies from Poisson distribution for all k values
+        k_values = np.arange(len(observed))
+        expected = stats.poisson.pmf(k_values, lam_val) * n_samples
+
+        # Normalize expected to sum to n_samples (account for tail beyond max_val)
+        expected_sum = np.sum(expected)
+        if expected_sum > 0:
+            expected = expected * (n_samples / expected_sum)
+
+        # Combine bins with expected frequency < 5 (chi-square requirement)
+        min_expected = 5
+        combined_observed = []
+        combined_expected = []
+        current_obs = 0
+        current_exp = 0
+
+        for i in range(len(observed)):
+            current_obs += observed[i]
+            current_exp += expected[i]
+            if current_exp >= min_expected or i == len(observed) - 1:
+                if current_exp > 0:  # Only add if expected > 0
+                    combined_observed.append(current_obs)
+                    combined_expected.append(current_exp)
+                current_obs = 0
+                current_exp = 0
+
+        # Normalize combined arrays to ensure sums match exactly
+        if len(combined_observed) > 1:
+            obs_sum = sum(combined_observed)
+            exp_sum = sum(combined_expected)
+            if exp_sum > 0 and obs_sum > 0:
+                # Scale expected to match observed sum
+                combined_expected = [x * (obs_sum / exp_sum) for x in combined_expected]
+
+                chi2_stat, p_value = stats.chisquare(
+                    combined_observed, f_exp=combined_expected, ddof=0
+                )
+                # We use a lenient significance level since we're testing approximations
+                if p_value <= significance_level:
+                    warnings.warn(
+                        f"rpoisson failed chi-square test for lambda={lam_val}: "
+                        f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
+                        UserWarning,
+                    )
+
+
+def rbinom_goodness_of_fit():
+    """Goodness of fit test for rbinom using chi-square test."""
+    n = [3, 20, 100, 2000]
+    p = [0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99]
+    n_samples = 10000
+    significance_level = 0.1
+
+    for n_val in n:
+        for p_val in p:
+            # Skip extreme cases that might have numerical issues
+            # if p_val < 1e-6 or p_val > 1 - 1e-6:
+            #     continue
+            # if n_val * p_val < 1 or n_val * (1 - p_val) < 1:
+            #     continue
+
+            key = jax.random.key((int(n_val * 100) + int(p_val * 10000)) % 2**31)
+            n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
+            p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
+            samples = np.array(ppr.rbinom(key, n_arr, p_arr))
+
+            # Convert to integers
+            samples_int = np.round(samples).astype(int)
+            samples_int = np.clip(samples_int, 0, n_val)
+
+            # Get observed frequencies
+            observed, _ = np.histogram(samples_int, bins=np.arange(-0.5, n_val + 1.5))
+
+            # Calculate expected frequencies from Binomial distribution
+            k_values = np.arange(len(observed))
+            expected = stats.binom.pmf(k_values, n_val, p_val) * n_samples
+
+            # Normalize expected to sum to n_samples
+            expected_sum = np.sum(expected)
+            if expected_sum > 0:
+                expected = expected * (n_samples / expected_sum)
+
+            # Combine bins with expected frequency < 5
+            min_expected = 5
+            combined_observed = []
+            combined_expected = []
+            current_obs = 0
+            current_exp = 0
+
+            for i in range(len(observed)):
+                current_obs += observed[i]
+                current_exp += expected[i]
+                if current_exp >= min_expected or i == len(observed) - 1:
+                    if current_exp > 0:  # Only add if expected > 0
+                        combined_observed.append(current_obs)
+                        combined_expected.append(current_exp)
+                    current_obs = 0
+                    current_exp = 0
+
+            # Normalize combined arrays to ensure sums match exactly
+            if len(combined_observed) > 1:
+                obs_sum = sum(combined_observed)
+                exp_sum = sum(combined_expected)
+                if exp_sum > 0 and obs_sum > 0:
+                    # Scale expected to match observed sum
+                    combined_expected = [
+                        x * (obs_sum / exp_sum) for x in combined_expected
+                    ]
+
+                    chi2_stat, p_value = stats.chisquare(
+                        combined_observed, f_exp=combined_expected, ddof=0
+                    )
+                    # We use a lenient significance level since we're testing approximations
+                    if p_value <= significance_level:
+                        warnings.warn(
+                            f"rbinom failed chi-square test for n={n_val}, p={p_val}: "
+                            f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
+                            UserWarning,
+                        )
+
+
+def rgamma_goodness_of_fit():
+    """Goodness of fit test for rgamma using Kolmogorov-Smirnov test."""
+    alpha = [0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
+    n_samples = 10000
+    significance_level = 0.1
+
+    for alpha_val in alpha:
+        key = jax.random.key(int(alpha_val * 1000) % 2**31)
+        alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
+        samples = np.array(ppr.rgamma(key, alpha_arr))
+
+        # Perform Kolmogorov-Smirnov test
+        # Gamma distribution with shape=alpha, scale=1 (rate=1)
+        ks_stat, p_value = stats.kstest(
+            samples, lambda x: stats.gamma.cdf(x, a=alpha_val, scale=1.0)
+        )
+
+        # We use a lenient significance level since we're testing approximations
+        if p_value <= significance_level:
+            warnings.warn(
+                f"rgamma failed KS test for alpha={alpha_val}: "
+                f"KS={ks_stat:.4f}, p={p_value:.4f}",
+                UserWarning,
+            )

@@ -139,7 +139,8 @@ class PompPFilterResult(PompBaseResult):
         df = self.to_dataframe()
         if not df.empty:
             print("\nResults:")
-            print(df.to_string())
+            df_sorted = df.sort_values("logLik", ascending=False).head(5)
+            print(df_sorted.to_string())
 
 
 @dataclass
@@ -231,7 +232,8 @@ class PompMIFResult(PompBaseResult):
         df = self.to_dataframe()
         if not df.empty:
             print("\nResults:")
-            print(df.to_string())
+            df_sorted = df.sort_values("logLik", ascending=False).head(5)
+            print(df_sorted.to_string())
 
 
 @dataclass
@@ -333,7 +335,8 @@ class PompTrainResult(PompBaseResult):
         df = self.to_dataframe()
         if not df.empty:
             print("\nResults:")
-            print(df.to_string())
+            df_sorted = df.sort_values("logLik", ascending=False).head(5)
+            print(df_sorted.to_string())
 
 
 @dataclass
@@ -588,7 +591,8 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         df = self.to_dataframe()
         if not df.empty:
             print("\nResults:")
-            print(df.to_string())
+            df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
+            print(df_sorted.to_string())
 
 
 @dataclass
@@ -806,7 +810,8 @@ class PanelPompMIFResult(PanelPompBaseResult):
         df = self.to_dataframe()
         if not df.empty:
             print("\nResults:")
-            print(df.to_string())
+            df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
+            print(df_sorted.to_string())
 
 
 class ResultsHistory:

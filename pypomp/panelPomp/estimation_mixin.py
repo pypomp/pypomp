@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from ..mif import _jv_panel_mif_internal
 from ..internal_functions import _shard_rows
 from ..RWSigma_class import RWSigma
+from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -221,24 +222,24 @@ class PanelEstimationMixin(Base):
                 thresh=thresh,
                 reps=reps,
             )
-            results.loc[:, unit, :] = obj.results_history[-1]["logLiks"]
-            obj.results_history = []
+            results.loc[:, unit, :] = obj.results_history[-1].logLiks
+            obj.results_history = ResultsHistory()
 
         execution_time = time.time() - start_time
 
-        self.results_history.append(
-            {
-                "method": "pfilter",
-                "logLiks": results,
-                "shared": shared,
-                "unit_specific": unit_specific,
-                "J": J,
-                "reps": reps,
-                "thresh": thresh,
-                "key": old_key,
-                "execution_time": execution_time,
-            }
+        result = PanelPompPFilterResult(
+            method="pfilter",
+            execution_time=execution_time,
+            key=old_key,
+            shared=shared,
+            unit_specific=unit_specific,
+            logLiks=results,
+            J=J,
+            reps=reps,
+            thresh=thresh,
         )
+
+        self.results_history.add(result)
 
     def mif(
         self,
@@ -483,21 +484,22 @@ class PanelEstimationMixin(Base):
         self.unit_specific = specific_list_out
 
         execution_time = time.time() - start_time
-        self.results_history.append(
-            {
-                "method": "mif",
-                "shared_traces": shared_da,
-                "unit_traces": unit_da,
-                "logLiks": full_logliks,
-                "shared": shared,
-                "unit_specific": unit_specific,
-                "J": J,
-                "thresh": thresh,
-                "rw_sd": rw_sd,
-                "M": M,
-                "a": a,
-                "block": block,
-                "key": old_key,
-                "execution_time": execution_time,
-            }
+
+        result = PanelPompMIFResult(
+            method="mif",
+            execution_time=execution_time,
+            key=old_key,
+            shared=shared,
+            unit_specific=unit_specific,
+            shared_traces=shared_da,
+            unit_traces=unit_da,
+            logLiks=full_logliks,
+            J=J,
+            M=M,
+            rw_sd=rw_sd,
+            a=a,
+            thresh=thresh,
+            block=block,
         )
+
+        self.results_history.add(result)

@@ -10,7 +10,7 @@ class PanelPompInterface(Protocol):
     unit_objects: dict[str, Pomp]
     shared: list[pd.DataFrame] | None
     unit_specific: list[pd.DataFrame] | None
-    results_history: list[dict]
+    results_history: "ResultsHistory"
     fresh_key: jax.Array | None
     canonical_param_names: list[str]
     canonical_shared_param_names: list[str]

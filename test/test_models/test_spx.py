@@ -1,6 +1,7 @@
 import jax
 import pytest
 import pypomp as pp
+from pypomp.results import ResultsHistory
 
 
 @pytest.fixture(scope="function")
@@ -34,7 +35,8 @@ def simple(simple_setup):
 def test_spx_pfilter_basic(simple):
     spx_model, rw_sd, J, key = simple
     spx_model.pfilter(J=J, key=key, reps=1)
-    assert isinstance(spx_model.results_history, list)
+
+    assert isinstance(spx_model.results_history, ResultsHistory)
     assert len(spx_model.results_history) > 0
 
 
@@ -47,5 +49,6 @@ def test_spx_mif_basic(simple):
         M=1,
         a=0.5,
     )
-    assert isinstance(spx_model.results_history, list)
+
+    assert isinstance(spx_model.results_history, ResultsHistory)
     assert len(spx_model.results_history) > 0

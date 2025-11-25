@@ -31,7 +31,7 @@ def simple():
 def test_dacca_pfilter(simple):
     dacca, rw_sd, J, key, ys = simple
     dacca.pfilter(J=1000, key=key)
-    logLik = dacca.results_history[-1]["logLiks"]
+    logLik = dacca.results_history[-1].logLiks
     assert abs(logLik.item() - -3750) < 2
 
 

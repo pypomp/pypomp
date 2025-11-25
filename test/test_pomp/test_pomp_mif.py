@@ -56,7 +56,7 @@ def test_class_mif_basic(simple):
             key=key,
         )
         mif_out1 = LG.results_history[-1]
-        traces = mif_out1["traces"]
+        traces = mif_out1.traces_da
         # traces is an xarray.DataArray with dims: (replicate, iteration, variable)
         # Check shape for first replicate
         assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
@@ -80,7 +80,7 @@ def test_class_mif_sigmas_array(simple):
         key=key,
     )
     mif_out2 = LG.results_history[-1]
-    traces2 = mif_out2["traces"]
+    traces2 = mif_out2.traces_da
     # check that the last parameter is never perturbed (assuming it's the 16th parameter)
     param_names = list(LG.theta[0].keys())
     last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
@@ -114,7 +114,7 @@ def test_mif_order_of_sigmas_consistency(simple):
         a=a,
         key=key,
     )
-    traces_ref = LG.results_history[-1]["traces"]
+    traces_ref = LG.results_history[-1].traces_da
 
     LG.results_history.clear()
 
@@ -126,7 +126,7 @@ def test_mif_order_of_sigmas_consistency(simple):
         a=a,
         key=key,
     )
-    traces_rev = LG.results_history[-1]["traces"]
+    traces_rev = LG.results_history[-1].traces_da
 
     for param in param_names:
         arr1 = traces_ref.sel(replicate=0, variable=param).values
@@ -162,7 +162,7 @@ def test_order_of_parameters_consistency(simple):
         key=key,
         theta=theta_orig,
     )
-    traces_orig = LG.results_history[-1]["traces"]
+    traces_orig = LG.results_history[-1].traces_da
 
     LG.results_history.clear()
 
@@ -174,7 +174,7 @@ def test_order_of_parameters_consistency(simple):
         key=key,
         theta=theta_reordered,
     )
-    traces_reordered = LG.results_history[-1]["traces"]
+    traces_reordered = LG.results_history[-1].traces_da
 
     for param in theta_orig.keys():
         arr1 = traces_orig.sel(replicate=0, variable=param).values

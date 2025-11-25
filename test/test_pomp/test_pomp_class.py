@@ -1,5 +1,7 @@
 import jax
 import pickle
+import numpy as np
+import xarray as xr
 import pypomp as pp
 import pytest
 
@@ -169,14 +171,14 @@ def test_theta_carryover_mif(simple):
     )
     assert theta_order == list(LG.theta[0].keys())
     LG.pfilter(J=J, reps=2)
-    assert list(LG.results_history[-1]["theta"][0].keys()) == theta_order
-    traces_da = LG.results_history[-2]["traces"]
+    assert list(LG.results_history[-1].theta[0].keys()) == theta_order
+    traces_da = LG.results_history[-2].traces_da
     param_names = traces_da.coords["variable"].values[1:]
     last_row = traces_da.sel(replicate=0, iteration=traces_da.sizes["iteration"] - 1)
     last_param_values = [
         float(last_row.sel(variable=param).values) for param in param_names
     ]
-    assert list(LG.results_history[-1]["theta"][0].values()) == last_param_values
+    assert list(LG.results_history[-1].theta[0].values()) == last_param_values
     traces = LG.traces()
     # Only compare the parameter values
     assert traces.iloc[-1, 4:].values.tolist() == traces.iloc[-2, 4:].values.tolist()
@@ -195,14 +197,14 @@ def test_theta_carryover_train(simple):
     )
     assert theta_order == list(LG.theta[0].keys())
     LG.pfilter(J=J, reps=2)
-    assert list(LG.results_history[-1]["theta"][0].keys()) == theta_order
-    traces_da = LG.results_history[-2]["traces"]
+    assert list(LG.results_history[-1].theta[0].keys()) == theta_order
+    traces_da = LG.results_history[-2].traces_da
     param_names = traces_da.coords["variable"].values[1:]
     last_row = traces_da.sel(replicate=0, iteration=traces_da.sizes["iteration"] - 1)
     last_param_values = [
         float(last_row.sel(variable=param).values) for param in param_names
     ]
-    assert list(LG.results_history[-1]["theta"][0].values()) == last_param_values
+    assert list(LG.results_history[-1].theta[0].values()) == last_param_values
     traces = LG.traces()
     # Only compare the parameter values
     assert traces.iloc[-1, 4:].values.tolist() == traces.iloc[-2, 4:].values.tolist()
@@ -226,7 +228,24 @@ def test_pickle(simple):
     assert LG.rproc == unpickled_obj.rproc
     assert LG.dmeas == unpickled_obj.dmeas
     assert LG.rproc.dt == unpickled_obj.rproc.dt
-    assert LG.results_history == unpickled_obj.results_history
+    assert len(LG.results_history) == len(unpickled_obj.results_history)
+    for orig, unpickled in zip(LG.results_history, unpickled_obj.results_history):
+        assert isinstance(unpickled, type(orig))
+        assert orig.method == unpickled.method
+        assert orig.execution_time == unpickled.execution_time
+        # Compare key values
+        assert np.array_equal(
+            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
+        )
+        # Compare other attributes based on result type
+        if hasattr(orig, "logLiks") and orig.logLiks is not None:
+            assert orig.logLiks.equals(unpickled.logLiks)
+        if hasattr(orig, "traces_da") and orig.traces_da is not None:
+            # For MIF/Train results, traces_da is a DataArray field
+            if isinstance(orig.traces_da, xr.DataArray):
+                assert orig.traces_da.equals(unpickled.traces_da)
+        if hasattr(orig, "theta"):
+            assert orig.theta == unpickled.theta
     assert LG.traces().values.tolist() == unpickled_obj.traces().values.tolist()
 
     # Check that the unpickled object can be pickled again if rmeas is None

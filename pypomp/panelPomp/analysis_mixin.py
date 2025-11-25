@@ -17,7 +17,7 @@ class PanelAnalysisMixin(Base):
     """
 
     def prune(self, n: int = 1, index: int = -1, refill: bool = True):
-        df = self.results(index)
+        df = self.results_history[index].to_dataframe()
         if df.empty or "shared logLik" not in df.columns:
             raise ValueError("No log-likelihoods found in results(index).")
 
@@ -27,8 +27,8 @@ class PanelAnalysisMixin(Base):
         top_replicates = [index_list[i] for i in top_indices]
 
         res = self.results_history[index]
-        shared_list = res.get("shared")
-        unit_specific_list = res.get("unit_specific")
+        shared_list = res.shared
+        unit_specific_list = res.unit_specific
 
         if shared_list is not None:
             top_shared = [shared_list[rep_idx] for rep_idx in top_replicates]
@@ -72,13 +72,13 @@ class PanelAnalysisMixin(Base):
         self.unit_specific = new_unit_specific
 
     def mix_and_match(self, index: int = -1):
-        df = self.results(index)
+        df = self.results_history[index].to_dataframe()
         if df.empty or "shared logLik" not in df.columns:
             raise ValueError("No log-likelihoods found in results(index).")
 
         res = self.results_history[index]
-        shared_list = res.get("shared")
-        unit_specific_list = res.get("unit_specific")
+        shared_list = res.shared
+        unit_specific_list = res.unit_specific
 
         replicate_logliks = df.groupby("replicate")["shared logLik"].first()
         n = len(replicate_logliks)
@@ -142,321 +142,14 @@ class PanelAnalysisMixin(Base):
         self.unit_specific = new_unit_specific_list
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
-        res = self.results_history[index]
-        method = res.get("method", None)
-        if method == "mif":
-            return self._results_from_mif(res)
-        elif method == "pfilter":
-            return self._results_from_pfilter(res, ignore_nan=ignore_nan)
-        else:
-            raise ValueError(f"Unknown method '{method}' for results()")
+        return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
-    def _results_from_mif(self, res) -> pd.DataFrame:
-        shared_da = res["shared_traces"]
-        unit_da = res["unit_traces"]
-        full_logliks = res["logLiks"]
-
-        all_shared_vars = list(shared_da.coords["variable"].values)
-        shared_names = all_shared_vars[1:] if len(all_shared_vars) > 1 else []
-
-        all_unit_vars = list(unit_da.coords["variable"].values)
-        unit_names = list(unit_da.coords["unit"].values)
-        n_reps = shared_da.sizes["replicate"]
-
-        shared_final_values = shared_da.isel(iteration=-1).values
-        unit_final_values = unit_da.isel(iteration=-1).values
-
-        shared_logliks = full_logliks[:, 0].values
-        unit_logliks = full_logliks[:, 1:].values
-
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
-
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
-
-        if shared_names:
-            shared_param_values = shared_final_values[:, 1:]
-            for i, param_name in enumerate(shared_names):
-                data[param_name] = shared_param_values[rep_indices, i]
-
-        unit_param_values = unit_final_values[:, 1:, :]
-        for i, param_name in enumerate(all_unit_vars[1:]):
-            data[param_name] = unit_param_values[rep_indices, i, unit_indices]
-
-        return pd.DataFrame(data)
-
-    def _results_from_pfilter(self, res, ignore_nan) -> pd.DataFrame:
-        logLiks = res["logLiks"]
-        shared_params = res.get("shared", [])
-        unit_specific_params = res.get("unit_specific", [])
-
-        unit_names = list(logLiks.coords["unit"].values)
-        n_reps = logLiks.sizes["theta"]
-
-        logliks_array = logLiks.values
-
-        unit_logliks = np.array(
-            [
-                [
-                    logmeanexp(logliks_array[rep, unit_idx, :], ignore_nan=ignore_nan)
-                    for unit_idx in range(len(unit_names))
-                ]
-                for rep in range(n_reps)
-            ]
-        )
-
-        shared_logliks = np.sum(unit_logliks, axis=1)
-
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
-
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
-
-        if shared_params and len(shared_params) > 0:
-            shared_param_data = {}
-            for rep in range(min(n_reps, len(shared_params))):
-                shared_df = shared_params[rep]
-                if hasattr(shared_df, "values") and shared_df.shape[1] >= 1:
-                    shared_vals = shared_df.iloc[:, 0].values
-                    shared_names = (
-                        list(shared_df.columns) if hasattr(shared_df, "columns") else []
-                    )
-                    for i, param_name in enumerate(shared_names):
-                        if param_name not in shared_param_data:
-                            shared_param_data[param_name] = np.full(n_reps, np.nan)
-                        shared_param_data[param_name][rep] = (
-                            shared_vals[i] if i < len(shared_vals) else np.nan
-                        )
-
-            for param_name, values in shared_param_data.items():
-                data[param_name] = values[rep_indices]
-
-        if unit_specific_params and len(unit_specific_params) > 0:
-            unit_param_data = {}
-            for rep in range(min(n_reps, len(unit_specific_params))):
-                unit_df = unit_specific_params[rep]
-                if hasattr(unit_df, "columns"):
-                    unit_param_names = (
-                        list(unit_df.index) if hasattr(unit_df, "index") else []
-                    )
-                    for param_name in unit_param_names:
-                        if param_name not in unit_param_data:
-                            unit_param_data[param_name] = np.full(
-                                (n_reps, len(unit_names)), np.nan
-                            )
-                        for unit_idx, unit in enumerate(unit_names):
-                            if unit in unit_df.columns:
-                                unit_param_data[param_name][rep, unit_idx] = (
-                                    unit_df.loc[param_name, unit]
-                                )
-
-            for param_name, values in unit_param_data.items():
-                data[param_name] = values[rep_indices, unit_indices]
-
-        return pd.DataFrame(data)
 
     def time(self):
-        rows = []
-        for idx, res in enumerate(self.results_history):
-            method = res.get("method", None)
-            exec_time = res.get("execution_time", None)
-            rows.append({"method": method, "time": exec_time})
-        df = pd.DataFrame(rows)
-        df.index.name = "history_index"
-        return df
+        return self.results_history.time()
 
     def traces(self) -> pd.DataFrame:
-        if not self.results_history:
-            return pd.DataFrame()
-
-        shared_param_names, unit_param_names = self._get_param_names()
-        all_param_names = shared_param_names + unit_param_names
-
-        all_data = []
-        global_iters: dict[int, int] = {}
-
-        for res in self.results_history:
-            method = res.get("method")
-            if method == "mif":
-                shared_da = res["shared_traces"]
-                unit_da = res["unit_traces"]
-                unit_names = list(unit_da.coords["unit"].values)
-                shared_vars = list(shared_da.coords["variable"].values)
-                unit_vars = list(unit_da.coords["variable"].values)
-
-                n_rep = shared_da.sizes["replicate"]
-                n_iter = shared_da.sizes["iteration"]
-
-                shared_values = shared_da.values
-                unit_values = unit_da.values
-
-                shared_param_indices = {
-                    name: i for i, name in enumerate(shared_vars[1:])
-                }
-                unit_param_indices = {name: i for i, name in enumerate(unit_vars[1:])}
-
-                for rep_idx in range(n_rep):
-                    if rep_idx not in global_iters:
-                        global_iters[rep_idx] = 0
-
-                    for iter_idx in range(n_iter):
-                        shared_loglik = float(shared_values[rep_idx, iter_idx, 0])
-                        shared_params = {
-                            name: float(
-                                shared_values[
-                                    rep_idx, iter_idx, shared_param_indices[name] + 1
-                                ]
-                            )
-                            for name in shared_param_indices
-                        }
-
-                        shared_row = {
-                            "replicate": rep_idx,
-                            "unit": "shared",
-                            "iteration": global_iters[rep_idx],
-                            "method": "mif",
-                            "logLik": shared_loglik,
-                        }
-                        for name in all_param_names:
-                            shared_row[name] = shared_params.get(name, float("nan"))
-                        all_data.append(shared_row)
-
-                        for unit_idx, unit in enumerate(unit_names):
-                            unit_loglik = float(
-                                unit_values[rep_idx, iter_idx, 0, unit_idx]
-                            )
-                            unit_params = {
-                                name: float(
-                                    unit_values[
-                                        rep_idx,
-                                        iter_idx,
-                                        unit_param_indices[name] + 1,
-                                        unit_idx,
-                                    ]
-                                )
-                                for name in unit_param_indices
-                            }
-
-                            unit_row = {
-                                "replicate": rep_idx,
-                                "unit": str(unit),
-                                "iteration": global_iters[rep_idx],
-                                "method": "mif",
-                                "logLik": unit_loglik,
-                            }
-                            for name in all_param_names:
-                                if name in unit_params:
-                                    unit_row[name] = unit_params[name]
-                                elif name in shared_params:
-                                    unit_row[name] = shared_params[name]
-                                else:
-                                    unit_row[name] = float("nan")
-                            all_data.append(unit_row)
-
-                        global_iters[rep_idx] += 1
-
-            elif method == "pfilter":
-                logLiks = res["logLiks"]
-                unit_names = list(logLiks.coords["unit"].values)
-                shared_list = res.get("shared")
-                unit_list = res.get("unit_specific")
-
-                n_theta = logLiks.sizes["theta"]
-
-                logliks_array = logLiks.values
-                unit_avgs = np.array(
-                    [
-                        [
-                            logmeanexp(logliks_array[rep_idx, u_i, :])
-                            for u_i in range(len(unit_names))
-                        ]
-                        for rep_idx in range(n_theta)
-                    ]
-                )
-                shared_totals = np.sum(unit_avgs, axis=1)
-
-                shared_param_data = {}
-                if isinstance(shared_list, list):
-                    for rep_idx in range(min(n_theta, len(shared_list))):
-                        df = shared_list[rep_idx]
-                        if hasattr(df, "index") and df.shape[1] >= 1:
-                            for name in df.index:
-                                if name not in shared_param_data:
-                                    shared_param_data[name] = np.full(n_theta, np.nan)
-                                shared_param_data[name][rep_idx] = float(
-                                    df.loc[name, df.columns[0]]
-                                )
-
-                unit_param_data = {}
-                if isinstance(unit_list, list):
-                    for rep_idx in range(min(n_theta, len(unit_list))):
-                        df = unit_list[rep_idx]
-                        if hasattr(df, "columns"):
-                            for name in df.index:
-                                if name not in unit_param_data:
-                                    unit_param_data[name] = np.full(
-                                        (n_theta, len(unit_names)), np.nan
-                                    )
-                                for unit_idx, unit in enumerate(unit_names):
-                                    if str(unit) in df.columns:
-                                        unit_param_data[name][rep_idx, unit_idx] = (
-                                            float(df.loc[name, str(unit)])
-                                        )
-
-                for rep_idx in range(n_theta):
-                    iter_val = global_iters.get(rep_idx, 1) - 1
-                    iter_val = iter_val if iter_val > 0 else 1
-
-                    shared_row = {
-                        "replicate": rep_idx,
-                        "unit": "shared",
-                        "iteration": iter_val,
-                        "method": "pfilter",
-                        "logLik": float(shared_totals[rep_idx]),
-                    }
-                    for name in all_param_names:
-                        if name in shared_param_data:
-                            shared_row[name] = shared_param_data[name][rep_idx]
-                        else:
-                            shared_row[name] = float("nan")
-                    all_data.append(shared_row)
-
-                    for u_i, unit in enumerate(unit_names):
-                        unit_row = {
-                            "replicate": rep_idx,
-                            "unit": str(unit),
-                            "iteration": iter_val,
-                            "method": "pfilter",
-                            "logLik": float(unit_avgs[rep_idx, u_i]),
-                        }
-                        for name in all_param_names:
-                            if name in unit_param_data:
-                                unit_row[name] = unit_param_data[name][rep_idx, u_i]
-                            elif name in shared_param_data:
-                                unit_row[name] = shared_param_data[name][rep_idx]
-                            else:
-                                unit_row[name] = float("nan")
-                        all_data.append(unit_row)
-
-        if not all_data:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(all_data)
-        if not df.empty:
-            df = df.sort_values(["replicate", "unit", "iteration"]).reset_index(
-                drop=True
-            )
-        return df
+        return self.results_history.traces()
 
     def plot_traces(self, which: str = "shared", show: bool = True):
         traces = self.traces()

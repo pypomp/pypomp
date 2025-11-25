@@ -29,7 +29,7 @@ def test_class_GD_basic(optimizer, simple):
         key=key,
     )
     GD_out = LG.results_history[-1]
-    traces = GD_out["traces"]
+    traces = GD_out.traces_da
     # Check shape for first replicate
     assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
     # +1 for logLik column
@@ -47,7 +47,7 @@ def test_class_GD_ls(simple):
         J=J, M=M, eta=0.2, optimizer="SGD", scale=True, ls=True, n_monitors=1, key=key
     )
     GD_out = LG.results_history[-1]
-    traces = GD_out["traces"]
+    traces = GD_out.traces_da
     assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
     assert "logLik" in list(traces.coords["variable"].values)
 
@@ -70,7 +70,7 @@ def test_train_param_order_invariance(simple):
         key=key,
         theta=theta,
     )
-    out1 = LG.results_history[-1]["traces"].values
+    out1 = LG.results_history[-1].traces_da.values
     param_keys = list(theta[0].keys())
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
@@ -84,5 +84,5 @@ def test_train_param_order_invariance(simple):
         key=key,
         theta=permuted_theta,
     )
-    out2 = LG.results_history[-1]["traces"].values
+    out2 = LG.results_history[-1].traces_da.values
     np.testing.assert_allclose(out1, out2, atol=1e-7)

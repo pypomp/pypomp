@@ -50,7 +50,7 @@ def test_fresh_key(measles_panel_setup_some_shared):
         jax.random.key_data(panel.fresh_key), jax.random.key_data(key)
     )
     assert np.array_equal(
-        jax.random.key_data(panel.results_history[0]["key"]),
+        jax.random.key_data(panel.results_history[0].key),
         jax.random.key_data(key),
     )
 
@@ -92,23 +92,40 @@ def test_pickle_panelpomp(measles_panel_mp):
 
     assert len(unpickled_panel.results_history) == len(panel.results_history)
     for orig, unpickled in zip(panel.results_history, unpickled_panel.results_history):
-        assert orig.keys() == unpickled.keys()
-        # Compare values for common keys; skip non-comparable objects
-        for k in orig.keys():
-            v1 = orig[k]
-            v2 = unpickled[k]
-            if isinstance(v1, np.ndarray):
-                assert np.allclose(v1, v2)
-            elif isinstance(v1, pd.DataFrame):
-                pd.testing.assert_frame_equal(v1, v2)
-            elif isinstance(v1, xr.DataArray):
-                xr.testing.assert_equal(v1, v2)
-            elif isinstance(v1, (float, int, str, type(None))):
-                assert v1 == v2
-            elif k == "key":
-                assert np.array_equal(jax.random.key_data(v1), jax.random.key_data(v2))
+        assert isinstance(unpickled, type(orig))
+        assert orig.method == unpickled.method
+        # Compare key values
+        assert np.array_equal(
+            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
+        )
+        # Compare execution times
+        assert orig.execution_time == unpickled.execution_time
+        # For MIF results, compare traces
+        if hasattr(orig, "shared_traces") and orig.shared_traces is not None:
+            assert orig.shared_traces.equals(unpickled.shared_traces)
+            assert orig.unit_traces.equals(unpickled.unit_traces)
+        # For pfilter results, compare logLiks
+        if hasattr(orig, "logLiks") and orig.logLiks is not None:
+            assert orig.logLiks.equals(unpickled.logLiks)
+        # Compare other attributes as needed
+        if hasattr(orig, "theta"):
+            assert orig.theta == unpickled.theta
+        if hasattr(orig, "shared"):
+            if orig.shared is None:
+                assert unpickled.shared is None
             else:
-                pass
+                assert len(orig.shared) == len(unpickled.shared)
+                for orig_df, unpickled_df in zip(orig.shared, unpickled.shared):
+                    pd.testing.assert_frame_equal(orig_df, unpickled_df)
+        if hasattr(orig, "unit_specific"):
+            if orig.unit_specific is None:
+                assert unpickled.unit_specific is None
+            else:
+                assert len(orig.unit_specific) == len(unpickled.unit_specific)
+                for orig_df, unpickled_df in zip(
+                    orig.unit_specific, unpickled.unit_specific
+                ):
+                    pd.testing.assert_frame_equal(orig_df, unpickled_df)
 
     # Check that the unit objects are properly reconstructed
     for unit_name in panel.unit_objects.keys():
@@ -131,7 +148,32 @@ def test_pickle_panelpomp(measles_panel_mp):
         assert original_unit.rproc.original_func == unpickled_unit.rproc.original_func
         assert original_unit.dmeas == unpickled_unit.dmeas
         assert original_unit.rproc.dt == unpickled_unit.rproc.dt
-        assert original_unit.results_history == unpickled_unit.results_history
+        # Compare results_history contents
+        assert len(original_unit.results_history) == len(unpickled_unit.results_history)
+        for orig_result, unpickled_result in zip(
+            original_unit.results_history, unpickled_unit.results_history
+        ):
+            assert isinstance(unpickled_result, type(orig_result))
+            assert orig_result.method == unpickled_result.method
+            # Compare key values
+            assert np.array_equal(
+                jax.random.key_data(orig_result.key),
+                jax.random.key_data(unpickled_result.key),
+            )
+            # Compare execution times
+            assert orig_result.execution_time == unpickled_result.execution_time
+            # For MIF results, compare traces
+            if (
+                hasattr(orig_result, "shared_traces")
+                and orig_result.shared_traces is not None
+            ):
+                assert orig_result.shared_traces.equals(unpickled_result.shared_traces)
+            # For pfilter results, compare logLiks
+            if hasattr(orig_result, "logLiks") and orig_result.logLiks is not None:
+                assert orig_result.logLiks.equals(unpickled_result.logLiks)
+            # Compare theta if present
+            if hasattr(orig_result, "theta"):
+                assert orig_result.theta == unpickled_result.theta
         assert (
             original_unit.traces().values.tolist()
             == unpickled_unit.traces().values.tolist()
@@ -281,32 +323,33 @@ def test_performance_comprehensive():
     )
 
     # Add multiple MIF results to history (stress test with many results)
+    from pypomp.results import PanelPompMIFResult, PanelPompPFilterResult
+
     for i in range(6):  # 6 MIF runs
-        panel.results_history.append(
-            {
-                "method": "mif",
-                "shared_traces": shared_traces,
-                "unit_traces": unit_traces,
-                "logLiks": logLiks,
-                "shared": [shared_params] * n_reps,
-                "unit_specific": [unit_specific_params] * n_reps,
-                "J": 100,
-                "thresh": 0.0,
-                "rw_sd": pp.RWSigma(
-                    {
-                        "param1": 0.1,
-                        "param2": 0.1,
-                        "unit_param1": 0.1,
-                        "unit_param2": 0.1,
-                    }
-                ),
-                "M": n_iter,
-                "a": 0.1,
-                "block": True,
-                "key": jax.random.key(42),
-                "execution_time": 1.0,
-            }
+        result = PanelPompMIFResult(
+            method="mif",
+            execution_time=1.0,
+            key=jax.random.key(42),
+            shared=[shared_params] * n_reps,
+            unit_specific=[unit_specific_params] * n_reps,
+            shared_traces=shared_traces,
+            unit_traces=unit_traces,
+            logLiks=logLiks,
+            J=100,
+            M=n_iter,
+            rw_sd=pp.RWSigma(
+                {
+                    "param1": 0.1,
+                    "param2": 0.1,
+                    "unit_param1": 0.1,
+                    "unit_param2": 0.1,
+                }
+            ),
+            a=0.1,
+            thresh=0.0,
+            block=True,
         )
+        panel.results_history.add(result)
 
     # Add some pfilter results too (stress test with mixed result types)
     for i in range(4):  # 4 pfilter runs
@@ -315,19 +358,18 @@ def test_performance_comprehensive():
             dims=["theta", "unit", "replicate"],
             coords={"theta": range(n_reps), "unit": units, "replicate": range(3)},
         )
-        panel.results_history.append(
-            {
-                "method": "pfilter",
-                "logLiks": pfilter_logLiks,
-                "shared": [shared_params] * n_reps,
-                "unit_specific": [unit_specific_params] * n_reps,
-                "J": 100,
-                "reps": 3,
-                "thresh": 0.0,
-                "key": jax.random.key(42),
-                "execution_time": 1.0,
-            }
+        result = PanelPompPFilterResult(
+            method="pfilter",
+            execution_time=1.0,
+            key=jax.random.key(42),
+            shared=[shared_params] * n_reps,
+            unit_specific=[unit_specific_params] * n_reps,
+            logLiks=pfilter_logLiks,
+            J=100,
+            reps=3,
+            thresh=0.0,
         )
+        panel.results_history.add(result)
 
     # Test results() performance
     start_time = time.time()
@@ -368,8 +410,8 @@ def test_prune(measles_panel_mp):
 
     # Store original parameters from results_history for comparison
     original_results = panel.results_history[-1]
-    original_shared = original_results.get("shared")
-    original_unit_specific = original_results.get("unit_specific")
+    original_shared = original_results.shared
+    original_unit_specific = original_results.unit_specific
 
     # Test pruning to top 1 replicate without refill
     panel.prune(n=1, refill=False)
@@ -382,8 +424,8 @@ def test_prune(measles_panel_mp):
 
     # Verify that the pruned parameters match the top replicate
     # Get the top replicate index from original results
-    if original_results.get("method") == "mif":
-        logLiks = original_results["logLiks"]
+    if original_results.method == "mif":
+        logLiks = original_results.logLiks
         # Get shared log-likelihoods (first column is "shared")
         shared_lls = logLiks[:, 0].values  # shape: (n_reps,)
         top_idx = int(np.argmax(shared_lls))
@@ -429,8 +471,8 @@ def test_mix_and_match(measles_panel_mp):
 
     # Store original parameters from results_history for comparison
     original_results = panel.results_history[-1]
-    original_shared = original_results.get("shared")
-    original_unit_specific = original_results.get("unit_specific")
+    original_shared = original_results.shared
+    original_unit_specific = original_results.unit_specific
 
     # Perform mix_and_match
     panel.mix_and_match()

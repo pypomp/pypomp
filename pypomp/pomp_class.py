@@ -19,9 +19,14 @@ import xarray as xr
 from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
 from .internal_functions import _calc_ys_covars, _shard_rows
-from .util import logmeanexp, logmeanexp_se
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
+from .results import (
+    ResultsHistory,
+    PompPFilterResult,
+    PompMIFResult,
+    PompTrainResult,
+)
 
 
 def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
@@ -153,7 +158,7 @@ class Pomp:
         self.ys: pd.DataFrame = ys
         self.covars: pd.DataFrame | None = covars
         self.t0: float = float(t0)
-        self.results_history: list[dict] = []
+        self.results_history = ResultsHistory()
         self.fresh_key: jax.Array | None = None
 
         if covars is not None:
@@ -430,47 +435,56 @@ class Pomp:
         else:
             execution_time = None
 
-        result_dict = {
-            "method": "pfilter",
-            "logLiks": logLik_da,
-            "theta": theta_list,
-            "J": J,
-            "reps": reps,
-            "thresh": thresh,
-            "key": old_key,
-            "execution_time": execution_time,
-        }
-
         # obtain diagnostics using names
+        CLL_da = None
+        ESS_da = None
+        filter_mean_da = None
+        prediction_mean_da = None
+
         if CLL and "CLL" in results:
             CLL_arr = results["CLL"]
-            result_dict["CLL"] = xr.DataArray(
+            CLL_da = xr.DataArray(
                 CLL_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"]
             )
 
         if ESS and "ESS" in results:
             ESS_arr = results["ESS"]
-            result_dict["ESS"] = xr.DataArray(
+            ESS_da = xr.DataArray(
                 ESS_arr.reshape(n_theta, reps, -1), dims=["theta", "replicate", "time"]
             )
 
         if filter_mean and "filter_mean" in results:
             filter_mean_arr = results["filter_mean"]
-            result_dict["filter_mean"] = xr.DataArray(
+            filter_mean_da = xr.DataArray(
                 filter_mean_arr.reshape(n_theta, reps, *filter_mean_arr.shape[1:]),
                 dims=["theta", "replicate", "time", "state"],
             )
 
         if prediction_mean and "prediction_mean" in results:
             prediction_mean_arr = results["prediction_mean"]
-            result_dict["prediction_mean"] = xr.DataArray(
+            prediction_mean_da = xr.DataArray(
                 prediction_mean_arr.reshape(
                     n_theta, reps, *prediction_mean_arr.shape[1:]
                 ),
                 dims=["theta", "replicate", "time", "state"],
             )
 
-        self.results_history.append(result_dict)
+        result = PompPFilterResult(
+            method="pfilter",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_list,
+            logLiks=logLik_da,
+            J=J,
+            reps=reps,
+            thresh=thresh,
+            CLL=CLL_da,
+            ESS=ESS_da,
+            filter_mean=filter_mean_da,
+            prediction_mean=prediction_mean_da,
+        )
+
+        self.results_history.add(result)
 
     def mif(
         self,
@@ -609,20 +623,20 @@ class Pomp:
         else:
             execution_time = None
 
-        self.results_history.append(
-            {
-                "method": "mif",
-                "traces": traces_da,
-                "theta": theta_list,
-                "J": J,
-                "M": M,
-                "rw_sd": rw_sd,
-                "a": a,
-                "thresh": thresh,
-                "key": old_key,
-                "execution_time": execution_time,
-            }
+        result = PompMIFResult(
+            method="mif",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_list,
+            traces_da=traces_da,
+            J=J,
+            M=M,
+            rw_sd=rw_sd,
+            a=a,
+            thresh=thresh,
         )
+
+        self.results_history.add(result)
 
     def train(
         self,
@@ -770,24 +784,24 @@ class Pomp:
         else:
             execution_time = None
 
-        self.results_history.append(
-            {
-                "method": "train",
-                "traces": joined_array,
-                "theta": theta_list,
-                "optimizer": optimizer,
-                "J": J,
-                "M": M,
-                "eta": eta,
-                "alpha": alpha,
-                "thresh": thresh,
-                "ls": ls,
-                "c": c,
-                "max_ls_itn": max_ls_itn,
-                "key": old_key,
-                "execution_time": execution_time,
-            }
+        result = PompTrainResult(
+            method="train",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_list,
+            traces_da=joined_array,
+            optimizer=optimizer,
+            J=J,
+            M=M,
+            eta=eta,
+            alpha=alpha,
+            thresh=thresh,
+            ls=ls,
+            c=c,
+            max_ls_itn=max_ls_itn,
         )
+
+        self.results_history.add(result)
 
     def simulate(
         self,
@@ -886,92 +900,7 @@ class Pomp:
             - logLik: The log-likelihood estimate (averaged over reps for pfilter)
             - <param>: One column for each parameter
         """
-        if not self.results_history:
-            return pd.DataFrame()
-
-        replicate_list: list[int] = []
-        iteration_list: list[int] = []
-        method_list: list[str] = []
-        loglik_list: list[float] = []
-        param_columns: dict[str, list[float]] = {}
-
-        param_names = list(self.theta[0].keys())
-        for p in param_names:
-            param_columns[p] = []
-
-        # tracks the current iteration for each replicate across rounds
-        global_iters: dict[
-            int, int
-        ] = {}  # key: replicate index, value: current iteration (start at 1)
-
-        for res in self.results_history:
-            method = res.get("method")
-            if method in ("mif", "train"):
-                traces = res[
-                    "traces"
-                ]  # xarray.DataArray (replicate, iteration, variable)
-                n_rep = traces.sizes["replicate"]
-                n_iter = traces.sizes["iteration"]
-                variable_names = list(traces.coords["variable"].values)
-
-                traces_array = traces.values  # shape: (n_rep, n_iter, n_vars)
-                loglik_idx = variable_names.index("logLik")
-                param_indices = [variable_names.index(p) for p in param_names]
-
-                for rep_idx in range(n_rep):
-                    if rep_idx not in global_iters:
-                        global_iters[rep_idx] = 0
-                    for iter_idx in range(n_iter):
-                        if (
-                            global_iters[rep_idx] == 0 or iter_idx > 0
-                        ):  # skip starting parameters beyond the the first round
-                            replicate_list.append(rep_idx)
-                            iteration_list.append(global_iters[rep_idx])
-                            method_list.append("mif" if method == "mif" else "train")
-                            loglik_list.append(
-                                float(traces_array[rep_idx, iter_idx, loglik_idx])
-                            )
-                            for i, p in enumerate(param_names):
-                                param_columns[p].append(
-                                    float(
-                                        traces_array[
-                                            rep_idx, iter_idx, param_indices[i]
-                                        ]
-                                    )
-                                )
-                            global_iters[rep_idx] += 1
-            elif method == "pfilter":
-                logLiks = res["logLiks"]
-                thetas = res["theta"]
-                for rep_idx, (logLik_arr, theta_dict) in enumerate(
-                    zip(logLiks, thetas)
-                ):
-                    last_iter = global_iters.get(rep_idx, 1) - 1
-                    avg_loglik = float(logmeanexp(logLik_arr))
-
-                    replicate_list.append(rep_idx)
-                    iteration_list.append(last_iter if last_iter > 0 else 1)
-                    method_list.append("pfilter")
-                    loglik_list.append(avg_loglik)
-                    for p in param_names:
-                        param_columns[p].append(float(theta_dict[p]))
-            # else: ignore unknown methods
-
-        if not replicate_list:
-            return pd.DataFrame()
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        df = pd.DataFrame(data)
-        if not df.empty:
-            df = df.sort_values(["iteration", "replicate"]).reset_index(drop=True)
-        return df
+        return self.results_history.traces()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """
@@ -986,41 +915,7 @@ class Pomp:
             pd.DataFrame: A DataFrame with the results of the method run at the given
                 index.
         """
-        res = self.results_history[index]
-        method = res.get("method")
-        rows = []
-        param_names = list(self.theta[0].keys())
-        if method == "pfilter":
-            logLiks = res["logLiks"]
-            thetas = res["theta"]
-            for param_idx, (logLik_arr, theta_dict) in enumerate(zip(logLiks, thetas)):
-                # Use underlying NumPy array if available to avoid copies
-                arr = getattr(logLik_arr, "values", logLik_arr)
-                logLik_arr_np = np.asarray(arr)
-                logLik = float(logmeanexp(logLik_arr_np, ignore_nan=ignore_nan))
-                se = (
-                    float(logmeanexp_se(logLik_arr_np, ignore_nan=ignore_nan))
-                    if len(logLik_arr_np) > 1
-                    else np.nan
-                )
-                row = {"logLik": logLik, "se": se}
-                row.update({param: float(theta_dict[param]) for param in param_names})
-                rows.append(row)
-        elif method in ("mif", "train"):
-            traces = res["traces"]
-            # traces is an xarray.DataArray with dims: (replicate, iteration, variable)
-            n_reps = traces.sizes["replicate"]
-            last_idx = traces.sizes["iteration"] - 1
-            for rep in range(n_reps):
-                last_row = traces.sel(replicate=rep, iteration=last_idx)
-                logLik_val = float(last_row.sel(variable="logLik").values)
-                row = {"logLik": logLik_val, "se": np.nan}
-                for param in param_names:
-                    row[param] = float(last_row.sel(variable=param).values)
-                rows.append(row)
-        else:
-            raise ValueError(f"Unknown method in results_history: {method}")
-        return pd.DataFrame(rows)
+        return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
     def time(self):
         """
@@ -1031,14 +926,7 @@ class Pomp:
                 - 'method': The name of the method run.
                 - 'time': The execution time in seconds.
         """
-        rows = []
-        for idx, res in enumerate(self.results_history):
-            method = res.get("method", None)
-            exec_time = res.get("execution_time", None)
-            rows.append({"method": method, "time": exec_time})
-        df = pd.DataFrame(rows)
-        df.index.name = "history_index"
-        return df
+        return self.results_history.time()
 
     def prune(self, n: int = 1, index: int = -1, refill: bool = True):
         """
@@ -1050,7 +938,7 @@ class Pomp:
             index (int): The index of the result to use for pruning. Defaults to -1 (the last result).
             refill (bool): If True, repeat the top n thetas to match the previous number of theta sets.
         """
-        df = self.results(index)
+        df = self.results_history[index].to_dataframe()
         if df.empty or "logLik" not in df.columns:
             raise ValueError("No log-likelihoods found in results(index).")
 
@@ -1152,38 +1040,13 @@ class Pomp:
         """
         Print a summary of the Pomp object.
         """
-        allow_list = [
-            "J",
-            "reps",
-            "thresh",
-            "execution_time",
-            "M",
-            "a",
-            "optimizer",
-            "eta",
-            "c",
-            "max_ls_itn",
-            "ls",
-            "alpha",
-        ]
         print("Basics:")
         print("-------")
         print(f"Number of observations: {len(self.ys)}")
         print(f"Number of time steps: {len(self._dt_array_extended)}")
         print(f"Number of parameters: {len(self.theta[0])}")
         print()
-        if len(self.results_history) > 0:
-            print("Results history:")
-            print("----------------")
-            for idx, entry in enumerate(self.results_history, 1):
-                print(f"Results entry {idx}:")
-                method = entry.get("method", None)
-                if method is not None:
-                    print(f"- method: {method}")
-                for k, v in entry.items():
-                    if k in allow_list:
-                        print(f"- {k}: {v}")
-                print()
+        self.results_history.print_summary()
 
     def __getstate__(self):
         """

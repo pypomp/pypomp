@@ -8,6 +8,7 @@ from pypomp.pomp_class import Pomp
 from pypomp.panelPomp.validation_mixin import PanelValidationMixin
 from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
 from pypomp.panelPomp.analysis_mixin import PanelAnalysisMixin
+from pypomp.results import ResultsHistory
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
@@ -38,7 +39,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         self.unit_objects: dict[str, Pomp] = unit_objects
         self.shared: list[pd.DataFrame] | None = shared
         self.unit_specific: list[pd.DataFrame] | None = unit_specific
-        self.results_history = []
+        self.results_history = ResultsHistory()
         self.fresh_key: jax.Array | None = None
         canonical_shared_param_names, canonical_unit_param_names = (
             self._get_param_names(shared, unit_specific)
@@ -51,6 +52,17 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
+
+    def print_summary(self):
+        """
+        Print a summary of the PanelPomp object.
+        """
+        print("Basics:")
+        print("-------")
+        print(f"Number of units: {len(self.unit_objects)}")
+        print(f"Number of parameters: {len(self.canonical_param_names)}")
+        print()
+        self.results_history.print_summary()
 
     def __getstate__(self):
         """

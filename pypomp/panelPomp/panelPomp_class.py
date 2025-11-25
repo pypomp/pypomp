@@ -57,10 +57,17 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         Print a summary of the PanelPomp object.
         """
+        first_unit = list(self.unit_objects.keys())[0]
         print("Basics:")
         print("-------")
         print(f"Number of units: {len(self.unit_objects)}")
         print(f"Number of parameters: {len(self.canonical_param_names)}")
+        print(
+            f"Number of observations (first unit): {len(self.unit_objects[first_unit].ys)}"
+        )
+        print(
+            f"Number of time steps (first unit): {len(self.unit_objects[first_unit]._dt_array_extended)}"
+        )
         print()
         self.results_history.print_summary()
 

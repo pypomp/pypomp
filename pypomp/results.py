@@ -138,7 +138,7 @@ class PompPFilterResult(PompBaseResult):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nResults:")
+            print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
@@ -231,7 +231,7 @@ class PompMIFResult(PompBaseResult):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nResults:")
+            print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
@@ -334,7 +334,7 @@ class PompTrainResult(PompBaseResult):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nResults:")
+            print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
@@ -590,7 +590,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nResults:")
+            print("\nTop 5 Results:")
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
@@ -809,7 +809,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nResults:")
+            print("\nTop 5 Results:")
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 

@@ -549,3 +549,8 @@ def test_mix_and_match(measles_panel_mp):
         # It's possible that the original ordering was already optimal, so we don't require mixing
         # But we do verify the structure is correct
         assert isinstance(mixing_occurred, bool)  # Just verify the check runs
+
+
+def test_print_summary(measles_panel_mp):
+    panel, rw_sd, key, J, M, a = measles_panel_mp
+    panel.print_summary()

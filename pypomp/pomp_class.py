@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
+from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
 from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
@@ -333,6 +334,96 @@ class Pomp:
                 )
             )
         return results
+
+    def dpop(
+        self,
+        J: int,
+        key: jax.Array | None = None,
+        theta: dict | list[dict] | None = None,
+        alpha: float = 0.97,
+        process_weight_index: int | None = None,
+    ) -> list[jax.Array]:
+        """
+        Runs the DPOP (dynamics-penalized) differentiable particle filter.
+
+        This method is analogous to :meth:`mop`, but additionally
+        incorporates a per-interval transition log-weight that is
+        assumed to be stored in one of the state components.
+
+        The process log-weight is expected to be accumulated over a
+        single observation interval by the user-specified process
+        model. At the beginning of each interval, the corresponding
+        state component should be reset to zero (this is naturally
+        handled by ``accumvars`` in :class:`RProc`).
+
+        Args:
+            J: Number of particles.
+            key: Optional random key. If None, ``self.fresh_key`` is
+                used and updated internally.
+            theta: Optional parameter dictionary or list of dictionaries.
+                If None, ``self.theta`` is used.
+            alpha: Cooling factor for the particle weights.
+            process_weight_index: Index of the state component that
+                stores the accumulated transition log-weight over a
+                single observation interval. If None, the method will
+                fall back to the last index in
+                ``self.rproc.accumvars`` (if available).
+
+        Returns:
+            list[jax.Array]: A list of log-likelihood estimates, one
+            for each parameter vector in ``theta``.
+        """
+        theta = theta or self.theta
+        theta_list = self._validate_theta(theta)
+        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
+
+        if self.dmeas is None:
+            raise ValueError("self.dmeas cannot be None")
+
+        if J < 1:
+            raise ValueError("J should be greater than 0")
+
+        # Determine which state index holds the process log-weight.
+        if process_weight_index is None:
+            accumvars = self.rproc.accumvars
+            if accumvars is not None and len(accumvars) > 0:
+                # By convention we use the last accumvar as the
+                # process log-weight accumulator.
+                process_weight_index = int(accumvars[-1])
+            else:
+                raise ValueError(
+                    "dpop requires a process-weight state. "
+                    "Provide `process_weight_index` explicitly or "
+                    "supply `accumvars` to `RProc` such that the last "
+                    "entry corresponds to the log-weight accumulator."
+                )
+
+        new_key, _ = self._update_fresh_key(key)
+        keys = jax.random.split(new_key, len(theta_list_trans))
+
+        results: list[jax.Array] = []
+        for theta_i, k in zip(theta_list_trans, keys):
+            results.append(
+                -_dpop_internal(
+                    theta=_theta_dict_to_array(theta_i, self.canonical_param_names),
+                    ys=jnp.array(self.ys),
+                    dt_array_extended=self._dt_array_extended,
+                    nstep_array=self._nstep_array,
+                    t0=self.t0,
+                    times=jnp.array(self.ys.index),
+                    J=J,
+                    rinitializer=self.rinit.struct_pf,
+                    rprocess_interp=self.rproc.struct_pf_interp,
+                    dmeasure=self.dmeas.struct_pf,
+                    accumvars=self.rproc.accumvars,
+                    covars_extended=self._covars_extended,
+                    alpha=alpha,
+                    process_weight_index=process_weight_index,
+                    key=k,
+                )
+            )
+        return results
+
 
     def pfilter(
         self,

@@ -14,7 +14,7 @@ import seaborn as sns
 from .mop import _mop_internal
 from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
-from .train import _vmapped_train_internal
+from .train import _vmapped_train_internal, dpop_sgd_decay  
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
@@ -893,6 +893,166 @@ class Pomp:
         )
 
         self.results_history.add(result)
+    
+    def dpop_sgd_decay(
+        self,
+        J: int,
+        M: int,
+        eta0: float,
+        decay: float,
+        alpha: float = 0.8,
+        process_weight_index: int | None = None,
+        key: jax.Array | None = None,
+        theta: dict | list[dict] | None = None,
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Run SGD with decaying step size on the DPOP objective.
+
+        This is a high-level convenience wrapper around the low-level
+        `dpop_sgd_decay` function in train.py. It automatically pulls all
+        internal arrays and callables from the Pomp object, so the user only
+        needs to specify:
+          - J: number of particles
+          - M: number of gradient steps
+          - eta0: initial learning rate
+          - decay: learning-rate decay coefficient
+          - alpha: DPOP discount / cooling factor
+          - key: random seed (optional)
+          - (optional) theta: custom initial parameter(s) in natural space
+
+        The optimization is performed in the *estimation space*, with
+        parameters ordered according to `self.canonical_param_names`.
+
+        Parameters
+        ----------
+        J : int
+            Number of particles used inside the DPOP objective.
+        M : int
+            Number of gradient steps.
+        eta0 : float
+            Initial learning rate for SGD.
+        decay : float
+            Learning-rate decay coefficient. At iteration m, the effective
+            step size is eta_m = eta0 / (1 + decay * m).
+        alpha : float, default 0.8
+            DPOP discount / cooling factor.
+        process_weight_index : int or None, default None
+            Index of the state component that stores the accumulated process
+            log-weight over one observation interval. If None, we default to
+            using the last entry of `self.rproc.accumvars`.
+        key : jax.Array or None, default None
+            Random key. If None, fall back to `self.fresh_key` and update it.
+        theta : dict or list[dict] or None, default None
+            Optional initial parameter(s) in natural space. If None, use
+            `self.theta`. Only the first element is used as the starting
+            point of the local search.
+
+        Returns
+        -------
+        nll_history : jax.Array, shape (M+1,)
+            Mean DPOP negative log-likelihood per observation at each step.
+        theta_history : jax.Array, shape (M+1, p)
+            Parameter vector (estimation space) at each step, ordered
+            according to `self.canonical_param_names`.
+        """
+        # Import the low-level implementation here (avoid circular imports).
+        from .train import dpop_sgd_decay as _dpop_sgd_decay
+
+        # 1) Update fresh_key (same mechanism as in pfilter/mif/train).
+        new_key, _ = self._update_fresh_key(key)
+
+        # 2) Decide which theta to use as initial point (in natural space).
+        #    If the user supplied `theta`, allow dict or list[dict] and
+        #    convert any JAX arrays to plain Python floats to satisfy
+        #    _validate_theta.
+        if theta is None:
+            theta_list_raw = self.theta
+        else:
+            if isinstance(theta, dict):
+                theta_list_raw = [theta]
+            elif isinstance(theta, list):
+                theta_list_raw = theta
+            else:
+                raise TypeError("theta must be a dict or a list of dicts")
+
+            def _to_float_dict(d: dict) -> dict:
+                # Ensure all values are plain Python floats (not jax.Array)
+                return {k: float(v) for k, v in d.items()}
+
+            theta_list_raw = [_to_float_dict(d) for d in theta_list_raw]
+
+        # Validate and get a clean list of parameter dicts.
+        theta_list = self._validate_theta(theta_list_raw)
+        # Use only the first parameter set as the starting point of the local search.
+        theta_nat = theta_list[0]
+
+        # 3) Map initial theta to estimation space in canonical order.
+        param_names = self.canonical_param_names
+        theta_est_dict = self.par_trans.to_est(theta_nat)
+        theta_init = jnp.array([theta_est_dict[name] for name in param_names])
+
+        # 4) Extract all internal quantities needed by DPOP from the Pomp object.
+        ys_array = jnp.array(self.ys.values)
+        dt_array_extended = self._dt_array_extended
+        nstep_array = self._nstep_array
+        t0 = self.t0
+        times_array = jnp.array(self.ys.index.values)
+
+        rinitializer = self.rinit.struct_pf
+        rprocess_interp = self.rproc.struct_pf_interp
+
+        if self.dmeas is None:
+            # DPOP requires an observation density `dmeas`; `rmeas` alone is not enough.
+            raise ValueError("dpop_sgd_decay requires self.dmeas to be not None.")
+        dmeasure = self.dmeas.struct_pf
+
+        accumvars = self.rproc.accumvars
+        covars_extended = self._covars_extended
+
+        # 5) Determine which state component holds the process log-weight ("logw").
+        #    By default we use the last entry of accumvars, but the user can override
+        #    this via `process_weight_index`.
+        if process_weight_index is None:
+            if accumvars is not None and len(accumvars) > 0:
+                process_weight_index = int(accumvars[-1])
+            else:
+                raise ValueError(
+                    "dpop_sgd_decay requires a process-weight state. "
+                    "Provide process_weight_index explicitly or supply "
+                    "`accumvars` so that the last entry corresponds to "
+                    "the log-weight accumulator."
+                )
+
+        # 6) Call the low-level dpop_sgd_decay
+        #    (its return order is: theta_history, nll_history).
+        theta_hist, nll_hist = _dpop_sgd_decay(
+            theta_init=theta_init,
+            ys=ys_array,
+            dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
+            t0=t0,
+            times=times_array,
+            J=J,
+            rinitializer=rinitializer,
+            rprocess_interp=rprocess_interp,
+            dmeasure=dmeasure,
+            accumvars=accumvars,
+            covars_extended=covars_extended,
+            alpha=alpha,
+            process_weight_index=process_weight_index,
+            key=new_key,
+            M=M,
+            eta0=eta0,
+            decay=decay,
+        )
+
+        # 7) Return in a user-friendly order: first NLL, then parameter trajectory.
+        #    Typical usage:
+        #        logliks, params = model.dpop_sgd_decay(...)
+        return nll_hist, theta_hist
+
+
+
 
     def simulate(
         self,

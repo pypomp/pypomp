@@ -1,4 +1,3 @@
-# euler_multinom.py
 """
 Utility functions for Euler-multinomial approximations of CTMC transitions.
 

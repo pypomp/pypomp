@@ -98,15 +98,17 @@ def test_dpop_default_vs_explicit_process_weight_index(simple_sis):
     Using the default process_weight_index (via accumvars) should produce
     the same DPOP value as passing the 'logw' state index explicitly.
     """
-    model, J, ys, theta, covars, key = simple_sis
+    model, J, ys, theta, covars, _ = simple_sis
 
-    # 1) Default behavior: process_weight_index is inferred from accumvars
-    nll_default = model.dpop(J=J, alpha=0.9, key=key)[0]
+    # Use the same base seed for both calls so the random stream matches.
+    key1 = jax.random.key(999)
+    key2 = jax.random.key(999)
 
-    # 2) Explicit behavior: tell Pomp which state holds the process log-weight
+    # 1) Default behavior: process_weight_index inferred from accumvars
+    nll_default = model.dpop(J=J, alpha=0.9, key=key1)[0]
+
+    # 2) Explicit process_weight_index = index of "logw" in statenames
     logw_index = model.statenames.index("logw")
-
-    key2 = jax.random.key(222)
     nll_explicit = model.dpop(
         J=J,
         alpha=0.9,
@@ -114,7 +116,6 @@ def test_dpop_default_vs_explicit_process_weight_index(simple_sis):
         process_weight_index=logw_index,
     )[0]
 
-    # They should agree numerically
     assert jnp.allclose(nll_default, nll_explicit, atol=1e-7), (
         f"DPOP default vs explicit index mismatch: {nll_default} vs {nll_explicit}"
     )

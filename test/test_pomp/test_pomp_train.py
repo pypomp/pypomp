@@ -103,20 +103,22 @@ def simple_sis_for_dpop():
 
 def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
     """
-    Check that Pomp.dpop_sgd_decay does not depend on the order of keys
-    inside the theta dictionaries.
     """
     model = simple_sis_for_dpop
 
-    # First run: default theta order
-    key = jax.random.key(123)
+    # Use small J,M so the test is fast, but KEEP THEM IDENTICAL across runs.
+    J = 50
+    M = 4
+
+    # First run: default theta ordering
+    key1 = jax.random.key(123)
     nll1, theta_hist1 = model.dpop_sgd_decay(
-        J=200,
-        M=5,
+        J=J,
+        M=M,
         eta0=0.01,
         decay=0.1,
         alpha=0.8,
-        key=key,
+        key=key1,
     )
 
     # Build a permuted theta with reversed key order
@@ -125,11 +127,11 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta_orig]
 
-    # Second run: same random key, but permuted key order in theta
+    # Second run: same random key & same hyper-parameters, but permuted theta
     key2 = jax.random.key(123)
     nll2, theta_hist2 = model.dpop_sgd_decay(
-        J=5,
-        M=3,
+        J=J,
+        M=M,
         eta0=0.01,
         decay=0.1,
         alpha=0.8,
@@ -137,8 +139,6 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
         theta=permuted_theta,
     )
 
-    # Compare histories (up to numerical tolerance)
+    # Histories should match exactly up to numerical precision
     np.testing.assert_allclose(nll1, nll2, atol=1e-7)
     np.testing.assert_allclose(theta_hist1, theta_hist2, atol=1e-7)
-
-

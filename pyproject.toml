@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "jax>=0.4.31",
+    "jax>=0.4.31,<0.7.0",
     "tqdm>=4.66.4",
     "numpy>=1.24",
     "pandas",

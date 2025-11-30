@@ -10,4 +10,5 @@ scipy
 typing_extensions
 seaborn
 matplotlib
+tensorflow-probability 
 loess

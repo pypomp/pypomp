@@ -25,7 +25,7 @@ dependencies = [
     "typing_extensions",
     "seaborn",
     "matplotlib",
-    "tensorflow_probability", 
+    "tensorflow-probability",
     "loess"
 ]
 

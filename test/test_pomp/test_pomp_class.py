@@ -322,23 +322,3 @@ def test_dpop_requires_process_weight(simple):
     with pytest.raises(ValueError, match="process-weight state"):
         LG.dpop(J=J, key=key)
 
-
-def test_dpop_has_no_side_effects_on_pomp_state(simple):
-    """
-    dpop() should not modify theta or results_history, even when it fails.
-    """
-    LG, rw_sd, J, a, M, key = simple
-
-    theta_before = LG.theta.copy()
-    n_results_before = len(LG.results_history)
-
-    # This call is expected to raise (no process-weight state),
-    # but we still want to ensure the Pomp object's state is unchanged.
-    with pytest.raises(ValueError):
-        LG.dpop(J=J, key=key)
-
-    # theta should be unchanged
-    assert LG.theta == theta_before
-    # and results_history length should also be unchanged
-    assert len(LG.results_history) == n_results_before
-

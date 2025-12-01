@@ -6,7 +6,7 @@ import jax.scipy.special as jspecial
 from pypomp.random.poissoninvf import rpoisson
 from pypomp.random.binominvf import rmultinomial
 from pypomp.random.gammainvf import rgamma
-from pypomp.ctmc_multinom import deulermultinom  # NEW: for Euler-multinomial log-prob
+from pypomp.ctmc_multinom import deulermultinom  
 
 
 param_names = (

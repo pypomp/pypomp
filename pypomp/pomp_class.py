@@ -14,7 +14,8 @@ import seaborn as sns
 from .mop import _mop_internal
 from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
-from .train import _vmapped_train_internal, dpop_sgd_decay  
+from .train import _vmapped_train_internal
+from .train_dpop import dpop_sgd_decay  
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
@@ -956,7 +957,7 @@ class Pomp:
             according to `self.canonical_param_names`.
         """
         # Import the low-level implementation here (avoid circular imports).
-        from .train import dpop_sgd_decay as _dpop_sgd_decay
+        from .train_dpop import dpop_sgd_decay as _dpop_sgd_decay
 
         # 1) Update fresh_key (same mechanism as in pfilter/mif/train).
         new_key, _ = self._update_fresh_key(key)

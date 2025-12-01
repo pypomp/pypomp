@@ -1,16 +1,16 @@
-# test_euler_multinom.py
+# test_ctmc_multinom.py
 """
 Unit tests for the Euler-multinomial CTMC utilities.
 
 We test:
 - basic shape and mass-conservation properties of `reulermultinom`,
-- consistency between `sample_and_log_prob` and `deulermultinom`.
+- consistency between `sample_and_log_prob` and `deulermultinom`,
+- behaviour of `deulermultinom` in the "no event" case.
 """
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from pypomp.ctmc_multinom import (
     reulermultinom,
@@ -44,7 +44,7 @@ def test_reulermultinom_shape_and_total():
     x_batch = reulermultinom(key_batch, n=n, rates=rates, dt=dt, shape=(B,))
     assert x_batch.shape == (B, rates.shape[0] + 1)
     assert jnp.all(x_batch >= 0)
-    # check mass conservation for each row
+
     totals = jnp.sum(x_batch, axis=-1)
     assert jnp.all(jnp.isclose(totals, n))
 
@@ -62,14 +62,14 @@ def test_sample_and_log_prob_matches_deulermultinom():
     rates = jnp.array([0.4, 0.6], dtype=jnp.float32)
     dt = 0.3
 
-    # sample: shape (K,), logw: scalar
     sample, logw, key_out = sample_and_log_prob(N=N, rates=rates, dt=dt, key=key)
 
-    # Basic shape checks
+    # Shape checks
     assert sample.shape == rates.shape
     assert isinstance(logw, jnp.ndarray)
     assert logw.shape == ()  # scalar
-    # key should be updated (not strictly required, but good to check)
+
+    # Key should be updated
     assert not jnp.array_equal(key, key_out)
 
     # Consistency check: recompute log-prob using deulermultinom
@@ -87,14 +87,14 @@ def test_deulermultinom_handles_zero_events():
     Check that `deulermultinom` behaves sensibly in the 'no event' case.
 
     If x is all zeros, the probability mass should correspond to having
-    no events in that Euler step.
+    no events in that Euler step and the log-probability should be finite.
     """
     N = 10
     rates = jnp.array([0.2, 0.3], dtype=jnp.float32)
     dt = 0.1
     x_zero = jnp.zeros_like(rates)
 
-    logw_zero = deulermultinom(x=x_zero, n= N, rates=rates, dt=dt)
+    logw_zero = deulermultinom(x=x_zero, n=N, rates=rates, dt=dt)
 
     # log-prob should be finite (no NaNs / infs)
     assert jnp.isfinite(logw_zero), "log-prob for zero increment should be finite"

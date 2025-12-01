@@ -72,62 +72,59 @@ class PompPFilterResult(PompBaseResult):
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert pfilter result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        for param_idx, (logLik_arr, theta_dict) in enumerate(
-            zip(self.logLiks, self.theta)
-        ):
-            # Use underlying NumPy array if available to avoid copies
-            arr = getattr(logLik_arr, "values", logLik_arr)
-            logLik_arr_np = np.asarray(arr)
-            logLik = float(logmeanexp(logLik_arr_np, ignore_nan=ignore_nan))
-            se = (
-                float(logmeanexp_se(logLik_arr_np, ignore_nan=ignore_nan))
-                if len(logLik_arr_np) > 1
-                else np.nan
+        if not self.theta or self.logLiks.size == 0:
+            return pd.DataFrame()
+
+        arr = getattr(self.logLiks, "values", self.logLiks)
+        logLik_arr_np = np.asarray(arr)
+
+        logLik = np.apply_along_axis(
+            logmeanexp, -1, logLik_arr_np, ignore_nan=ignore_nan
+        )
+
+        if logLik_arr_np.shape[-1] > 1:
+            se = np.apply_along_axis(
+                logmeanexp_se, -1, logLik_arr_np, ignore_nan=ignore_nan
             )
-            row = {"logLik": logLik, "se": se}
-            row.update({param: float(theta_dict[param]) for param in param_names})
-            rows.append(row)
-        return pd.DataFrame(rows)
+        else:
+            se = np.full_like(logLik, np.nan, dtype=float)
+
+        theta_df = pd.DataFrame(self.theta)
+
+        df = pd.DataFrame(
+            {
+                "logLik": logLik.astype(float),
+                "se": se.astype(float),
+            }
+        )
+
+        return pd.concat(
+            [df.reset_index(drop=True), theta_df.reset_index(drop=True)], axis=1
+        )
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this pfilter result."""
         if not self.theta or not len(self.logLiks):
             return pd.DataFrame()
 
-        param_names = list(self.theta[0].keys())
+        arr = getattr(self.logLiks, "values", self.logLiks)
+        logLik_arr_np = np.asarray(arr)
+        logliks = np.apply_along_axis(logmeanexp, -1, logLik_arr_np)
+
         n_reps = len(self.theta)
 
-        # Vectorize loglik computation
-        logliks = []
-        for logLik_arr in self.logLiks:
-            arr = getattr(logLik_arr, "values", logLik_arr)
-            logLik_arr_np = np.asarray(arr)
-            logliks.append(float(logmeanexp(logLik_arr_np)))
+        base_df = pd.DataFrame(
+            {
+                "replicate": np.arange(n_reps, dtype=int),
+                "iteration": np.zeros(n_reps, dtype=int),
+                "method": self.method,
+                "logLik": logliks.astype(float),
+            }
+        )
 
-        # Vectorize replicate, iteration, and method lists
-        replicate_list = np.arange(n_reps).tolist()
-        iteration_list = [0] * n_reps  # Local iteration for pfilter
-        method_list = ["pfilter"] * n_reps
-        loglik_list = logliks
+        theta_df = pd.DataFrame(self.theta).reset_index(drop=True)
 
-        # Vectorize parameter extraction
-        param_columns = {}
-        for p in param_names:
-            param_columns[p] = [
-                float(self.theta[rep_idx][p]) for rep_idx in range(n_reps)
-            ]
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
+        return pd.concat([base_df.reset_index(drop=True), theta_df], axis=1)
 
     def print_summary(self):
         """Print summary of pfilter result."""
@@ -160,66 +157,35 @@ class PompMIFResult(PompBaseResult):
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert mif result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        # traces_da is an xarray.DataArray with dims: (replicate, iteration, variable)
         traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if traces_da is None or not hasattr(traces_da, "sizes") or not traces_da.sizes:
             return pd.DataFrame()
-        n_reps = traces_da.sizes["replicate"]
-        last_idx = traces_da.sizes["iteration"] - 1
-        for rep in range(n_reps):
-            last_row = traces_da.sel(replicate=rep, iteration=last_idx)
-            logLik_val = float(last_row.sel(variable="logLik").values)
-            row = {"logLik": logLik_val, "se": np.nan}
-            for param in param_names:
-                row[param] = float(last_row.sel(variable=param).values)
-            rows.append(row)
-        return pd.DataFrame(rows)
+
+        df = (
+            traces_da.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+        )
+
+        param_names = list(self.theta[0].keys())
+        cols = ["logLik"] + param_names
+        df = pd.DataFrame(df[cols])
+        df.insert(1, "se", np.nan)
+
+        return df
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this mif result."""
-        traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if self.traces_da is None:
             return pd.DataFrame()
 
-        n_rep = traces_da.sizes["replicate"]
-        n_iter = traces_da.sizes["iteration"]
-        variable_names = list(traces_da.coords["variable"].values)
-
-        traces_array = traces_da.values
-        loglik_idx = variable_names.index("logLik")
-
-        param_names = list(self.theta[0].keys())
-        param_indices = np.array([variable_names.index(p) for p in param_names])
-
-        # Vectorize index creation using meshgrid
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        return (
+            self.traces_da.to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+            .assign(method="mif")
         )
-        replicate_list = rep_indices.flatten().tolist()
-        iteration_list = iter_indices.flatten().tolist()
-        method_list = ["mif"] * (n_rep * n_iter)
-
-        # Vectorize loglik extraction
-        loglik_list = traces_array[:, :, loglik_idx].flatten().astype(float).tolist()
-
-        # Vectorize parameter extraction
-        param_columns = {}
-        for i, p in enumerate(param_names):
-            param_columns[p] = (
-                traces_array[:, :, param_indices[i]].flatten().astype(float).tolist()
-            )
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
 
     def print_summary(self):
         """Print summary of mif result."""
@@ -257,66 +223,35 @@ class PompTrainResult(PompBaseResult):
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert train result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        # traces_da is an xarray.DataArray with dims: (replicate, iteration, variable)
         traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if traces_da is None or not hasattr(traces_da, "sizes") or not traces_da.sizes:
             return pd.DataFrame()
-        n_reps = traces_da.sizes["replicate"]
-        last_idx = traces_da.sizes["iteration"] - 1
-        for rep in range(n_reps):
-            last_row = traces_da.sel(replicate=rep, iteration=last_idx)
-            logLik_val = float(last_row.sel(variable="logLik").values)
-            row = {"logLik": logLik_val, "se": np.nan}
-            for param in param_names:
-                row[param] = float(last_row.sel(variable=param).values)
-            rows.append(row)
-        return pd.DataFrame(rows)
+
+        df = (
+            traces_da.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+        )
+
+        param_names = list(self.theta[0].keys())
+        cols = ["logLik"] + param_names
+        df = pd.DataFrame(df[cols])
+        df.insert(1, "se", np.nan)
+
+        return df
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this train result."""
-        traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if self.traces_da is None:
             return pd.DataFrame()
 
-        n_rep = traces_da.sizes["replicate"]
-        n_iter = traces_da.sizes["iteration"]
-        variable_names = list(traces_da.coords["variable"].values)
-
-        traces_array = traces_da.values
-        loglik_idx = variable_names.index("logLik")
-
-        param_names = list(self.theta[0].keys())
-        param_indices = np.array([variable_names.index(p) for p in param_names])
-
-        # Vectorize index creation using meshgrid
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        return (
+            self.traces_da.to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+            .assign(method="train")
         )
-        replicate_list = rep_indices.flatten().tolist()
-        iteration_list = iter_indices.flatten().tolist()
-        method_list = ["train"] * (n_rep * n_iter)
-
-        # Vectorize loglik extraction
-        loglik_list = traces_array[:, :, loglik_idx].flatten().astype(float).tolist()
-
-        # Vectorize parameter extraction
-        param_columns = {}
-        for i, p in enumerate(param_names):
-            param_columns[p] = (
-                traces_array[:, :, param_indices[i]].flatten().astype(float).tolist()
-            )
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
 
     def print_summary(self):
         """Print summary of train result."""
@@ -354,232 +289,71 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
-        unit_names = list(self.logLiks.coords["unit"].values)
-        n_reps = self.logLiks.sizes["theta"]
-
-        logliks_array = self.logLiks.values
-
-        unit_logliks = np.array(
-            [
-                [
-                    logmeanexp(logliks_array[rep, unit_idx, :], ignore_nan=ignore_nan)
-                    for unit_idx in range(len(unit_names))
-                ]
-                for rep in range(n_reps)
-            ]
+        ll = np.apply_along_axis(
+            logmeanexp, -1, self.logLiks.values, ignore_nan=ignore_nan
         )
 
-        shared_logliks = np.sum(unit_logliks, axis=1)
+        df = (
+            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
+            .assign(
+                replicate=lambda x: range(len(x)),
+                **{"shared logLik": lambda x: x.sum(axis=1)},
+            )
+            .melt(
+                id_vars=["replicate", "shared logLik"],
+                var_name="unit",
+                value_name="unit logLik",
+            )
+        )
 
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
+        if self.shared:
+            s_params = pd.concat(self.shared, axis=1).T.reset_index(drop=True)
+            df = df.join(s_params, on="replicate")
 
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
+        if self.unit_specific:
+            u_params = (
+                pd.concat(self.unit_specific, keys=range(len(self.unit_specific)))
+                .stack()
+                .unstack(level=1)
+                .reset_index()
+            )
+            col_names = list(u_params.columns)
+            u_params.rename(
+                columns={col_names[0]: "replicate", col_names[1]: "unit"}, inplace=True
+            )
+            df = df.merge(u_params, on=["replicate", "unit"], how="left")
 
-        if self.shared and len(self.shared) > 0:
-            shared_param_data = {}
-            for rep in range(min(n_reps, len(self.shared))):
-                shared_df = self.shared[rep]
-                if hasattr(shared_df, "values") and shared_df.shape[1] >= 1:
-                    shared_vals = shared_df.iloc[:, 0].values
-                    shared_names = (
-                        list(shared_df.columns) if hasattr(shared_df, "columns") else []
-                    )
-                    for i, param_name in enumerate(shared_names):
-                        if param_name not in shared_param_data:
-                            shared_param_data[param_name] = np.full(n_reps, np.nan)
-                        shared_param_data[param_name][rep] = (
-                            shared_vals[i] if i < len(shared_vals) else np.nan
-                        )
-
-            for param_name, values in shared_param_data.items():
-                data[param_name] = values[rep_indices]
-
-        if self.unit_specific and len(self.unit_specific) > 0:
-            unit_param_data = {}
-            for rep in range(min(n_reps, len(self.unit_specific))):
-                unit_df = self.unit_specific[rep]
-                if hasattr(unit_df, "columns"):
-                    unit_param_names = (
-                        list(unit_df.index) if hasattr(unit_df, "index") else []
-                    )
-                    for param_name in unit_param_names:
-                        if param_name not in unit_param_data:
-                            unit_param_data[param_name] = np.full(
-                                (n_reps, len(unit_names)), np.nan
-                            )
-                        for unit_idx, unit in enumerate(unit_names):
-                            if unit in unit_df.columns:
-                                unit_param_data[param_name][rep, unit_idx] = (
-                                    unit_df.loc[param_name, unit]
-                                )
-
-            for param_name, values in unit_param_data.items():
-                data[param_name] = values[rep_indices, unit_indices]
-
-        return pd.DataFrame(data)
+        return df
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this panel pfilter result."""
-        unit_names = list(self.logLiks.coords["unit"].values)
-        shared_list = self.shared
-        unit_list = self.unit_specific
+        """Return pfilter results formatted as traces (long format)."""
+        ll = np.apply_along_axis(logmeanexp, -1, self.logLiks.values)
+        reps = np.arange(len(ll))
 
-        n_theta = self.logLiks.sizes["theta"]
-        n_units = len(unit_names)
-
-        if n_theta == 0:
-            return pd.DataFrame()
-
-        logliks_array = self.logLiks.values
-        # Vectorize unit_avgs calculation
-        unit_avgs = np.array(
-            [
-                [logmeanexp(logliks_array[rep_idx, u_i, :]) for u_i in range(n_units)]
-                for rep_idx in range(n_theta)
-            ]
+        df_s = pd.DataFrame(
+            {"replicate": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
         )
-        shared_totals = np.sum(unit_avgs, axis=1)
 
-        # Get param names
-        shared_param_names = []
-        unit_param_names = []
-        if shared_list:
-            shared_df = shared_list[0]
-            if hasattr(shared_df, "index"):
-                shared_param_names = list(shared_df.index)
-        if unit_list:
-            unit_df = unit_list[0]
-            if hasattr(unit_df, "index"):
-                unit_param_names = list(unit_df.index)
+        df_u = (
+            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values, index=reps)
+            .melt(ignore_index=False, var_name="unit", value_name="logLik")
+            .reset_index()
+            .rename(columns={"index": "replicate"})
+        )
 
-        all_param_names = shared_param_names + unit_param_names
+        if self.shared:
+            p_s = pd.concat(self.shared, axis=1).T.set_axis(reps, axis=0)
+            df_s = df_s.join(p_s, on="replicate")
+            df_u = df_u.join(p_s, on="replicate")
 
-        shared_param_data = {}
-        if isinstance(shared_list, list):
-            for rep_idx in range(min(n_theta, len(shared_list))):
-                df = shared_list[rep_idx]
-                if hasattr(df, "index") and df.shape[1] >= 1:
-                    for name in df.index:
-                        if name not in shared_param_data:
-                            shared_param_data[name] = np.full(n_theta, np.nan)
-                        shared_param_data[name][rep_idx] = float(
-                            df.loc[name, df.columns[0]]
-                        )
+        if self.unit_specific:
+            p_u = pd.concat(self.unit_specific, keys=reps).stack().unstack(level=1)
+            p_u.index.names = ["replicate", "unit"]
+            df_u = df_u.join(p_u, on=["replicate", "unit"])
 
-        unit_param_data = {}
-        if isinstance(unit_list, list):
-            for rep_idx in range(min(n_theta, len(unit_list))):
-                df = unit_list[rep_idx]
-                if hasattr(df, "columns"):
-                    for name in df.index:
-                        if name not in unit_param_data:
-                            unit_param_data[name] = np.full((n_theta, n_units), np.nan)
-                        for unit_idx, unit in enumerate(unit_names):
-                            if str(unit) in df.columns:
-                                unit_param_data[name][rep_idx, unit_idx] = float(
-                                    df.loc[name, str(unit)]
-                                )
-
-        # Vectorize row creation
-        # Create shared rows: one per replicate
-        rep_indices_shared = np.arange(n_theta)
-        # Create unit rows: n_units per replicate
-        rep_indices_units = np.repeat(np.arange(n_theta), n_units)
-        unit_indices = np.tile(np.arange(n_units), n_theta)
-
-        # Build shared rows data
-        shared_data = {
-            "replicate": rep_indices_shared.tolist(),
-            "unit": ["shared"] * n_theta,
-            "iteration": [0] * n_theta,
-            "method": ["pfilter"] * n_theta,
-            "logLik": shared_totals.astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in shared_param_data:
-                shared_data[name] = shared_param_data[name].astype(float).tolist()
-            else:
-                shared_data[name] = [float("nan")] * n_theta
-
-        # Build unit rows data
-        unit_data = {
-            "replicate": rep_indices_units.tolist(),
-            "unit": [str(unit_names[i]) for i in unit_indices],
-            "iteration": [0] * (n_theta * n_units),
-            "method": ["pfilter"] * (n_theta * n_units),
-            "logLik": unit_avgs[rep_indices_units, unit_indices].astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in unit_param_data:
-                unit_data[name] = (
-                    unit_param_data[name][rep_indices_units, unit_indices]
-                    .astype(float)
-                    .tolist()
-                )
-            elif name in shared_param_data:
-                unit_data[name] = (
-                    shared_param_data[name][rep_indices_units].astype(float).tolist()
-                )
-            else:
-                unit_data[name] = [float("nan")] * (n_theta * n_units)
-
-        # Combine shared and unit rows, interleaving by replicate
-        # Build interleaved structure directly using numpy for efficiency
-        n_total = n_theta * (1 + n_units)  # 1 shared + n_units per replicate
-
-        # Create interleaved structure: for each rep, [shared, unit1, unit2, ...]
-        # Shared positions: 0, 1+n_units, 2*(1+n_units), ...
-        shared_positions = np.arange(0, n_total, 1 + n_units)
-        # Unit positions: everything else
-        unit_positions = np.setdiff1d(np.arange(n_total), shared_positions)
-
-        # Build combined data dict directly
-        combined_data = {}
-
-        # Handle "unit" column specially
-        shared_units = np.array(["shared"] * n_theta, dtype=object)
-        unit_units = np.array([str(unit_names[i]) for i in unit_indices], dtype=object)
-        combined_units = np.empty(n_total, dtype=object)
-        combined_units[shared_positions] = shared_units
-        combined_units[unit_positions] = unit_units
-        combined_data["unit"] = combined_units.tolist()
-
-        # Handle other columns
-        for col in ["replicate", "iteration", "method", "logLik"]:
-            shared_vals = np.array(shared_data[col])
-            unit_vals = np.array(unit_data[col])
-            combined_vals = np.empty(n_total, dtype=shared_vals.dtype)
-            combined_vals[shared_positions] = shared_vals
-            combined_vals[unit_positions] = unit_vals
-            combined_data[col] = combined_vals.tolist()
-
-        # Handle parameter columns
-        for name in all_param_names:
-            if name in shared_param_data:
-                shared_vals = shared_param_data[name]
-            else:
-                shared_vals = np.full(n_theta, np.nan)
-
-            if name in unit_param_data:
-                unit_vals = unit_param_data[name][rep_indices_units, unit_indices]
-            elif name in shared_param_data:
-                unit_vals = shared_param_data[name][rep_indices_units]
-            else:
-                unit_vals = np.full(n_theta * n_units, np.nan)
-
-            combined_vals = np.empty(n_total, dtype=float)
-            combined_vals[shared_positions] = shared_vals.astype(float)
-            combined_vals[unit_positions] = unit_vals.astype(float)
-            combined_data[name] = combined_vals.tolist()
-
-        df = pd.DataFrame(combined_data)
-        return df
+        return pd.concat([df_s, df_u], ignore_index=True).assign(
+            method="pfilter", iteration=1
+        )
 
     def print_summary(self):
         """Print summary of panel pfilter result."""
@@ -615,188 +389,50 @@ class PanelPompMIFResult(PanelPompBaseResult):
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel mif result to DataFrame."""
-        shared_da = self.shared_traces
-        unit_da = self.unit_traces
+        s_df = (
+            self.shared_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"logLik": "shared logLik"})
+        )
 
-        all_shared_vars = list(shared_da.coords["variable"].values)
-        shared_names = all_shared_vars[1:] if len(all_shared_vars) > 1 else []
+        u_df = (
+            self.unit_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"unitLogLik": "unit logLik"})
+        )
 
-        all_unit_vars = list(unit_da.coords["variable"].values)
-        unit_names = list(unit_da.coords["unit"].values)
-        n_reps = shared_da.sizes["replicate"]
+        # Avoid duplicate "iteration" column on join; keep the one from u_df
+        if "iteration" in s_df.columns:
+            s_df = s_df.drop(columns=["iteration"])
 
-        shared_final_values = shared_da.isel(iteration=-1).values
-        unit_final_values = unit_da.isel(iteration=-1).values
-
-        shared_logliks = self.logLiks[:, 0].values
-        unit_logliks = self.logLiks[:, 1:].values
-
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
-
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
-
-        if shared_names:
-            shared_param_values = shared_final_values[:, 1:]
-            for i, param_name in enumerate(shared_names):
-                data[param_name] = shared_param_values[rep_indices, i]
-
-        unit_param_values = unit_final_values[:, 1:, :]
-        for i, param_name in enumerate(all_unit_vars[1:]):
-            data[param_name] = unit_param_values[rep_indices, i, unit_indices]
-
-        return pd.DataFrame(data)
+        return u_df.join(s_df, on="replicate").reset_index()
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this panel mif result."""
-        shared_da = self.shared_traces
-        unit_da = self.unit_traces
-        unit_names = list(unit_da.coords["unit"].values)
-        shared_vars = list(shared_da.coords["variable"].values)
-        unit_vars = list(unit_da.coords["variable"].values)
-
-        n_rep = shared_da.sizes["replicate"]
-        n_iter = shared_da.sizes["iteration"]
-        n_units = len(unit_names)
-
-        if n_rep == 0 or n_iter == 0:
+        """Return panel mif results formatted as traces (long format)."""
+        if self.shared_traces.size == 0:
             return pd.DataFrame()
 
-        shared_values = shared_da.values
-        unit_values = unit_da.values
-
-        shared_param_indices = {name: i for i, name in enumerate(shared_vars[1:])}
-        unit_param_indices = {name: i for i, name in enumerate(unit_vars[1:])}
-
-        shared_param_names = list(shared_param_indices.keys())
-        unit_param_names = list(unit_param_indices.keys())
-        all_param_names = shared_param_names + unit_param_names
-
-        # Vectorize index creation
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        df_s = (
+            self.shared_traces.to_dataset(dim="variable").to_dataframe().reset_index()
         )
-        rep_indices_flat = rep_indices.flatten()
-        iter_indices_flat = iter_indices.flatten()
+        df_s["unit"] = "shared"
 
-        # Extract shared logliks and params vectorized
-        shared_logliks = shared_values[:, :, 0].flatten()
-        shared_param_arrays = {}
-        for name in shared_param_names:
-            idx = shared_param_indices[name] + 1
-            shared_param_arrays[name] = shared_values[:, :, idx].flatten()
+        df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
+        df_u = df_u.rename(columns={"unitLogLik": "logLik"})
 
-        # Extract unit logliks and params vectorized
-        unit_logliks = unit_values[:, :, 0, :].reshape(n_rep * n_iter, n_units)
-        unit_param_arrays = {}
-        for name in unit_param_names:
-            idx = unit_param_indices[name] + 1
-            unit_param_arrays[name] = unit_values[:, :, idx, :].reshape(
-                n_rep * n_iter, n_units
+        meta_cols = {"replicate", "iteration", "logLik", "unit"}
+        shared_params = [c for c in df_s.columns if c not in meta_cols]
+
+        if shared_params:
+            df_u = df_u.merge(
+                df_s[["replicate", "iteration"] + shared_params],
+                on=["replicate", "iteration"],
+                how="left",
             )
 
-        # Build shared rows
-        shared_data = {
-            "replicate": rep_indices_flat.tolist(),
-            "unit": ["shared"] * (n_rep * n_iter),
-            "iteration": iter_indices_flat.tolist(),
-            "method": ["mif"] * (n_rep * n_iter),
-            "logLik": shared_logliks.astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in shared_param_arrays:
-                shared_data[name] = shared_param_arrays[name].astype(float).tolist()
-            else:
-                shared_data[name] = [float("nan")] * (n_rep * n_iter)
-
-        # Build unit rows
-        # Repeat each (rep, iter) combination for each unit
-        rep_indices_units = np.repeat(rep_indices_flat, n_units)
-        iter_indices_units = np.repeat(iter_indices_flat, n_units)
-        unit_indices_flat = np.tile(np.arange(n_units), n_rep * n_iter)
-
-        unit_data = {
-            "replicate": rep_indices_units.tolist(),
-            "unit": [str(unit_names[i]) for i in unit_indices_flat],
-            "iteration": iter_indices_units.tolist(),
-            "method": ["mif"] * (n_rep * n_iter * n_units),
-            "logLik": unit_logliks.flatten().astype(float).tolist(),
-        }
-
-        # Map flat indices back to (rep*iter, unit) for unit params
-        flat_to_repiter = np.repeat(np.arange(n_rep * n_iter), n_units)
-
-        for name in all_param_names:
-            if name in unit_param_arrays:
-                unit_data[name] = (
-                    unit_param_arrays[name].flatten().astype(float).tolist()
-                )
-            elif name in shared_param_arrays:
-                # Broadcast shared params to units
-                unit_data[name] = (
-                    shared_param_arrays[name][flat_to_repiter].astype(float).tolist()
-                )
-            else:
-                unit_data[name] = [float("nan")] * (n_rep * n_iter * n_units)
-
-        # Combine shared and unit rows, interleaving by (rep, iter)
-        # Build interleaved structure directly using numpy for efficiency
-        n_total = n_rep * n_iter * (1 + n_units)  # 1 shared + n_units per (rep, iter)
-
-        # Create interleaved structure: for each (rep, iter), [shared, unit1, unit2, ...]
-        # Shared positions: 0, 1+n_units, 2*(1+n_units), ...
-        shared_positions = np.arange(0, n_total, 1 + n_units)
-        # Unit positions: everything else
-        unit_positions = np.setdiff1d(np.arange(n_total), shared_positions)
-
-        # Build combined data dict directly
-        combined_data = {}
-
-        # Handle "unit" column specially
-        shared_units = np.array(["shared"] * (n_rep * n_iter), dtype=object)
-        unit_units = np.array(
-            [str(unit_names[i]) for i in unit_indices_flat], dtype=object
-        )
-        combined_units = np.empty(n_total, dtype=object)
-        combined_units[shared_positions] = shared_units
-        combined_units[unit_positions] = unit_units
-        combined_data["unit"] = combined_units.tolist()
-
-        # Handle other columns
-        for col in ["replicate", "iteration", "method", "logLik"]:
-            shared_vals = np.array(shared_data[col])
-            unit_vals = np.array(unit_data[col])
-            combined_vals = np.empty(n_total, dtype=shared_vals.dtype)
-            combined_vals[shared_positions] = shared_vals
-            combined_vals[unit_positions] = unit_vals
-            combined_data[col] = combined_vals.tolist()
-
-        # Handle parameter columns
-        for name in all_param_names:
-            if name in shared_param_arrays:
-                shared_vals = shared_param_arrays[name]
-            else:
-                shared_vals = np.full(n_rep * n_iter, np.nan)
-
-            if name in unit_param_arrays:
-                unit_vals = unit_param_arrays[name].flatten()
-            elif name in shared_param_arrays:
-                unit_vals = shared_param_arrays[name][flat_to_repiter]
-            else:
-                unit_vals = np.full(n_rep * n_iter * n_units, np.nan)
-
-            combined_vals = np.empty(n_total, dtype=float)
-            combined_vals[shared_positions] = shared_vals.astype(float)
-            combined_vals[unit_positions] = unit_vals.astype(float)
-            combined_data[name] = combined_vals.tolist()
-
-        df = pd.DataFrame(combined_data)
-        return df
+        return pd.concat([df_s, df_u], ignore_index=True).assign(method="mif")
 
     def print_summary(self):
         """Print summary of panel mif result."""
@@ -832,6 +468,10 @@ class ResultsHistory:
         """Get number of entries."""
         return len(self._entries)
 
+    def __iter__(self):
+        """Iterate over entries."""
+        return iter(self._entries)
+
     def clear(self):
         """Clear all entries from the history."""
         self._entries.clear()
@@ -841,17 +481,6 @@ class ResultsHistory:
         if not self._entries:
             raise ValueError("History is empty")
         return self._entries[-1]
-
-    def get_best_run(self) -> BaseResult | None:
-        """Find run with highest log-likelihood."""
-        if not self._entries:
-            return None
-        return max(
-            self._entries,
-            key=lambda x: getattr(
-                x, "total_log_lik", getattr(x, "best_log_lik", -float("inf"))
-            ),
-        )
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """Get results DataFrame for entry at index."""
@@ -872,74 +501,50 @@ class ResultsHistory:
         return df
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame from entire result history."""
+        """
+        Return traces DataFrame from entire result history.
+
+        Handles continuous iteration counting across chained runs
+        (e.g., MIF -> MIF) and aligns checkpoints (PFilter).
+        """
         if not self._entries:
             return pd.DataFrame()
 
         all_dfs = []
-        global_iters: dict[int, int] = {}  # replicate -> current global iteration
+        global_iter_counters: dict[int, int] = {}
 
         for res in self._entries:
-            # Check if the result class has a traces() method (not just a traces attribute)
-            traces_method = getattr(type(res), "traces", None)
-            if not callable(traces_method):
+            if not hasattr(res, "traces"):
                 continue
-            df = res.traces()  # type: ignore[attr-defined]
+            df = res.traces()  # pyright: ignore[reportAttributeAccessIssue]
             if df.empty:
                 continue
 
-            # Adjust iteration numbers to be global (vectorized)
-            rep_indices = df["replicate"].values.astype(int)
-            local_iters = df["iteration"].values.astype(int)
+            is_estimation = res.method in ["mif", "train"]
 
-            # Initialize global_iters for any new replicates
-            unique_reps = np.unique(rep_indices)
-            for rep_idx in unique_reps:
-                if rep_idx not in global_iters:
-                    global_iters[rep_idx] = 0
+            unique_reps = df["replicate"].unique()
+            offsets_map = {r: global_iter_counters.get(r, 0) for r in unique_reps}
 
-            # Vectorized processing based on result type
-            if isinstance(res, (PompMIFResult, PompTrainResult, PanelPompMIFResult)):
-                # For mif/train: skip starting parameters beyond the first round
-                keep_mask = np.ones(len(df), dtype=bool)
-                new_iterations = np.zeros(len(df), dtype=int)
+            row_offsets = df["replicate"].map(offsets_map)
 
-                for rep_idx in unique_reps:
-                    rep_mask = rep_indices == rep_idx
-                    local_iters_rep = local_iters[rep_mask]
-                    rep_indices_in_df = np.where(rep_mask)[0]
+            if is_estimation:
+                mask = (df["iteration"] > 0) | (row_offsets == 0)
+                df = df.loc[mask].copy()
 
-                    # Skip starting parameters beyond first round
-                    if global_iters[rep_idx] == 0:
-                        # Keep all rows for first round
-                        # Update iterations sequentially
-                        for i, idx_in_df in enumerate(rep_indices_in_df):
-                            new_iterations[idx_in_df] = global_iters[rep_idx]
-                            global_iters[rep_idx] += 1
-                    else:
-                        # Skip rows with local_iter == 0 (starting params)
-                        skip_mask = local_iters_rep == 0
-                        keep_mask[rep_indices_in_df[skip_mask]] = False
-                        # Update iterations for kept rows
-                        kept_mask = ~skip_mask
-                        for i, idx_in_df in enumerate(rep_indices_in_df[kept_mask]):
-                            new_iterations[idx_in_df] = global_iters[rep_idx]
-                            global_iters[rep_idx] += 1
+                row_offsets = df["replicate"].map(offsets_map)
 
-                df = df[keep_mask].copy()
-                df["iteration"] = new_iterations[keep_mask]
+                df["iteration"] = df["iteration"] + row_offsets
 
-            elif isinstance(res, (PompPFilterResult, PanelPompPFilterResult)):
-                # For pfilter, use the last global iteration (or 1 if first)
-                new_iterations = np.zeros(len(df), dtype=int)
-                for rep_idx in unique_reps:
-                    rep_mask = rep_indices == rep_idx
-                    last_iter = global_iters.get(rep_idx, 1) - 1
-                    new_iter = last_iter if last_iter > 0 else 1
-                    new_iterations[rep_mask] = new_iter
+                new_maxes = df.groupby("replicate")["iteration"].max()
+                for r, mx in new_maxes.items():
+                    global_iter_counters[r] = int(mx)
 
+            else:
+                # LOGIC: PFilter is a snapshot.
+                # Plot it at the current "end" of the timeline.
                 df = df.copy()
-                df["iteration"] = new_iterations
+                df["iteration"] = row_offsets
+                # We do NOT increment the global_iter_counters here
 
             if not df.empty:
                 all_dfs.append(df)
@@ -947,21 +552,22 @@ class ResultsHistory:
         if not all_dfs:
             return pd.DataFrame()
 
-        # Concatenate all DataFrames
         result_df = pd.concat(all_dfs, ignore_index=True)
 
-        # Sort by iteration and replicate
+        sort_cols = ["replicate", "iteration"]
         if "unit" in result_df.columns:
-            # Panel results: sort by replicate, unit, iteration
-            result_df = result_df.sort_values(
-                ["replicate", "unit", "iteration"]
-            ).reset_index(drop=True)
-        else:
-            # Regular results: sort by iteration, replicate
-            result_df = result_df.sort_values(["iteration", "replicate"]).reset_index(
-                drop=True
-            )
+            sort_cols.insert(1, "unit")
 
+        result_df = result_df.sort_values(sort_cols).reset_index(drop=True)
+
+        canonical_first = ["replicate", "unit", "iteration", "method", "logLik"]
+        existing_first = [c for c in canonical_first if c in result_df.columns]
+        remaining = [c for c in result_df.columns if c not in existing_first]
+        result_df = result_df[existing_first + remaining]
+
+        assert isinstance(result_df, pd.DataFrame), (
+            "result_df is not a DataFrame; something went wrong"
+        )
         return result_df
 
     def print_summary(self):

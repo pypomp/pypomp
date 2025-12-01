@@ -59,11 +59,42 @@ def test_traces(measles_panel_mp):
     panel, *_ = measles_panel_mp
     traces = panel.traces()
     assert isinstance(traces, pd.DataFrame)
-    assert "replicate" in traces.columns
-    assert "unit" in traces.columns
-    assert "iteration" in traces.columns
-    assert "method" in traces.columns
-    assert "logLik" in traces.columns
+    expected_column_order = ["replicate", "unit", "iteration", "method", "logLik"]
+    assert list(traces.columns[:5]) == expected_column_order, (
+        f"First five columns are {list(traces.columns[:5])}, expected {expected_column_order}"
+    )
+
+    traces_sorted = traces.sort_values(
+        ["replicate", "unit", "iteration"], kind="stable"
+    ).reset_index(drop=True)
+    assert traces.equals(traces_sorted)
+
+    grouped = traces.groupby(["replicate", "unit"], sort=False)
+    for (rep, unit), df in grouped:  # type: ignore[misc]
+        if len(df) == 0:
+            continue
+
+        # For non-pfilter methods (e.g., MIF, train), iterations should increase
+        # from 0 up to the number of such entries minus one.
+        non_pfilter = df[df["method"] != "pfilter"]
+        if len(non_pfilter) > 0:
+            non_pfilter_iters = np.sort(np.asarray(non_pfilter["iteration"]))
+            expected_seq = np.arange(len(non_pfilter_iters))
+            assert bool(np.array_equal(non_pfilter_iters, expected_seq)), (
+                f"Iteration numbers for replicate={rep}, unit={unit} and "
+                f"method!=pfilter are {non_pfilter_iters}, expected {expected_seq}"
+            )
+
+        # For pfilter entries, the iteration counter should not advance;
+        # they are allowed to repeat the last non-pfilter iteration.
+        pfilter = df[df["method"] == "pfilter"]
+        if len(pfilter) > 0 and len(non_pfilter) > 0:
+            pfilter_iters = np.asarray(pfilter["iteration"])
+            last_non_pfilter_iter = non_pfilter["iteration"].max()
+            assert bool(np.all(pfilter_iters == last_non_pfilter_iter)), (
+                f"Pfilter iteration numbers for replicate={rep}, unit={unit} "
+                f"are {pfilter_iters}, expected all {last_non_pfilter_iter}"
+            )
 
 
 def test_time(measles_panel_mp):
@@ -163,17 +194,22 @@ def test_pickle_panelpomp(measles_panel_mp):
             # Compare execution times
             assert orig_result.execution_time == unpickled_result.execution_time
             # For MIF results, compare traces
-            if (
-                hasattr(orig_result, "shared_traces")
-                and orig_result.shared_traces is not None
-            ):
-                assert orig_result.shared_traces.equals(unpickled_result.shared_traces)
+            shared_traces = getattr(orig_result, "shared_traces", None)
+            if shared_traces is not None:
+                unpickled_shared_traces = getattr(
+                    unpickled_result, "shared_traces", None
+                )
+                assert shared_traces.equals(unpickled_shared_traces)
             # For pfilter results, compare logLiks
-            if hasattr(orig_result, "logLiks") and orig_result.logLiks is not None:
-                assert orig_result.logLiks.equals(unpickled_result.logLiks)
+            logLiks = getattr(orig_result, "logLiks", None)
+            if logLiks is not None:
+                unpickled_logLiks = getattr(unpickled_result, "logLiks", None)
+                assert logLiks.equals(unpickled_logLiks)
             # Compare theta if present
-            if hasattr(orig_result, "theta"):
-                assert orig_result.theta == unpickled_result.theta
+            theta = getattr(orig_result, "theta", None)
+            if theta is not None:
+                unpickled_theta = getattr(unpickled_result, "theta", None)
+                assert theta == unpickled_theta
         assert (
             original_unit.traces().values.tolist()
             == unpickled_unit.traces().values.tolist()

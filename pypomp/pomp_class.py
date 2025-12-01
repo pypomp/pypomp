@@ -82,7 +82,7 @@ class Pomp:
     def __init__(
         self,
         ys: pd.DataFrame,
-        theta: dict | list[dict],
+        theta: dict | list[dict] | PompParameters,
         statenames: list[str],
         t0: float,
         rinit: Callable,
@@ -119,7 +119,10 @@ class Pomp:
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        self.theta: PompParameters = PompParameters(theta)
+        if isinstance(theta, PompParameters):
+            self.theta: PompParameters = theta  # type: ignore[reportRedeclaration]
+        else:
+            self.theta: PompParameters = PompParameters(theta)
 
         # Extract parameter names from first theta dict
         self.canonical_param_names: list[str] = self.theta.get_param_names()
@@ -212,6 +215,23 @@ class Pomp:
         )
         self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
 
+    def _prepare_theta_input(
+        self, theta: dict | list[dict] | PompParameters | None
+    ) -> PompParameters:
+        """
+        Prepare the theta input for the method.
+        """
+        if theta is None:
+            return self.theta
+        elif isinstance(theta, dict) or isinstance(theta, list):
+            return PompParameters(theta)
+        elif isinstance(theta, PompParameters):
+            return theta
+        else:
+            raise TypeError(
+                "theta must be a dictionary, a list of dictionaries, or a PompParameters object"
+            )
+
     def _update_fresh_key(
         self, key: jax.Array | None = None
     ) -> tuple[jax.Array, jax.Array]:
@@ -281,12 +301,7 @@ class Pomp:
             list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model
                 parameters. Always a list, even if only one theta is provided.
         """
-        if theta is None:
-            theta_obj = self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta_obj = PompParameters(theta)
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        theta_obj = self._prepare_theta_input(theta)
 
         theta_list = theta_obj.to_list()
         theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
@@ -325,7 +340,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         thresh: float = 0,
         reps: int = 1,
         CLL: bool = False,
@@ -364,12 +379,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        if theta is None:
-            theta_obj = self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta_obj = PompParameters(theta)
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        theta_obj = self._prepare_theta_input(theta)
         n_theta_reps = theta_obj.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)
@@ -483,7 +493,7 @@ class Pomp:
         rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         thresh: float = 0,
         track_time: bool = True,
     ) -> None:
@@ -509,12 +519,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        if theta is None:
-            theta_obj = self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta_obj = PompParameters(theta)
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        theta_obj = self._prepare_theta_input(theta)
         n_reps = theta_obj.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)
@@ -636,7 +641,7 @@ class Pomp:
         M: int,
         eta: float,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         optimizer: str = "SGD",
         alpha: float = 0.97,
         thresh: int = 0,
@@ -684,12 +689,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        if theta is None:
-            theta_obj = self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta_obj = PompParameters(theta)
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        theta_obj = self._prepare_theta_input(theta)
 
         theta_obj.transform(self.par_trans, direction="to_est")
         n_reps = theta_obj.num_replicates()
@@ -800,7 +800,7 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -825,12 +825,7 @@ class Pomp:
             - time: The time points at which the observations were made.
             - Remaining columns contain the features of the state and observation processes.
         """
-        if theta is None:
-            theta_obj = self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta_obj = PompParameters(theta)
-        else:
-            raise TypeError("theta must be a dictionary or a list of dictionaries")
+        theta_obj = self._prepare_theta_input(theta)
 
         if self.rmeas is None:
             raise ValueError(

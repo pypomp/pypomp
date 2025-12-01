@@ -31,7 +31,7 @@ def test_simulate_param_order_invariance(simple):
     nsim = 1
     X_sims, Y_sims = LG.simulate(nsim=nsim, key=key, theta=theta)
 
-    param_keys = list(theta[0].keys())
+    param_keys = list(theta.to_list()[0].keys())
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
 

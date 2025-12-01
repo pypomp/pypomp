@@ -72,7 +72,9 @@ def panel_pomp_with_transform():
 
 
 def test_panel_mif_traces_transformed(panel_pomp_with_transform):
-    """Test that with rw_sd=0, parameters remain unchanged after transformation cycle."""
+    """
+    Test that with rw_sd=0, parameters remain unchanged after transformation cycle.
+    """
     panel = panel_pomp_with_transform
 
     # Capture initial parameters in natural space before running mif

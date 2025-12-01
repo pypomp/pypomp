@@ -261,21 +261,21 @@ def test_prune(simple):
     # Run pfilter with multiple replicates to generate results
     LG.pfilter(J=J, reps=5, key=key)
     # Save the original theta list length
-    orig_theta = LG.theta.copy()
+    orig_theta = LG.theta.to_list()
     orig_len = len(orig_theta)
     # Prune to top 2 thetas, refill to original length
     LG.prune(n=2, refill=True)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == orig_len
     # The unique thetas should be at most 2
     unique_thetas = [tuple(sorted(d.items())) for d in LG.theta]
     assert len(set(unique_thetas)) <= 2
     # Prune to top 1 theta, do not refill
     LG.prune(n=1, refill=False)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == 1
     # The theta should be a dict
-    assert isinstance(LG.theta[0], dict)
+    assert isinstance(LG.theta.to_list()[0], dict)
     # Prune with n greater than available thetas (should not error, just return all)
     LG.theta = orig_theta.copy()
     LG.prune(n=10, refill=False)
@@ -283,7 +283,7 @@ def test_prune(simple):
     # Test error if results are empty
     LG2 = LG.__class__(
         ys=LG.ys.copy(),
-        theta=LG.theta[0].copy(),
+        theta=LG.theta.to_list()[0].copy(),
         rinit=LG.rinit.original_func,
         rproc=LG.rproc.original_func,
         dmeas=LG.dmeas.original_func,

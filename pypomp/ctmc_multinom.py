@@ -1,4 +1,5 @@
 """
+ctmc_multinom.py
 Utility functions for Euler-multinomial approximations of CTMC transitions.
 
 These helpers are model-agnostic and can be reused across different

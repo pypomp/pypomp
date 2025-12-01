@@ -4,6 +4,7 @@ import os
 import pickle
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
+import pypomp.measles.model_001d as m001d  # <-- NEW: import your DPOP model
 from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
@@ -165,7 +166,7 @@ class UKMeasles:
         theta : dict | list[dict]
             Parameters for the model. Can be a single dict or a list of dicts.
         model : str
-            The model to use. Can be "001b" or "001c", currently.
+            The model to use. Can be "001b", "001c" or "001d".
         interp_method : str
             The method to use to interpolate the covariates. Can be "shifted_splines" or "linear".
         first_year : int
@@ -227,7 +228,16 @@ class UKMeasles:
         mod = {
             "001b": m001b,
             "001c": m001c,
+            "001d": m001d,   # <-- NEW: register your DPOP model
         }[model]
+
+        # For 001d we have extra state "logw" that should be reset each obs interval.
+        # W (index 4), C (index 5) and logw (index 6)
+        if model == "001d":
+            accumvars = (4, 5, 6)
+        else:
+            accumvars = (4, 5)
+
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(
             ys=dat_filtered,
@@ -237,7 +247,7 @@ class UKMeasles:
             nstep=None,
             dt=dt,
             ydim=1,
-            accumvars=(4, 5),
+            accumvars=accumvars,
             statenames=mod.statenames,
             rinit=mod.rinit,
             rproc=mod.rproc,

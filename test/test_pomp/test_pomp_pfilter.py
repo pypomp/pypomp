@@ -26,7 +26,7 @@ def test_class_basic_default(simple):
 
 def test_reps_default(simple):
     LG, key, J = simple
-    theta = LG.theta
+    theta = LG.theta.to_list()
     theta_list = [theta[0], {k: v * 2 for k, v in theta[0].items()}]
     LG.pfilter(J=J, key=key, theta=theta_list, reps=2)
     val1 = LG.results_history[-1].logLiks

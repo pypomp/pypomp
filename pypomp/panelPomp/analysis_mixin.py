@@ -144,7 +144,6 @@ class PanelAnalysisMixin(Base):
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
-
     def time(self):
         return self.results_history.time()
 

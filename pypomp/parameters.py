@@ -6,6 +6,7 @@ It handles input validation, standardization, and conversion to JAX arrays.
 from abc import ABC, abstractmethod
 import pandas as pd
 import jax.numpy as jnp
+import numpy as np
 import jax
 from typing import Any, Union, Optional, Literal
 from .ParTrans_class import ParTrans
@@ -58,17 +59,34 @@ class PompParameters(ParameterSet):
 
     def __init__(
         self,
-        theta: Union[dict, list[dict], "PompParameters"],
+        theta: Union[dict, list[dict], "PompParameters"] | None,
+        logLik: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
         """
         Args:
             theta: A single dictionary, a list of dictionaries, or an existing
-                   PompParameters object.
+                   PompParameters object containing the parameter values.
+            logLik: A numpy array of log-likelihoods.
+            estimation_scale: Whether the parameters are in the estimation scale.
         """
+        if theta is None:
+            self._params = []
+            self._logLik = np.full(0, np.nan)
+            self._canonical_param_names = []
+            self.estimation_scale = False
+            return
+
         if isinstance(theta, PompParameters):
             # Copy constructor behavior (shallow copy of list)
             self._params = list(theta._params)
+            self._logLik = (
+                theta.logLik.copy()
+                if logLik is None
+                else self._format_logLik(logLik, len(self._params))
+            )
+            self._canonical_param_names = theta._canonical_param_names
+            self.estimation_scale = theta.estimation_scale
             return
 
         # Normalize input to list of dicts
@@ -79,6 +97,23 @@ class PompParameters(ParameterSet):
         self._params: list[dict] = theta
         self._canonical_param_names: list[str] = list(self._params[0].keys())
         self.estimation_scale: bool = estimation_scale
+        self._logLik = self._format_logLik(logLik, len(self._params))
+
+    def _format_logLik(self, ll: np.ndarray | None, n_reps: int) -> np.ndarray:
+        """Helper to standardize logLik input."""
+        if ll is None:
+            return np.full(n_reps, np.nan)
+
+        ll = np.array(ll, dtype=float)
+
+        if ll.ndim == 0:  # Handle single scalar input (broadcast)
+            return np.full(n_reps, ll)
+
+        if len(ll) != n_reps:
+            raise ValueError(
+                f"Length of logLik ({len(ll)}) must match parameters ({n_reps})"
+            )
+        return ll
 
     def _validate_raw(self, theta: list[dict]):
         if not isinstance(theta, list):
@@ -110,14 +145,21 @@ class PompParameters(ParameterSet):
     def _child_PompParameters(
         self,
         theta: Union[dict, list[dict], "PompParameters"] | None = None,
+        logLik: np.ndarray | None = None,
         estimation_scale: bool | None = None,
     ):
         """
         Make a new PompParameters object with current attributes as the default.
         """
-        theta_sel = theta or self._params
-        estimation_scale_sel = estimation_scale or self.estimation_scale
-        return PompParameters(theta=theta_sel, estimation_scale=estimation_scale_sel)
+        # Explicitly handle None to avoid ambiguous truth-value checks on arrays
+        theta_sel = self._params if theta is None else theta
+        estimation_scale_sel = (
+            self.estimation_scale if estimation_scale is None else estimation_scale
+        )
+        logLik_sel = self._logLik if logLik is None else logLik
+        return PompParameters(
+            theta=theta_sel, logLik=logLik_sel, estimation_scale=estimation_scale_sel
+        )
 
     def to_jax_array(self, param_names: list[str], **kwargs) -> jax.Array:
         """
@@ -133,6 +175,14 @@ class PompParameters(ParameterSet):
             )
 
         return jnp.array(ordered_values)
+
+    @property
+    def logLik(self) -> np.ndarray:
+        return self._logLik
+
+    @logLik.setter
+    def logLik(self, value):
+        self._logLik = self._format_logLik(value, self.num_replicates())
 
     def to_jax_array_canonical(self) -> jax.Array:
         return self.to_jax_array(self._canonical_param_names)
@@ -150,10 +200,12 @@ class PompParameters(ParameterSet):
         # Determine subset based on type
         if isinstance(indices, slice):
             subset_params = self._params[indices]
+            subset_logLik = self._logLik[indices]
         else:
             subset_params = [self._params[i] for i in indices]
+            subset_logLik = self._logLik[indices]
 
-        return self._child_PompParameters(subset_params)
+        return self._child_PompParameters(subset_params, logLik=subset_logLik)
 
     def get_param_names(self) -> list[str]:
         if not self._params:
@@ -190,6 +242,42 @@ class PompParameters(ParameterSet):
         else:
             # If this statement is reached, the parameters are already in the correct estimation space. Nothing needs to be done.
             pass
+
+    def prune(self, n: int = 1, refill: bool = True) -> None:
+        """
+        Replace internal parameter sets with the top `n` based on stored log-likelihoods.
+
+        Args:
+            n: Number of top parameter sets to keep.
+            refill: If True, repeat the top `n` parameter sets to match the
+                previous number of replicates. If False, keep only the `n` sets.
+        """
+        n_reps = self.num_replicates()
+        if n_reps == 0:
+            raise ValueError("No parameter sets available to prune.")
+        if n < 1:
+            raise ValueError("n must be at least 1.")
+
+        if self._logLik is None or np.all(np.isnan(self._logLik)):
+            raise ValueError("No valid log-likelihoods available to prune.")
+
+        # Indices of top-n log-likelihoods (descending order)
+        top_indices = self._logLik.argsort()[-n:][::-1]
+
+        top_params = [self._params[i] for i in top_indices]
+        top_logLik = self._logLik[top_indices]
+
+        if refill:
+            prev_len = n_reps
+            repeats = (prev_len + n - 1) // n  # Ceiling division
+            new_params = (top_params * repeats)[:prev_len]
+            new_logLik = np.tile(top_logLik, repeats)[:prev_len]
+        else:
+            new_params = top_params
+            new_logLik = top_logLik
+
+        self._params = new_params
+        self._logLik = new_logLik
 
     def __getitem__(
         self, index: Union[int, slice]
@@ -229,7 +317,8 @@ class PompParameters(ParameterSet):
             raise ValueError("Cannot create empty PompParameters")
         # Replicate the parameter sets n times
         replicated_params = self._params * n
-        return self._child_PompParameters(replicated_params)
+        replicated_logLik = np.tile(self._logLik, n)
+        return self._child_PompParameters(replicated_params, logLik=replicated_logLik)
 
     def __rmul__(self, n: int) -> "PompParameters":
         """Support left multiplication like 3 * theta."""
@@ -375,7 +464,7 @@ class PanelParameters(ParameterSet):
         return PanelParameters(new_shared, new_specific)
 
     def to_jax_array(
-        self, param_names: list[str], unit_names: list[str] | None = None
+        self, param_names: list[str], unit_names: list[str] | None = None, **kwargs
     ) -> jax.Array:
         """
         Constructs a combined parameter array for all units.
@@ -390,8 +479,8 @@ class PanelParameters(ParameterSet):
             unit_names: List of unit names in the order expected by the model.
                         If None, inferred from unit_specific columns.
         """
-        J = self.num_replicates()
-        if J == 0:
+        reps = self.num_replicates()
+        if reps == 0:
             return jnp.empty((0, 0, 0))
 
         # Infer unit names if not provided
@@ -416,11 +505,10 @@ class PanelParameters(ParameterSet):
         # Build the array
         # This implementation uses numpy for construction flexibility, then converts to JAX
         # (constructing complex structures directly in JAX can be tricky without vmap)
-        import numpy as np
 
-        full_array = np.zeros((J, n_units, n_params))
+        full_array = np.zeros((reps, n_units, n_params))
 
-        for j in range(J):
+        for j in range(reps):
             # Extract data for this replicate
             s_df = self.shared[j] if self.shared else None
             u_df = self.unit_specific[j] if self.unit_specific else None

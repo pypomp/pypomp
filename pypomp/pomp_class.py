@@ -28,22 +28,7 @@ from .results import (
     PompTrainResult,
 )
 from .parameters import PompParameters
-
-
-def _theta_dict_to_array(theta_dict: dict, param_names: list[str]) -> jax.Array:
-    """
-    Convert a theta dictionary to a JAX array using canonical parameter ordering.
-
-    Args:
-        theta_dict: Dictionary mapping parameter names to values
-        param_names: List of parameter names in canonical order
-
-    Returns:
-        JAX array with parameter values in canonical order
-    """
-    # Reorder dict to match canonical order
-    ordered_values = [theta_dict[name] for name in param_names]
-    return jnp.array(ordered_values)
+from .util import logmeanexp
 
 
 class Pomp:
@@ -120,12 +105,12 @@ class Pomp:
             raise TypeError("covars must be a pandas DataFrame or None")
 
         if isinstance(theta, PompParameters):
-            self.theta: PompParameters = theta  # type: ignore[reportRedeclaration]
+            self._theta: PompParameters = theta  # type: ignore[reportRedeclaration]
         else:
-            self.theta: PompParameters = PompParameters(theta)
+            self._theta = PompParameters(theta)
 
         # Extract parameter names from first theta dict
-        self.canonical_param_names: list[str] = self.theta.get_param_names()
+        self.canonical_param_names: list[str] = self._theta.get_param_names()
 
         # If statenames not provided, we need to infer them
         if statenames is None:
@@ -158,6 +143,7 @@ class Pomp:
             covar_names=self.covar_names,
             par_trans=self.par_trans,
         )
+
         self.rproc: RProc = RProc(
             struct=rproc,
             statenames=statenames,
@@ -214,6 +200,17 @@ class Pomp:
             order="linear",
         )
         self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
+
+    @property
+    def theta(self) -> PompParameters:
+        return self._theta
+
+    @theta.setter
+    def theta(self, value: dict | list[dict] | PompParameters):
+        if isinstance(value, PompParameters):
+            self._theta = value
+        else:
+            self._theta = PompParameters(value)
 
     def _prepare_theta_input(
         self, theta: dict | list[dict] | PompParameters | None
@@ -318,7 +315,9 @@ class Pomp:
         for theta_i, k in zip(theta_list_trans, keys):
             results.append(
                 -_mop_internal(
-                    theta=_theta_dict_to_array(theta_i, self.canonical_param_names),
+                    theta=jnp.array(
+                        [theta_i[name] for name in self.canonical_param_names]
+                    ),
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     nstep_array=self._nstep_array,
@@ -379,8 +378,8 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj = self._prepare_theta_input(theta)
-        n_theta_reps = theta_obj.num_replicates()
+        theta_obj_in = self._prepare_theta_input(theta)
+        n_theta_reps = theta_obj_in.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)
 
@@ -390,7 +389,7 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        thetas_array = theta_obj.to_jax_array(self.canonical_param_names)
+        thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
         thetas_repl = jnp.vstack(
             [jnp.tile(thetas_array[i], (reps, 1)) for i in range(n_theta_reps)]
         )
@@ -469,11 +468,17 @@ class Pomp:
                 dims=["theta", "replicate", "time", "state"],
             )
 
+        logLik_estimates = np.apply_along_axis(
+            logmeanexp, -1, (-neg_logliks).reshape(n_theta_reps, reps), ignore_nan=False
+        )
+        theta_obj_in.logLik = logLik_estimates
+        self.theta = theta_obj_in
+
         result = PompPFilterResult(
             method="pfilter",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj.to_list(),
+            theta=theta_obj_in.to_list(),
             logLiks=logLik_da,
             J=J,
             reps=reps,
@@ -519,15 +524,16 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj = self._prepare_theta_input(theta)
-        n_reps = theta_obj.num_replicates()
+        theta_obj_in = self._prepare_theta_input(theta)
+        theta_list_in = theta_obj_in.to_list()
+        n_reps = theta_obj_in.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)
-        theta_obj.transform(self.par_trans, direction="to_est")
+        theta_obj_in.transform(self.par_trans, direction="to_est")
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
         )
-        theta_array = theta_obj.to_jax_array(self.canonical_param_names)
+        theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -610,7 +616,8 @@ class Pomp:
             )
             for theta_ests in final_theta_ests
         ]
-        self.theta = PompParameters(theta)
+        logLik_estimates = -nLLs
+        self.theta = PompParameters(theta, logLik=logLik_estimates)
 
         if track_time is True:
             nLLs.block_until_ready()
@@ -618,13 +625,11 @@ class Pomp:
         else:
             execution_time = None
 
-        theta_obj.transform(self.par_trans, direction="from_est")
-
         result = PompMIFResult(
             method="mif",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj.to_list(),
+            theta=theta_list_in,
             traces_da=traces_da,
             J=J,
             M=M,
@@ -689,10 +694,11 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj = self._prepare_theta_input(theta)
+        theta_obj_in = self._prepare_theta_input(theta)
+        theta_list_in = theta_obj_in.to_list()
 
-        theta_obj.transform(self.par_trans, direction="to_est")
-        n_reps = theta_obj.num_replicates()
+        theta_obj_in.transform(self.par_trans, direction="to_est")
+        n_reps = theta_obj_in.num_replicates()
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -701,7 +707,7 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
-        theta_array = theta_obj.to_jax_array(self.canonical_param_names)
+        theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         n_obs = len(self.ys)
 
@@ -769,7 +775,8 @@ class Pomp:
             )
             for i in range(n_reps)
         ]
-        self.theta = PompParameters(theta)
+        logLik_estimates = -nLLs
+        self.theta = PompParameters(theta, logLik=logLik_estimates)
 
         if track_time is True:
             nLLs.block_until_ready()
@@ -777,12 +784,11 @@ class Pomp:
         else:
             execution_time = None
 
-        theta_obj.transform(self.par_trans, direction="from_est")
         result = PompTrainResult(
             method="train",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj.to_list(),
+            theta=theta_list_in,
             traces_da=joined_array,
             optimizer=optimizer,
             J=J,
@@ -825,14 +831,14 @@ class Pomp:
             - time: The time points at which the observations were made.
             - Remaining columns contain the features of the state and observation processes.
         """
-        theta_obj = self._prepare_theta_input(theta)
+        theta_obj_in = self._prepare_theta_input(theta)
 
         if self.rmeas is None:
             raise ValueError(
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
             )
 
-        thetas_array = theta_obj.to_jax_array(self.canonical_param_names)
+        thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, thetas_array.shape[0])
@@ -917,35 +923,16 @@ class Pomp:
         """
         return self.results_history.time()
 
-    def prune(self, n: int = 1, index: int = -1, refill: bool = True):
+    def prune(self, n: int = 1, refill: bool = True):
         """
         Replace self.theta with a list of the top n thetas based on the most recent available log-likelihood estimates.
         Optionally, refill the list to the previous length by repeating the top n thetas.
 
         Args:
             n (int): Number of top thetas to keep.
-            index (int): The index of the result to use for pruning. Defaults to -1 (the last result).
             refill (bool): If True, repeat the top n thetas to match the previous number of theta sets.
         """
-        df = self.results_history[index].to_dataframe()
-        if df.empty or "logLik" not in df.columns:
-            raise ValueError("No log-likelihoods found in results(index).")
-
-        top_indices = df["logLik"].to_numpy().argsort()[-n:][::-1]
-        # Extract the corresponding thetas as dicts
-        param_names = [col for col in df.columns if col not in ("logLik", "se")]
-        top_thetas = [
-            {param: df.iloc[i][param] for param in param_names} for i in top_indices
-        ]
-
-        if refill:
-            prev_len = len(self.theta) if isinstance(self.theta, list) else 1
-            repeats = (prev_len + n - 1) // n  # Ceiling division
-            new_theta = (top_thetas * repeats)[:prev_len]
-        else:
-            new_theta = top_thetas
-
-        self.theta = PompParameters(new_theta)
+        self.theta.prune(n=n, refill=refill)
 
     def plot_traces(self, show: bool = True):
         """

@@ -51,7 +51,12 @@ def test_dpop_basic(simple_sis):
     model, J, ys, theta, covars, key = simple_sis
 
     # Call DPOP with a moderate cooling factor alpha
-    vals = model.dpop(J=J, alpha=0.9, key=key)
+    vals = model.dpop(
+        J=J,
+        alpha=0.9,
+        key=key,
+        process_weight_state="logw",
+    )
     nll0 = vals[0]
 
     # Must be a scalar
@@ -74,7 +79,13 @@ def test_dpop_param_order_invariance(simple_sis):
     model, J, ys, theta, covars, key = simple_sis
 
     # Baseline DPOP value with original theta ordering
-    val1 = model.dpop(J=J, alpha=0.9, key=key, theta=theta)
+    val1 = model.dpop(
+        J=J,
+        alpha=0.9,
+        key=key,
+        theta=theta,
+        process_weight_state="logw",
+    )
     nll1 = val1[0]
 
     # Reverse the key order in each theta dict
@@ -84,7 +95,13 @@ def test_dpop_param_order_invariance(simple_sis):
 
     # Use a fresh key to avoid accidental correlation in randomness
     key2 = jax.random.key(111)
-    val2 = model.dpop(J=J, alpha=0.9, key=key2, theta=permuted_theta)
+    val2 = model.dpop(
+        J=J,
+        alpha=0.9,
+        key=key2,
+        theta=permuted_theta,
+        process_weight_state="logw",
+    )
     nll2 = val2[0]
 
     # The two NLLs should match up to numerical tolerance
@@ -93,10 +110,10 @@ def test_dpop_param_order_invariance(simple_sis):
     )
 
 
-def test_dpop_default_vs_explicit_process_weight_index(simple_sis):
+def test_dpop_explicit_process_weight_state_is_deterministic(simple_sis):
     """
-    Using the default process_weight_index (via accumvars) should produce
-    the same DPOP value as passing the 'logw' state index explicitly.
+    Calling dpop() with the same process_weight_state ('logw') and the
+    same random seed should give identical results.
     """
     model, J, ys, theta, covars, _ = simple_sis
 
@@ -104,18 +121,21 @@ def test_dpop_default_vs_explicit_process_weight_index(simple_sis):
     key1 = jax.random.key(999)
     key2 = jax.random.key(999)
 
-    # 1) Default behavior: process_weight_index inferred from accumvars
-    nll_default = model.dpop(J=J, alpha=0.9, key=key1)[0]
+    nll_1 = model.dpop(
+        J=J,
+        alpha=0.9,
+        key=key1,
+        process_weight_state="logw",
+    )[0]
 
-    # 2) Explicit process_weight_index = index of "logw" in statenames
-    logw_index = model.statenames.index("logw")
-    nll_explicit = model.dpop(
+    nll_2 = model.dpop(
         J=J,
         alpha=0.9,
         key=key2,
-        process_weight_index=logw_index,
+        process_weight_state="logw",
     )[0]
 
-    assert jnp.allclose(nll_default, nll_explicit, atol=1e-7), (
-        f"DPOP default vs explicit index mismatch: {nll_default} vs {nll_explicit}"
+    assert jnp.allclose(nll_1, nll_2, atol=1e-7), (
+        f"DPOP results with process_weight_state='logw' do not match: "
+        f"{nll_1} vs {nll_2}"
     )

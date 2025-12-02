@@ -4,7 +4,7 @@ import os
 import pickle
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
-import pypomp.measles.model_001d as m001d  # <-- NEW: import your DPOP model
+import pypomp.measles.model_001d as m001d  
 from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
@@ -228,7 +228,7 @@ class UKMeasles:
         mod = {
             "001b": m001b,
             "001c": m001c,
-            "001d": m001d,   # <-- NEW: register your DPOP model
+            "001d": m001d,  
         }[model]
 
         # For 001d we have extra state "logw" that should be reset each obs interval.

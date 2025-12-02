@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 import pypomp as pp
 import jax.numpy as jnp
-from pypomp.train_dpop import dpop_sgd_decay
+from pypomp.train_dpop import dpop_sgd_decay  # still imported, though not used directly
 
 
 @pytest.fixture(scope="function")
@@ -18,12 +18,15 @@ def simple_sis_for_dpop():
     model = pp.SIS(T=50, key=key_model)
     return model
 
+
 def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
     """
+    Check that Pomp.dpop_sgd_decay is invariant to the ordering of
+    parameter dictionary keys (in natural space).
     """
     model = simple_sis_for_dpop
 
-    # Use small J,M so the test is fast, but KEEP THEM IDENTICAL across runs.
+    # Use small J, M so the test is fast, but keep them identical across runs.
     J = 50
     M = 4
 
@@ -36,6 +39,7 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
         decay=0.1,
         alpha=0.8,
         key=key1,
+        process_weight_state="logw",
     )
 
     # Build a permuted theta with reversed key order
@@ -44,7 +48,7 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta_orig]
 
-    # Second run: same random key & same hyper-parameters, but permuted theta
+    # Second run: same random key & hyper-parameters, but permuted theta
     key2 = jax.random.key(123)
     nll2, theta_hist2 = model.dpop_sgd_decay(
         J=J,
@@ -54,6 +58,7 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
         alpha=0.8,
         key=key2,
         theta=permuted_theta,
+        process_weight_state="logw",
     )
 
     # Histories should match exactly up to numerical precision

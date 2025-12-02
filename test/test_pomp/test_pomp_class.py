@@ -318,7 +318,7 @@ def test_dpop_requires_process_weight(simple):
     """
     LG, rw_sd, J, a, M, key = simple
 
-    # LG has no accumvars, so dpop without process_weight_index must raise.
+    # LG has no accumvars, so dpop without process_weight_state must raise.
     with pytest.raises(ValueError, match="process-weight state"):
         LG.dpop(J=J, key=key)
 

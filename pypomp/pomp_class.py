@@ -342,7 +342,7 @@ class Pomp:
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
         alpha: float = 0.97,
-        process_weight_index: int | None = None,
+        process_weight_state: str | None = None,  # use state *name* here
     ) -> list[jax.Array]:
         """
         Runs the DPOP (dynamics-penalized) differentiable particle filter.
@@ -364,15 +364,13 @@ class Pomp:
             theta: Optional parameter dictionary or list of dictionaries.
                 If None, ``self.theta`` is used.
             alpha: Cooling factor for the particle weights.
-            process_weight_index: Index of the state component that
+            process_weight_state: Name of the state component that
                 stores the accumulated transition log-weight over a
-                single observation interval. If None, the method will
-                fall back to the last index in
-                ``self.rproc.accumvars`` (if available).
+                single observation interval (for example ``"logw"``).
 
         Returns:
-            list[jax.Array]: A list of log-likelihood estimates, one
-            for each parameter vector in ``theta``.
+            list[jax.Array]: A list of negative DPOP log-likelihood
+            estimates, one for each parameter vector in ``theta``.
         """
         theta = theta or self.theta
         theta_list = self._validate_theta(theta)
@@ -384,21 +382,28 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        # Determine which state index holds the process log-weight.
-        if process_weight_index is None:
-            accumvars = self.rproc.accumvars
-            if accumvars is not None and len(accumvars) > 0:
-                # By convention we use the last accumvar as the
-                # process log-weight accumulator.
-                process_weight_index = int(accumvars[-1])
-            else:
-                raise ValueError(
-                    "dpop requires a process-weight state. "
-                    "Provide `process_weight_index` explicitly or "
-                    "supply `accumvars` to `RProc` such that the last "
-                    "entry corresponds to the log-weight accumulator."
-                )
+        # ------------------------------------------------------------------
+        # No default: user must be explicit.
+        # ------------------------------------------------------------------
+        if process_weight_state is None:
+            raise ValueError(
+                "dpop requires a process-weight state. "
+                "Please provide `process_weight_state` as the name of the state "
+                "variable that accumulates the transition log-weight "
+                "(e.g. 'logw')."
+            )
 
+        try:
+            process_weight_index = int(self.statenames.index(process_weight_state))
+        except ValueError as exc:
+            raise ValueError(
+                f"Unknown process_weight_state '{process_weight_state}'. "
+                f"Available statenames are: {self.statenames}"
+            ) from exc
+
+        # ------------------------------------------------------------------
+        # Run DPOP for each theta
+        # ------------------------------------------------------------------
         new_key, _ = self._update_fresh_key(key)
         keys = jax.random.split(new_key, len(theta_list_trans))
 
@@ -419,11 +424,13 @@ class Pomp:
                     accumvars=self.rproc.accumvars,
                     covars_extended=self._covars_extended,
                     alpha=alpha,
-                    process_weight_index=process_weight_index,
+                    process_weight_index=process_weight_index,  # still an int internally
                     key=k,
                 )
             )
         return results
+
+
 
 
     def pfilter(
@@ -902,7 +909,7 @@ class Pomp:
         eta0: float,
         decay: float,
         alpha: float = 0.8,
-        process_weight_index: int | None = None,
+        process_weight_state: str | None = None,
         key: jax.Array | None = None,
         theta: dict | list[dict] | None = None,
     ) -> tuple[jax.Array, jax.Array]:
@@ -910,9 +917,10 @@ class Pomp:
         Run SGD with decaying step size on the DPOP objective.
 
         This is a high-level convenience wrapper around the low-level
-        `dpop_sgd_decay` function in train.py. It automatically pulls all
-        internal arrays and callables from the Pomp object, so the user only
-        needs to specify:
+        ``dpop_sgd_decay`` function in ``train_dpop.py``. It
+        automatically pulls all internal arrays and callables from the
+        :class:`Pomp` object, so the user only needs to specify:
+
           - J: number of particles
           - M: number of gradient steps
           - eta0: initial learning rate
@@ -922,7 +930,7 @@ class Pomp:
           - (optional) theta: custom initial parameter(s) in natural space
 
         The optimization is performed in the *estimation space*, with
-        parameters ordered according to `self.canonical_param_names`.
+        parameters ordered according to ``self.canonical_param_names``.
 
         Parameters
         ----------
@@ -937,15 +945,15 @@ class Pomp:
             step size is eta_m = eta0 / (1 + decay * m).
         alpha : float, default 0.8
             DPOP discount / cooling factor.
-        process_weight_index : int or None, default None
-            Index of the state component that stores the accumulated process
-            log-weight over one observation interval. If None, we default to
-            using the last entry of `self.rproc.accumvars`.
+        process_weight_state : str or None, default None
+            Name of the state component that stores the accumulated
+            process log-weight over one observation interval (for example
+            ``"logw"``).
         key : jax.Array or None, default None
-            Random key. If None, fall back to `self.fresh_key` and update it.
+            Random key. If None, fall back to ``self.fresh_key`` and update it.
         theta : dict or list[dict] or None, default None
             Optional initial parameter(s) in natural space. If None, use
-            `self.theta`. Only the first element is used as the starting
+            ``self.theta``. Only the first element is used as the starting
             point of the local search.
 
         Returns
@@ -954,7 +962,7 @@ class Pomp:
             Mean DPOP negative log-likelihood per observation at each step.
         theta_history : jax.Array, shape (M+1, p)
             Parameter vector (estimation space) at each step, ordered
-            according to `self.canonical_param_names`.
+            according to ``self.canonical_param_names``.
         """
         # Import the low-level implementation here (avoid circular imports).
         from .train_dpop import dpop_sgd_decay as _dpop_sgd_decay
@@ -963,9 +971,6 @@ class Pomp:
         new_key, _ = self._update_fresh_key(key)
 
         # 2) Decide which theta to use as initial point (in natural space).
-        #    If the user supplied `theta`, allow dict or list[dict] and
-        #    convert any JAX arrays to plain Python floats to satisfy
-        #    _validate_theta.
         if theta is None:
             theta_list_raw = self.theta
         else:
@@ -1003,29 +1008,30 @@ class Pomp:
         rprocess_interp = self.rproc.struct_pf_interp
 
         if self.dmeas is None:
-            # DPOP requires an observation density `dmeas`; `rmeas` alone is not enough.
             raise ValueError("dpop_sgd_decay requires self.dmeas to be not None.")
         dmeasure = self.dmeas.struct_pf
 
         accumvars = self.rproc.accumvars
         covars_extended = self._covars_extended
 
-        # 5) Determine which state component holds the process log-weight ("logw").
-        #    By default we use the last entry of accumvars, but the user can override
-        #    this via `process_weight_index`.
-        if process_weight_index is None:
-            if accumvars is not None and len(accumvars) > 0:
-                process_weight_index = int(accumvars[-1])
-            else:
-                raise ValueError(
-                    "dpop_sgd_decay requires a process-weight state. "
-                    "Provide process_weight_index explicitly or supply "
-                    "`accumvars` so that the last entry corresponds to "
-                    "the log-weight accumulator."
-                )
+        # 5) Determine which state component holds the process log-weight.
+        if process_weight_state is None:
+            raise ValueError(
+                "dpop_sgd_decay requires a process-weight state. "
+                "Please provide `process_weight_state` as the name of the state "
+                "variable that accumulates the transition log-weight "
+                "(e.g. 'logw')."
+            )
 
-        # 6) Call the low-level dpop_sgd_decay
-        #    (its return order is: theta_history, nll_history).
+        try:
+            process_weight_index = int(self.statenames.index(process_weight_state))
+        except ValueError as e:
+            raise ValueError(
+                f"State '{process_weight_state}' not found in statenames "
+                f"{self.statenames}"
+            ) from e
+
+        # 6) Call the low-level dpop_sgd_decay (returns theta_history, nll_history).
         theta_hist, nll_hist = _dpop_sgd_decay(
             theta_init=theta_init,
             ys=ys_array,
@@ -1048,11 +1054,7 @@ class Pomp:
         )
 
         # 7) Return in a user-friendly order: first NLL, then parameter trajectory.
-        #    Typical usage:
-        #        logliks, params = model.dpop_sgd_decay(...)
         return nll_hist, theta_hist
-
-
 
 
     def simulate(

@@ -308,3 +308,17 @@ def test_print_summary(neapolitan):
     # Should not error
     LG, *_ = neapolitan
     LG.print_summary()
+
+
+
+def test_dpop_requires_process_weight(simple):
+    """
+    Calling dpop() on a model without a process-weight state (no accumvars)
+    should fail with a clear ValueError.
+    """
+    LG, rw_sd, J, a, M, key = simple
+
+    # LG has no accumvars, so dpop without process_weight_state must raise.
+    with pytest.raises(ValueError, match="process-weight state"):
+        LG.dpop(J=J, key=key)
+

@@ -2,6 +2,7 @@ import jax
 import pytest
 import numpy as np
 import pypomp as pp
+import jax.numpy as jnp
 
 
 @pytest.fixture(scope="function")

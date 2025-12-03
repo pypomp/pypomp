@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .RWSigma_class import RWSigma
+    from .parameters import PanelParameters
 else:
     RWSigma = object
+    PanelParameters = object
 
 from .util import logmeanexp, logmeanexp_se
 
@@ -49,8 +51,7 @@ class PompBaseResult(BaseResult):
 class PanelPompBaseResult(BaseResult):
     """Base class for PanelPomp results."""
 
-    shared: list[pd.DataFrame] | None = None
-    unit_specific: list[pd.DataFrame] | None = None
+    theta: "PanelParameters | None" = None
 
 
 @dataclass
@@ -282,6 +283,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     J: int = 0
     reps: int = 1
     thresh: float = 0.0
+    theta: "PanelParameters | None" = None
 
     def __post_init__(self):
         """Set method to pfilter."""
@@ -306,22 +308,35 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             )
         )
 
-        if self.shared:
-            s_params = pd.concat(self.shared, axis=1).T.reset_index(drop=True)
-            df = df.join(s_params, on="replicate")
+        # Extract shared/unit_specific from theta
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        if self.unit_specific:
-            u_params = (
-                pd.concat(self.unit_specific, keys=range(len(self.unit_specific)))
-                .stack()
-                .unstack(level=1)
-                .reset_index()
-            )
-            col_names = list(u_params.columns)
-            u_params.rename(
-                columns={col_names[0]: "replicate", col_names[1]: "unit"}, inplace=True
-            )
-            df = df.merge(u_params, on=["replicate", "unit"], how="left")
+            if shared_list:
+                s_params = pd.concat(shared_list, axis=1).T.reset_index(drop=True)
+                df = df.join(s_params, on="replicate")
+
+            if unit_specific_list:
+                u_params = (
+                    pd.concat(unit_specific_list, keys=range(len(unit_specific_list)))
+                    .stack()
+                    .unstack(level=1)
+                    .reset_index()
+                )
+                col_names = list(u_params.columns)
+                u_params.rename(
+                    columns={col_names[0]: "replicate", col_names[1]: "unit"},
+                    inplace=True,
+                )
+                df = df.merge(u_params, on=["replicate", "unit"], how="left")
 
         return df
 
@@ -341,15 +356,26 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             .rename(columns={"index": "replicate"})
         )
 
-        if self.shared:
-            p_s = pd.concat(self.shared, axis=1).T.set_axis(reps, axis=0)
-            df_s = df_s.join(p_s, on="replicate")
-            df_u = df_u.join(p_s, on="replicate")
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        if self.unit_specific:
-            p_u = pd.concat(self.unit_specific, keys=reps).stack().unstack(level=1)
-            p_u.index.names = ["replicate", "unit"]
-            df_u = df_u.join(p_u, on=["replicate", "unit"])
+            if shared_list:
+                p_s = pd.concat(shared_list, axis=1).T.set_axis(reps, axis=0)
+                df_s = df_s.join(p_s, on="replicate")
+                df_u = df_u.join(p_s, on="replicate")
+
+            if unit_specific_list:
+                p_u = pd.concat(unit_specific_list, keys=reps).stack().unstack(level=1)
+                p_u.index.names = ["replicate", "unit"]
+                df_u = df_u.join(p_u, on=["replicate", "unit"])
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(
             method="pfilter", iteration=1

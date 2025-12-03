@@ -353,194 +353,432 @@ class PompParameters(ParameterSet):
 class PanelParameters(ParameterSet):
     """
     Manages parameters for PanelPomp models.
-    Internal storage is lists of DataFrames for shared and unit-specific parameters.
+    Internal storage is a list of dictionaries, always containing "shared" and "unit_specific" keys mapping to DataFrames (which may be empty).
     """
 
     def __init__(
         self,
-        shared: Union[pd.DataFrame, list[pd.DataFrame], None] = None,
-        unit_specific: Union[pd.DataFrame, list[pd.DataFrame], None] = None,
+        theta: Union[
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            "PanelParameters",
+            None,
+        ],
+        logLik_unit: np.ndarray | None = None,
+        estimation_scale: bool = False,
     ):
-        self.shared = self._normalize_input(shared)
-        self.unit_specific = self._normalize_input(unit_specific)
+        self._theta: list[dict[str, pd.DataFrame | None]]
+        self.estimation_scale: bool
+        self._logLik_unit: np.ndarray
+        self._canonical_shared_param_names: list[str]
+        self._canonical_unit_param_names: list[str]
+        self._canonical_param_names: list[str]
 
-        self._validate_consistency()
-        self._canonical_shared_param_names: list[str] = (
-            list(self.shared[0].index) if self.shared else []
-        )
-        self._canonical_unit_specific_param_names: list[str] = (
-            list(self.unit_specific[0].index) if self.unit_specific else []
+        if isinstance(theta, PanelParameters):
+            self._theta = [
+                {k: v.copy() if v is not None else None for k, v in t.items()}
+                for t in theta._theta
+            ]
+            self.estimation_scale = theta.estimation_scale
+            self._validate_none_consistency()
+            self._validate_df_consistency()
+            self._logLik_unit = (
+                theta.logLik_unit.copy()
+                if logLik_unit is None
+                else self._format_logLik_unit(logLik_unit, len(self._theta))
+            )
+        else:
+            self._theta = self._normalize_input(theta)
+            self.estimation_scale = estimation_scale
+            self._validate_none_consistency()
+            self._validate_df_consistency()
+            self._logLik_unit = self._format_logLik_unit(logLik_unit, len(self._theta))
+
+        self._logLik = self._logLik_unit.sum(axis=1)
+
+        shared_df = self._theta[0]["shared"]
+        unit_df = self._theta[0]["unit_specific"]
+        if shared_df is not None:
+            self._canonical_shared_param_names = list(shared_df.index)
+        else:
+            self._canonical_shared_param_names = []
+        if unit_df is not None:
+            self._canonical_unit_param_names = list(unit_df.index)
+        else:
+            self._canonical_unit_param_names = []
+
+        self._canonical_param_names = list(
+            set(self._canonical_shared_param_names + self._canonical_unit_param_names)
         )
 
-    def _normalize_input(self, data: Any) -> Optional[list[pd.DataFrame]]:
-        if data is None:
-            return None
-        if isinstance(data, pd.DataFrame):
-            return [data]
-        if isinstance(data, list):
-            if not all(isinstance(d, pd.DataFrame) for d in data):
-                raise TypeError("Input lists must contain pandas DataFrames")
-            return data
-        raise TypeError(
-            f"Invalid input type: {type(data)}. Expected DataFrame or list of DataFrames."
-        )
-
-    def _validate_consistency(self):
+    def _normalize_input(
+        self,
+        theta: None
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]],
+    ) -> list[dict[str, pd.DataFrame | None]]:
         """
-        Ensures shared and unit_specific inputs have matching lengths (J) and structures.
+        Normalize input to list of dicts with valid DataFrames or None.
+        Checks that all dictionaries have the keys "shared" and "unit_specific" and that all values are None or pd.DataFrames.
         """
-        if self.shared is None and self.unit_specific is None:
-            # It is technically possible to initialize an empty shell,
-            # but usually this implies no parameters.
+        if theta is None:
+            return []
+
+        if isinstance(theta, dict):
+            theta = [theta]
+
+        if not isinstance(theta, list):
+            raise TypeError("theta must be a dictionary or a list of dictionaries")
+
+        for i, t in enumerate(theta):
+            keys = set(t.keys())
+            if keys != {"shared", "unit_specific"}:
+                raise ValueError(
+                    f"Each parameter dictionary must have exactly the keys 'shared' and 'unit_specific'. "
+                    f"Found keys {keys} in item {i}."
+                )
+            if not all(isinstance(v, (pd.DataFrame, type(None))) for v in t.values()):
+                raise TypeError(
+                    f"All values in each dictionary must be None or pd.DataFrames. "
+                    f"Found values {t.values()} of type {type(t.values())} in item {i}."
+                )
+
+        return theta.copy()
+
+    def _validate_none_consistency(self):
+        """
+        Sets internal flags for whether all or only some 'shared'/'unit_specific' are None.
+        """
+        shared_none = [t["shared"] is None for t in self._theta]
+        unit_none = [t["unit_specific"] is None for t in self._theta]
+
+        some_shared_none = any(shared_none) and not all(shared_none)
+        some_unit_specific_none = any(unit_none) and not all(unit_none)
+        if some_shared_none:
+            raise ValueError(
+                "Some, but not all, shared parameters are None. This is not supported."
+            )
+        if some_unit_specific_none:
+            raise ValueError(
+                "Some, but not all, unit-specific parameters are None. This is not supported."
+            )
+
+    def _format_logLik_unit(
+        self, ll_unit: np.ndarray | None, n_reps: int
+    ) -> np.ndarray:
+        """Standardize logLik dimensions."""
+        # Determine n_units from the first valid unit_specific dataframe
+        n_units = 0
+        if n_reps > 0 and self._theta[0]["unit_specific"] is not None:
+            n_units = self._theta[0]["unit_specific"].shape[1]
+
+        if ll_unit is None:
+            return np.full((n_reps, n_units), np.nan)
+
+        ll_unit = np.array(ll_unit, dtype=float)
+        if ll_unit.ndim == 1 and n_reps == 1:
+            return ll_unit.reshape(1, -1)
+        if ll_unit.shape != (n_reps, n_units):
+            # Allow shape (n_reps, 0) if n_units is 0
+            if n_units == 0 and ll_unit.size == 0:
+                return np.empty((n_reps, 0))
+            raise ValueError(
+                f"logLik_unit shape mismatch: {ll_unit.shape} vs ({n_reps}, {n_units})"
+            )
+        return ll_unit
+
+    def _validate_df_consistency(self):
+        """
+        Ensure all replicates have consistent data frames:
+        - Shared parameters must have the same index and exactly one column.
+        - Unit-specific parameters must have the same index and columns.
+        - If a parameter is in shared, it must not be in unit-specific and vice-versa.
+        """
+        if not self.theta:
             return
 
-        # Check lengths match if both exist
-        if self.shared is not None and self.unit_specific is not None:
-            if len(self.shared) != len(self.unit_specific):
-                raise ValueError(
-                    f"shared and unit_specific must have the same number of replicates. "
-                    f"Got shared={len(self.shared)}, unit_specific={len(self.unit_specific)}"
-                )
+        ref = self.theta[0]
+        if ref["shared"] is not None:
+            ref_s_idx = ref["shared"].index
+            ref_s_cols = ref["shared"].columns
+            if len(ref_s_cols) != 1:
+                raise ValueError("Shared parameters must have exactly one column.")
+        else:
+            ref_s_idx = []
+        if ref["unit_specific"] is not None:
+            ref_u_idx = ref["unit_specific"].index
+            ref_u_cols = ref["unit_specific"].columns
+        else:
+            ref_u_idx = []
+            ref_u_cols = []
 
-        # Validate index consistency across replicates
-        # (All shared DFs should have same index; All unit_specific DFs should have same index/columns)
-        if self.shared:
-            ref_idx = self.shared[0].index
-            if not all(df.index.equals(ref_idx) for df in self.shared[1:]):
-                raise ValueError(
-                    "All shared DataFrames must have the same index (parameter names)"
-                )
-            # Check that all shared DataFrames have a single column named "shared"
-            for i, df in enumerate(self.shared):
-                if df.columns != ["shared"]:
-                    raise ValueError(
-                        f"All shared DataFrames must contain a single column named 'shared'. "
-                        f"Missing in shared DataFrame at replicate {i}."
-                    )
+        shared_param_names = set(ref_s_idx)
+        unit_param_names = set(ref_u_idx)
+        overlap = shared_param_names.intersection(unit_param_names)
+        if overlap:
+            raise ValueError(
+                f"Parameter name(s) found in both shared and unit-specific parameters: {sorted(overlap)}"
+            )
 
-        if self.unit_specific:
-            ref_idx = self.unit_specific[0].index
-            ref_cols = self.unit_specific[0].columns
-            for i, df in enumerate(self.unit_specific[1:]):
-                if not df.index.equals(ref_idx):
+        for i, t in enumerate(self.theta[1:], 1):
+            if t["shared"] is not None:
+                if not t["shared"].index.equals(ref_s_idx):
                     raise ValueError(
-                        "All unit_specific DataFrames must have the same index (parameter names)"
+                        f"Shared parameter index mismatch at replicate {i}."
                     )
-                if not df.columns.equals(ref_cols):
-                    raise ValueError(
-                        f"All unit_specific DataFrames must have the same columns (unit names). "
-                        f"Mismatch found at replicate {i + 1}."
-                    )
+            if t["unit_specific"] is not None:
+                if not t["unit_specific"].index.equals(ref_u_idx):
+                    raise ValueError(f"Unit parameter index mismatch at replicate {i}.")
+                if not t["unit_specific"].columns.equals(ref_u_cols):
+                    raise ValueError(f"Unit columns mismatch at replicate {i}.")
+
+    @property
+    def logLik(self) -> np.ndarray:
+        return self._logLik
+
+    @logLik.setter
+    def logLik(self, value):
+        # We generally don't set full logLik directly for panels, but strictly:
+        # We can't infer unit contribution, so this setter is ambiguous
+        # unless we just broadcast/reset. For now, assume read-only derived.
+        pass
+
+    @property
+    def logLik_unit(self) -> np.ndarray:
+        return self._logLik_unit
+
+    @logLik_unit.setter
+    def logLik_unit(self, value):
+        self._logLik_unit = self._format_logLik_unit(value, len(self.theta))
+        self._logLik = self._logLik_unit.sum(axis=1)
+
+    @property
+    def theta(self):
+        return self._theta.copy()
+
+    @theta.setter
+    def theta(
+        self,
+        value: dict[str, pd.DataFrame | None] | list[dict[str, pd.DataFrame | None]],
+    ):
+        self._theta = self._normalize_input(value)
+        self._validate_none_consistency()
+        self._validate_df_consistency()
+        n_reps = len(value)
+        self._logLik_unit = self._format_logLik_unit(None, n_reps)
+        self._logLik = self._logLik_unit.sum(axis=1)
 
     def num_replicates(self) -> int:
-        if self.shared is not None:
-            return len(self.shared)
-        if self.unit_specific is not None:
-            return len(self.unit_specific)
-        return 0
+        return len(self._theta)
 
-    def get_param_names(self) -> tuple[list[str], list[str]]:
-        """
-        Returns a tuple: (shared_param_names, unit_specific_param_names)
-        """
-        return (
-            list(self._canonical_shared_param_names),
-            list(self._canonical_unit_specific_param_names),
-        )
+    def get_param_names(self) -> list[str]:
+        return self._canonical_param_names
+
+    def get_shared_param_names(self) -> list[str]:
+        return self._canonical_shared_param_names
+
+    def get_unit_param_names(self) -> list[str]:
+        return self._canonical_unit_param_names
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PanelParameters":
         if isinstance(indices, int):
             indices = [indices]
 
+        # Slicing handled by list/array slicing logic
         if isinstance(indices, slice):
-            new_shared = self.shared[indices] if self.shared else None
-            new_specific = self.unit_specific[indices] if self.unit_specific else None
+            sub_theta = self._theta[indices]
+            sub_ll = self._logLik_unit[indices]
         else:
-            new_shared = [self.shared[i] for i in indices] if self.shared else None
-            new_specific = (
-                [self.unit_specific[i] for i in indices] if self.unit_specific else None
-            )
+            sub_theta = [self._theta[i] for i in indices]
+            sub_ll = self._logLik_unit[indices]
 
-        return PanelParameters(new_shared, new_specific)
+        return PanelParameters(
+            sub_theta, logLik_unit=sub_ll, estimation_scale=self.estimation_scale
+        )
 
     def to_jax_array(
         self, param_names: list[str], unit_names: list[str] | None = None, **kwargs
     ) -> jax.Array:
-        """
-        Constructs a combined parameter array for all units.
-
-        Strategy:
-        1. Iterate through replicates.
-        2. For each replicate, build a (n_units, n_params) matrix.
-        3. Stack to get (J, n_units, n_params).
-
-        Args:
-            param_names: List of all parameters required by the model logic.
-            unit_names: List of unit names in the order expected by the model.
-                        If None, inferred from unit_specific columns.
-        """
-        reps = self.num_replicates()
+        reps = len(self._theta)
         if reps == 0:
             return jnp.empty((0, 0, 0))
 
-        # Infer unit names if not provided
+        # Infer unit names if needed
         if unit_names is None:
-            if self.unit_specific:
-                unit_names = list(self.unit_specific[0].columns)
+            if self._theta[0]["unit_specific"] is not None:
+                unit_names = list(self._theta[0]["unit_specific"].columns)
             else:
                 raise ValueError(
-                    "unit_names must be provided if no unit_specific parameters exist"
+                    "unit_names required when no unit_specific parameters exist"
                 )
 
         n_units = len(unit_names)
         n_params = len(param_names)
 
-        # Pre-calculate indices for speed
-        # We need to know, for each required param, whether it comes from shared or specific
-        shared_keys = set(self.shared[0].index) if self.shared else set()
-        specific_keys = (
-            set(self.unit_specific[0].index) if self.unit_specific else set()
-        )
-
-        # Build the array
-        # This implementation uses numpy for construction flexibility, then converts to JAX
-        # (constructing complex structures directly in JAX can be tricky without vmap)
+        # Identify source of each parameter
+        ref = self._theta[0]
+        if ref["shared"] is not None:
+            shared_keys = set(ref["shared"].index)
+        else:
+            shared_keys = set()
+        if ref["unit_specific"] is not None:
+            specific_keys = set(ref["unit_specific"].index)
+        else:
+            specific_keys = set()
 
         full_array = np.zeros((reps, n_units, n_params))
 
-        for j in range(reps):
-            # Extract data for this replicate
-            s_df = self.shared[j] if self.shared else None
-            u_df = self.unit_specific[j] if self.unit_specific else None
+        for j, t in enumerate(self._theta):
+            if t["shared"] is not None:
+                s_df = t["shared"]
+            else:
+                s_df = pd.DataFrame()
+            if t["unit_specific"] is not None:
+                u_df = t["unit_specific"]
+            else:
+                u_df = pd.DataFrame()
 
             for p_idx, p_name in enumerate(param_names):
                 if p_name in specific_keys:
-                    # Look up in unit_specific (row=p_name)
-                    # We ensure we pull values in the order of `unit_names`
-                    # Reindexing handles the ordering safety
-                    if u_df is None:
-                        raise ValueError(
-                            "unit_specific is None but parameter is unit-specific"
-                        )
+                    # u_df cannot be empty if p_name is in specific_keys
                     try:
-                        vals = u_df.loc[p_name, unit_names].values
-                    except KeyError as e:
-                        # This happens if a unit name in unit_names is missing from the DF columns
-                        raise KeyError(
-                            f"Unit {e} not found in unit_specific parameters"
-                        )
-                    full_array[j, :, p_idx] = vals
+                        full_array[j, :, p_idx] = u_df.loc[p_name, unit_names].values
+                    except KeyError:
+                        raise KeyError(f"Unit mismatch for parameter {p_name}")
                 elif p_name in shared_keys:
-                    # Look up in shared and broadcast across units
-                    if s_df is None:
-                        raise ValueError("shared is None but parameter is shared")
-                    val = s_df.loc[p_name].values[
-                        0
-                    ]  # Assumes single column 'shared' or similar
+                    # s_df cannot be empty if p_name is in shared_keys
+                    val = s_df.loc[p_name].iloc[0]
                     full_array[j, :, p_idx] = val
                 else:
-                    raise KeyError(
-                        f"Parameter '{p_name}' not found in shared or unit_specific data."
-                    )
+                    raise KeyError(f"Parameter '{p_name}' not found.")
 
         return jnp.array(full_array)
+
+    def transform(
+        self,
+        par_trans: ParTrans,
+        direction: Literal["to_est", "from_est"] | None = None,
+    ):
+        auto = direction is None
+        if auto:
+            direction = "from_est" if self.estimation_scale else "to_est"
+
+        if (direction == "to_est" and not self.estimation_scale) or (
+            direction == "from_est" and self.estimation_scale
+        ):
+            self._theta = par_trans.panel_transform_list(
+                self._theta, direction=direction
+            )
+            self.estimation_scale = not self.estimation_scale
+
+    def prune(self, n: int = 1, refill: bool = True) -> None:
+        if not self.theta:
+            return
+
+        # Sort by total log likelihood
+        top_indices = self._logLik.argsort()[-n:][::-1]
+
+        top_theta = [self.theta[i] for i in top_indices]
+        top_ll_unit = self._logLik_unit[top_indices]
+
+        if refill:
+            n_reps = len(self.theta)
+            repeats = (n_reps + n - 1) // n
+            self.theta = (top_theta * repeats)[:n_reps]
+            self._logLik_unit = np.tile(top_ll_unit, (repeats, 1))[:n_reps]
+        else:
+            self.theta = top_theta
+            self._logLik_unit = top_ll_unit
+
+        self._logLik = self._logLik_unit.sum(axis=1)
+
+    def mix_and_match(self, unit_names: list[str]) -> None:
+        if not self.theta:
+            return
+
+        # Rank by shared logLik (total)
+        shared_ranks = self._logLik.argsort()[::-1]
+
+        # Rank by unit-specific logLik
+        unit_ranks = {}
+        for u_idx, unit in enumerate(unit_names):
+            unit_ranks[unit] = self._logLik_unit[:, u_idx].argsort()[::-1]
+
+        new_theta = []
+        new_ll_unit = np.zeros_like(self._logLik_unit)
+
+        for i in range(len(self.theta)):
+            # 1. Best shared params for this position
+            s_idx = shared_ranks[i]
+            best_shared = self.theta[s_idx]["shared"].copy()
+
+            # 2. Best unit params for each unit for this position
+            new_u_data = {}
+            for u_idx, unit in enumerate(unit_names):
+                u_best_idx = unit_ranks[unit][i]
+
+                # Copy the logLik for this unit/replicate combo
+                new_ll_unit[i, u_idx] = self._logLik_unit[u_best_idx, u_idx]
+
+                # Extract the unit specific column
+                src_df = self.theta[u_best_idx]["unit_specific"]
+                if not src_df.empty and unit in src_df.columns:
+                    new_u_data[unit] = src_df[unit].copy()
+
+            # Construct new unit dataframe
+            if new_u_data:
+                # Use index from the first theta (guaranteed consistent)
+                if self._theta[0]["unit_specific"] is not None:
+                    new_u_df = pd.DataFrame(
+                        new_u_data, index=self._theta[0]["unit_specific"].index
+                    )
+                else:
+                    new_u_df = None
+            else:
+                new_u_df = None
+
+            new_theta.append({"shared": best_shared, "unit_specific": new_u_df})
+
+        self._theta = new_theta
+        self._logLik_unit = new_ll_unit
+        self._logLik = new_ll_unit.sum(axis=1)
+
+    def to_list(self) -> list[dict[str, pd.DataFrame | None]]:
+        return self._theta.copy()
+
+    def __getitem__(self, index):
+        if isinstance(index, int):
+            return self._theta[index]
+        return self.subset(index)
+
+    def __iter__(self):
+        return iter(self._theta)
+
+    def __len__(self):
+        return len(self._theta)
+
+    def __mul__(self, n: int) -> "PanelParameters":
+        """Replicate the parameter set n times."""
+        if not isinstance(n, int):
+            return NotImplemented
+        if n < 0:
+            raise ValueError("n must be non-negative")
+
+        # Replicate the internal list of dicts
+        new_theta = self._theta * n
+
+        # Replicate the logLik array
+        if self._logLik_unit.size > 0:
+            new_ll_unit = np.tile(self._logLik_unit, (n, 1))
+        else:
+            # Handle edge case of empty params or 0 replicates
+            n_cols = self._logLik_unit.shape[1] if self._logLik_unit.ndim > 1 else 0
+            new_ll_unit = np.empty((len(new_theta), n_cols))
+
+        return PanelParameters(
+            new_theta, logLik_unit=new_ll_unit, estimation_scale=self.estimation_scale
+        )
+
+    def __rmul__(self, n: int) -> "PanelParameters":
+        """Support left multiplication (e.g. 5 * params)."""
+        return self.__mul__(n)

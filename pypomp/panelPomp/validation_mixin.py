@@ -98,37 +98,3 @@ class PanelValidationMixin(Base):
                     f"shared length: {len(shared)}, unit_specific length: {len(unit_specific)}"
                 )
         return shared, unit_specific, unit_objects
-
-    def _get_param_names(
-        self,
-        shared: list[pd.DataFrame] | None = None,
-        unit_specific: list[pd.DataFrame] | None = None,
-    ) -> tuple[list[str], list[str]]:
-        shared = shared or self.shared
-        shared_lst = [] if shared is None else list(shared[0].index)
-        unit_specific = unit_specific or self.unit_specific
-        unit_specific_lst = (
-            [] if unit_specific is None else list(unit_specific[0].index)
-        )
-        return shared_lst, unit_specific_lst
-
-    def _get_theta_list_len(
-        self,
-        shared: list[pd.DataFrame] | None,
-        unit_specific: list[pd.DataFrame] | None,
-    ) -> int:
-        shared = shared or self.shared
-        unit_specific = unit_specific or self.unit_specific
-        if shared is None and unit_specific is not None:
-            return len(unit_specific)
-        elif shared is not None and unit_specific is None:
-            return len(shared)
-        elif shared is not None and unit_specific is not None:
-            if len(shared) == len(unit_specific):
-                return len(shared)
-            else:
-                raise ValueError(
-                    "shared and unit_specific must have the same length if both are provided"
-                )
-        else:
-            raise ValueError("At least one of shared or unit_specific must be provided")

@@ -12,7 +12,7 @@ def test_get_unit_parameters(measles_panel_setup_some_shared):
     params = panel.get_unit_parameters(unit="London")
     assert isinstance(params, list)
     assert isinstance(params[0], dict)
-    assert len(params) == panel._get_theta_list_len(panel.shared, panel.unit_specific)
+    assert len(params) == panel.theta.num_replicates()
 
 
 def test_results(measles_panel_mp):
@@ -237,20 +237,19 @@ def test_sample_params(measles_panel_setup_some_shared):
         "R_0": [0.9, 0.99],
     }
     shared_names = ["gamma", "cohort"]
-    shared_param_sets, unit_specific_param_sets = panel.sample_params(
+    param_sets = panel.sample_params(
         param_bounds=param_bounds,
         units=list(panel.unit_objects.keys()),
         n=2,
         key=key,
         shared_names=shared_names,
     )
-    assert isinstance(shared_param_sets, list)
-    assert isinstance(unit_specific_param_sets, list)
-    assert len(shared_param_sets) == 2
-    assert len(unit_specific_param_sets) == 2
+    assert isinstance(param_sets, list)
+    assert len(param_sets) == 2
 
     # Check that shared_param_sets DataFrames have correct index and column in correct order
-    for shared_df in shared_param_sets:
+    for param_set in param_sets:
+        shared_df = param_set["shared"]
         # Index should be shared_names, in order
         assert list(shared_df.index) == shared_names
         # Only one column which is exactly ["shared"]
@@ -261,20 +260,23 @@ def test_sample_params(measles_panel_setup_some_shared):
     unit_specific_names = [
         name for name in param_bounds if name not in set(shared_names)
     ]
-    for unit_df in unit_specific_param_sets:
+    for param_set in param_sets:
+        unit_df = param_set["unit_specific"]
         # Columns (units) are in the correct order
         assert list(unit_df.columns) == units
         # Index should be unit_specific_names, in order
         assert list(unit_df.index) == unit_specific_names
 
     # Also check that each value is within the specified bounds
-    for shared_df in shared_param_sets:
+    for param_set in param_sets:
+        shared_df = param_set["shared"]
         for name in shared_names:
             val = shared_df.loc[name, "shared"]
             lower, upper = param_bounds[name]
             assert lower <= val <= upper
 
-    for unit_df in unit_specific_param_sets:
+    for param_set in param_sets:
+        unit_df = param_set["unit_specific"]
         for param_name in unit_specific_names:
             lower, upper = param_bounds[param_name]
             for unit in units:
@@ -319,8 +321,7 @@ def test_performance_comprehensive():
     # Create panel
     panel = pp.PanelPomp(
         Pomp_dict=pomp_objects,
-        shared=[shared_params],
-        unit_specific=[unit_specific_params],
+        theta=[{"shared": shared_params, "unit_specific": unit_specific_params}],
     )
 
     # Create comprehensive dummy results to stress test
@@ -366,8 +367,8 @@ def test_performance_comprehensive():
             method="mif",
             execution_time=1.0,
             key=jax.random.key(42),
-            shared=[shared_params] * n_reps,
-            unit_specific=[unit_specific_params] * n_reps,
+            theta=[{"shared": shared_params, "unit_specific": unit_specific_params}]
+            * n_reps,  # type: ignore[reportArgumentType]
             shared_traces=shared_traces,
             unit_traces=unit_traces,
             logLiks=logLiks,
@@ -398,8 +399,8 @@ def test_performance_comprehensive():
             method="pfilter",
             execution_time=1.0,
             key=jax.random.key(42),
-            shared=[shared_params] * n_reps,
-            unit_specific=[unit_specific_params] * n_reps,
+            theta=[{"shared": shared_params, "unit_specific": unit_specific_params}]
+            * n_reps,  # type: ignore[reportArgumentType]
             logLiks=pfilter_logLiks,
             J=100,
             reps=3,

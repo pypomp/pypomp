@@ -144,6 +144,14 @@ def _time_interp(
 
 
 class RInit:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+
     def __init__(
         self,
         struct: Callable,
@@ -208,6 +216,21 @@ class RInit:
 
 
 class RProc:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+    struct_interp: Callable
+    struct_pf_interp: Callable
+    struct_per_interp: Callable
+    nstep: int | None
+    dt: float | None
+    accumvars: tuple[int, ...] | None
+    _max_steps_bound: int | None
+
     def __init__(
         self,
         struct: Callable,
@@ -335,6 +358,15 @@ class RProc:
 
 
 class DMeas:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    y_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+
     def __init__(
         self,
         struct: Callable,
@@ -403,6 +435,15 @@ class DMeas:
 
 
 class RMeas:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+    ydim: int
+
     def __init__(
         self,
         struct: Callable,

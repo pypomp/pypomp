@@ -9,6 +9,10 @@ import numpy as np
 class ParTrans:
     """
     Class that handles the parameter transformation to and from the natural parameter space.
+
+    Attributes:
+        to_est: Function that transforms the parameters to the estimation parameter space.
+        from_est: Function that transforms the parameters from the estimation parameter space to the natural parameter space.
     """
 
     to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]

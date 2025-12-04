@@ -1,4 +1,4 @@
-[![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
+[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 [![codecov](https://codecov.io/gh/pypomp/pypomp/graph/badge.svg?token=8TA2X3DRML)](https://codecov.io/gh/pypomp/pypomp)
 
 # pypomp
@@ -26,7 +26,7 @@ See the [tutorials](https://pypomp.github.io/tutorials) for user-friendly guides
 
 ### Package Development 
 
-* The **pypomp** package is currently at early stages of development. All version numbers below 0.1 are pre-release.
+* The **pypomp** package is currently in early and active development. Backward compatibility is not yet a major consideration. Tutorials and quantitative tests may not all run on the latest pypomp version.
 
 * All contributions are welcome! Contributions should keep in mind the intended uses of this package, and its intended users.
 

@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import pypomp as pp
 import pytest
+from typing import cast
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def panel_pomp_with_transform():
     # Get initial values from one of the LG models to ensure consistency
     # LG models have all parameters: A1-A4, C1-C4, Q1-Q4, R1-R4
     # Use values from LG1 for all parameters
-    theta_base = LG1.theta[0]
+    theta_base = LG1.theta.to_list()[0]
 
     # Create panel with shared parameters (A and C matrices) and unit-specific (Q and R)
     shared_param_names = ["A1", "A2", "A3", "A4", "C1", "C2", "C3", "C4"]
@@ -62,24 +63,40 @@ def panel_pomp_with_transform():
         },
     )
 
+    theta = cast(
+        list[dict[str, pd.DataFrame | None]],
+        [{"shared": shared_params, "unit_specific": unit_specific_params}],
+    )
     panel = pp.PanelPomp(
         Pomp_dict={"unit1": LG1, "unit2": LG2},
-        shared=shared_params,
-        unit_specific=unit_specific_params,
+        theta=theta,
     )
 
     return panel
 
 
 def test_panel_mif_traces_transformed(panel_pomp_with_transform):
-    """Test that with rw_sd=0, parameters remain unchanged after transformation cycle."""
+    """
+    Test that with rw_sd=0, parameters remain unchanged after transformation cycle.
+    """
     panel = panel_pomp_with_transform
 
     # Capture initial parameters in natural space before running mif
     # Deep copy to avoid mutations during mif
-
-    initial_shared = [df.copy() for df in panel.shared]
-    initial_unit_specific = [df.copy() for df in panel.unit_specific]
+    panel_shared = [
+        panel.theta.theta[i].get("shared")
+        for i in range(len(panel.theta.theta))
+        if panel.theta.theta[i].get("shared") is not None
+    ]
+    panel_unit_specific = [
+        panel.theta.theta[i].get("unit_specific")
+        for i in range(len(panel.theta.theta))
+        if panel.theta.theta[i].get("unit_specific") is not None
+    ]
+    initial_shared = [df.copy() for df in panel_shared] if panel_shared else None
+    initial_unit_specific = (
+        [df.copy() for df in panel_unit_specific] if panel_unit_specific else None
+    )
 
     # Get canonical param names before running mif
     shared_names = panel.canonical_shared_param_names
@@ -96,12 +113,26 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
 
     panel.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
 
+    # Extract final parameters from theta
+    final_shared = [
+        panel.theta.theta[i].get("shared")
+        for i in range(len(panel.theta.theta))
+        if panel.theta.theta[i].get("shared") is not None
+    ]
+    final_unit_specific = [
+        panel.theta.theta[i].get("unit_specific")
+        for i in range(len(panel.theta.theta))
+        if panel.theta.theta[i].get("unit_specific") is not None
+    ]
+    final_shared = final_shared if final_shared else None
+    final_unit_specific = final_unit_specific if final_unit_specific else None
+
     # Check that shared parameters are unchanged
-    if initial_shared is not None and panel.shared is not None:
+    if initial_shared is not None and final_shared is not None:
         # Compare initial and final shared parameters
-        for rep_idx in range(len(panel.shared)):
+        for rep_idx in range(len(final_shared)):
             initial_df = initial_shared[rep_idx]
-            final_df = panel.shared[rep_idx]
+            final_df = final_shared[rep_idx]
 
             for param in shared_names:
                 initial_val = initial_df.loc[param, "shared"]
@@ -117,11 +148,11 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
                 )
 
     # Check that unit-specific parameters are unchanged
-    if initial_unit_specific is not None and panel.unit_specific is not None:
+    if initial_unit_specific is not None and final_unit_specific is not None:
         # Compare initial and final unit-specific parameters
-        for rep_idx in range(len(panel.unit_specific)):
+        for rep_idx in range(len(final_unit_specific)):
             initial_df = initial_unit_specific[rep_idx]
-            final_df = panel.unit_specific[rep_idx]
+            final_df = final_unit_specific[rep_idx]
 
             for param in unit_names:
                 for unit in final_df.columns:

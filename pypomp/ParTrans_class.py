@@ -1,4 +1,5 @@
 from typing import Callable, Literal
+import importlib
 import pandas as pd
 import jax
 import jax.numpy as jnp
@@ -10,6 +11,9 @@ class ParTrans:
     Class that handles the parameter transformation to and from the natural parameter space.
     """
 
+    to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
+    from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
+
     def __init__(
         self,
         to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
@@ -20,121 +24,73 @@ class ParTrans:
 
     def panel_transform(
         self,
-        shared: pd.DataFrame | None,
-        unit_specific: pd.DataFrame | None,
+        theta: dict[str, pd.DataFrame | None],
         direction: Literal["to_est", "from_est"],
-    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    ) -> dict[str, pd.DataFrame | None]:
         """
-        Transform shared and unit-specific parameters to or from the estimation parameter space.
+        Transform shared and unit-specific parameters for a single replicate.
+        Input theta contains 'shared' and/or 'unit_specific' DataFrames.
         """
-        if shared is None and unit_specific is None:
-            return None, None
+        func = self.to_est if direction == "to_est" else self.from_est
 
-        shared_out = None
-        unit_specific_out = None
+        # Normalize to empty DFs if None or missing for cleaner logic
+        s_df = theta.get("shared")
+        if s_df is None:
+            s_df = None
 
-        # Process shared parameters
-        if shared is not None:
-            shared_names = shared.index.tolist()
-            shared_dict = shared.to_dict("index")
-            # Extract the single column value for each parameter
-            shared_values = {
-                name: list(data.values())[0] for name, data in shared_dict.items()
-            }
+        u_df = theta.get("unit_specific")
+        if u_df is None:
+            u_df = None
 
-            complete_input = shared_values.copy()
-            if unit_specific is not None:
-                unit_specific_names = unit_specific.index.tolist()
-                # Fill in actual values from the first unit for unit-specific parameters
-                first_unit = unit_specific.columns[0]
-                unit_values = unit_specific[first_unit].to_dict()
-                complete_input.update(unit_values)
+        res: dict[str, pd.DataFrame | None] = {"shared": None, "unit_specific": None}
 
-            shared_transformed = (
-                self.to_est(complete_input)
-                if direction == "to_est"
-                else self.from_est(complete_input)
+        # Pre-calculate shared dictionary (param -> value)
+        s_vals = s_df.iloc[:, 0].to_dict() if s_df is not None else {}
+
+        # 1. Transform Shared Parameters
+        if s_df is not None:
+            # Context: Shared values + First unit's specific values (if any)
+            ctx = s_vals.copy()
+            if u_df is not None:
+                first_unit = u_df.columns[0]
+                ctx.update(u_df[first_unit].to_dict())
+
+            trans = func(ctx)
+
+            # Filter output back to just shared keys
+            new_s_vals = {k: trans[k] for k in s_vals}
+            res["shared"] = pd.DataFrame(
+                new_s_vals.values(),
+                index=pd.Index(new_s_vals.keys()),
+                columns=pd.Index(["shared"]),
             )
-            shared_out = pd.DataFrame(
-                index=pd.Index(shared_names),
-                data={"shared": [shared_transformed[name] for name in shared_names]},
-            )
 
-        # Process unit-specific parameters
-        if unit_specific is not None:
-            unit_specific_names = unit_specific.index.tolist()
-            unit_names = unit_specific.columns.tolist()
-            unit_specific_out = pd.DataFrame(index=pd.Index(unit_specific_names))
+        # 2. Transform Unit-Specific Parameters
+        if u_df is not None:
+            new_u_data = {}
+            for unit in u_df.columns:
+                # Context: Shared values + This unit's specific values
+                ctx = s_vals.copy()
+                ctx.update(u_df[unit].to_dict())
 
-            for unit in unit_names:
-                input_dict = {}
-                if shared is not None:
-                    shared_dict = shared.to_dict("index")
-                    shared_values = {
-                        name: list(data.values())[0]
-                        for name, data in shared_dict.items()
-                    }
-                    input_dict.update(shared_values)
+                trans = func(ctx)
 
-                unit_values = unit_specific[unit].to_dict()
-                input_dict.update(unit_values)
+                # Filter output back to specific keys (maintaining order)
+                new_u_data[unit] = [trans[k] for k in u_df.index]
 
-                output_dict = (
-                    self.to_est(input_dict)
-                    if direction == "to_est"
-                    else self.from_est(input_dict)
-                )
+            res["unit_specific"] = pd.DataFrame(new_u_data, index=u_df.index)
 
-                unit_specific_transformed = {
-                    name: output_dict[name] for name in unit_specific_names
-                }
-                unit_specific_out[unit] = [
-                    unit_specific_transformed[name] for name in unit_specific_names
-                ]
-
-        return shared_out, unit_specific_out
+        return res
 
     def panel_transform_list(
         self,
-        shared_list: list[pd.DataFrame] | None,
-        unit_specific_list: list[pd.DataFrame] | None,
+        theta_list: list[dict[str, pd.DataFrame | None]],
         direction: Literal["to_est", "from_est"],
-    ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
-        if shared_list is None and unit_specific_list is None:
-            return [], []
-
-        # Convert None inputs to list of Nones with appropriate length
-        if shared_list is None and unit_specific_list is not None:
-            length = len(unit_specific_list)
-            shared_list = [None] * length  # type: ignore
-        elif shared_list is not None and unit_specific_list is None:
-            length = len(shared_list)
-            unit_specific_list = [None] * length  # type: ignore
-
-        # Both lists should now be non-None for easy iteration
-        assert shared_list is not None
-        assert unit_specific_list is not None
-
-        if len(shared_list) != len(unit_specific_list):
-            raise ValueError(
-                "shared_list and unit_specific_list must have the same length"
-            )
-
-        param_trans_list: list[tuple[pd.DataFrame | None, pd.DataFrame | None]] = [
-            self.panel_transform(shared, spec, direction=direction)
-            for shared, spec in zip(shared_list, unit_specific_list)
-        ]
-        shared_trans_list = [
-            shared_trans.apply(pd.to_numeric, errors="coerce").astype(float)
-            for shared_trans, _ in param_trans_list
-            if shared_trans is not None
-        ]
-        spec_trans_list = [
-            spec_trans.apply(pd.to_numeric, errors="coerce").astype(float)
-            for _, spec_trans in param_trans_list
-            if spec_trans is not None
-        ]
-        return shared_trans_list, spec_trans_list  # type: ignore
+    ) -> list[dict[str, pd.DataFrame | None]]:
+        """
+        Apply transform to a list of parameter sets.
+        """
+        return [self.panel_transform(t, direction) for t in theta_list]
 
     def to_floats(
         self, theta: dict[str, jax.Array], direction: Literal["to_est", "from_est"]
@@ -317,6 +273,82 @@ class ParTrans:
             unit_out = unit_traces.copy()
 
         return shared_out, unit_out
+
+    def __eq__(self, other):
+        """
+        Check equality with another ParTrans object.
+
+        Two ParTrans instances are equal if they use the same function objects
+        for to_est and from_est. Note that functionally identical lambda functions
+        will not be considered equal unless they are the same object.
+        """
+        if not isinstance(other, type(self)):
+            return False
+        if self.to_est != other.to_est:
+            return False
+        if self.from_est != other.from_est:
+            return False
+        return True
+
+    def __getstate__(self):
+        """
+        Custom pickling method to preserve function identity.
+
+        Stores module and function names for module-level functions.
+        Lambdas/closures cannot be reliably reconstructed and will fall back
+        to defaults on unpickling.
+        """
+        state = {}
+
+        # Store function information for reconstruction
+        # Check if to_est is a module-level function
+        if (
+            hasattr(self.to_est, "__module__")
+            and hasattr(self.to_est, "__name__")
+            and self.to_est.__module__ is not None
+        ):
+            state["_to_est_module"] = self.to_est.__module__
+            state["_to_est_name"] = self.to_est.__name__
+        else:
+            # Lambda or closure - can't reliably pickle, will use default
+            state["_to_est_is_lambda"] = True
+
+        # Check if from_est is a module-level function
+        if (
+            hasattr(self.from_est, "__module__")
+            and hasattr(self.from_est, "__name__")
+            and self.from_est.__module__ is not None
+        ):
+            state["_from_est_module"] = self.from_est.__module__
+            state["_from_est_name"] = self.from_est.__name__
+        else:
+            # Lambda or closure - can't reliably pickle, will use default
+            state["_from_est_is_lambda"] = True
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling method to reconstruct functions.
+
+        Reconstructs module-level functions by importing them.
+        Falls back to defaults for lambdas/closures.
+        """
+        # Reconstruct to_est
+        if "_to_est_is_lambda" in state:
+            # Can't reconstruct lambdas - use default
+            self.to_est = to_est_default
+        else:
+            module = importlib.import_module(state["_to_est_module"])
+            self.to_est = getattr(module, state["_to_est_name"])
+
+        # Reconstruct from_est
+        if "_from_est_is_lambda" in state:
+            # Can't reconstruct lambdas - use default
+            self.from_est = from_est_default
+        else:
+            module = importlib.import_module(state["_from_est_module"])
+            self.from_est = getattr(module, state["_from_est_name"])
 
 
 def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

@@ -220,33 +220,8 @@ def test_pickle(simple):
     # Unpickle the object
     unpickled_obj = pickle.loads(pickled_data)
 
-    # Check that the unpickled object has the same attributes
-    assert LG.ys.values.tolist() == unpickled_obj.ys.values.tolist()
-    assert LG.theta == unpickled_obj.theta
-    assert LG.covars == unpickled_obj.covars
-    assert LG.rinit == unpickled_obj.rinit
-    assert LG.rproc == unpickled_obj.rproc
-    assert LG.dmeas == unpickled_obj.dmeas
-    assert LG.rproc.dt == unpickled_obj.rproc.dt
-    assert len(LG.results_history) == len(unpickled_obj.results_history)
-    for orig, unpickled in zip(LG.results_history, unpickled_obj.results_history):
-        assert isinstance(unpickled, type(orig))
-        assert orig.method == unpickled.method
-        assert orig.execution_time == unpickled.execution_time
-        # Compare key values
-        assert np.array_equal(
-            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
-        )
-        # Compare other attributes based on result type
-        if hasattr(orig, "logLiks") and orig.logLiks is not None:
-            assert orig.logLiks.equals(unpickled.logLiks)
-        if hasattr(orig, "traces_da") and orig.traces_da is not None:
-            # For MIF/Train results, traces_da is a DataArray field
-            if isinstance(orig.traces_da, xr.DataArray):
-                assert orig.traces_da.equals(unpickled.traces_da)
-        if hasattr(orig, "theta"):
-            assert orig.theta == unpickled.theta
-    assert LG.traces().values.tolist() == unpickled_obj.traces().values.tolist()
+    # Check equality
+    assert LG == unpickled_obj
 
     # Check that the unpickled object can be pickled again if rmeas is None
     unpickled_obj.rmeas = None
@@ -261,29 +236,29 @@ def test_prune(simple):
     # Run pfilter with multiple replicates to generate results
     LG.pfilter(J=J, reps=5, key=key)
     # Save the original theta list length
-    orig_theta = LG.theta.copy()
+    orig_theta = LG.theta
     orig_len = len(orig_theta)
     # Prune to top 2 thetas, refill to original length
     LG.prune(n=2, refill=True)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == orig_len
     # The unique thetas should be at most 2
     unique_thetas = [tuple(sorted(d.items())) for d in LG.theta]
     assert len(set(unique_thetas)) <= 2
     # Prune to top 1 theta, do not refill
     LG.prune(n=1, refill=False)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == 1
     # The theta should be a dict
-    assert isinstance(LG.theta[0], dict)
+    assert isinstance(LG.theta.to_list()[0], dict)
     # Prune with n greater than available thetas (should not error, just return all)
-    LG.theta = orig_theta.copy()
+    LG.theta = pp.PompParameters(orig_theta)
     LG.prune(n=10, refill=False)
     assert len(LG.theta) == min(10, len(orig_theta))
     # Test error if results are empty
     LG2 = LG.__class__(
         ys=LG.ys.copy(),
-        theta=LG.theta[0].copy(),
+        theta=pp.PompParameters(LG.theta.to_list()[0].copy()),
         rinit=LG.rinit.original_func,
         rproc=LG.rproc.original_func,
         dmeas=LG.dmeas.original_func,
@@ -292,7 +267,7 @@ def test_prune(simple):
         ydim=LG.rmeas.ydim,
         statenames=["state_0", "state_1"],
     )
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError):
         LG2.prune(n=1)
 
 

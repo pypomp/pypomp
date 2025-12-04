@@ -1,5 +1,6 @@
 import xarray as xr
 import jax.numpy as jnp
+from copy import deepcopy
 
 
 def test_mif(measles_panel_setup_some_shared):
@@ -7,8 +8,7 @@ def test_mif(measles_panel_setup_some_shared):
     J = 2
     M = 2
     a = 0.5
-    shared_orig = panel.shared
-    unit_specific_orig = panel.unit_specific
+    theta_orig = panel.theta
     panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
     result = panel.results_history[-1]
 
@@ -16,8 +16,7 @@ def test_mif(measles_panel_setup_some_shared):
     assert hasattr(result, "shared_traces")
     assert hasattr(result, "unit_traces")
     assert hasattr(result, "logLiks")
-    assert result.shared is shared_orig
-    assert result.unit_specific is unit_specific_orig
+    assert result.theta is theta_orig
     assert result.J == J
     assert result.M == M
     assert result.a == a
@@ -45,22 +44,11 @@ def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
     J = 2
     M = 3
     a = 0.5
-    panel.unit_specific = panel.unit_specific * 2
-    panel.shared = panel.shared * 2
+    panel.theta = panel.theta * 2
 
-    original_unit_specific = [df.copy() for df in panel.unit_specific]
-    original_shared = [df.copy() for df in panel.shared]
-
-    reordered_unit_specific = []
-    for df in original_unit_specific:
-        reordered_index = list(reversed(df.index))
-        reordered_df = df.reindex(reordered_index)
-        reordered_unit_specific.append(reordered_df)
-    reordered_shared = []
-    for df in original_shared:
-        reordered_index = list(reversed(df.index))
-        reordered_df = df.reindex(reordered_index)
-        reordered_shared.append(reordered_df)
+    original_theta = deepcopy(panel.theta)
+    reordered_theta = deepcopy(panel.theta)
+    reordered_theta.theta = list(reversed(reordered_theta.theta))
 
     panel.mif(
         J=J,
@@ -68,8 +56,7 @@ def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
         M=M,
         a=a,
         key=key,
-        unit_specific=original_unit_specific,
-        shared=original_shared,
+        theta=original_theta,
     )
     result_original = panel.results_history[-1]
 
@@ -80,8 +67,7 @@ def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
         M=M,
         a=a,
         key=key,
-        unit_specific=reordered_unit_specific,
-        shared=reordered_shared,
+        theta=reordered_theta,
     )
     result_reordered = panel.results_history[-1]
 

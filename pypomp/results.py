@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .RWSigma_class import RWSigma
+    from .parameters import PanelParameters
 else:
     RWSigma = object
+    PanelParameters = object
 
 from .util import logmeanexp, logmeanexp_se
 
@@ -26,6 +28,37 @@ class BaseResult(ABC):
     def __post_init__(self):
         """Post-initialization hook."""
         pass
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for all result types.
+
+        Compares:
+        - type
+        - method string
+        - execution_time
+        - timestamp
+        - JAX key contents (via key_data)
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        if self.method != other.method:
+            return False
+
+        if self.execution_time != other.execution_time:
+            return False
+
+        if self.timestamp != other.timestamp:
+            return False
+
+        # Compare JAX keys by underlying data
+        if not jax.numpy.array_equal(
+            jax.random.key_data(self.key), jax.random.key_data(other.key)
+        ):
+            return False
+
+        return True
 
     @abstractmethod
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
@@ -44,13 +77,44 @@ class PompBaseResult(BaseResult):
 
     theta: list[dict] = field(default_factory=list)
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for Pomp result types.
+
+        Extends BaseResult equality by comparing theta.
+        """
+        if not super().__eq__(other):
+            return False
+
+        # theta is a list of plain dicts; rely on Python's structural equality
+        if self.theta != other.theta:
+            return False
+
+        return True
+
 
 @dataclass
 class PanelPompBaseResult(BaseResult):
     """Base class for PanelPomp results."""
 
-    shared: list[pd.DataFrame] | None = None
-    unit_specific: list[pd.DataFrame] | None = None
+    theta: "PanelParameters | None" = None
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for PanelPomp result types.
+
+        Extends BaseResult equality by comparing PanelParameters.
+        """
+        if not super().__eq__(other):
+            return False
+
+        if (self.theta is None) != (other.theta is None):
+            return False
+
+        if self.theta is not None and self.theta != other.theta:
+            return False
+
+        return True
 
 
 @dataclass
@@ -69,6 +133,42 @@ class PompPFilterResult(PompBaseResult):
     def __post_init__(self):
         """Set method to pfilter."""
         self.method = "pfilter"
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including log-likelihoods and diagnostics."""
+        if not super().__eq__(other):
+            return False
+
+        if self.J != other.J or self.reps != other.reps or self.thresh != other.thresh:
+            return False
+
+        # logLiks
+        if isinstance(self.logLiks, xr.DataArray) and isinstance(
+            other.logLiks, xr.DataArray
+        ):
+            if not self.logLiks.equals(other.logLiks):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.logLiks), np.asarray(other.logLiks), equal_nan=True
+            ):
+                return False
+
+        # Optional diagnostics
+        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if (a is None) != (b is None):
+                return False
+            if a is not None and b is not None:
+                if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                    if not a.equals(b):
+                        return False
+                else:
+                    if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                        return False
+
+        return True
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert pfilter result to DataFrame."""
@@ -155,6 +255,41 @@ class PompMIFResult(PompBaseResult):
         """Set method to mif."""
         self.method = "mif"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces and algorithmic settings."""
+        if not super().__eq__(other):
+            return False
+
+        if (
+            self.J != other.J
+            or self.M != other.M
+            or self.a != other.a
+            or self.thresh != other.thresh
+        ):
+            return False
+
+        # rw_sd comparison: rely on its own __eq__ if present
+        if (self.rw_sd is None) != (other.rw_sd is None):
+            return False
+        if self.rw_sd is not None and self.rw_sd != other.rw_sd:
+            return False
+
+        # traces_da
+        if isinstance(self.traces_da, xr.DataArray) and isinstance(
+            other.traces_da, xr.DataArray
+        ):
+            if not self.traces_da.equals(other.traces_da):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.traces_da),
+                np.asarray(other.traces_da),
+                equal_nan=True,
+            ):
+                return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert mif result to DataFrame."""
         traces_da: xr.DataArray = self.traces_da
@@ -221,6 +356,42 @@ class PompTrainResult(PompBaseResult):
         """Set method to train."""
         self.method = "train"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces and optimizer settings."""
+        if not super().__eq__(other):
+            return False
+
+        scalar_fields = [
+            "optimizer",
+            "J",
+            "M",
+            "eta",
+            "alpha",
+            "thresh",
+            "ls",
+            "c",
+            "max_ls_itn",
+        ]
+        for name in scalar_fields:
+            if getattr(self, name) != getattr(other, name):
+                return False
+
+        # traces_da
+        if isinstance(self.traces_da, xr.DataArray) and isinstance(
+            other.traces_da, xr.DataArray
+        ):
+            if not self.traces_da.equals(other.traces_da):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.traces_da),
+                np.asarray(other.traces_da),
+                equal_nan=True,
+            ):
+                return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert train result to DataFrame."""
         traces_da: xr.DataArray = self.traces_da
@@ -282,17 +453,40 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     J: int = 0
     reps: int = 1
     thresh: float = 0.0
+    theta: "PanelParameters | None" = None
 
     def __post_init__(self):
         """Set method to pfilter."""
         self.method = "pfilter"
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including panel log-likelihoods."""
+        if not super().__eq__(other):
+            return False
+
+        if self.J != other.J or self.reps != other.reps or self.thresh != other.thresh:
+            return False
+
+        if isinstance(self.logLiks, xr.DataArray) and isinstance(
+            other.logLiks, xr.DataArray
+        ):
+            if not self.logLiks.equals(other.logLiks):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.logLiks),
+                np.asarray(other.logLiks),
+                equal_nan=True,
+            ):
+                return False
+
+        return True
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
         ll = np.apply_along_axis(
             logmeanexp, -1, self.logLiks.values, ignore_nan=ignore_nan
         )
-
         df = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
             .assign(
@@ -306,22 +500,35 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             )
         )
 
-        if self.shared:
-            s_params = pd.concat(self.shared, axis=1).T.reset_index(drop=True)
-            df = df.join(s_params, on="replicate")
+        # Extract shared/unit_specific from theta
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        if self.unit_specific:
-            u_params = (
-                pd.concat(self.unit_specific, keys=range(len(self.unit_specific)))
-                .stack()
-                .unstack(level=1)
-                .reset_index()
-            )
-            col_names = list(u_params.columns)
-            u_params.rename(
-                columns={col_names[0]: "replicate", col_names[1]: "unit"}, inplace=True
-            )
-            df = df.merge(u_params, on=["replicate", "unit"], how="left")
+            if shared_list:
+                s_params = pd.concat(shared_list, axis=1).T.reset_index(drop=True)
+                df = df.join(s_params, on="replicate")
+
+            if unit_specific_list:
+                u_params = (
+                    pd.concat(unit_specific_list, keys=range(len(unit_specific_list)))
+                    .stack()
+                    .unstack(level=1)
+                    .reset_index()
+                )
+                col_names = list(u_params.columns)
+                u_params.rename(
+                    columns={col_names[0]: "replicate", col_names[1]: "unit"},
+                    inplace=True,
+                )
+                df = df.merge(u_params, on=["replicate", "unit"], how="left")
 
         return df
 
@@ -341,15 +548,26 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             .rename(columns={"index": "replicate"})
         )
 
-        if self.shared:
-            p_s = pd.concat(self.shared, axis=1).T.set_axis(reps, axis=0)
-            df_s = df_s.join(p_s, on="replicate")
-            df_u = df_u.join(p_s, on="replicate")
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        if self.unit_specific:
-            p_u = pd.concat(self.unit_specific, keys=reps).stack().unstack(level=1)
-            p_u.index.names = ["replicate", "unit"]
-            df_u = df_u.join(p_u, on=["replicate", "unit"])
+            if shared_list:
+                p_s = pd.concat(shared_list, axis=1).T.set_axis(reps, axis=0)
+                df_s = df_s.join(p_s, on="replicate")
+                df_u = df_u.join(p_s, on="replicate")
+
+            if unit_specific_list:
+                p_u = pd.concat(unit_specific_list, keys=reps).stack().unstack(level=1)
+                p_u.index.names = ["replicate", "unit"]
+                df_u = df_u.join(p_u, on=["replicate", "unit"])
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(
             method="pfilter", iteration=1
@@ -376,6 +594,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
     shared_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    theta: "PanelParameters | None" = None
     J: int = 0
     M: int = 0
     rw_sd: RWSigma | None = None
@@ -386,6 +605,39 @@ class PanelPompMIFResult(PanelPompBaseResult):
     def __post_init__(self):
         """Set method to mif."""
         self.method = "mif"
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces, log-likelihoods, and settings."""
+        if not super().__eq__(other):
+            return False
+
+        if (
+            self.J != other.J
+            or self.M != other.M
+            or self.a != other.a
+            or self.thresh != other.thresh
+            or self.block != other.block
+        ):
+            return False
+
+        # rw_sd comparison
+        if (self.rw_sd is None) != (other.rw_sd is None):
+            return False
+        if self.rw_sd is not None and self.rw_sd != other.rw_sd:
+            return False
+
+        # shared_traces, unit_traces, logLiks
+        for name in ["shared_traces", "unit_traces", "logLiks"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                if not a.equals(b):
+                    return False
+            else:
+                if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                    return False
+
+        return True
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel mif result to DataFrame."""
@@ -459,6 +711,25 @@ class ResultsHistory:
     def add(self, result: BaseResult):
         """Add a result entry."""
         self._entries.append(result)
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for ResultsHistory.
+
+        Two histories are equal if they contain the same sequence of result
+        objects (compared via their own __eq__ implementations).
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        if len(self._entries) != len(other._entries):
+            return False
+
+        for a, b in zip(self._entries, other._entries):
+            if a != b:
+                return False
+
+        return True
 
     def __getitem__(self, index):
         """Get result by index."""

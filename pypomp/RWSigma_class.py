@@ -104,3 +104,18 @@ class RWSigma:
             raise ValueError("factor should be between 0 and 1")
         for key in self.sigmas:
             self.sigmas[key] *= factor
+
+    def __eq__(self, other) -> bool:
+        """
+        Check equality with another RWSigma object.
+
+        Two RWSigma instances are equal if they have the same sigmas
+        and init_names.
+        """
+        if not isinstance(other, type(self)):
+            return False
+        if self.sigmas != other.sigmas:
+            return False
+        if self.init_names != other.init_names:
+            return False
+        return True

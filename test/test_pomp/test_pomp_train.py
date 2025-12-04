@@ -36,7 +36,7 @@ def test_class_GD_basic(optimizer, simple):
     # Check that "logLik" is in variable coordinate
     assert "logLik" in list(traces.coords["variable"].values)
     # Check that all parameter names are in variable coordinate
-    for param in LG.theta[0].keys():
+    for param in LG.theta.to_list()[0].keys():
         assert param in list(traces.coords["variable"].values)
     assert all(isinstance(v, float) for v in LG.theta[0].values())
 
@@ -71,7 +71,7 @@ def test_train_param_order_invariance(simple):
         theta=theta,
     )
     out1 = LG.results_history[-1].traces_da.values
-    param_keys = list(theta[0].keys())
+    param_keys = list(theta.to_list()[0].keys())
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
     LG.train(

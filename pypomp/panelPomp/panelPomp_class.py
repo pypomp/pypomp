@@ -9,14 +9,25 @@ from pypomp.panelPomp.validation_mixin import PanelValidationMixin
 from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
 from pypomp.panelPomp.analysis_mixin import PanelAnalysisMixin
 from pypomp.results import ResultsHistory
+from pypomp.parameters import PanelParameters
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
+    unit_objects: dict[str, Pomp]
+    theta: PanelParameters
+    results_history: ResultsHistory
+    fresh_key: jax.Array | None
+    canonical_param_names: list[str]
+    canonical_shared_param_names: list[str]
+    canonical_unit_param_names: list[str]
+
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
-        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
-        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
     ):
         """
         Initializes a PanelPOMP model, which consists of multiple POMP models
@@ -24,34 +35,33 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         and observations.
 
         Args:
-            Pomp_dict (dict[str, Pomp]): A dictionary mapping unit names to Pomp objects.
-                Each Pomp object represents a single unit in the panel data.
-                The keys are used as unit identifiers.
-            shared (pd.DataFrame): A (d,1) DataFrame containing shared parameters.
-                The index should be parameter names and the single column should be named 'shared'.
-            unit_specific (pd.DataFrame): A (d,U) DataFrame containing unit-specific parameters.
-                The index should be parameter names and columns should be unit names.
+            Pomp_dict (dict[str, Pomp]): A dictionary mapping unit names to Pomp objects. Each Pomp object represents a single unit in the panel data.
+            The keys are used as unit identifiers.
+            theta: A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
         """
-        shared, unit_specific, unit_objects = self._validate_params_and_units(
-            shared, unit_specific, Pomp_dict
-        )
+        # Convert inputs to PanelParameters
+        if theta is not None:
+            if isinstance(theta, PanelParameters):
+                self.theta = theta
+            else:
+                self.theta = PanelParameters(theta=theta)
+        else:
+            self.theta = PanelParameters(theta=None)
 
-        self.unit_objects: dict[str, Pomp] = unit_objects
-        self.shared: list[pd.DataFrame] | None = shared
-        self.unit_specific: list[pd.DataFrame] | None = unit_specific
+        self.unit_objects = Pomp_dict
         self.results_history = ResultsHistory()
-        self.fresh_key: jax.Array | None = None
-        canonical_shared_param_names, canonical_unit_param_names = (
-            self._get_param_names(shared, unit_specific)
-        )
-        self.canonical_shared_param_names: list[str] = canonical_shared_param_names
-        self.canonical_unit_param_names: list[str] = canonical_unit_param_names
-        self.canonical_param_names: list[str] = (
-            canonical_shared_param_names + canonical_unit_param_names
-        )
+        self.fresh_key = None
+        self.canonical_param_names = self.theta.get_param_names()
+        self.canonical_shared_param_names = self.theta.get_shared_param_names()
+        self.canonical_unit_param_names = self.theta.get_unit_param_names()
+
+        self._validate_params_and_units()
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
+
+    def get_unit_names(self) -> list[str]:
+        return list(self.unit_objects.keys())
 
     def print_summary(self):
         """
@@ -70,6 +80,58 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         )
         print()
         self.results_history.print_summary()
+
+    def __eq__(self, other):
+        """
+        Check structural equality with another PanelPomp object.
+
+        Two PanelPomp instances are considered equal if they:
+        - Are of the same type
+        - Have identical canonical parameter name lists
+        - Have equal PanelParameters (self.theta)
+        - Have the same unit names in the same order
+        - Have unit Pomp objects with identical data and parameter structure
+        - Have equal results_history
+        - Have equal fresh_key values (or both None)
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        # Canonical parameter structure
+        if self.canonical_param_names != other.canonical_param_names:
+            return False
+        if self.canonical_shared_param_names != other.canonical_shared_param_names:
+            return False
+        if self.canonical_unit_param_names != other.canonical_unit_param_names:
+            return False
+
+        # Panel parameters
+        if self.theta != other.theta:
+            return False
+
+        # Unit objects: same unit names and comparable structure
+        self_units = list(self.unit_objects.keys())
+        other_units = list(other.unit_objects.keys())
+        if self_units != other_units:
+            return False
+
+        for unit in self_units:
+            if self.unit_objects[unit] != other.unit_objects[unit]:
+                return False
+
+        if self.results_history != other.results_history:
+            return False
+
+        if (self.fresh_key is None) != (other.fresh_key is None):
+            return False
+        if self.fresh_key is not None and other.fresh_key is not None:
+            if not jax.numpy.array_equal(
+                jax.random.key_data(self.fresh_key),
+                jax.random.key_data(other.fresh_key),
+            ):
+                return False
+
+        return True
 
     def __getstate__(self):
         """

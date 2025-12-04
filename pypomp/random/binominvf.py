@@ -429,7 +429,9 @@ def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
 @partial(jax.jit, static_argnames=["order"])
 def rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
     """
-    Generate binomial random variables using inverse CDF method.
+    Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
+
+    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016).
 
     Args:
         key: PRNG key used as the random key.
@@ -439,6 +441,10 @@ def rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
 
     Returns:
         Binomial random variables with the same shape as n and p.
+
+    References:
+        * Giles, Michael B., and Casper Beentjes. “Approximation of an Inverse of the Incomplete Beta Function.” In Mathematical Software – ICMS 2024, vol. 14749. Lecture Notes in Computer Science. Springer Nature Switzerland, 2024. https://doi.org/10.1007/978-3-031-64529-7_22.
+        * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
     shape = jnp.broadcast_shapes(n.shape, p.shape)
     u = jax.random.uniform(key, shape)

@@ -16,6 +16,8 @@ class PanelAnalysisMixin(Base):
 
     def prune(self, n: int = 1, refill: bool = True):
         """
+        Prune the parameter sets to the top `n` based on log-likelihoods stored in the PanelParameters object under theta.
+
         Args:
             n: Number of top parameter sets to keep.
             refill: If True, repeat the top `n` parameter sets to match the
@@ -23,12 +25,11 @@ class PanelAnalysisMixin(Base):
         """
         self.theta.prune(n=n, refill=refill)
 
-    def mix_and_match(self, index: int = -1):
+    def mix_and_match(self):
         """
-        Args:
-            index: Index of the results to mix and match.
+        Sorts unit-specific parameters and shared parameters in descending order of unit log-likelihood and shared log-likelihood, respectively, then combines them to form new parameter sets. The nth best parameter for a given unit or for the shared parameters is placed in the nth parameter set.
         """
-        self.theta.mix_and_match(unit_names=list(self.unit_objects.keys()))
+        self.theta.mix_and_match()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         return self.results_history.results(index=index, ignore_nan=ignore_nan)

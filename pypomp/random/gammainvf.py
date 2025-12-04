@@ -105,6 +105,8 @@ def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
     """
     Generate a Gamma random variable with given shape parameter.
 
+    The implementation follows the methodology from Temme (1992). To extend the method to small alpha values, we apply a multi-step trick.
+
     Args:
         key: a PRNG key used as the random key.
         alpha: shape parameters for the Gamma(alpha, 1) distribution.
@@ -115,6 +117,9 @@ def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
 
     Returns:
         A Gamma random variable.
+
+    References:
+        * Temme, N. M. “Asymptotic Inversion of Incomplete Gamma Functions.” Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
     """
     shape = alpha.shape
     alpha_orig_dtype = alpha.dtype

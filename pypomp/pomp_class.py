@@ -3,6 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 import importlib
+from copy import deepcopy
 import time
 from typing import Callable
 import numpy as np
@@ -56,7 +57,7 @@ class Pomp:
         rmeas (RMeas | None): Measurement simulator
         par_trans (ParTrans | None): Parameter transformation object
         covars (pd.DataFrame | None): Covariates for the model if applicable
-        results_history (list | None): History of the results for the pfilter, mif, and train
+        results_history (ResultsHistory | None): History of the results for the pfilter, mif, and train
             methods run on the object. This includes the algorithmic parameters used.
         fresh_key (jax.Array | None): Running a method that takes a key argument will
             store a fresh, unused key in this attribute. Subsequent calls to a method
@@ -105,10 +106,11 @@ class Pomp:
         Initializes the necessary components for a specific POMP model.
 
         Args:
-            ys (pd.DataFrame): The measurement data frame. The row index must contain the
-                observation times.
+            ys (pd.DataFrame): The measurement data frame. The row index must contain the observation times.
             theta (dict or list[dict]): Parameters involved in the POMP model. Each
                 value should be a float. Can be a single dict or a list of dicts.
+            statenames (list[str]): List of state variable names.
+            t0 (float): The initial time for the model.
             rinit (Callable): Initial state simulator function.
             rproc (Callable): Process simulator function.
             dmeas (Callable, optional): Measurement density function.
@@ -117,7 +119,14 @@ class Pomp:
                 If provided, the parameters will be transformed to and from the estimation parameter space. Defaults to the identity transformation.
             covars (pd.DataFrame, optional): Covariates or None if not applicable.
                 The row index must contain the covariate times.
-            statenames (list[str], optional): List of state variable names.
+            nstep (int, optional): The number of steps to take for the fixedstep method.
+                Must be None if dt is provided.
+            dt (float, optional): The time step to use for the time_helper method.
+                Must be None if nstep is provided.
+            ydim (int, optional): The dimension of the measurement vector. Only
+                required if rmeas is provided.
+            accumvars (tuple[int, ...], optional): The indices of accumulator state
+                variables. These are reset to 0 at the beginning of each observation interval.
         """
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -544,7 +553,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj_in = self._prepare_theta_input(theta)
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_list_in = theta_obj_in.to_list()
         n_reps = theta_obj_in.num_replicates()
 
@@ -714,7 +723,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj_in = self._prepare_theta_input(theta)
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_list_in = theta_obj_in.to_list()
 
         theta_obj_in.transform(self.par_trans, direction="to_est")

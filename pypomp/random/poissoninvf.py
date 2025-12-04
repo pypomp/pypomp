@@ -311,12 +311,17 @@ def rpoisson(key: Array, lam: Array) -> Array:
     """
     Generate a Poisson random variable with given rate parameter.
 
+    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve the speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method.
+
     Args:
         key: a PRNG key used as the random key.
         lam: rate parameters for the Poisson distribution.
 
     Returns:
         A Poisson random variable.
+
+    References:
+        * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
     shape = lam.shape
     u = jax.random.uniform(key, shape)

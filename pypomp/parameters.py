@@ -711,7 +711,11 @@ class PanelParameters(ParameterSet):
 
         self._logLik = self._logLik_unit.sum(axis=1)
 
-    def mix_and_match(self, unit_names: list[str]) -> None:
+    def mix_and_match(self) -> None:
+        """
+        Sorts unit-specific parameters and shared parameters in descending order of unit log-likelihood and shared log-likelihood, respectively, then combines them to form new parameter sets. The nth best parameter for a given unit or for the shared parameters is placed in the nth parameter set.
+        """
+        unit_names = self.get_unit_names()
         if not self.theta:
             return
 

@@ -64,6 +64,26 @@ class Pomp:
             argument.
     """
 
+    ys: pd.DataFrame
+    _theta: PompParameters
+    canonical_param_names: list[str]
+    statenames: list[str]
+    t0: float
+    rinit: RInit
+    rproc: RProc
+    dmeas: DMeas | None
+    rmeas: RMeas | None
+    par_trans: ParTrans
+    covars: pd.DataFrame | None
+    _covars_extended: jax.Array | None
+    _nstep_array: jax.Array
+    _dt_array_extended: jax.Array
+    _max_steps_per_interval: int
+    ydim: int | None
+    accumvars: tuple[int, ...] | None
+    results_history: ResultsHistory
+    fresh_key: jax.Array | None
+
     def __init__(
         self,
         ys: pd.DataFrame,
@@ -105,12 +125,12 @@ class Pomp:
             raise TypeError("covars must be a pandas DataFrame or None")
 
         if isinstance(theta, PompParameters):
-            self._theta: PompParameters = theta  # type: ignore[reportRedeclaration]
+            self._theta = theta
         else:
             self._theta = PompParameters(theta)
 
         # Extract parameter names from first theta dict
-        self.canonical_param_names: list[str] = self._theta.get_param_names()
+        self.canonical_param_names = self._theta.get_param_names()
 
         # If statenames not provided, we need to infer them
         if statenames is None:
@@ -123,20 +143,20 @@ class Pomp:
         ):
             raise ValueError("statenames must be a list of strings")
 
-        self.statenames: list[str] = statenames
-        self.ys: pd.DataFrame = ys
-        self.covars: pd.DataFrame | None = covars
-        self.t0: float = float(t0)
+        self.statenames = statenames
+        self.ys = ys
+        self.covars = covars
+        self.t0 = float(t0)
         self.results_history = ResultsHistory()
-        self.fresh_key: jax.Array | None = None
+        self.fresh_key = None
 
         if covars is not None:
-            self.covar_names: list[str] = list(covars.columns)  # type: ignore[reportRedeclaration]
+            self.covar_names = list(covars.columns)
         else:
-            self.covar_names: list[str] = []
+            self.covar_names = []
 
-        self.par_trans: ParTrans = par_trans or ParTrans()
-        self.rinit: RInit = RInit(
+        self.par_trans = par_trans or ParTrans()
+        self.rinit = RInit(
             struct=rinit,
             statenames=statenames,
             param_names=self.canonical_param_names,
@@ -144,7 +164,7 @@ class Pomp:
             par_trans=self.par_trans,
         )
 
-        self.rproc: RProc = RProc(
+        self.rproc = RProc(
             struct=rproc,
             statenames=statenames,
             param_names=self.canonical_param_names,
@@ -156,7 +176,7 @@ class Pomp:
         )
 
         if dmeas is not None:
-            self.dmeas: DMeas | None = DMeas(  # type: ignore[reportRedeclaration]
+            self.dmeas = DMeas(
                 struct=dmeas,
                 statenames=statenames,
                 param_names=self.canonical_param_names,
@@ -165,12 +185,12 @@ class Pomp:
                 y_names=list(self.ys.columns),
             )
         else:
-            self.dmeas: DMeas | None = None
+            self.dmeas = None
 
         if rmeas is not None:
             if ydim is None:
                 raise ValueError("rmeas function must have ydim attribute")
-            self.rmeas: RMeas | None = RMeas(  # type: ignore[reportRedeclaration]
+            self.rmeas = RMeas(
                 struct=rmeas,
                 ydim=ydim,
                 statenames=statenames,
@@ -179,7 +199,7 @@ class Pomp:
                 par_trans=self.par_trans,
             )
         else:
-            self.rmeas: RMeas | None = None
+            self.rmeas = None
 
         if self.dmeas is None and self.rmeas is None:
             raise ValueError("You must supply at least one of dmeas or rmeas")
@@ -1024,6 +1044,90 @@ class Pomp:
         print()
         self.results_history.print_summary()
 
+    def __eq__(self, other):
+        """
+        Check structural equality with another Pomp object.
+
+        Two Pomp instances are considered equal if they:
+        - Are of the same type
+        - Have identical canonical parameter names
+        - Have equal parameter sets (self.theta)
+        - Have identical data (ys) and covariates (covars)
+        - Have the same state names and initial time t0
+        - Have equivalent model components (rinit, rproc, dmeas, rmeas)
+        - Have equal fresh_key values (or both None)
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        # Canonical parameter names
+        if self.canonical_param_names != other.canonical_param_names:
+            return False
+
+        # Parameter sets
+        if self.theta != other.theta:
+            return False
+
+        # Data and covariates
+        if not self.ys.equals(other.ys):
+            return False
+        if (self.covars is None) != (other.covars is None):
+            return False
+        if self.covars is not None:
+            if not self.covars.equals(other.covars):
+                return False
+        # Handle _covars_extended (can be None or JAX array)
+        if (self._covars_extended is None) != (other._covars_extended is None):
+            return False
+        if self._covars_extended is not None and other._covars_extended is not None:
+            if not jax.numpy.array_equal(self._covars_extended, other._covars_extended):
+                return False
+        # Compare JAX arrays using array_equal
+        if not jax.numpy.array_equal(self._nstep_array, other._nstep_array):
+            return False
+        if not jax.numpy.array_equal(self._dt_array_extended, other._dt_array_extended):
+            return False
+        if self._max_steps_per_interval != other._max_steps_per_interval:
+            return False
+
+        # State names and initial time
+        if self.statenames != other.statenames:
+            return False
+        if float(self.t0) != float(other.t0):
+            return False
+
+        # Model components: rely on their own __eq__ implementations
+        if self.rinit != other.rinit:
+            return False
+        if self.rproc != other.rproc:
+            return False
+        if (self.dmeas is None) != (other.dmeas is None):
+            return False
+        if self.dmeas is not None and self.dmeas != other.dmeas:
+            return False
+        if (self.rmeas is None) != (other.rmeas is None):
+            return False
+        if self.rmeas is not None and self.rmeas != other.rmeas:
+            return False
+
+        if self.results_history != other.results_history:
+            return False
+
+        if self.par_trans != other.par_trans:
+            return False
+
+        # fresh_key: both None or numerically equal
+        if (self.fresh_key is None) != (other.fresh_key is None):
+            return False
+        if self.fresh_key is not None and other.fresh_key is not None:
+            if not jax.numpy.array_equal(
+                jax.random.key_data(self.fresh_key),
+                jax.random.key_data(other.fresh_key),
+            ):
+                return False
+
+        return True
+
     def __getstate__(self):
         """
         Custom pickling method to handle wrapped function objects.  This is
@@ -1111,6 +1215,14 @@ class Pomp:
                     par_trans=self.par_trans,
                     **kwargs,
                 )
+                # Restore nstep if it was set (even if dt was originally provided)
+                # This handles the case where rebuild_interp set nstep after initial construction
+                if "_rproc_nstep" in state and state["_rproc_nstep"] is not None:
+                    # If dt is None, nstep was already set via kwargs
+                    # If dt is not None but nstep was stored, it means rebuild_interp set it
+                    # In that case, restore it directly (bypassing RProc validation)
+                    if state["_rproc_dt"] is not None:
+                        self.rproc.nstep = state["_rproc_nstep"]
 
         # Reconstruct dmeas
         if "_dmeas_func_name" in state:

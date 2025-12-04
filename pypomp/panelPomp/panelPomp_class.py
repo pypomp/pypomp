@@ -13,6 +13,14 @@ from pypomp.parameters import PanelParameters
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
+    unit_objects: dict[str, Pomp]
+    theta: PanelParameters
+    results_history: ResultsHistory
+    fresh_key: jax.Array | None
+    canonical_param_names: list[str]
+    canonical_shared_param_names: list[str]
+    canonical_unit_param_names: list[str]
+
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
@@ -31,8 +39,6 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             The keys are used as unit identifiers.
             theta: A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
         """
-        unit_objects = self._validate_unit_objects(Pomp_dict)
-
         # Convert inputs to PanelParameters
         if theta is not None:
             if isinstance(theta, PanelParameters):
@@ -42,17 +48,20 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         else:
             self.theta = PanelParameters(theta=None)
 
-        self.unit_objects: dict[str, Pomp] = unit_objects
+        self.unit_objects = Pomp_dict
         self.results_history = ResultsHistory()
-        self.fresh_key: jax.Array | None = None
-        self.canonical_param_names: list[str] = self.theta.get_param_names()
-        self.canonical_shared_param_names: list[str] = (
-            self.theta.get_shared_param_names()
-        )
-        self.canonical_unit_param_names: list[str] = self.theta.get_unit_param_names()
+        self.fresh_key = None
+        self.canonical_param_names = self.theta.get_param_names()
+        self.canonical_shared_param_names = self.theta.get_shared_param_names()
+        self.canonical_unit_param_names = self.theta.get_unit_param_names()
+
+        self._validate_params_and_units()
 
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
+
+    def get_unit_names(self) -> list[str]:
+        return list(self.unit_objects.keys())
 
     def print_summary(self):
         """
@@ -71,6 +80,58 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         )
         print()
         self.results_history.print_summary()
+
+    def __eq__(self, other):
+        """
+        Check structural equality with another PanelPomp object.
+
+        Two PanelPomp instances are considered equal if they:
+        - Are of the same type
+        - Have identical canonical parameter name lists
+        - Have equal PanelParameters (self.theta)
+        - Have the same unit names in the same order
+        - Have unit Pomp objects with identical data and parameter structure
+        - Have equal results_history
+        - Have equal fresh_key values (or both None)
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        # Canonical parameter structure
+        if self.canonical_param_names != other.canonical_param_names:
+            return False
+        if self.canonical_shared_param_names != other.canonical_shared_param_names:
+            return False
+        if self.canonical_unit_param_names != other.canonical_unit_param_names:
+            return False
+
+        # Panel parameters
+        if self.theta != other.theta:
+            return False
+
+        # Unit objects: same unit names and comparable structure
+        self_units = list(self.unit_objects.keys())
+        other_units = list(other.unit_objects.keys())
+        if self_units != other_units:
+            return False
+
+        for unit in self_units:
+            if self.unit_objects[unit] != other.unit_objects[unit]:
+                return False
+
+        if self.results_history != other.results_history:
+            return False
+
+        if (self.fresh_key is None) != (other.fresh_key is None):
+            return False
+        if self.fresh_key is not None and other.fresh_key is not None:
+            if not jax.numpy.array_equal(
+                jax.random.key_data(self.fresh_key),
+                jax.random.key_data(other.fresh_key),
+            ):
+                return False
+
+        return True
 
     def __getstate__(self):
         """

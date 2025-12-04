@@ -4,11 +4,12 @@ It handles input validation, standardization, and conversion to JAX arrays.
 """
 
 from abc import ABC, abstractmethod
+import copy
 import pandas as pd
 import jax.numpy as jnp
 import numpy as np
 import jax
-from typing import Any, Union, Optional, Literal
+from typing import Union, Literal
 from .ParTrans_class import ParTrans
 
 
@@ -580,6 +581,18 @@ class PanelParameters(ParameterSet):
     def get_unit_param_names(self) -> list[str]:
         return self._canonical_unit_param_names
 
+    def get_unit_names(self) -> list[str]:
+        """
+        Return the list of unit names from the first replicate's unit_specific DataFrame.
+        """
+        if not self._theta:
+            return []
+        first = self._theta[0]
+        unit_specific_df = first.get("unit_specific")
+        if unit_specific_df is not None:
+            return list(unit_specific_df.columns)
+        return []
+
     def subset(self, indices: Union[int, list[int], slice]) -> "PanelParameters":
         if isinstance(indices, int):
             indices = [indices]
@@ -710,7 +723,11 @@ class PanelParameters(ParameterSet):
         for i in range(len(self.theta)):
             # 1. Best shared params for this position
             s_idx = shared_ranks[i]
-            best_shared = self.theta[s_idx]["shared"].copy()
+            best_shared = (
+                self.theta[s_idx]["shared"].copy()
+                if self.theta[s_idx]["shared"] is not None
+                else None
+            )
 
             # 2. Best unit params for each unit for this position
             new_u_data = {}
@@ -722,7 +739,7 @@ class PanelParameters(ParameterSet):
 
                 # Extract the unit specific column
                 src_df = self.theta[u_best_idx]["unit_specific"]
-                if not src_df.empty and unit in src_df.columns:
+                if src_df is not None and not src_df.empty and unit in src_df.columns:
                     new_u_data[unit] = src_df[unit].copy()
 
             # Construct new unit dataframe
@@ -782,3 +799,78 @@ class PanelParameters(ParameterSet):
     def __rmul__(self, n: int) -> "PanelParameters":
         """Support left multiplication (e.g. 5 * params)."""
         return self.__mul__(n)
+
+    def __copy__(self):
+        # Create a new instance without calling __init__ to skip validation overhead
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+
+        new_obj._theta = list(self._theta)
+
+        new_obj._logLik_unit = self._logLik_unit
+        new_obj._logLik = self._logLik
+
+        new_obj.estimation_scale = self.estimation_scale
+
+        new_obj._canonical_shared_param_names = self._canonical_shared_param_names
+        new_obj._canonical_unit_param_names = self._canonical_unit_param_names
+        new_obj._canonical_param_names = self._canonical_param_names
+
+        return new_obj
+
+    def __deepcopy__(self, memo):
+        # Create a new instance without calling __init__ to skip validation overhead
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+        memo[id(self)] = new_obj
+
+        new_obj._theta = copy.deepcopy(self._theta, memo)
+
+        new_obj._logLik_unit = copy.deepcopy(self._logLik_unit, memo)
+        new_obj._logLik = copy.deepcopy(self._logLik, memo)
+
+        new_obj.estimation_scale = self.estimation_scale
+
+        new_obj._canonical_shared_param_names = copy.deepcopy(
+            self._canonical_shared_param_names, memo
+        )
+        new_obj._canonical_unit_param_names = copy.deepcopy(
+            self._canonical_unit_param_names, memo
+        )
+        new_obj._canonical_param_names = copy.deepcopy(
+            self._canonical_param_names, memo
+        )
+
+        return new_obj
+
+    def __eq__(self, other) -> bool:
+        """
+        Check structural equality with another PanelParameters object.
+        Two PanelParameters are equal if they have the same canonical
+        parameter names, estimation scale, log-likelihoods, and
+        per-replicate parameter DataFrames.
+        """
+        if not isinstance(other, type(self)):
+            return False
+        if self.estimation_scale != other.estimation_scale:
+            return False
+        if self._canonical_shared_param_names != other._canonical_shared_param_names:
+            return False
+        if self._canonical_unit_param_names != other._canonical_unit_param_names:
+            return False
+        if not np.array_equal(self._logLik_unit, other._logLik_unit, equal_nan=True):
+            return False
+        if len(self._theta) != len(other._theta):
+            return False
+        for t1, t2 in zip(self._theta, other._theta):
+            for key in ("shared", "unit_specific"):
+                df1 = t1.get(key)
+                df2 = t2.get(key)
+                if (df1 is None) != (df2 is None):
+                    return False
+                if df1 is not None:
+                    try:
+                        pd.testing.assert_frame_equal(df1, df2, check_dtype=True)
+                    except AssertionError:
+                        return False
+        return True

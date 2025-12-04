@@ -20,12 +20,9 @@ class PanelPompInterface(Protocol):
     # You can also add method signatures if Mixins call each other
     def _validate_params_and_units(
         self,
-        shared: pd.DataFrame | list[pd.DataFrame] | None,
-        unit_specific: pd.DataFrame | list[pd.DataFrame] | None,
-        unit_objects: dict[str, Pomp],
-    ) -> tuple[
-        list[pd.DataFrame] | None, list[pd.DataFrame] | None, dict[str, Pomp]
-    ]: ...
+    ) -> None: ...
     def _dataframe_to_array_canonical(
         self, df: pd.DataFrame, param_names: list[str], column_name: str
     ) -> jnp.ndarray: ...
+
+    def get_unit_names(self) -> list[str]: ...

@@ -220,33 +220,8 @@ def test_pickle(simple):
     # Unpickle the object
     unpickled_obj = pickle.loads(pickled_data)
 
-    # Check that the unpickled object has the same attributes
-    assert LG.ys.values.tolist() == unpickled_obj.ys.values.tolist()
-    assert LG.theta == unpickled_obj.theta
-    assert LG.covars == unpickled_obj.covars
-    assert LG.rinit == unpickled_obj.rinit
-    assert LG.rproc == unpickled_obj.rproc
-    assert LG.dmeas == unpickled_obj.dmeas
-    assert LG.rproc.dt == unpickled_obj.rproc.dt
-    assert len(LG.results_history) == len(unpickled_obj.results_history)
-    for orig, unpickled in zip(LG.results_history, unpickled_obj.results_history):
-        assert isinstance(unpickled, type(orig))
-        assert orig.method == unpickled.method
-        assert orig.execution_time == unpickled.execution_time
-        # Compare key values
-        assert np.array_equal(
-            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
-        )
-        # Compare other attributes based on result type
-        if hasattr(orig, "logLiks") and orig.logLiks is not None:
-            assert orig.logLiks.equals(unpickled.logLiks)
-        if hasattr(orig, "traces_da") and orig.traces_da is not None:
-            # For MIF/Train results, traces_da is a DataArray field
-            if isinstance(orig.traces_da, xr.DataArray):
-                assert orig.traces_da.equals(unpickled.traces_da)
-        if hasattr(orig, "theta"):
-            assert orig.theta == unpickled.theta
-    assert LG.traces().values.tolist() == unpickled_obj.traces().values.tolist()
+    # Check equality
+    assert LG == unpickled_obj
 
     # Check that the unpickled object can be pickled again if rmeas is None
     unpickled_obj.rmeas = None

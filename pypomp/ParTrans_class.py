@@ -1,4 +1,5 @@
 from typing import Callable, Literal
+import importlib
 import pandas as pd
 import jax
 import jax.numpy as jnp
@@ -9,6 +10,9 @@ class ParTrans:
     """
     Class that handles the parameter transformation to and from the natural parameter space.
     """
+
+    to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
+    from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
 
     def __init__(
         self,
@@ -38,7 +42,7 @@ class ParTrans:
         if u_df is None:
             u_df = None
 
-        res = {}
+        res: dict[str, pd.DataFrame | None] = {"shared": None, "unit_specific": None}
 
         # Pre-calculate shared dictionary (param -> value)
         s_vals = s_df.iloc[:, 0].to_dict() if s_df is not None else {}
@@ -269,6 +273,82 @@ class ParTrans:
             unit_out = unit_traces.copy()
 
         return shared_out, unit_out
+
+    def __eq__(self, other):
+        """
+        Check equality with another ParTrans object.
+
+        Two ParTrans instances are equal if they use the same function objects
+        for to_est and from_est. Note that functionally identical lambda functions
+        will not be considered equal unless they are the same object.
+        """
+        if not isinstance(other, type(self)):
+            return False
+        if self.to_est != other.to_est:
+            return False
+        if self.from_est != other.from_est:
+            return False
+        return True
+
+    def __getstate__(self):
+        """
+        Custom pickling method to preserve function identity.
+
+        Stores module and function names for module-level functions.
+        Lambdas/closures cannot be reliably reconstructed and will fall back
+        to defaults on unpickling.
+        """
+        state = {}
+
+        # Store function information for reconstruction
+        # Check if to_est is a module-level function
+        if (
+            hasattr(self.to_est, "__module__")
+            and hasattr(self.to_est, "__name__")
+            and self.to_est.__module__ is not None
+        ):
+            state["_to_est_module"] = self.to_est.__module__
+            state["_to_est_name"] = self.to_est.__name__
+        else:
+            # Lambda or closure - can't reliably pickle, will use default
+            state["_to_est_is_lambda"] = True
+
+        # Check if from_est is a module-level function
+        if (
+            hasattr(self.from_est, "__module__")
+            and hasattr(self.from_est, "__name__")
+            and self.from_est.__module__ is not None
+        ):
+            state["_from_est_module"] = self.from_est.__module__
+            state["_from_est_name"] = self.from_est.__name__
+        else:
+            # Lambda or closure - can't reliably pickle, will use default
+            state["_from_est_is_lambda"] = True
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling method to reconstruct functions.
+
+        Reconstructs module-level functions by importing them.
+        Falls back to defaults for lambdas/closures.
+        """
+        # Reconstruct to_est
+        if "_to_est_is_lambda" in state:
+            # Can't reconstruct lambdas - use default
+            self.to_est = to_est_default
+        else:
+            module = importlib.import_module(state["_to_est_module"])
+            self.to_est = getattr(module, state["_to_est_name"])
+
+        # Reconstruct from_est
+        if "_from_est_is_lambda" in state:
+            # Can't reconstruct lambdas - use default
+            self.from_est = from_est_default
+        else:
+            module = importlib.import_module(state["_from_est_module"])
+            self.from_est = getattr(module, state["_from_est_name"])
 
 
 def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import pypomp as pp
 import pytest
+from typing import cast
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def panel_pomp_with_transform():
     # Get initial values from one of the LG models to ensure consistency
     # LG models have all parameters: A1-A4, C1-C4, Q1-Q4, R1-R4
     # Use values from LG1 for all parameters
-    theta_base = LG1.theta[0]
+    theta_base = LG1.theta.to_list()[0]
 
     # Create panel with shared parameters (A and C matrices) and unit-specific (Q and R)
     shared_param_names = ["A1", "A2", "A3", "A4", "C1", "C2", "C3", "C4"]
@@ -62,7 +63,10 @@ def panel_pomp_with_transform():
         },
     )
 
-    theta = [{"shared": shared_params, "unit_specific": unit_specific_params}]
+    theta = cast(
+        list[dict[str, pd.DataFrame | None]],
+        [{"shared": shared_params, "unit_specific": unit_specific_params}],
+    )
     panel = pp.PanelPomp(
         Pomp_dict={"unit1": LG1, "unit2": LG2},
         theta=theta,

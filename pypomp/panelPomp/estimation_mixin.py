@@ -4,7 +4,7 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 import time
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, cast
 
 from ..mif import _jv_panel_mif_internal
 from ..internal_functions import _shard_rows
@@ -238,8 +238,8 @@ class PanelEstimationMixin(Base):
         block: bool = True,
     ) -> None:
         start_time = time.time()
-        theta = self._prepare_theta_input(theta)
-        if theta is None:
+        theta_obj_in = self._prepare_theta_input(theta)
+        if theta_obj_in is None:
             raise ValueError("theta must be provided or self.theta must exist")
 
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
@@ -254,7 +254,8 @@ class PanelEstimationMixin(Base):
             raise ValueError("a should be between 0 and 1.")
         if block is False:
             raise NotImplementedError("block=False is not supported yet.")
-        unit_names = list(self.unit_objects.keys())
+
+        unit_names = self.get_unit_names()
         U = len(unit_names)
         rep_unit = self.unit_objects[unit_names[0]]
 
@@ -290,21 +291,47 @@ class PanelEstimationMixin(Base):
         else:
             covars_per_unit = None
 
-        n_reps = theta.num_replicates()
+        n_reps = theta_obj_in.num_replicates()
 
-        shared_list = shared if isinstance(shared, list) else None
-        spec_list = unit_specific if isinstance(unit_specific, list) else None
-        shared_trans_list, spec_trans_list = rep_unit.par_trans.panel_transform_list(
-            shared_list, spec_list, direction="to_est"
-        )
+        # Extract theta list from PanelParameters and transform to estimation scale if needed
+        theta_list = theta_obj_in.theta
+        if not theta_obj_in.estimation_scale:
+            # Create a copy to avoid modifying the original
+            theta_list = [
+                {
+                    "shared": t["shared"].copy() if t["shared"] is not None else None,
+                    "unit_specific": (
+                        t["unit_specific"].copy()
+                        if t["unit_specific"] is not None
+                        else None
+                    ),
+                }
+                for t in theta_list
+            ]
+            theta_trans_list = rep_unit.par_trans.panel_transform_list(
+                theta_list, direction="to_est"
+            )
+        else:
+            theta_trans_list = theta_list
 
-        if len(shared_trans_list) == 0:
+        # Extract shared and unit_specific DataFrames from transformed list
+        shared_trans_list = [t.get("shared") for t in theta_trans_list]
+        spec_trans_list = [t.get("unit_specific") for t in theta_trans_list]
+
+        # Store original shared/unit_specific for later use
+        shared = [t.get("shared") for t in theta_list]
+        unit_specific = [t.get("unit_specific") for t in theta_list]
+
+        if all(df is None for df in shared_trans_list):
             n_shared = 0
             shared_array = jnp.zeros((n_reps, 0, J))
             shared_index: list[str] = []
         else:
             shared_index = self.canonical_shared_param_names
             n_shared = len(shared_index)
+            # PanelParameters ensures all shared are None or all are not None
+            # Cast to list[pd.DataFrame] since we know all are not None here
+            shared_trans_list_nonnull = cast(list[pd.DataFrame], shared_trans_list)
             shared_array = jnp.stack(
                 [
                     jnp.tile(
@@ -313,18 +340,21 @@ class PanelEstimationMixin(Base):
                         ).reshape(n_shared, 1),
                         (1, J),
                     )
-                    for df in shared_trans_list
+                    for df in shared_trans_list_nonnull
                 ],
                 axis=0,
             )
 
-        if len(spec_trans_list) == 0:
+        if all(df is None for df in spec_trans_list):
             n_spec = 0
             unit_array = jnp.zeros((n_reps, 0, J, U))
             spec_index: list[str] = []
         else:
             spec_index = self.canonical_unit_param_names
             n_spec = len(spec_index)
+            # PanelParameters ensures all unit_specific are None or all are not None
+            # Cast to list[pd.DataFrame] since we know all are not None here
+            spec_trans_list_nonnull = cast(list[pd.DataFrame], spec_trans_list)
             unit_array = jnp.stack(
                 [
                     jnp.stack(
@@ -339,7 +369,7 @@ class PanelEstimationMixin(Base):
                         ],
                         axis=2,
                     )
-                    for df in spec_trans_list
+                    for df in spec_trans_list_nonnull
                 ],
                 axis=0,
             )
@@ -439,7 +469,8 @@ class PanelEstimationMixin(Base):
             coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},
         )
 
-        if shared is not None:
+        # PanelParameters ensures all shared are None or all are not None
+        if shared and shared[0] is not None:
             shared_list_out = [
                 pd.DataFrame(
                     shared_traces[rep, -1, 1:].reshape(-1, 1),
@@ -451,7 +482,8 @@ class PanelEstimationMixin(Base):
         else:
             shared_list_out = None
 
-        if unit_specific is not None:
+        # PanelParameters ensures all unit_specific are None or all are not None
+        if unit_specific and unit_specific[0] is not None:
             specific_list_out = [
                 pd.DataFrame(
                     unit_traces[rep, -1, 1:, :],
@@ -472,8 +504,7 @@ class PanelEstimationMixin(Base):
             method="mif",
             execution_time=execution_time,
             key=old_key,
-            shared=shared,
-            unit_specific=unit_specific,
+            theta=theta_obj_in,
             shared_traces=shared_da,
             unit_traces=unit_da,
             logLiks=full_logliks,

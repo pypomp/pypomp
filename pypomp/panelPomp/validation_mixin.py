@@ -45,7 +45,24 @@ class PanelValidationMixin(Base):
             raise ValueError(
                 "The unit names in the unit_objects dictionary must match the unit names in the theta object"
             )
-        if self.canonical_param_names != self.theta.get_param_names():
+        if set(self.canonical_param_names) != set(self.theta.get_param_names()):
             raise ValueError(
                 "The canonical parameter names must match the canonical parameter names in the theta object"
             )
+        first_unit_canonical_param_names = self.unit_objects[
+            self.get_unit_names()[0]
+        ].canonical_param_names
+        unit_canonical_param_names_match = [
+            set(self.unit_objects[unit].canonical_param_names)
+            == set(first_unit_canonical_param_names)
+            for unit in self.get_unit_names()
+        ]
+        if not all(unit_canonical_param_names_match):
+            raise ValueError(
+                "The canonical parameter names in the unit objects must match the canonical parameter names in the first unit for all units."
+            )
+        if set(self.canonical_param_names) != set(first_unit_canonical_param_names):
+            raise ValueError(
+                "The canonical parameter names must match the canonical parameter names in the unit objects (up to reordering)."
+            )
+        self.canonical_param_names = first_unit_canonical_param_names

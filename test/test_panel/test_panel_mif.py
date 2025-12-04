@@ -8,7 +8,7 @@ def test_mif(measles_panel_setup_some_shared):
     J = 2
     M = 2
     a = 0.5
-    theta_orig = panel.theta
+    theta_orig = deepcopy(panel.theta)
     panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
     result = panel.results_history[-1]
 
@@ -16,7 +16,17 @@ def test_mif(measles_panel_setup_some_shared):
     assert hasattr(result, "shared_traces")
     assert hasattr(result, "unit_traces")
     assert hasattr(result, "logLiks")
-    assert result.theta is theta_orig
+    theta_list1, theta_list2 = result.theta.to_list(), theta_orig.to_list()
+    assert len(theta_list1) == len(theta_list2) and all(
+        (d1.get(k) is None and d2.get(k) is None)
+        or (
+            d1.get(k) is not None
+            and d2.get(k) is not None
+            and d1.get(k).equals(d2.get(k))
+        )
+        for d1, d2 in zip(theta_list1, theta_list2)
+        for k in ["shared", "unit_specific"]
+    )
     assert result.J == J
     assert result.M == M
     assert result.a == a

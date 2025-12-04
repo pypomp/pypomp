@@ -58,6 +58,11 @@ class PompParameters(ParameterSet):
     Internal storage is a list of dictionaries.
     """
 
+    _params: list[dict]
+    _canonical_param_names: list[str]
+    estimation_scale: bool
+    _logLik: np.ndarray
+
     def __init__(
         self,
         theta: Union[dict, list[dict], "PompParameters"] | None,
@@ -95,9 +100,9 @@ class PompParameters(ParameterSet):
             theta = [theta]
 
         self._validate_raw(theta)
-        self._params: list[dict] = theta
-        self._canonical_param_names: list[str] = list(self._params[0].keys())
-        self.estimation_scale: bool = estimation_scale
+        self._params = theta
+        self._canonical_param_names = list(self._params[0].keys())
+        self.estimation_scale = estimation_scale
         self._logLik = self._format_logLik(logLik, len(self._params))
 
     def _format_logLik(self, ll: np.ndarray | None, n_reps: int) -> np.ndarray:
@@ -357,6 +362,14 @@ class PanelParameters(ParameterSet):
     Internal storage is a list of dictionaries, always containing "shared" and "unit_specific" keys mapping to DataFrames (which may be empty).
     """
 
+    _theta: list[dict[str, pd.DataFrame | None]]
+    estimation_scale: bool
+    _logLik_unit: np.ndarray
+    _logLik: np.ndarray
+    _canonical_shared_param_names: list[str]
+    _canonical_unit_param_names: list[str]
+    _canonical_param_names: list[str]
+
     def __init__(
         self,
         theta: Union[
@@ -368,13 +381,6 @@ class PanelParameters(ParameterSet):
         logLik_unit: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
-        self._theta: list[dict[str, pd.DataFrame | None]]
-        self.estimation_scale: bool
-        self._logLik_unit: np.ndarray
-        self._canonical_shared_param_names: list[str]
-        self._canonical_unit_param_names: list[str]
-        self._canonical_param_names: list[str]
-
         if isinstance(theta, PanelParameters):
             self._theta = [
                 {k: v.copy() if v is not None else None for k, v in t.items()}

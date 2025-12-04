@@ -4,6 +4,7 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 import time
+from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast
 
 from ..mif import _jv_panel_mif_internal
@@ -11,6 +12,7 @@ from ..internal_functions import _shard_rows
 from ..RWSigma_class import RWSigma
 from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
 from ..parameters import PanelParameters
+from ..util import logmeanexp
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -206,6 +208,14 @@ class PanelEstimationMixin(Base):
             results.loc[:, unit, :] = obj.results_history[-1].logLiks
             obj.results_history = ResultsHistory()
 
+        # results has shape (n_theta_reps, len(self.unit_objects), reps)
+        results_np = np.array(results.values)
+        logLik_unit = np.apply_along_axis(
+            logmeanexp, -1, results_np, ignore_nan=False
+        )  # shape: (n_theta_reps, len(self.unit_objects))
+
+        self.theta.logLik_unit = logLik_unit
+
         execution_time = time.time() - start_time
 
         result = PanelPompPFilterResult(
@@ -238,7 +248,7 @@ class PanelEstimationMixin(Base):
         block: bool = True,
     ) -> None:
         start_time = time.time()
-        theta_obj_in = self._prepare_theta_input(theta)
+        theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         if theta_obj_in is None:
             raise ValueError("theta must be provided or self.theta must exist")
 
@@ -495,8 +505,20 @@ class PanelEstimationMixin(Base):
         else:
             specific_list_out = None
 
-        self.shared = shared_list_out
-        self.unit_specific = specific_list_out
+        theta_list_out = [
+            {
+                "shared": shared_list_out[rep] if shared_list_out else None,
+                "unit_specific": specific_list_out[rep] if specific_list_out else None,
+            }
+            for rep in range(n_reps)
+        ]
+
+        # unit_final_logliks has shape (n_reps, U)
+        logLik_unit_out = np.array(unit_final_logliks)
+
+        self.theta.theta = theta_list_out
+        self.theta.logLik_unit = logLik_unit_out
+        self.theta.estimation_scale = False
 
         execution_time = time.time() - start_time
 

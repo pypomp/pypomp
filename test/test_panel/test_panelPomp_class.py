@@ -196,7 +196,12 @@ def test_performance_comprehensive():
         ys = pd.DataFrame({"cases": np.random.poisson(10, 10)}, index=times)
         pomp_obj = pp.Pomp(
             ys=ys,
-            theta={"param1": 1.0, "param2": 2.0},
+            theta={
+                "param1": 1.0,
+                "param2": 2.0,
+                "unit_param1": 0.5,
+                "unit_param2": 0.5,
+            },
             statenames=["S", "I"],
             t0=float(times[0]),
             rinit=lambda theta_, key, covars, t0: {"S": 1000, "I": 1},

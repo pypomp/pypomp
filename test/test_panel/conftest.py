@@ -2,6 +2,7 @@ import pandas as pd
 import jax
 import pypomp as pp
 import pytest
+from copy import deepcopy
 
 
 @pytest.fixture(scope="module")
@@ -112,7 +113,7 @@ def measles_panel_setup_specific_only(measles_panel_setup_specific_only_module):
 def measles_panel_setup_some_shared(measles_panel_setup_some_shared_module):
     panel, rw_sd, theta, key, fresh_key = measles_panel_setup_some_shared_module
     panel.results_history.clear()
-    panel.theta = theta
+    panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key
 
@@ -172,6 +173,6 @@ def measles_panel_mp(measles_panel_mp_module):
         results_history,
     ) = measles_panel_mp_module
     panel.results_history = results_history
-    panel.theta = theta
+    panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key, J, M, a

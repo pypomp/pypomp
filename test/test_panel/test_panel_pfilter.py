@@ -11,7 +11,7 @@ def test_pfilter_basic(measles_panel_setup_some_shared):
     assert isinstance(result.logLiks, xr.DataArray)
     assert result.logLiks.dims == ("theta", "unit", "replicate")
     assert result.logLiks.shape == (2, 2, 1)
-    assert result.theta is panel.theta
+    assert result.theta == panel.theta
     assert result.J == 2
     assert result.reps == 1
     assert result.thresh == 0

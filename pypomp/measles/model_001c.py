@@ -1,4 +1,21 @@
-"""He10 model without alpha or deaths"""
+"""
+He10 model without alpha or deaths. This may run significantly faster than model_001b because it does not have to simulate deaths.
+
+Parameters:
+- R0: Basic reproduction number
+- sigma: Rate of transition from susceptible to exposed
+- gamma: Rate of transition from exposed to infectious
+- iota: Imported cases
+- sigmaSE: Rate of stochastic extrademographic variation
+- cohort: Cohort effect
+- amplitude: Seasonality amplitude
+- rho: Reporting probability
+- psi: Reporting error over-dispersion
+- S_0: Initial susceptible population proportion
+- E_0: Initial exposed population proportion
+- I_0: Initial infectious population proportion
+- R_0: Initial recovered population proportion
+"""
 
 import jax.numpy as jnp
 import jax

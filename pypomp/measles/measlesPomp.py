@@ -4,6 +4,7 @@ import os
 import pickle
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
+import pypomp.measles.model_002 as m002
 from scipy.interpolate import make_splrep
 from scipy.interpolate import splev
 from pypomp.pomp_class import Pomp
@@ -227,6 +228,7 @@ class UKMeasles:
         mod = {
             "001b": m001b,
             "001c": m001c,
+            "002": m002,
         }[model]
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(

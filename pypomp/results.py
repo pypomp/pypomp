@@ -659,7 +659,18 @@ class PanelPompMIFResult(PanelPompBaseResult):
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 
-        return u_df.join(s_df, on="replicate").reset_index()
+        u_df = u_df.join(s_df, on="replicate").reset_index()
+
+        cols = ["replicate", "shared logLik", "unit", "unit logLik"] + [
+            c
+            for c in u_df.columns
+            if c not in {"replicate", "shared logLik", "unit", "unit logLik"}
+        ]
+        u_df = u_df[cols]
+
+        assert isinstance(u_df, pd.DataFrame)
+
+        return u_df
 
     def traces(self) -> pd.DataFrame:
         """Return panel mif results formatted as traces (long format)."""

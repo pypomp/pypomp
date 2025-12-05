@@ -661,10 +661,11 @@ class PanelPompMIFResult(PanelPompBaseResult):
 
         u_df = u_df.join(s_df, on="replicate").reset_index()
 
-        cols = ["replicate", "shared logLik", "unit", "unit logLik"] + [
+        cols = ["replicate", "iteration", "shared logLik", "unit", "unit logLik"] + [
             c
             for c in u_df.columns
-            if c not in {"replicate", "shared logLik", "unit", "unit logLik"}
+            if c
+            not in {"replicate", "iteration", "shared logLik", "unit", "unit logLik"}
         ]
         u_df = u_df[cols]
 

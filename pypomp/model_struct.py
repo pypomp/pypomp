@@ -154,7 +154,9 @@ class RInit:
 
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [dict[str, float], jax.Array, dict[str, float], float], dict[str, float]
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -233,7 +235,17 @@ class RProc:
 
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [
+                dict[str, float],
+                dict[str, float],
+                jax.Array,
+                dict[str, float],
+                float,
+                float,
+            ],
+            dict[str, float],
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -369,7 +381,16 @@ class DMeas:
 
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [
+                dict[str, float],
+                dict[str, float],
+                dict[str, float],
+                dict[str, float],
+                float,
+            ],
+            float,
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -446,7 +467,10 @@ class RMeas:
 
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [dict[str, float], dict[str, float], jax.Array, dict[str, float], float],
+            jax.Array,
+        ],
         ydim: int,
         statenames: list[str],
         param_names: list[str],

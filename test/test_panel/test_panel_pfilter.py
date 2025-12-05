@@ -1,9 +1,11 @@
 import xarray as xr
+from copy import deepcopy
 
 
 def test_pfilter_basic(measles_panel_setup_some_shared):
     """Test basic pfilter functionality with some shared parameters."""
     panel, rw_sd, key = measles_panel_setup_some_shared
+    theta_orig = deepcopy(panel.theta)
     panel.pfilter(J=2, key=key)
 
     # Check results structure
@@ -11,7 +13,7 @@ def test_pfilter_basic(measles_panel_setup_some_shared):
     assert isinstance(result.logLiks, xr.DataArray)
     assert result.logLiks.dims == ("theta", "unit", "replicate")
     assert result.logLiks.shape == (2, 2, 1)
-    assert result.theta == panel.theta
+    assert result.theta == theta_orig
     assert result.J == 2
     assert result.reps == 1
     assert result.thresh == 0
@@ -22,13 +24,14 @@ def test_pfilter_basic(measles_panel_setup_some_shared):
 def test_pfilter_unit_specific_only(measles_panel_setup_specific_only):
     """Test pfilter with unit-specific parameters only."""
     panel, rw_sd, key = measles_panel_setup_specific_only
+    theta_orig = deepcopy(panel.theta)
     panel.pfilter(J=2, key=key)
 
     result = panel.results_history[-1]
     assert isinstance(result.logLiks, xr.DataArray)
     assert result.logLiks.dims == ("theta", "unit", "replicate")
     assert result.logLiks.shape == (2, 2, 1)
-    assert result.theta is panel.theta
+    assert result.theta == theta_orig
     assert result.J == 2
     assert result.reps == 1
     assert result.thresh == 0

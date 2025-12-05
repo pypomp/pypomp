@@ -407,7 +407,7 @@ class Pomp:
         """
         start_time = time.time()
 
-        theta_obj_in = self._prepare_theta_input(theta)
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         n_theta_reps = theta_obj_in.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)

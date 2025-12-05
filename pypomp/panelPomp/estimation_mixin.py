@@ -185,7 +185,7 @@ class PanelEstimationMixin(Base):
         reps: int = 1,
     ) -> None:
         start_time = time.time()
-        theta_obj_in = self._prepare_theta_input(theta)
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
 
         key, old_key = self._update_fresh_key(key)
 

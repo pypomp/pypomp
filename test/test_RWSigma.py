@@ -210,3 +210,24 @@ class TestRWSigma:
         rw_sigma = pp.RWSigma({"param1": 0.1}, ["param1"])
         with pytest.raises(ValueError, match=expected_error):
             rw_sigma._validate_attributes(sigmas, init_names)
+
+    def test_setitem_valid(self):
+        """Test __setitem__ with valid inputs."""
+        rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
+        rw_sigma["param1"] = 0.5
+        assert rw_sigma.sigmas == {"param1": 0.5, "param2": 0.2}
+        rw_sigma["param2"] = 3  # int should be coerced to float
+        assert rw_sigma.sigmas == {"param1": 0.5, "param2": 3.0}
+
+    @pytest.mark.parametrize(
+        "param_name,value,error",
+        [
+            ("param3", 0.5, KeyError),
+            ("param1", -0.5, ValueError),
+        ],
+    )
+    def test_setitem_invalid(self, param_name, value, error):
+        """Test __setitem__ with invalid inputs."""
+        rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
+        with pytest.raises(error):
+            rw_sigma[param_name] = value

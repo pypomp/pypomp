@@ -239,6 +239,87 @@ class PompPFilterResult(PompBaseResult):
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PompPFilterResult") -> "PompPFilterResult":
+        """
+        Merge replications from an arbitrary number of PompPFilterResult objects into a single PompPFilterResult object.
+        All objects must have the same J (number of particles), thresh (resampling threshold), and reps (number of replicates).
+        Execution time is the maximum execution time of the merged objects, and the key is the key from the first object.
+        """
+        # TODO: handle keys in a better way
+        if len(results) == 0:
+            raise ValueError("At least one PompPFilterResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompPFilterResult.")
+            if result.J != first.J:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same J (number of particles)."
+                )
+            if result.thresh != first.thresh:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same thresh (resampling threshold)."
+                )
+            if result.reps != first.reps:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same reps (number of replicates)."
+                )
+
+        # Merge theta lists
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        # Concatenate logLiks along the "theta" dimension
+        logLik_arrays = []
+        for result in results:
+            if result.logLiks.size > 0:
+                logLik_arrays.append(result.logLiks)
+        if logLik_arrays:
+            merged_logLiks: xr.DataArray = xr.concat(logLik_arrays, dim="theta")  # type: ignore[assignment]
+        else:
+            merged_logLiks = xr.DataArray([])
+
+        # Concatenate optional diagnostics along the "theta" dimension
+        def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
+            arrays = []
+            for result in results:
+                diag = getattr(result, name)
+                if diag is not None and diag.size > 0:
+                    arrays.append(diag)
+            if arrays:
+                return xr.concat(arrays, dim="theta")  # type: ignore[return-value]
+            return None
+
+        merged_CLL = merge_optional_diagnostic("CLL")
+        merged_ESS = merge_optional_diagnostic("ESS")
+        merged_filter_mean = merge_optional_diagnostic("filter_mean")
+        merged_prediction_mean = merge_optional_diagnostic("prediction_mean")
+
+        # Use max execution time if available
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        merged_result = PompPFilterResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            logLiks=merged_logLiks,
+            J=first.J,
+            reps=first.reps,
+            thresh=first.thresh,
+            CLL=merged_CLL,
+            ESS=merged_ESS,
+            filter_mean=merged_filter_mean,
+            prediction_mean=merged_prediction_mean,
+        )
+        return merged_result
+
 
 @dataclass
 class PompMIFResult(PompBaseResult):
@@ -454,13 +535,17 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     reps: int = 1
     thresh: float = 0.0
     theta: "PanelParameters | None" = None
+    CLL: xr.DataArray | None = None
+    ESS: xr.DataArray | None = None
+    filter_mean: xr.DataArray | None = None
+    prediction_mean: xr.DataArray | None = None
 
     def __post_init__(self):
         """Set method to pfilter."""
         self.method = "pfilter"
 
     def __eq__(self, other) -> bool:  # type: ignore[override]
-        """Structural equality including panel log-likelihoods."""
+        """Structural equality including panel log-likelihoods and diagnostics."""
         if not super().__eq__(other):
             return False
 
@@ -479,6 +564,19 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 equal_nan=True,
             ):
                 return False
+
+        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if (a is None) != (b is None):
+                return False
+            if a is not None and b is not None:
+                if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                    if not a.equals(b):
+                        return False
+                else:
+                    if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                        return False
 
         return True
 

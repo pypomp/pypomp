@@ -183,6 +183,10 @@ class PanelEstimationMixin(Base):
         ] = None,
         thresh: float = 0.0,
         reps: int = 1,
+        CLL: bool = False,
+        ESS: bool = False,
+        filter_mean: bool = False,
+        prediction_mean: bool = False,
     ) -> None:
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
@@ -190,11 +194,20 @@ class PanelEstimationMixin(Base):
         key, old_key = self._update_fresh_key(key)
 
         n_theta_reps = theta_obj_in.num_replicates()
+        unit_names = list(self.unit_objects.keys())
+        n_units = len(unit_names)
+
         results = xr.DataArray(
-            np.zeros((n_theta_reps, len(self.unit_objects), reps)),
+            np.zeros((n_theta_reps, n_units, reps)),
             dims=["theta", "unit", "replicate"],
-            coords={"unit": list(self.unit_objects.keys()), "replicate": range(reps)},
+            coords={"unit": unit_names, "replicate": range(reps)},
         )
+
+        CLL_list = []
+        ESS_list = []
+        filter_mean_list = []
+        prediction_mean_list = []
+
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, theta=theta_obj_in)
             key, subkey = jax.random.split(key)  # pyright: ignore[reportArgumentType]
@@ -204,8 +217,23 @@ class PanelEstimationMixin(Base):
                 theta=theta_list,
                 thresh=thresh,
                 reps=reps,
+                CLL=CLL,
+                ESS=ESS,
+                filter_mean=filter_mean,
+                prediction_mean=prediction_mean,
             )
-            results.loc[:, unit, :] = obj.results_history[-1].logLiks
+            unit_result = obj.results_history[-1]
+            results.loc[:, unit, :] = unit_result.logLiks
+
+            if CLL and unit_result.CLL is not None:
+                CLL_list.append(unit_result.CLL)
+            if ESS and unit_result.ESS is not None:
+                ESS_list.append(unit_result.ESS)
+            if filter_mean and unit_result.filter_mean is not None:
+                filter_mean_list.append(unit_result.filter_mean)
+            if prediction_mean and unit_result.prediction_mean is not None:
+                prediction_mean_list.append(unit_result.prediction_mean)
+
             obj.results_history = ResultsHistory()
 
         # results has shape (n_theta_reps, len(self.unit_objects), reps)
@@ -215,6 +243,54 @@ class PanelEstimationMixin(Base):
         )  # shape: (n_theta_reps, len(self.unit_objects))
 
         self.theta.logLik_unit = logLik_unit
+
+        def _stack_diagnostics(diag_list, dims, coord_names):
+            """Stack unit diagnostics and create DataArray with unit dimension."""
+            if not diag_list:
+                return None
+            arrays = [np.array(arr.values) for arr in diag_list]
+            stacked = np.stack(arrays, axis=1)
+            coords = {"unit": unit_names, "replicate": range(reps)}
+            for i, coord_name in enumerate(coord_names):
+                coord_idx = -(len(coord_names) - i)
+                if coord_name in diag_list[0].coords:
+                    coords[coord_name] = diag_list[0].coords[coord_name]
+                else:
+                    coords[coord_name] = range(stacked.shape[coord_idx])
+            return xr.DataArray(stacked, dims=dims, coords=coords)
+
+        CLL_da = (
+            _stack_diagnostics(
+                CLL_list, ["theta", "unit", "replicate", "time"], ["time"]
+            )
+            if CLL
+            else None
+        )
+        ESS_da = (
+            _stack_diagnostics(
+                ESS_list, ["theta", "unit", "replicate", "time"], ["time"]
+            )
+            if ESS
+            else None
+        )
+        filter_mean_da = (
+            _stack_diagnostics(
+                filter_mean_list,
+                ["theta", "unit", "replicate", "time", "state"],
+                ["time", "state"],
+            )
+            if filter_mean
+            else None
+        )
+        prediction_mean_da = (
+            _stack_diagnostics(
+                prediction_mean_list,
+                ["theta", "unit", "replicate", "time", "state"],
+                ["time", "state"],
+            )
+            if prediction_mean
+            else None
+        )
 
         execution_time = time.time() - start_time
 
@@ -227,6 +303,10 @@ class PanelEstimationMixin(Base):
             J=J,
             reps=reps,
             thresh=thresh,
+            CLL=CLL_da,
+            ESS=ESS_da,
+            filter_mean=filter_mean_da,
+            prediction_mean=prediction_mean_da,
         )
 
         self.results_history.add(result)

@@ -14,6 +14,7 @@ else:
     PanelParameters = object
 
 from .util import logmeanexp, logmeanexp_se
+from .parameters import PanelParameters
 
 
 @dataclass
@@ -417,6 +418,59 @@ class PompMIFResult(PompBaseResult):
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PompMIFResult") -> "PompMIFResult":
+        """Merge replications from multiple PompMIFResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PompMIFResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompMIFResult.")
+            if (
+                result.J != first.J
+                or result.M != first.M
+                or result.a != first.a
+                or result.thresh != first.thresh
+            ):
+                raise ValueError(
+                    "All PompMIFResult objects must have the same J, M, a, and thresh."
+                )
+            if (result.rw_sd is None) != (first.rw_sd is None) or (
+                result.rw_sd is not None and result.rw_sd != first.rw_sd
+            ):
+                raise ValueError("All PompMIFResult objects must have the same rw_sd.")
+
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
+        merged_traces = (
+            xr.concat(trace_arrays, dim="replicate")
+            if trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PompMIFResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_traces,
+            J=first.J,
+            M=first.M,
+            rw_sd=first.rw_sd,
+            a=first.a,
+            thresh=first.thresh,
+        )
+
 
 @dataclass
 class PompTrainResult(PompBaseResult):
@@ -524,6 +578,66 @@ class PompTrainResult(PompBaseResult):
             print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
+
+    @staticmethod
+    def merge(*results: "PompTrainResult") -> "PompTrainResult":
+        """Merge replications from multiple PompTrainResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PompTrainResult object must be provided.")
+        first = results[0]
+
+        scalar_fields = [
+            "optimizer",
+            "J",
+            "M",
+            "eta",
+            "alpha",
+            "thresh",
+            "ls",
+            "c",
+            "max_ls_itn",
+        ]
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompTrainResult.")
+            for field_name in scalar_fields:
+                if getattr(result, field_name) != getattr(first, field_name):
+                    raise ValueError(
+                        f"All PompTrainResult objects must have the same {field_name}."
+                    )
+
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
+        merged_traces = (
+            xr.concat(trace_arrays, dim="replicate")
+            if trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PompTrainResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_traces,
+            optimizer=first.optimizer,
+            J=first.J,
+            M=first.M,
+            eta=first.eta,
+            alpha=first.alpha,
+            thresh=first.thresh,
+            ls=first.ls,
+            c=first.c,
+            max_ls_itn=first.max_ls_itn,
+        )
 
 
 @dataclass
@@ -684,6 +798,68 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PanelPompPFilterResult") -> "PanelPompPFilterResult":
+        """Merge replications from multiple PanelPompPFilterResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError(
+                "At least one PanelPompPFilterResult object must be provided."
+            )
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError(
+                    "All merged objects must be of type PanelPompPFilterResult."
+                )
+            if (
+                result.J != first.J
+                or result.reps != first.reps
+                or result.thresh != first.thresh
+            ):
+                raise ValueError(
+                    "All PanelPompPFilterResult objects must have the same J, reps, and thresh."
+                )
+
+        merged_theta = (
+            PanelParameters.merge(*[r.theta for r in results if r.theta is not None])
+            if any(r.theta is not None for r in results)
+            else None
+        )
+
+        logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
+        merged_logLiks = (
+            xr.concat(logLik_arrays, dim="theta") if logLik_arrays else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
+            arrays = [
+                getattr(r, name)
+                for r in results
+                if getattr(r, name) is not None and getattr(r, name).size > 0
+            ]
+            return xr.concat(arrays, dim="theta") if arrays else None  # type: ignore[return-value]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PanelPompPFilterResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            logLiks=merged_logLiks,
+            J=first.J,
+            reps=first.reps,
+            thresh=first.thresh,
+            CLL=merge_optional_diagnostic("CLL"),
+            ESS=merge_optional_diagnostic("ESS"),
+            filter_mean=merge_optional_diagnostic("filter_mean"),
+            prediction_mean=merge_optional_diagnostic("prediction_mean"),
+        )
+
 
 @dataclass
 class PanelPompMIFResult(PanelPompBaseResult):
@@ -811,12 +987,93 @@ class PanelPompMIFResult(PanelPompBaseResult):
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PanelPompMIFResult") -> "PanelPompMIFResult":
+        """Merge replications from multiple PanelPompMIFResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PanelPompMIFResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError(
+                    "All merged objects must be of type PanelPompMIFResult."
+                )
+            if (
+                result.J != first.J
+                or result.M != first.M
+                or result.a != first.a
+                or result.thresh != first.thresh
+                or result.block != first.block
+            ):
+                raise ValueError(
+                    "All PanelPompMIFResult objects must have the same J, M, a, thresh, and block."
+                )
+            if (result.rw_sd is None) != (first.rw_sd is None) or (
+                result.rw_sd is not None and result.rw_sd != first.rw_sd
+            ):
+                raise ValueError(
+                    "All PanelPompMIFResult objects must have the same rw_sd."
+                )
+
+        merged_theta = (
+            PanelParameters.merge(*[r.theta for r in results if r.theta is not None])
+            if any(r.theta is not None for r in results)
+            else None
+        )
+
+        shared_trace_arrays = [
+            r.shared_traces for r in results if r.shared_traces.size > 0
+        ]
+        merged_shared_traces = (
+            xr.concat(shared_trace_arrays, dim="replicate")
+            if shared_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        unit_trace_arrays = [r.unit_traces for r in results if r.unit_traces.size > 0]
+        merged_unit_traces = (
+            xr.concat(unit_trace_arrays, dim="replicate")
+            if unit_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
+        merged_logLiks = (
+            xr.concat(logLik_arrays, dim="replicate")
+            if logLik_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PanelPompMIFResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            shared_traces=merged_shared_traces,
+            unit_traces=merged_unit_traces,
+            logLiks=merged_logLiks,
+            J=first.J,
+            M=first.M,
+            rw_sd=first.rw_sd,
+            a=first.a,
+            thresh=first.thresh,
+            block=first.block,
+        )
+
 
 class ResultsHistory:
     """Container class for managing result history."""
 
+    _entries: list[BaseResult] = field(default_factory=list)
+
     def __init__(self):
-        self._entries: list[BaseResult] = []
+        self._entries = []
 
     def add(self, result: BaseResult):
         """Add a result entry."""
@@ -963,3 +1220,44 @@ class ResultsHistory:
             print(f"Results entry {idx}:")
             entry.print_summary()
             print()
+
+    @staticmethod
+    def merge(*histories: "ResultsHistory") -> "ResultsHistory":
+        """Merge replications from multiple ResultsHistory objects into a single object."""
+        if len(histories) == 0:
+            raise ValueError("At least one ResultsHistory object must be provided.")
+
+        # Check if all histories have the same number of entries
+        entry_lengths = [len(h._entries) for h in histories]
+        if len(set(entry_lengths)) != 1:
+            raise ValueError(
+                f"Cannot merge ResultsHistory objects: differing number of entries ({entry_lengths})"
+            )
+
+        merged_history = ResultsHistory()
+
+        for i in range(entry_lengths[0]):
+            results_at_position = []
+            for history in histories:
+                if i < len(history._entries):
+                    results_at_position.append(history._entries[i])
+
+            if not results_at_position:
+                continue
+
+            first_result = results_at_position[0]
+            result_type = type(first_result)
+            if not all(isinstance(r, result_type) for r in results_at_position):
+                raise ValueError(
+                    f"Results at position {i} have different types and cannot be merged."
+                )
+
+            if hasattr(result_type, "merge"):
+                merged_result = result_type.merge(*results_at_position)
+                merged_history.add(merged_result)
+            else:
+                raise ValueError(
+                    f"Result type {result_type} does not have a merge method."
+                )
+
+        return merged_history

@@ -355,6 +355,37 @@ class PompParameters(ParameterSet):
             return False
         return True
 
+    @staticmethod
+    def merge(*param_objs: "PompParameters") -> "PompParameters":
+        """
+        Merge replications from an arbitrary number of PompParameters objects into a single PompParameters object.
+        All objects must have the same canonical parameter names and estimation scale.
+        Usage:
+            merged = PompParameters.merge(p1, p2, p3, ...)
+        """
+        if len(param_objs) == 0:
+            raise ValueError("At least one PompParameters object must be provided.")
+        first = param_objs[0]
+
+        for obj in param_objs:
+            if not isinstance(obj, type(first)):
+                raise TypeError("All merged objects must be of type PompParameters.")
+            if obj._canonical_param_names != first._canonical_param_names:
+                raise ValueError(
+                    "All PompParameters objects must have the same canonical parameter names."
+                )
+            if obj.estimation_scale != first.estimation_scale:
+                raise ValueError(
+                    "All PompParameters objects must have the same estimation scale."
+                )
+        all_params = []
+        all_logLik = []
+        for obj in param_objs:
+            all_params.extend(obj._params)
+            all_logLik.append(obj._logLik)
+        merged_logLik = np.concatenate(all_logLik) if all_logLik else np.array([])
+        return PompParameters(all_params, logLik=merged_logLik)
+
 
 class PanelParameters(ParameterSet):
     """
@@ -884,3 +915,48 @@ class PanelParameters(ParameterSet):
                     except AssertionError:
                         return False
         return True
+
+    @staticmethod
+    def merge(*param_objs: "PanelParameters") -> "PanelParameters":
+        """
+        Merge replications from an arbitrary number of PanelParameters objects into a single PanelParameters object.
+        All objects must have the same canonical parameter names, unit names, and estimation scale.
+        Usage:
+            merged = PanelParameters.merge(p1, p2, p3, ...)
+        """
+        if len(param_objs) == 0:
+            raise ValueError("At least one PanelParameters object must be provided.")
+        first = param_objs[0]
+
+        for obj in param_objs:
+            if not isinstance(obj, type(first)):
+                raise TypeError("All merged objects must be of type PanelParameters.")
+            if obj._canonical_shared_param_names != first._canonical_shared_param_names:
+                raise ValueError(
+                    "All PanelParameters objects must have the same canonical shared parameter names."
+                )
+            if obj._canonical_unit_param_names != first._canonical_unit_param_names:
+                raise ValueError(
+                    "All PanelParameters objects must have the same canonical unit parameter names."
+                )
+            if obj.estimation_scale != first.estimation_scale:
+                raise ValueError(
+                    "All PanelParameters objects must have the same estimation scale."
+                )
+            if obj.get_unit_names() != first.get_unit_names():
+                raise ValueError(
+                    "All PanelParameters objects must have the same unit names."
+                )
+        all_theta = []
+        all_logLik_unit = []
+        for obj in param_objs:
+            all_theta.extend(obj._theta)
+            all_logLik_unit.append(obj._logLik_unit)
+        merged_logLik_unit = (
+            np.concatenate(all_logLik_unit, axis=0) if all_logLik_unit else np.array([])
+        )
+        return PanelParameters(
+            all_theta,
+            logLik_unit=merged_logLik_unit,
+            estimation_scale=first.estimation_scale,
+        )

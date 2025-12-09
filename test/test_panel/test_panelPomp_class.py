@@ -497,3 +497,81 @@ def test_mix_and_match(measles_panel_mp):
 def test_print_summary(measles_panel_mp):
     panel, rw_sd, key, J, M, a = measles_panel_mp
     panel.print_summary()
+
+
+def test_merge(measles_panel_setup_some_shared):
+    """Test merging two PanelPomp objects."""
+    panel1, rw_sd, key1 = measles_panel_setup_some_shared
+    panel2, _, key2 = measles_panel_setup_some_shared
+
+    J = 2
+    M = 2
+    a = 0.5
+    panel1.pfilter(J=J, key=key1)
+    panel1.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key1)
+    panel2.pfilter(J=J, key=key2)
+    panel2.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key2)
+
+    n_reps1 = len(panel1.theta)
+    n_reps2 = len(panel2.theta)
+    n_history1 = len(panel1.results_history)
+    n_history2 = len(panel2.results_history)
+
+    merged = pp.PanelPomp.merge(panel1, panel2)
+
+    assert merged.canonical_param_names == panel1.canonical_param_names
+    assert merged.get_unit_names() == panel1.get_unit_names()
+
+    assert len(merged.theta) == n_reps1 + n_reps2
+    assert len(merged.results_history) == n_history1 == n_history2
+
+    # Verify merged results have combined replications
+    for i in range(len(merged.results_history)):
+        merged_result = merged.results_history[i]
+        result1 = panel1.results_history[i]
+        result2 = panel2.results_history[i]
+
+        # Verify algorithmic parameters match
+        assert merged_result.J == result1.J == result2.J == J
+        assert merged_result.thresh == result1.thresh == result2.thresh
+
+        if merged_result.method == "pfilter":
+            assert merged_result.reps == result1.reps == result2.reps
+        elif merged_result.method == "mif":
+            assert merged_result.M == result1.M == result2.M == M
+            assert merged_result.a == result1.a == result2.a == a
+            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
+            assert merged_result.block == result1.block == result2.block
+
+        # Check that merged result has combined replications
+        if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
+            if merged_result.method == "pfilter":
+                # For pfilter results: logLiks has dims ["theta", "unit", "replicate"]
+                # The theta dimension corresponds to theta replications
+                merged_n_theta = merged_result.logLiks.sizes["theta"]
+                result1_n_theta = result1.logLiks.sizes["theta"]
+                result2_n_theta = result2.logLiks.sizes["theta"]
+                assert merged_n_theta == result1_n_theta + result2_n_theta, (
+                    f"Position {i} ({merged_result.method}): merged has {merged_n_theta} theta replications, "
+                    f"expected {result1_n_theta} + {result2_n_theta} = {result1_n_theta + result2_n_theta}"
+                )
+            elif merged_result.method == "mif":
+                # For mif results: logLiks has dims ["replicate", "unit"]
+                # The replicate dimension corresponds to theta replications
+                merged_n_reps = merged_result.logLiks.sizes["replicate"]
+                result1_n_reps = result1.logLiks.sizes["replicate"]
+                result2_n_reps = result2.logLiks.sizes["replicate"]
+                assert merged_n_reps == result1_n_reps + result2_n_reps, (
+                    f"Position {i} ({merged_result.method}): merged has {merged_n_reps} replicates, "
+                    f"expected {result1_n_reps} + {result2_n_reps} = {result1_n_reps + result2_n_reps}"
+                )
+
+        # Also verify shared_traces and unit_traces for mif results
+        if (
+            hasattr(merged_result, "shared_traces")
+            and merged_result.shared_traces.size > 0
+        ):
+            merged_n_reps = merged_result.shared_traces.sizes["replicate"]
+            result1_n_reps = result1.shared_traces.sizes["replicate"]
+            result2_n_reps = result2.shared_traces.sizes["replicate"]
+            assert merged_n_reps == result1_n_reps + result2_n_reps

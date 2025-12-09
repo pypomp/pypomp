@@ -1137,6 +1137,55 @@ class Pomp:
 
         return True
 
+    @staticmethod
+    def merge(*pomp_objs: "Pomp") -> "Pomp":
+        """Merge replications from multiple Pomp objects into a single object."""
+        if len(pomp_objs) == 0:
+            raise ValueError("At least one Pomp object must be provided.")
+        first = pomp_objs[0]
+
+        for obj in pomp_objs:
+            if not isinstance(obj, type(first)):
+                raise TypeError("All merged objects must be of type Pomp.")
+            if obj.canonical_param_names != first.canonical_param_names:
+                raise ValueError(
+                    "All Pomp objects must have the same canonical_param_names."
+                )
+            if obj.statenames != first.statenames:
+                raise ValueError("All Pomp objects must have the same statenames.")
+            if not obj.ys.equals(first.ys):
+                raise ValueError("All Pomp objects must have the same ys data.")
+            if obj.t0 != first.t0:
+                raise ValueError("All Pomp objects must have the same t0.")
+            if obj.rinit != first.rinit or obj.rproc != first.rproc:
+                raise ValueError("All Pomp objects must have the same rinit and rproc.")
+            if (obj.dmeas is None) != (first.dmeas is None):
+                raise ValueError(
+                    "All Pomp objects must have the same dmeas (both None or both not None)."
+                )
+            if obj.dmeas is not None and obj.dmeas != first.dmeas:
+                raise ValueError("All Pomp objects must have the same dmeas.")
+            if (obj.rmeas is None) != (first.rmeas is None):
+                raise ValueError(
+                    "All Pomp objects must have the same rmeas (both None or both not None)."
+                )
+            if obj.rmeas is not None and obj.rmeas != first.rmeas:
+                raise ValueError("All Pomp objects must have the same rmeas.")
+            if obj.par_trans != first.par_trans:
+                raise ValueError("All Pomp objects must have the same par_trans.")
+
+        merged_theta = PompParameters.merge(*[obj._theta for obj in pomp_objs])
+        merged_history = ResultsHistory.merge(
+            *[obj.results_history for obj in pomp_objs]
+        )
+
+        merged_pomp = deepcopy(first)
+        merged_pomp._theta = merged_theta
+        merged_pomp.results_history = merged_history
+        merged_pomp.fresh_key = first.fresh_key
+
+        return merged_pomp
+
     def __getstate__(self):
         """
         Custom pickling method to handle wrapped function objects.  This is

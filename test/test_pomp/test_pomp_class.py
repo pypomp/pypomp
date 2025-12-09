@@ -1,7 +1,5 @@
 import jax
 import pickle
-import numpy as np
-import xarray as xr
 import pypomp as pp
 import pytest
 
@@ -283,3 +281,65 @@ def test_print_summary(neapolitan):
     # Should not error
     LG, *_ = neapolitan
     LG.print_summary()
+
+
+def test_merge(simple_setup):
+    """Test merging two Pomp objects."""
+    base_LG, rw_sd, J, a, M, key, theta, fresh_key = simple_setup
+
+    LG1 = pp.LG()
+    LG2 = pp.LG()
+
+    key1, key2 = jax.random.split(key)
+
+    LG1.pfilter(theta=theta, J=J, reps=1, key=key1)
+    LG1.mif(J=J, M=M, rw_sd=rw_sd, a=a)
+    LG1.train(J=J, M=1, eta=0.2)
+
+    LG2.pfilter(theta=theta, J=J, reps=1, key=key2)
+    LG2.mif(J=J, M=M, rw_sd=rw_sd, a=a)
+    LG2.train(J=J, M=1, eta=0.2)
+
+    n_reps1 = len(LG1.theta)
+    n_reps2 = len(LG2.theta)
+    n_history1 = len(LG1.results_history)
+    n_history2 = len(LG2.results_history)
+
+    merged = pp.Pomp.merge(LG1, LG2)
+
+    assert merged.canonical_param_names == LG1.canonical_param_names
+    assert len(merged.theta) == n_reps1 + n_reps2
+    assert len(merged.results_history) == n_history1 == n_history2
+
+    for i in range(len(merged.results_history)):
+        merged_result = merged.results_history[i]
+        result1 = LG1.results_history[i]
+        result2 = LG2.results_history[i]
+
+        # Verify algorithmic parameters match
+        assert merged_result.J == result1.J == result2.J == J
+        assert merged_result.thresh == result1.thresh == result2.thresh
+
+        if merged_result.method == "pfilter":
+            assert merged_result.reps == result1.reps == result2.reps
+        elif merged_result.method == "mif":
+            assert merged_result.M == result1.M == result2.M == M
+            assert merged_result.a == result1.a == result2.a == a
+            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
+        elif merged_result.method == "train":
+            assert merged_result.M == result1.M == result2.M == 1
+            assert merged_result.eta == result1.eta == result2.eta == 0.2
+            assert merged_result.optimizer == result1.optimizer == result2.optimizer
+
+        if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
+            # Pfilter result: logLiks dims ["theta", "replicate"]
+            merged_n_theta = merged_result.logLiks.sizes.get("theta", 0)
+            result1_n_theta = result1.logLiks.sizes.get("theta", 0)
+            result2_n_theta = result2.logLiks.sizes.get("theta", 0)
+            assert merged_n_theta == result1_n_theta + result2_n_theta
+
+        if hasattr(merged_result, "traces_da") and merged_result.traces_da.size > 0:
+            merged_n_reps = merged_result.traces_da.sizes.get("replicate", 0)
+            result1_n_reps = result1.traces_da.sizes.get("replicate", 0)
+            result2_n_reps = result2.traces_da.sizes.get("replicate", 0)
+            assert merged_n_reps == result1_n_reps + result2_n_reps

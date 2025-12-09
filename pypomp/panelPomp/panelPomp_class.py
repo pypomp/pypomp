@@ -10,6 +10,7 @@ from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
 from pypomp.panelPomp.analysis_mixin import PanelAnalysisMixin
 from pypomp.results import ResultsHistory
 from pypomp.parameters import PanelParameters
+from copy import deepcopy
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
@@ -132,6 +133,46 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
                 return False
 
         return True
+
+    @staticmethod
+    def merge(*panel_pomp_objs: "PanelPomp") -> "PanelPomp":
+        """
+        Merge replications from multiple PanelPomp objects into a single object.
+        All panel objects must have the same units and canonical parameter names.
+        """
+        if len(panel_pomp_objs) == 0:
+            raise ValueError("At least one PanelPomp object must be provided.")
+        first = panel_pomp_objs[0]
+
+        for obj in panel_pomp_objs:
+            if not isinstance(obj, type(first)):
+                raise TypeError("All merged objects must be of type PanelPomp.")
+            if obj.canonical_param_names != first.canonical_param_names:
+                raise ValueError(
+                    "All PanelPomp objects must have the same canonical_param_names."
+                )
+            if obj.canonical_shared_param_names != first.canonical_shared_param_names:
+                raise ValueError(
+                    "All PanelPomp objects must have the same canonical_shared_param_names."
+                )
+            if obj.canonical_unit_param_names != first.canonical_unit_param_names:
+                raise ValueError(
+                    "All PanelPomp objects must have the same canonical_unit_param_names."
+                )
+            if list(obj.unit_objects.keys()) != list(first.unit_objects.keys()):
+                raise ValueError("All PanelPomp objects must have the same unit names.")
+
+        merged_theta = PanelParameters.merge(*[obj.theta for obj in panel_pomp_objs])
+        merged_history = ResultsHistory.merge(
+            *[obj.results_history for obj in panel_pomp_objs]
+        )
+
+        merged_panel_pomp = deepcopy(first)
+        merged_panel_pomp.theta = merged_theta
+        merged_panel_pomp.results_history = merged_history
+        merged_panel_pomp.fresh_key = first.fresh_key
+
+        return merged_panel_pomp
 
     def __getstate__(self):
         """

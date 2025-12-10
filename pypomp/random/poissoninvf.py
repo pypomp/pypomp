@@ -334,4 +334,3 @@ def rpoisson(key: Array, lam: Array) -> Array:
     max_val = lam + 10.0 * jnp.sqrt(jnp.maximum(lam, 1.0))
     x = jnp.minimum(x, max_val)
     return x.astype(lam.dtype)
-    return x.astype(lam.dtype)

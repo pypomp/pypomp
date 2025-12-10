@@ -33,8 +33,8 @@ def test_rgamma():
     assert x.min() >= 0
 
 
-def rpoisson_moments():
-    """Check that the first 3 moments of rpoisson match theoretical Poisson moments."""
+def rpoisson_moments(n_moments=2):
+    """Check that the first n_moments moments of rpoisson match theoretical Poisson moments."""
     key = jax.random.key(42)
     lam_vals = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
     n_samples = 100000
@@ -56,23 +56,25 @@ def rpoisson_moments():
         std_emp = np.std(samples)
         skew_emp = m3 / (std_emp**3) if std_emp > 0 else 0.0
 
-        if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.02):
-            warnings.warn(
-                f"Poisson mean fail for lam={lam}. Empirical: {mean_emp}, Theoretical: {mean_th}"
-            )
-        if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
-            warnings.warn(
-                f"Poisson var fail for lam={lam}. Empirical: {var_emp}, Theoretical: {var_th}"
-            )
-        if lam > 0.5:
+        if n_moments >= 1:
+            if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.02):
+                warnings.warn(
+                    f"Poisson mean fail for lam={lam}. Empirical: {mean_emp}, Theoretical: {mean_th}"
+                )
+        if n_moments >= 2:
+            if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
+                warnings.warn(
+                    f"Poisson var fail for lam={lam}. Empirical: {var_emp}, Theoretical: {var_th}"
+                )
+        if n_moments >= 3 and lam > 0.5:
             if not np.allclose(skew_emp, skew_th, rtol=0.10, atol=0.04):
                 warnings.warn(
                     f"Poisson skew fail for lam={lam}. Empirical: {skew_emp}, Theoretical: {skew_th}"
                 )
 
 
-def rbinom_moments():
-    """Check that the first 3 moments of rbinom match theoretical Binomial moments."""
+def rbinom_moments(n_moments=2):
+    """Check that the first n_moments moments of rbinom match theoretical Binomial moments."""
     key = jax.random.key(123)
     n = [3, 20, 100, 2000]
     p = [0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99]
@@ -98,23 +100,25 @@ def rbinom_moments():
         std_emp = np.std(samples)
         skew_emp = m3 / (std_emp**3) if std_emp > 0 else 0.0
 
-        if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.02):
-            warnings.warn(
-                f"Binom mean fail for n={n},p={p}. Empirical: {mean_emp}, Theoretical: {mean_th}"
-            )
-        if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
-            warnings.warn(
-                f"Binom var fail for n={n},p={p}. Empirical: {var_emp}, Theoretical: {var_th}"
-            )
-        if var_th > 2:
+        if n_moments >= 1:
+            if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.02):
+                warnings.warn(
+                    f"Binom mean fail for n={n},p={p}. Empirical: {mean_emp}, Theoretical: {mean_th}"
+                )
+        if n_moments >= 2:
+            if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
+                warnings.warn(
+                    f"Binom var fail for n={n},p={p}. Empirical: {var_emp}, Theoretical: {var_th}"
+                )
+        if n_moments >= 3 and var_th > 2:
             if not np.allclose(skew_emp, skew_th, rtol=0.15, atol=0.06):
                 warnings.warn(
                     f"Binom skew fail for n={n},p={p}. Empirical: {skew_emp}, Theoretical: {skew_th}"
                 )
 
 
-def rgamma_moments():
-    """Check that the first 3 moments of rgamma match theoretical Gamma moments (scale=1)."""
+def test_rgamma_moments(n_moments=3):
+    """Check that the first n_moments moments of rgamma match theoretical Gamma moments (scale=1)."""
     key = jax.random.key(456)
     alpha_vals = [0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
     n_samples = 100000
@@ -138,15 +142,17 @@ def rgamma_moments():
         std_emp = np.std(samples)
         skew_emp = m3 / (std_emp**3) if std_emp > 0 else 0.0
 
-        if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.03):
-            warnings.warn(
-                f"Gamma mean fail for alpha={alpha}. Empirical: {mean_emp}, Theoretical: {mean_th}"
-            )
-        if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
-            warnings.warn(
-                f"Gamma var fail for alpha={alpha}. Empirical: {var_emp}, Theoretical: {var_th}"
-            )
-        if alpha > 0.5:
+        if n_moments >= 1:
+            if not np.allclose(mean_emp, mean_th, rtol=0.02, atol=0.03):
+                warnings.warn(
+                    f"Gamma mean fail for alpha={alpha}. Empirical: {mean_emp}, Theoretical: {mean_th}"
+                )
+        if n_moments >= 2:
+            if not np.allclose(var_emp, var_th, rtol=0.03, atol=0.03):
+                warnings.warn(
+                    f"Gamma var fail for alpha={alpha}. Empirical: {var_emp}, Theoretical: {var_th}"
+                )
+        if n_moments >= 3 and alpha > 0.5:
             if not np.allclose(skew_emp, skew_th, rtol=0.10, atol=0.06):
                 warnings.warn(
                     f"Gamma skew fail for alpha={alpha}. Empirical: {skew_emp}, Theoretical: {skew_th}"

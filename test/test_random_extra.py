@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 import time
 import matplotlib.pyplot as plt
-import pypomp as pp
 import pypomp.random as ppr
 import warnings
 from scipy import stats
@@ -16,7 +15,7 @@ from scipy import stats
 def poissoninvf_performance():
     # Prepare parameters
     n = 1_000_000
-    key = jax.random.PRNGKey(42)
+    key = jax.random.key(42)
     lam = jnp.array([0.01, 0.2, 1.0, 8.0, 10.0, 12.0, 50.0, 100.0], dtype=jnp.float32)
     lam_samples = jnp.repeat(lam, n // len(lam))
     reps = 20
@@ -59,7 +58,7 @@ def poissoninvf_performance():
 def binominvf_performance():
     # Prepare parameters
     n = 1_000_000
-    key = jax.random.PRNGKey(43)
+    key = jax.random.key(43)
     trials = jnp.array([1, 5, 20, 50, 100, 200], dtype=jnp.float32)
     p = jnp.array([0.01, 0.2, 0.5, 0.7, 0.9, 0.99], dtype=jnp.float32)
     trial_grid, p_grid = jnp.meshgrid(trials, p, indexing="ij")
@@ -109,7 +108,7 @@ def binominvf_performance():
 def gammainvf_performance():
     # Prepare parameters
     n = 1_000_000
-    key = jax.random.PRNGKey(44)
+    key = jax.random.key(44)
     alpha = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
     alpha_samples = jnp.repeat(alpha, n // len(alpha))
     reps = 20
@@ -162,8 +161,7 @@ def compare_rpoisson_and_jax_poisson(
     Compare distributions of pypomp.rpoisson (inverse CDF, continuous-valued Poisson)
     and jax.random.poisson (discrete Poisson), for various rates, using histograms and qq-plots.
     """
-    key = jax.random.PRNGKey(seed)
-    lam = jnp.array(lam_vals)
+    key = jax.random.key(seed)
     n_samples = 100000
 
     fig, axes = plt.subplots(2, len(lam_vals), figsize=(5 * len(lam_vals), 8))
@@ -253,9 +251,7 @@ def compare_rbinom_and_jax_binom(
     This test compares the outputs of a custom binomial sampler and JAX's built-in binomial sampler,
     over the cross product of n_trials_list and prob_vals.
     """
-    key = jax.random.PRNGKey(seed)
-    probs = jnp.array(prob_vals, dtype=jnp.float32)
-    n_trials_arr = jnp.array(n_trials_list, dtype=jnp.int32)
+    key = jax.random.key(seed)
     n_samples = 100000
 
     n_rows = len(n_trials_list)
@@ -373,7 +369,7 @@ def compare_rgamma_and_jax_gamma(
 
     This test compares the outputs of a custom gamma sampler and JAX's built-in gamma sampler.
     """
-    key = jax.random.PRNGKey(seed)
+    key = jax.random.key(seed)
     n_samples = 100000
 
     fig, axes = plt.subplots(2, len(alpha_vals), figsize=(5 * len(alpha_vals), 8))

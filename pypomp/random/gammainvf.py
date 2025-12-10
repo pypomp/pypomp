@@ -241,7 +241,13 @@ def _solve_lambda_from_eta(eta):
         step = val / safe_grad
         # Mask the step if we are at the singularity to avoid instability
         step = jnp.where(jnp.abs(grad) < 1e-6, 0.0, step)
-        return lam_curr - step
+        lam_new = lam_curr - step
+        # Ensure lambda stays positive to avoid NaN in log
+        # Use a small positive epsilon to prevent numerical issues
+        # This should be relevant only very rarely
+        # TODO: implement a better solution
+        lam_new = jnp.maximum(lam_new, jnp.float32(1e-10))
+        return lam_new
 
     # 3 iterations is usually sufficient for double precision with this good initial guess
     lam = safe_guess

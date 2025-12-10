@@ -331,7 +331,7 @@ def rpoisson(key: Array, lam: Array) -> Array:
     u = jnp.minimum(u, u_max)
     x = poissinvf(u, lam)
     # Cap the output to a reasonable maximum to prevent overflow
-    max_val = lam + 20.0 * jnp.sqrt(jnp.maximum(lam, 1.0))
+    max_val = lam + 10.0 * jnp.sqrt(jnp.maximum(lam, 1.0))
     x = jnp.minimum(x, max_val)
     return x.astype(lam.dtype)
     return x.astype(lam.dtype)

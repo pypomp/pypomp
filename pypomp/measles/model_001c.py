@@ -20,8 +20,8 @@ Parameters:
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.random.poissoninvf import rpoisson
-from pypomp.random.binominvf import rbinom
+from pypomp.random.poissoninvf import fast_approx_rpoisson
+from pypomp.random.binominvf import fast_approx_rbinom
 from pypomp.random.gammainvf import rgamma
 
 
@@ -105,7 +105,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = rpoisson(keys[1], br * dt)
+    births = fast_approx_rpoisson(keys[1], br * dt)
 
     # transitions between classes
     # rt_final = jnp.zeros((3, 2))
@@ -117,7 +117,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # rt_final = rt_final.at[:, 0].set(1 - p0_values).at[:, 1].set(p0_values)
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = rbinom(keys[2], populations, p0_values)
+    transitions = fast_approx_rbinom(keys[2], populations, p0_values)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

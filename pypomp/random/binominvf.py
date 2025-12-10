@@ -427,7 +427,7 @@ def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
 
 
 @partial(jax.jit, static_argnames=["order"])
-def rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
+def fast_approx_rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
     """
     Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
 
@@ -452,9 +452,9 @@ def rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
     return x.astype(n.dtype)
 
 
-def rmultinomial(key: Array, n: Array, p: Array) -> Array:
+def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
     """
-    Generate multinomial random variables using the inverse CDF method with rbinom.
+    Generate multinomial random variables using the inverse CDF method with fast_approx_rbinom.
 
     Args:
         key: PRNG key used as the random key.
@@ -494,7 +494,7 @@ def rmultinomial(key: Array, n: Array, p: Array) -> Array:
         for j in range(num_cat - 1):
             p_cur = p_i[j] / p_remain
             p_cur = jnp.clip(p_cur, 0.0, 1.0)  # ensure numerically safe
-            x = rbinom(keys[j], jnp.array(n_remaining), jnp.array(p_cur))
+            x = fast_approx_rbinom(keys[j], jnp.array(n_remaining), jnp.array(p_cur))
             out.append(x)
             n_remaining = n_remaining - x
             p_remain = p_remain - p_i[j]

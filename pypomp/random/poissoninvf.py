@@ -307,7 +307,7 @@ def poissinvf(u: Array, lam: Array) -> Array:
 
 
 @jax.jit
-def rpoisson(key: Array, lam: Array) -> Array:
+def fast_approx_rpoisson(key: Array, lam: Array) -> Array:
     """
     Generate a Poisson random variable with given rate parameter.
 

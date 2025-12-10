@@ -8,7 +8,7 @@ import warnings
 def test_rpoisson():
     key = jax.random.key(0)
     lam = jnp.array([1.0, 2.0, 3.0])
-    x = ppr.rpoisson(key, lam)
+    x = ppr.fast_approx_rpoisson(key, lam)
     assert x.shape == (3,)
     assert x.dtype == jnp.float32
     assert x.min() >= 0
@@ -18,7 +18,7 @@ def test_rbinom():
     key = jax.random.key(0)
     n = jnp.array([1, 2, 3])
     p = jnp.array([0.5, 0.6, 0.7])
-    x = ppr.rbinom(key, n, p)
+    x = ppr.fast_approx_rbinom(key, n, p)
     assert x.shape == (3,)
     assert x.min() >= 0
     assert all(x <= n)
@@ -34,14 +34,14 @@ def test_rgamma():
 
 
 def rpoisson_moments(n_moments=2):
-    """Check that the first n_moments moments of rpoisson match theoretical Poisson moments."""
+    """Check that the first n_moments moments of fast_approx_rpoisson match theoretical Poisson moments."""
     key = jax.random.key(42)
     lam_vals = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
     n_samples = 100000
 
     for lam in lam_vals:
         lam_arr = jnp.full((n_samples,), lam, dtype=jnp.float32)
-        samples = np.array(ppr.rpoisson(key, lam_arr))
+        samples = np.array(ppr.fast_approx_rpoisson(key, lam_arr))
 
         # Theoretical moments for Poisson
         mean_th = lam
@@ -74,7 +74,7 @@ def rpoisson_moments(n_moments=2):
 
 
 def rbinom_moments(n_moments=2):
-    """Check that the first n_moments moments of rbinom match theoretical Binomial moments."""
+    """Check that the first n_moments moments of fast_approx_rbinom match theoretical Binomial moments."""
     key = jax.random.key(123)
     n = [3, 20, 100, 2000]
     p = [0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99]
@@ -84,7 +84,7 @@ def rbinom_moments(n_moments=2):
     for n, p in test_params:
         n_arr = jnp.full((n_samples,), n, dtype=jnp.float32)
         p_arr = jnp.full((n_samples,), p, dtype=jnp.float32)
-        samples = np.array(ppr.rbinom(key, n_arr, p_arr))
+        samples = np.array(ppr.fast_approx_rbinom(key, n_arr, p_arr))
 
         mean_th = n * p
         var_th = n * p * (1 - p)

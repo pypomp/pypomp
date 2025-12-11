@@ -463,7 +463,10 @@ def fast_approx_rbinom(
     return x.astype(dtype)
 
 
-def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
+@partial(jax.jit, static_argnames=["dtype"])
+def fast_approx_rmultinom(
+    key: Array, n: Array, p: Array, dtype: jnp.dtype = jnp.float32
+) -> Array:
     """
     Generate multinomial random variables using the inverse CDF method with fast_approx_rbinom.
 
@@ -472,7 +475,7 @@ def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
         n: Number of trials for the multinomial distribution. Shape: (...,)
         p: Probabilities for each category. Shape: (..., k), where k = num categories.
            Probabilities along the last axis must sum to 1.
-
+        dtype: Data type of the output. Default is jnp.float32. If integer, returns -1 for invalid inputs instead of nan.
     Returns:
         Multinomial counts. Same shape as p, but dtype = n.dtype.
     """
@@ -495,6 +498,12 @@ def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
     # Broadcast n to match batch shape if needed
     n_broadcast = jnp.broadcast_to(n, shape_batch)
 
+    # Normalize p so the last axis sums to 1
+    p_sum = jnp.sum(p, axis=-1, keepdims=True)
+    # Avoid division by zero: if p_sum == 0, set to 1 to avoid nans
+    p_safe_sum = jnp.where(p_sum == 0, 1.0, p_sum)
+    p = p / p_safe_sum
+
     def single_multinomial(key, n_i, p_i):
         """Sample a single multinomial row via sequential binomials."""
         # p_i: (k,)
@@ -505,7 +514,9 @@ def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
         for j in range(num_cat - 1):
             p_cur = p_i[j] / p_remain
             p_cur = jnp.clip(p_cur, 0.0, 1.0)  # ensure numerically safe
-            x = fast_approx_rbinom(keys[j], jnp.array(n_remaining), jnp.array(p_cur))
+            x = fast_approx_rbinom(
+                keys[j], jnp.array(n_remaining), jnp.array(p_cur), dtype=dtype
+            )
             out.append(x)
             n_remaining = n_remaining - x
             p_remain = p_remain - p_i[j]
@@ -521,4 +532,5 @@ def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:
     n_flat = n_broadcast.reshape((batch_size,))
     p_flat = p.reshape((batch_size, num_cat))
     samples = sample_fn(keys, n_flat, p_flat)
-    return samples.reshape(shape_batch + (num_cat,)).astype(n.dtype)
+
+    return samples.reshape(shape_batch + (num_cat,)).astype(dtype)

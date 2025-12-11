@@ -78,7 +78,7 @@ def test_rmultinom():
     assert jnp.all(x2 >= 0)
 
 
-def rmultinom_edges_and_invalid():
+def test_rmultinom_edges_and_invalid():
     key = jax.random.key(0)
 
     # Edge case 1: n=0, valid probability vector
@@ -102,29 +102,29 @@ def rmultinom_edges_and_invalid():
     assert x[1] == 5
     assert jnp.all(x[np.array([0, 2])] == 0)
 
-    # Edge case 4: n = negative, should raise or return nan/throw
+    # Edge case 4: n = negative, should return nan or -1
     n_neg = jnp.array(-3, dtype=jnp.int32)
-    try:
-        x = ppr.fast_approx_rmultinom(key, n_neg, p)
-        # Should be nan or raise if input is invalid
-        assert jnp.any(jnp.isnan(x)) or jnp.all(x == 0)
-    except Exception:
-        pass  # Accept exception as valid for invalid input
 
-    # Edge case 5: Probability vector does not sum to 1
-    n = jnp.array(5, dtype=jnp.int32)
+    x = ppr.fast_approx_rmultinom(key, n_neg, p, dtype=jnp.float32)
+    assert jnp.all(jnp.isnan(x))
+    x = ppr.fast_approx_rmultinom(key, n_neg, p, dtype=jnp.int32)
+    assert jnp.all(x == -1)
+
+    # Edge case 5: Probability vector does not sum to 1; should normalize to sum to 1
+    n = jnp.array(50, dtype=jnp.int32)
     p_bad = jnp.array([0.2, 0.3, 0.7], dtype=jnp.float32)  # sums to 1.2
-    try:
-        x = ppr.fast_approx_rmultinom(key, n, p_bad)
-    except Exception:
-        pass  # Accept failure as valid
+    p_good = jnp.array([0.2 / 1.2, 0.3 / 1.2, 0.7 / 1.2], dtype=jnp.float32)
 
-    # Edge case 6: Probability vector contains negative values
-    p_neg = jnp.array([0.5, -0.2, 0.7], dtype=jnp.float32)
-    try:
-        x = ppr.fast_approx_rmultinom(key, n, p_neg)
-    except Exception:
-        pass  # Accept failure as valid
+    x_bad = ppr.fast_approx_rmultinom(key, n, p_bad)
+    x_good = ppr.fast_approx_rmultinom(key, n, p_good)
+    assert jnp.allclose(x_bad, x_good)
+
+    # Edge case 6: Probability vector contains negative values; should normalize to sum to 1
+    # p_bad = jnp.array([0.5, -0.2, 0.7], dtype=jnp.float32)
+    # p_good = jnp.array([0.3, 0.0, 0.7], dtype=jnp.float32)
+    # x_bad = ppr.fast_approx_rmultinom(key, n, p_bad)
+    # x_good = ppr.fast_approx_rmultinom(key, n, p_good)
+    # assert jnp.allclose(x_bad, x_good)
 
     # Edge case 7: Only one category (should get all in that category)
     n = jnp.array(4, dtype=jnp.int32)

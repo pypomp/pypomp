@@ -429,8 +429,10 @@ def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     return flat_res.reshape(u_arr.shape)
 
 
-@partial(jax.jit, static_argnames=["order"])
-def fast_approx_rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
+@partial(jax.jit, static_argnames=["order", "dtype"])
+def fast_approx_rbinom(
+    key: Array, n: Array, p: Array, order: int = 2, dtype: jnp.dtype = jnp.float32
+) -> Array:
     """
     Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
 
@@ -441,6 +443,7 @@ def fast_approx_rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
         n: Number of trials for the binomial distribution.
         p: Success probability for the binomial distribution.
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
+        dtype: Data type of the output. Default is jnp.float32. If integer, returns -1 for invalid inputs instead of nan.
 
     Returns:
         Binomial random variables with the same shape as n and p.
@@ -450,21 +453,14 @@ def fast_approx_rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
         * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
     shape = jnp.broadcast_shapes(n.shape, p.shape)
-    n = jnp.asarray(n)
-    p = jnp.asarray(p)
-
-    if not jnp.issubdtype(n.dtype, jnp.integer) and not jnp.issubdtype(
-        n.dtype, jnp.floating
-    ):
-        raise ValueError("n must be integer or float type")
 
     u = jax.random.uniform(key, shape)
     x = binominvf(u, n, p, order=order)
-    # Preserve nan when converting types - convert to float32 if any nan present
-    has_nan = jnp.any(jnp.isnan(x))
-    # If result contains nan, keep as float32 to preserve it, otherwise convert to n.dtype
-    # TODO improve type handling in random functions
-    return jnp.where(has_nan, x.astype(jnp.float32), x.astype(n.dtype))
+
+    if jnp.issubdtype(dtype, jnp.integer):
+        x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)
+
+    return x.astype(dtype)
 
 
 def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:

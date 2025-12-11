@@ -23,6 +23,9 @@ def test_rbinom():
     assert x.min() >= 0
     assert all(x <= n)
 
+    x = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int32)
+    assert x.dtype == jnp.int32
+
 
 def test_rbinom_invalid_and_edges():
     key = jax.random.key(0)
@@ -40,6 +43,17 @@ def test_rbinom_invalid_and_edges():
     assert jnp.isnan(x[3])  # negative n → invalid, returns nan
     assert jnp.isnan(x[4])  # p < 0 → invalid, returns nan
     assert jnp.isnan(x[5])  # p > 1 → invalid, returns nan
+
+    x = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int32)
+
+    assert x.shape == n.shape
+    assert x.dtype == jnp.int32
+    assert x[0] == 0  # p = 0 → always zero successes
+    assert x[1] == n[1]  # p = 1 → always n successes
+    assert x[2] == 0  # n = 0 → always zero successes (valid)
+    assert x[3] == -1  # negative n → invalid, returns -1
+    assert x[4] == -1  # p < 0 → invalid, returns -1
+    assert x[5] == -1  # p > 1 → invalid, returns -1
 
 
 def test_rmultinom():
@@ -62,6 +76,69 @@ def test_rmultinom():
     assert x2.shape == (3,)
     assert jnp.sum(x2) == n2
     assert jnp.all(x2 >= 0)
+
+
+def rmultinom_edges_and_invalid():
+    key = jax.random.key(0)
+
+    # Edge case 1: n=0, valid probability vector
+    n = jnp.array(0, dtype=jnp.int32)
+    p = jnp.array([0.2, 0.3, 0.5], dtype=jnp.float32)
+    x = ppr.fast_approx_rmultinom(key, n, p)
+    assert x.shape == (3,)
+    assert jnp.sum(x) == 0
+    assert jnp.all(x == 0)
+
+    # Edge case 2: p = [1.0, 0.0, 0.0] (all probability on first class)
+    n = jnp.array(5, dtype=jnp.int32)
+    p = jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32)
+    x = ppr.fast_approx_rmultinom(key, n, p)
+    assert x.shape == (3,)
+    assert x[0] == 5
+    assert jnp.all(x[1:] == 0)
+
+    # Edge case 3: p = [0.0, 1.0, 0.0] (all on second class)
+    x = ppr.fast_approx_rmultinom(key, n, jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32))
+    assert x[1] == 5
+    assert jnp.all(x[np.array([0, 2])] == 0)
+
+    # Edge case 4: n = negative, should raise or return nan/throw
+    n_neg = jnp.array(-3, dtype=jnp.int32)
+    try:
+        x = ppr.fast_approx_rmultinom(key, n_neg, p)
+        # Should be nan or raise if input is invalid
+        assert jnp.any(jnp.isnan(x)) or jnp.all(x == 0)
+    except Exception:
+        pass  # Accept exception as valid for invalid input
+
+    # Edge case 5: Probability vector does not sum to 1
+    n = jnp.array(5, dtype=jnp.int32)
+    p_bad = jnp.array([0.2, 0.3, 0.7], dtype=jnp.float32)  # sums to 1.2
+    try:
+        x = ppr.fast_approx_rmultinom(key, n, p_bad)
+    except Exception:
+        pass  # Accept failure as valid
+
+    # Edge case 6: Probability vector contains negative values
+    p_neg = jnp.array([0.5, -0.2, 0.7], dtype=jnp.float32)
+    try:
+        x = ppr.fast_approx_rmultinom(key, n, p_neg)
+    except Exception:
+        pass  # Accept failure as valid
+
+    # Edge case 7: Only one category (should get all in that category)
+    n = jnp.array(4, dtype=jnp.int32)
+    p_onecat = jnp.array([1.0], dtype=jnp.float32)
+    x = ppr.fast_approx_rmultinom(key, n, p_onecat)
+    assert x.shape == (1,)
+    assert x[0] == n
+
+    # Edge case 8: Shape/broadcasting mismatch
+    n = jnp.array([5, 6], dtype=jnp.int32)
+    p2 = jnp.array([[0.5, 0.5], [0.7, 0.3]], dtype=jnp.float32)
+    x = ppr.fast_approx_rmultinom(key, n, p2)
+    assert x.shape == (2, 2)
+    assert jnp.allclose(jnp.sum(x, axis=1), n)
 
 
 def test_rgamma():

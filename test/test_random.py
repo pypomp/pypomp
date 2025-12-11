@@ -24,6 +24,46 @@ def test_rbinom():
     assert all(x <= n)
 
 
+def test_rbinom_invalid_and_edges():
+    key = jax.random.key(0)
+    # Includes deterministic edges (p=0, p=1, n=0) and invalid inputs.
+    n = jnp.array([5.0, 5.0, 0.0, -2.0, 5.0, 5.0], dtype=jnp.float32)
+    p = jnp.array([0.0, 1.0, 0.4, 0.4, -0.1, 1.2], dtype=jnp.float32)
+
+    x = ppr.fast_approx_rbinom(key, n, p)
+
+    assert x.shape == n.shape
+    assert x.dtype == n.dtype
+    assert x[0] == 0.0  # p = 0 → always zero successes
+    assert x[1] == n[1]  # p = 1 → always n successes
+    assert x[2] == 0.0  # n = 0 → always zero successes (valid)
+    assert jnp.isnan(x[3])  # negative n → invalid, returns nan
+    assert jnp.isnan(x[4])  # p < 0 → invalid, returns nan
+    assert jnp.isnan(x[5])  # p > 1 → invalid, returns nan
+
+
+def test_rmultinom():
+    key = jax.random.key(0)
+    n = jnp.array([5, 10], dtype=jnp.int32)
+    p = jnp.array([[0.2, 0.3, 0.5], [0.1, 0.4, 0.5]], dtype=jnp.float32)
+    x = ppr.fast_approx_rmultinom(key, n, p)
+    # Shape: should be (2, 3) for 2 draws, 3 categories
+    assert x.shape == (2, 3)
+    # Sum across categories should equal n for each row
+    assert np.allclose(np.sum(np.array(x), axis=1), np.array(n))
+    # Each value should be non-negative and no more than n for that row
+    for xi, ni in zip(x, n):
+        assert np.all(xi >= 0)
+        assert np.all(xi <= ni)
+    # Test with a batch of 1 for broadcasting
+    n2 = jnp.array(12, dtype=jnp.int32)
+    p2 = jnp.array([0.5, 0.3, 0.2], dtype=jnp.float32)
+    x2 = ppr.fast_approx_rmultinom(key, n2, p2)
+    assert x2.shape == (3,)
+    assert jnp.sum(x2) == n2
+    assert jnp.all(x2 >= 0)
+
+
 def test_rgamma():
     key = jax.random.key(0)
     alpha = jnp.array([1.0, 2.0, 3.0])
@@ -33,7 +73,7 @@ def test_rgamma():
     assert x.min() >= 0
 
 
-def rpoisson_moments(n_moments=2):
+def rpoisson_moments(n_moments=3):
     """Check that the first n_moments moments of fast_approx_rpoisson match theoretical Poisson moments."""
     key = jax.random.key(42)
     lam_vals = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
@@ -73,7 +113,7 @@ def rpoisson_moments(n_moments=2):
                 )
 
 
-def rbinom_moments(n_moments=2):
+def rbinom_moments(n_moments=3):
     """Check that the first n_moments moments of fast_approx_rbinom match theoretical Binomial moments."""
     key = jax.random.key(123)
     n = [3, 20, 100, 2000]

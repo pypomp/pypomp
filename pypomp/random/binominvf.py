@@ -309,12 +309,13 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Handle edge cases
     nan = jnp.array(jnp.nan, dtype=dtype)
 
-    invalid_n = n <= jnp.float32(0.0)
+    invalid_n = n < jnp.float32(0.0)
     invalid_p = (p < jnp.float32(0.0)) | (p > jnp.float32(1.0))
     invalid_u = (u < jnp.float32(0.0)) | (u > jnp.float32(1.0))
     invalid = invalid_n | invalid_p | invalid_u
 
     # Special cases
+    n_is_zero = n == jnp.float32(0.0)
     u_is_zero = u == jnp.float32(0.0)
     u_is_one = u == jnp.float32(1.0)
     p_is_zero = p == jnp.float32(0.0)
@@ -377,15 +378,17 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Apply symmetry flip if needed
     k_flipped = cast(Array, jnp.where(flip, n_safe - k_approx, k_approx))
 
-    # Handle edge cases
-    k_result = cast(Array, jnp.where(invalid, nan, k_flipped))
+    k_result = k_flipped
+    k_result = cast(Array, jnp.where(n_is_zero, jnp.float32(0.0), k_result))
     k_result = cast(Array, jnp.where(u_is_zero, jnp.float32(0.0), k_result))
     k_result = cast(Array, jnp.where(u_is_one, n_safe, k_result))
     k_result = cast(Array, jnp.where(p_is_zero, jnp.float32(0.0), k_result))
     k_result = cast(Array, jnp.where(p_is_one, n_safe, k_result))
     k_result = cast(Array, jnp.clip(k_result, jnp.float32(0.0), n_safe))
 
-    return k_result.astype(jnp.int32)
+    k_result = cast(Array, jnp.where(invalid, nan, k_result))
+
+    return k_result
 
 
 _binominvf_vmap = jax.vmap(_binominvf_scalar, in_axes=(0, 0, 0, None))
@@ -447,9 +450,21 @@ def fast_approx_rbinom(key: Array, n: Array, p: Array, order: int = 2) -> Array:
         * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
     shape = jnp.broadcast_shapes(n.shape, p.shape)
+    n = jnp.asarray(n)
+    p = jnp.asarray(p)
+
+    if not jnp.issubdtype(n.dtype, jnp.integer) and not jnp.issubdtype(
+        n.dtype, jnp.floating
+    ):
+        raise ValueError("n must be integer or float type")
+
     u = jax.random.uniform(key, shape)
     x = binominvf(u, n, p, order=order)
-    return x.astype(n.dtype)
+    # Preserve nan when converting types - convert to float32 if any nan present
+    has_nan = jnp.any(jnp.isnan(x))
+    # If result contains nan, keep as float32 to preserve it, otherwise convert to n.dtype
+    # TODO improve type handling in random functions
+    return jnp.where(has_nan, x.astype(jnp.float32), x.astype(n.dtype))
 
 
 def fast_approx_rmultinom(key: Array, n: Array, p: Array) -> Array:

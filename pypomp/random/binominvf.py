@@ -235,16 +235,15 @@ def _q_n2(
 
 
 def _binom_bottom_up(
-    u: Array, n: Array, p: Array, approx: Array, max_k: int = 10
+    u: Array, n: Array, p: Array, approx: Array, max_k: int = 20
 ) -> Array:
     """
-    Compute the exact inverse CDF for small k by accumulating the binomial CDF
-    from k = 0 using a stable probability recurrence.
-
-    Optimized: Uses a Python loop (static unroll) instead of lax.fori_loop.
+    Compute the exact inverse CDF for small k by accumulating the binomial CDF.
+    Includes protection against float32 numerical stalling in the tail.
     """
     dtype = jnp.float32
     tiny = jnp.finfo(dtype).tiny
+    epsilon = 1e-7  # Approx machine epsilon for float32
 
     q = jnp.clip(jnp.float32(1.0) - p, tiny, jnp.float32(1.0))
     p_safe = jnp.clip(p, jnp.float32(0.0), jnp.float32(1.0))
@@ -261,8 +260,7 @@ def _binom_bottom_up(
 
     found = cdf >= u
 
-    # If found at k=0, result is 0. Otherwise, initialize with 'approx'
-    # so that if the loop finishes without finding a solution, we fall back to approx.
+    # Initialize result with approx (fallback), but if found at k=0, use 0.
     result = cast(Array, jnp.where(found, jnp.float32(0.0), approx))
 
     for i in range(1, max_k):
@@ -270,14 +268,19 @@ def _binom_bottom_up(
         k_curr = jnp.full_like(result, k_curr_val)
         k_prev = jnp.float32(i - 1)
 
-        # Calculate recurrence: P(k) = P(k-1) * ((n - k + 1) / k) * (p / q)
+        # Recurrence: P(k) = P(k-1) * ((n - k + 1) / k) * (p / q)
         num = jnp.maximum(n - k_prev, jnp.float32(0.0))
         den = k_curr_val
 
         pmf = pmf * (num / den) * ratio_multiplier
         cdf = cdf + pmf
 
-        found_now = cdf >= u
+        # Check for numerical stall:
+        # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further
+        # in float32. We claim any remaining u values belong to this tail bucket.
+        is_stalled = (cdf > 0.95) & (pmf < epsilon)
+
+        found_now = (cdf >= u) | is_stalled
 
         is_new_discovery = jnp.logical_and(~found, found_now)
         result = cast(Array, jnp.where(is_new_discovery, k_curr, result))
@@ -369,10 +372,10 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Compute x from the bottom up if it is less than the cutoff
     cutoff = 5
     u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=cutoff)
+    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=10)
     k_very_small = k_approx < cutoff
-    npq_very_small = npq_ < 0.05
-    use_bottom_up = k_very_small | npq_very_small
+    np_very_small = np_ < 0.5
+    use_bottom_up = k_very_small | np_very_small
     k_approx = cast(Array, jnp.where(use_bottom_up, k_small, k_approx))
 
     # Apply symmetry flip if needed

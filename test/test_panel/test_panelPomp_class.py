@@ -432,28 +432,39 @@ def test_mix_and_match(measles_panel_mp):
     initial_n_reps = results_df["replicate"].nunique()
     assert initial_n_reps > 1, "Need multiple replicates to test mix_and_match"
 
-    original_theta = panel.results_history[-1].theta
+    # Capture original state BEFORE mix_and_match() modifies panel.theta
+    # (panel.theta and results_history[-1].theta are the same object reference)
+    original_theta = panel.theta
     if original_theta is None:
         return
 
-    original_shared = [t.get("shared") for t in original_theta._theta]
-    original_unit_specific = [t.get("unit_specific") for t in original_theta._theta]
+    # Make deep copies of the DataFrames before they get modified
+    original_shared = [
+        t.get("shared").copy(deep=True) if t.get("shared") is not None else None
+        for t in original_theta._theta
+    ]
+    original_unit_specific = [
+        t.get("unit_specific").copy(deep=True)
+        if t.get("unit_specific") is not None
+        else None
+        for t in original_theta._theta
+    ]
     unit_names = list(panel.unit_objects.keys())
 
-    panel.mix_and_match()
-    assert len(panel.theta._theta) == initial_n_reps
-
-    # Compute rankings (same logic as PanelParameters.mix_and_match)
-    shared_ranks = original_theta.logLik.argsort()[::-1].tolist()
+    # Compute rankings from the original log-likelihoods BEFORE mix_and_match() modifies them
+    original_logLik = original_theta.logLik.copy()
+    original_logLik_unit = original_theta.logLik_unit.copy()
+    shared_ranks = original_logLik.argsort()[::-1].tolist()
     unit_name_to_idx = {
         name: idx for idx, name in enumerate(original_theta.get_unit_names())
     }
     unit_ranks = {
-        unit: original_theta.logLik_unit[:, unit_name_to_idx[unit]]
-        .argsort()[::-1]
-        .tolist()
+        unit: original_logLik_unit[:, unit_name_to_idx[unit]].argsort()[::-1].tolist()
         for unit in unit_names
     }
+
+    panel.mix_and_match()
+    assert len(panel.theta._theta) == initial_n_reps
 
     # Helper to verify a replicate has correct mixed parameters
     def verify_replicate(rep_idx, rank_idx):
@@ -468,9 +479,11 @@ def test_mix_and_match(measles_panel_mp):
             new_spec = panel.theta.theta[rep_idx]["unit_specific"]
             if new_spec is not None:
                 for unit in unit_names:
-                    orig_col = original_unit_specific[unit_ranks[unit][rank_idx]].get(
-                        unit
-                    )
+                    orig_df = original_unit_specific[unit_ranks[unit][rank_idx]]
+                    if orig_df is not None and unit in orig_df.columns:
+                        orig_col = orig_df[unit].copy()
+                    else:
+                        orig_col = None
                     new_col = new_spec.get(unit)
                     if orig_col is not None and new_col is not None:
                         pd.testing.assert_series_equal(

@@ -190,7 +190,7 @@ def test_rpoisson_moments(n_moments=3):
                 )
 
 
-def rbinom_moments(n_moments=3):
+def test_rbinom_moments(n_moments=3):
     """Check that the first n_moments moments of fast_approx_rbinom match theoretical Binomial moments."""
     key = jax.random.key(123)
     n = [3, 20, 100, 2000]

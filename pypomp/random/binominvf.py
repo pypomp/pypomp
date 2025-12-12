@@ -372,7 +372,7 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Compute x from the bottom up if it is less than the cutoff
     cutoff = 5
     u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=10)
+    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=5)
     k_very_small = k_approx < cutoff
     np_very_small = np_ < 0.5
     use_bottom_up = k_very_small | np_very_small

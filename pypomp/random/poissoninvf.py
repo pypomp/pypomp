@@ -65,23 +65,17 @@ _X_COEFFS: Tuple[float, ...] = (
 
 _SQRT2 = jnp.sqrt(jnp.float32(2.0))
 
-# Pre-reverse coefficients for polyval (expects highest degree first)
-_RM_COEFFS_REV = jnp.array(_RM_COEFFS[::-1], dtype=jnp.float32)
-_T_COEFFS_REV = jnp.array(_T_COEFFS[::-1], dtype=jnp.float32)
-_X_COEFFS_REV = jnp.array(_X_COEFFS[::-1], dtype=jnp.float32)
-
-
-def _horner(coeffs_arr: Array, x: Array) -> Array:
-    # Use pre-reversed coefficients array
-    return jnp.polyval(coeffs_arr, x)
+_RM_COEFFS_ARR = jnp.array(_RM_COEFFS, dtype=jnp.float32)
+_T_COEFFS_ARR = jnp.array(_T_COEFFS, dtype=jnp.float32)
+_X_COEFFS_ARR = jnp.array(_X_COEFFS, dtype=jnp.float32)
 
 
 def _central_region(s: Array, lam: Array) -> Array:
-    rm = _horner(_RM_COEFFS_REV, s)
+    rm = jnp.polyval(_RM_COEFFS_ARR, s)
     rm = s + s * (rm * s)
 
-    t = _horner(_T_COEFFS_REV, rm)
-    x = _horner(_X_COEFFS_REV, rm) / lam
+    t = jnp.polyval(_T_COEFFS_ARR, rm)
+    x = jnp.polyval(_X_COEFFS_ARR, rm) / lam
 
     total = lam + (x + t) + lam * rm
     return jnp.floor(total)
@@ -244,7 +238,7 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
             operand=0.0,
         )
 
-    large_lambda = lam_safe > 20.0
+    large_lambda = lam_safe > 4.0
     x_large = lax.cond(
         large_lambda,
         large_lambda_case,
@@ -255,7 +249,7 @@ def _poissinvf_scalar(u: Array, lam: Array) -> Array:
     def bottom_up_branch(_):
         return _bottom_up(u, lam_safe)
 
-    bottom_up = x_large < 10.0
+    bottom_up = x_large <= 10.0
     # not_large_bottom_up = jnp.logical_and(jnp.logical_not(large_lambda), bottom_up)
     # x = x_large
     # x = lax.cond(

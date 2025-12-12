@@ -150,7 +150,7 @@ def test_rgamma():
     assert x.min() >= 0
 
 
-def rpoisson_moments(n_moments=3):
+def test_rpoisson_moments(n_moments=3):
     """Check that the first n_moments moments of fast_approx_rpoisson match theoretical Poisson moments."""
     key = jax.random.key(42)
     lam_vals = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]

@@ -267,7 +267,9 @@ def compare_rbinom_and_jax_binom(
             n_arr = jnp.full((n_samples,), n, dtype=jnp.int32)
             # Use a new PRNG split for each
             key_rbinom, key = jax.random.split(key)
-            rbinom_samples = ppr.fast_approx_rbinom(key_rbinom, n_arr, p_arr)
+            rbinom_samples = ppr.fast_approx_rbinom(
+                key_rbinom, n_arr, p_arr, exact_max=5
+            )
             key_jax, key = jax.random.split(key)
             jax_binom_samples = jax.random.binomial(key_jax, n=n_arr, p=p_arr)
             all_samples[(row, col)] = (rbinom_samples, jax_binom_samples, n, p_val)

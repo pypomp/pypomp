@@ -250,7 +250,7 @@ def _binom_bottom_up(
     q_safe = jnp.clip(q, tiny, jnp.float32(1.0))
     ratio_multiplier = p_safe / q_safe
 
-    log_q = jnp.log(q_safe)
+    log_q = jnp.log1p(-p_safe)
     pmf = jnp.where(
         n == jnp.float32(0.0),
         jnp.float32(1.0),
@@ -290,7 +290,9 @@ def _binom_bottom_up(
     return cast(Array, jnp.clip(result, jnp.float32(0.0), n))
 
 
-def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
+def _binominvf_scalar(
+    u: Array, n: Array, p: Array, exact_max: int, order: int = 2
+) -> Array:
     """
     Scalar version of inverse binomial CDF approximation using Giles and Beentjes (2024).
 
@@ -372,7 +374,7 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     # Compute x from the bottom up if it is less than the cutoff
     cutoff = 5
     u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=5)
+    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=exact_max)
     k_very_small = k_approx < cutoff
     np_very_small = np_ < 0.5
     use_bottom_up = k_very_small | np_very_small
@@ -394,11 +396,17 @@ def _binominvf_scalar(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     return k_result
 
 
-_binominvf_vmap = jax.vmap(_binominvf_scalar, in_axes=(0, 0, 0, None))
+_binominvf_vmap = jax.vmap(_binominvf_scalar, in_axes=(0, 0, 0, None, None))
 
 
-@partial(jax.jit, static_argnames=["order"])
-def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
+@partial(jax.jit, static_argnames=["order", "exact_max"])
+def binominvf(
+    u: Array,
+    n: Array,
+    p: Array,
+    exact_max: int,
+    order: int = 2,
+) -> Array:
     """
     Vectorized inverse binomial CDF approximation using Giles and Beentjes (2024).
 
@@ -418,6 +426,7 @@ def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
         u: Probabilities (scalar or array) in the interval [0, 1].
         n: Number of trials (must be positive integer or positive float).
         p: Success probability (must be in [0, 1]).
+        exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
 
     Returns:
@@ -428,13 +437,18 @@ def binominvf(u: Array, n: Array, p: Array, order: int = 2) -> Array:
     flat_u = u_arr.reshape(-1)
     flat_n = n_arr.reshape(-1)
     flat_p = p_arr.reshape(-1)
-    flat_res = _binominvf_vmap(flat_u, flat_n, flat_p, order)
+    flat_res = _binominvf_vmap(flat_u, flat_n, flat_p, exact_max, order)
     return flat_res.reshape(u_arr.shape)
 
 
-@partial(jax.jit, static_argnames=["order", "dtype"])
+@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def fast_approx_rbinom(
-    key: Array, n: Array, p: Array, order: int = 2, dtype: jnp.dtype = jnp.float32
+    key: Array,
+    n: Array,
+    p: Array,
+    order: int = 2,
+    exact_max: int = 5,
+    dtype: jnp.dtype = jnp.float32,
 ) -> Array:
     """
     Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
@@ -446,6 +460,7 @@ def fast_approx_rbinom(
         n: Number of trials for the binomial distribution.
         p: Success probability for the binomial distribution.
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
+        exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
         dtype: Data type of the output. Default is jnp.float32. If integer, returns -1 for invalid inputs instead of nan.
 
     Returns:
@@ -458,7 +473,7 @@ def fast_approx_rbinom(
     shape = jnp.broadcast_shapes(n.shape, p.shape)
 
     u = jax.random.uniform(key, shape)
-    x = binominvf(u, n, p, order=order)
+    x = binominvf(u, n, p, order=order, exact_max=exact_max)
 
     if jnp.issubdtype(dtype, jnp.integer):
         x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)

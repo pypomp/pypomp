@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import pypomp.random as ppr
 import warnings
 from scipy import stats
+from jax.scipy.stats import binom as jax_binom
 
 
 def poissoninvf_performance():
@@ -230,8 +231,10 @@ def compare_rpoisson_and_jax_poisson(
         ax_qq.plot(
             [min_val, max_val], [min_val, max_val], "r--", alpha=0.7, label="y=x"
         )
-        ax_qq.set_xlabel("jax.random.poisson quantiles")
-        ax_qq.set_ylabel("pp.fast_approx_rpoisson quantiles")
+        if i == 1:
+            ax_qq.set_xlabel("jax.random.poisson quantiles")
+        if i == 0:
+            ax_qq.set_ylabel("pp.fast_approx_rpoisson quantiles")
         if i == len(lam_vals) - 1:
             ax_qq.legend()
     plt.tight_layout()
@@ -242,6 +245,7 @@ def compare_rbinom_and_jax_binom(
     seed=42,
     n_trials_list=[3, 20, 100, 2000],
     prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99],
+    jitter_scale=0.01,  # % of the data range
 ):
     """
     Compare distributions of pypomp.fast_approx_rbinom (inverse CDF, Binomial) and
@@ -343,16 +347,38 @@ def compare_rbinom_and_jax_binom(
             # Sort both samples
             sorted_jax = np.sort(np.array(jax_binom_samples))
             sorted_rbinom = np.sort(np.array(rbinom_samples))
-            # Plot quantiles
-            ax_qq.scatter(sorted_jax, sorted_rbinom, alpha=0.5, s=10, color="C0")
+            # Add jitter to reduce overplotting
+            x_range = (
+                float(sorted_jax[-1] - sorted_jax[0]) if len(sorted_jax) > 1 else 1.0
+            )
+            y_range = (
+                float(sorted_rbinom[-1] - sorted_rbinom[0])
+                if len(sorted_rbinom) > 1
+                else 1.0
+            )
+            np.random.seed(42)  # For reproducibility
+            x_jitter = np.random.normal(0, x_range * jitter_scale, size=len(sorted_jax))
+            y_jitter = np.random.normal(
+                0, y_range * jitter_scale, size=len(sorted_rbinom)
+            )
+            # Plot quantiles with jitter
+            ax_qq.scatter(
+                sorted_jax + x_jitter,
+                sorted_rbinom + y_jitter,
+                alpha=0.2,
+                s=10,
+                color="C0",
+            )
             # Add y=x reference line
             min_val = min(float(sorted_jax[0]), float(sorted_rbinom[0]))
             max_val = max(float(sorted_jax[-1]), float(sorted_rbinom[-1]))
             ax_qq.plot(
                 [min_val, max_val], [min_val, max_val], "r--", alpha=0.7, label="y=x"
             )
-            ax_qq.set_xlabel("jax.random.binomial quantiles")
-            ax_qq.set_ylabel("pp.fast_approx_rbinom quantiles")
+            if row == len(n_trials_list) - 1 and col == 1:
+                ax_qq.set_xlabel("jax.random.binomial quantiles")
+            if col == 0:
+                ax_qq.set_ylabel("pp.fast_approx_rbinom quantiles")
             ax_qq.set_title(r"$n$ = {}, $p$ = {:.2f}".format(n, p_val))
             if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
                 ax_qq.legend()

@@ -17,142 +17,7 @@ from functools import partial
 import jax
 from jax import Array, lax
 import jax.numpy as jnp
-from jax.scipy import special as jsp_special
 from jax.scipy.stats import norm
-
-
-def _newton_incomplete_beta(
-    a: Array, b: Array, y: Array, x0: Array, max_iter: int = 10
-) -> Array:
-    """
-    Refine initial guess for inverse incomplete beta using Newton iteration.
-
-    Solves I_x(a, b) = y for x, where I_x is the regularized incomplete beta function.
-    """
-    dtype = x0.dtype
-
-    x = jnp.clip(x0, jnp.float32(0.0), jnp.float32(1.0))
-
-    for _ in range(max_iter):
-        # Compute I_x(a, b) and its derivative
-        # The derivative of I_x(a, b) with respect to x is:
-        # x^(a-1) * (1-x)^(b-1) / B(a, b)
-        ibeta = jsp_special.betainc(a, b, x)
-        # PDF = x^(a-1) * (1-x)^(b-1) / B(a, b)
-        # We can compute this using betainc derivative or directly
-        log_pdf = (
-            (a - 1) * jnp.log(jnp.maximum(x, jnp.finfo(dtype).tiny))
-            + (b - 1) * jnp.log(jnp.maximum(1 - x, jnp.finfo(dtype).tiny))
-            - jsp_special.betaln(a, b)
-        )
-        pdf = jnp.exp(log_pdf)
-
-        # Newton step: x_new = x - (I_x(a,b) - y) / pdf
-        f = ibeta - y
-        x = x - f / jnp.maximum(pdf, jnp.finfo(dtype).tiny)
-
-        # Clamp to valid range [0, 1]
-        x = jnp.clip(x, jnp.float32(0.0), jnp.float32(1.0))
-
-    return x
-
-
-def _initial_guess_betaincinv(a: Array, b: Array, y: Array) -> Array:
-    """
-    Provide initial guess for inverse incomplete beta function.
-
-    Uses approximation based on mean and mode of beta distribution.
-    """
-    dtype = a.dtype
-    # Mean of beta distribution
-    mean = a / (a + b)
-
-    # Mode (when a > 1 and b > 1)
-    mode = (a - jnp.float32(1.0)) / (a + b - jnp.float32(2.0))
-    mode = jnp.where((a > jnp.float32(1.0)) & (b > jnp.float32(1.0)), mode, mean)
-
-    # Use interpolation between 0, mean/mode, and 1 based on y
-    x0 = jnp.where(
-        y < jnp.float32(0.5),
-        y * jnp.float32(2.0) * mode,
-        jnp.float32(1.0)
-        - (jnp.float32(1.0) - y) * jnp.float32(2.0) * (jnp.float32(1.0) - mode),
-    )
-
-    # Clamp to valid range
-    x0 = jnp.clip(x0, jnp.finfo(dtype).tiny, jnp.float32(1.0) - jnp.finfo(dtype).tiny)
-    return x0
-
-
-def _betaincinv_scalar(a: Array, b: Array, y: Array) -> Array:
-    """
-    Compute inverse of regularized incomplete beta function I_x(a, b) = y.
-
-    This is the core function that approximates the inverse incomplete beta.
-    """
-    dtype = jnp.float32
-    a_arr = jnp.asarray(a, dtype=dtype)
-    b_arr = jnp.asarray(b, dtype=dtype)
-    y_arr = jnp.asarray(y, dtype=dtype)
-
-    # Handle edge cases
-    nan = jnp.array(jnp.nan, dtype=dtype)
-
-    # Invalid inputs
-    invalid_a = a_arr <= jnp.float32(0.0)
-    invalid_b = b_arr <= jnp.float32(0.0)
-    invalid_y = (y_arr < jnp.float32(0.0)) | (y_arr > jnp.float32(1.0))
-    invalid = invalid_a | invalid_b | invalid_y
-
-    # Edge cases for y
-    y_is_zero = y_arr == jnp.float32(0.0)
-    y_is_one = y_arr == jnp.float32(1.0)
-
-    # Use safe values for computation
-    a_safe = cast(Array, jnp.where(invalid_a, jnp.float32(1.0), a_arr))
-    b_safe = cast(Array, jnp.where(invalid_b, jnp.float32(1.0), b_arr))
-    y_safe = cast(Array, jnp.clip(y_arr, jnp.float32(0.0), jnp.float32(1.0)))
-
-    # Initial approximation
-    x0 = _initial_guess_betaincinv(a_safe, b_safe, y_safe)
-
-    # Refine using Newton iteration
-    x = _newton_incomplete_beta(a_safe, b_safe, y_safe, x0)
-
-    # Handle edge cases
-    x = cast(Array, jnp.where(invalid, nan, x))
-    x = cast(Array, jnp.where(y_is_zero, jnp.float32(0.0), x))
-    x = cast(Array, jnp.where(y_is_one, jnp.float32(1.0), x))
-
-    return x
-
-
-_betaincinv_vmap = jax.vmap(_betaincinv_scalar, in_axes=(0, 0, 0))
-
-
-@jax.jit
-def betaincinv_approx(a: Array, b: Array, y: Array) -> Array:
-    """
-    Vectorized inverse incomplete beta function approximation.
-
-    Computes x such that I_x(a, b) = y, where I_x is the regularized
-    incomplete beta function.
-
-    Args:
-        a: First shape parameter (must be positive).
-        b: Second shape parameter (must be positive).
-        y: Target value of the incomplete beta function (in [0, 1]).
-
-    Returns:
-        Array with the same broadcast shape as inputs, containing values
-        in [0, 1] such that I_x(a, b) = y.
-    """
-    a_arr, b_arr, y_arr = jnp.broadcast_arrays(a, b, y)
-    flat_a = a_arr.reshape(-1)
-    flat_b = b_arr.reshape(-1)
-    flat_y = y_arr.reshape(-1)
-    flat_res = _betaincinv_vmap(flat_a, flat_b, flat_y)
-    return flat_res.reshape(a_arr.shape)
 
 
 def _q_n0(
@@ -372,13 +237,14 @@ def _binominvf_scalar(
     k_approx = jnp.clip(jnp.floor(q_u), jnp.float32(0.0), n_safe)
 
     # Compute x from the bottom up if it is less than the cutoff
-    cutoff = 5
+    x_cutoff = 10
+    np_cutoff = 4.0
     u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_small = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=exact_max)
-    k_very_small = k_approx < cutoff
-    np_very_small = np_ < 0.5
-    use_bottom_up = k_very_small | np_very_small
-    k_approx = cast(Array, jnp.where(use_bottom_up, k_small, k_approx))
+    k_bottom_up = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=exact_max)
+    k_small = k_approx < x_cutoff
+    np_small = np_ < np_cutoff
+    use_bottom_up = k_small | np_small
+    k_approx = cast(Array, jnp.where(use_bottom_up, k_bottom_up, k_approx))
 
     # Apply symmetry flip if needed
     k_flipped = cast(Array, jnp.where(flip, n_safe - k_approx, k_approx))
@@ -390,7 +256,6 @@ def _binominvf_scalar(
     k_result = cast(Array, jnp.where(p_is_zero, jnp.float32(0.0), k_result))
     k_result = cast(Array, jnp.where(p_is_one, n_safe, k_result))
     k_result = cast(Array, jnp.clip(k_result, jnp.float32(0.0), n_safe))
-
     k_result = cast(Array, jnp.where(invalid, nan, k_result))
 
     return k_result

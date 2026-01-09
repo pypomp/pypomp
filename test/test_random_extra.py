@@ -11,6 +11,7 @@ import pypomp.random as ppr
 import warnings
 from scipy import stats
 from jax.scipy.stats import binom as jax_binom
+from scipy.stats import binom as scipy_binom
 
 
 def poissoninvf_performance():
@@ -241,19 +242,24 @@ def compare_rpoisson_and_jax_poisson(
     plt.show()
 
 
-def compare_rbinom_and_jax_binom(
+def compare_rbinom2(
     seed=42,
     n_trials_list=[3, 20, 100, 2000],
     prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99],
-    jitter_scale=0.01,  # % of the data range
+    compare_to_exact=False,
+    jitter_scale=0,  # % of the data range
 ):
     """
-    Compare distributions of pypomp.fast_approx_rbinom (inverse CDF, Binomial) and
-    jax.random.binomial for various probabilities and numbers of trials,
-    using histograms and qq-plots in a grid.
+    Compare distributions of fast_approx_rbinom against either jax.random.binomial
+    or the exact theoretical Binomial PMF/Quantiles.
 
-    This test compares the outputs of a custom binomial sampler and JAX's built-in binomial sampler,
-    over the cross product of n_trials_list and prob_vals.
+    Args:
+        seed: Random seed.
+        n_trials_list: List of n parameters to test.
+        prob_vals: List of p parameters to test.
+        compare_to_exact: If True, compares to exact PMF and theoretical quantiles.
+                         If False, compares to jax.random.binomial samples.
+        jitter_scale: Scale factor for jitter (as fraction of data range) to reduce overplotting.
     """
     key = jax.random.key(seed)
     n_samples = 100000
@@ -261,130 +267,144 @@ def compare_rbinom_and_jax_binom(
     n_rows = len(n_trials_list)
     n_cols = len(prob_vals)
 
-    # Store samples for both plots
-    all_samples = {}
+    # Store data for plotting
+    plot_data = {}
 
     for row, n in enumerate(n_trials_list):
         for col, p_val in enumerate(prob_vals):
-            # Draw samples for the given n and p
+            # Draw samples for the fast approximation
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
             n_arr = jnp.full((n_samples,), n, dtype=jnp.int32)
-            # Use a new PRNG split for each
+
             key_rbinom, key = jax.random.split(key)
+            # Assuming ppr is available in your namespace
             rbinom_samples = ppr.fast_approx_rbinom(
                 key_rbinom, n_arr, p_arr, exact_max=5
             )
-            key_jax, key = jax.random.split(key)
-            jax_binom_samples = jax.random.binomial(key_jax, n=n_arr, p=p_arr)
-            all_samples[(row, col)] = (rbinom_samples, jax_binom_samples, n, p_val)
 
-    # Use smaller figure heights to reduce vertical space
+            if compare_to_exact:
+                # Store n and p for theoretical calculation
+                plot_data[(row, col)] = (rbinom_samples, None, n, p_val)
+            else:
+                # Draw JAX samples
+                key_jax, key = jax.random.split(key)
+                jax_binom_samples = jax.random.binomial(key_jax, n=n_arr, p=p_arr)
+                plot_data[(row, col)] = (rbinom_samples, jax_binom_samples, n, p_val)
+
+    # --- Histogram Figure ---
     fig_hist, hist_axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(4 * n_cols, 2 * n_rows),
-        squeeze=False,
+        n_rows, n_cols, figsize=(3.5 * n_cols, 1.8 * n_rows), squeeze=False
     )
 
     for row, n in enumerate(n_trials_list):
         for col, p_val in enumerate(prob_vals):
-            rbinom_samples, jax_binom_samples, n, p_val = all_samples[(row, col)]
+            rbinom_samples, jax_samples, n, p_val = plot_data[(row, col)]
+            ax = hist_axes[row, col]
 
-            # Histogram plot
-            ax_hist = hist_axes[row, col]
-            # Compute shared bin edges that span both sample sets (from min to max of both)
-            min_bin = min(
-                float(jnp.min(jax_binom_samples)),
-                float(jnp.min(rbinom_samples)),
-            )
-            max_bin = max(
-                float(jnp.max(jax_binom_samples)),
-                float(jnp.max(rbinom_samples)),
-            )
-            # Make bin edges as integer steps
-            bin_edges = jnp.arange(jnp.floor(min_bin), jnp.ceil(max_bin) + 1)
-            ax_hist.hist(
-                jax_binom_samples,
-                bins=bin_edges,
-                alpha=0.5,
-                label="jax.random.binomial",
-                density=True,
-                color="C1",
-                edgecolor="k",
-            )
-            ax_hist.hist(
+            # Determine plot range
+            min_v = int(jnp.min(rbinom_samples))
+            max_v = int(jnp.max(rbinom_samples))
+            if jax_samples is not None:
+                min_v = min(min_v, int(jnp.min(jax_samples)))
+                max_v = max(max_v, int(jnp.max(jax_samples)))
+
+            # Ensure at least some range for the x-axis
+            bins = np.arange(min_v, max_v + 2) - 0.5
+
+            if compare_to_exact:
+                # Plot exact PMF
+                x_exact = np.arange(min_v, max_v + 1)
+                pmf_exact = jax_binom.pmf(x_exact, n, p_val)
+                ax.step(
+                    x_exact,
+                    pmf_exact,
+                    where="mid",
+                    color="red",
+                    lw=1.5,
+                    label="Exact PMF",
+                )
+                ax.scatter(x_exact, pmf_exact, color="red", s=10)
+            else:
+                # Plot JAX samples
+                ax.hist(
+                    jax_samples,
+                    bins=bins,
+                    alpha=0.5,
+                    label="jax_binom",
+                    density=True,
+                    color="C1",
+                    edgecolor="k",
+                )
+
+            # Plot fast_approx_rbinom
+            ax.hist(
                 rbinom_samples,
-                bins=bin_edges,
+                bins=bins,
                 alpha=0.5,
-                label="pp.fast_approx_rbinom",
+                label="approx_rbinom",
                 density=True,
                 color="C0",
                 edgecolor="k",
             )
-            ax_hist.set_title(r"$n$ = {}, $p$ = {:.2f}".format(n, p_val), fontsize=10)
-            ax_hist.set_xlabel("Sample value", fontsize=8)
+
+            ax.set_title(f"n={n}, p={p_val:.4f}", fontsize=8)
             if col == 0:
-                ax_hist.set_ylabel("Density")
-            if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
-                ax_hist.legend()
+                ax.set_ylabel("Density", fontsize=8)
+            if row == n_rows - 1:
+                ax.set_xlabel("Value", fontsize=8)
+            ax.tick_params(axis="both", which="major", labelsize=7)
+            if row == 0 and col == n_cols - 1:
+                ax.legend(fontsize=7)
 
     fig_hist.tight_layout()
 
-    # Create separate figure for qq-plots
+    # --- QQ Plot Figure ---
     fig_qq, qq_axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(5 * n_cols, 2 * n_rows),
-        squeeze=False,
+        n_rows, n_cols, figsize=(3.5 * n_cols, 1.8 * n_rows), squeeze=False
     )
 
     for row, n in enumerate(n_trials_list):
         for col, p_val in enumerate(prob_vals):
-            rbinom_samples, jax_binom_samples, n, p_val = all_samples[(row, col)]
+            rbinom_samples, jax_samples, n, p_val = plot_data[(row, col)]
+            ax = qq_axes[row, col]
 
-            # QQ-plot
-            ax_qq = qq_axes[row, col]
-            # Sort both samples
-            sorted_jax = np.sort(np.array(jax_binom_samples))
-            sorted_rbinom = np.sort(np.array(rbinom_samples))
+            sorted_approx = np.sort(np.array(rbinom_samples))
+
+            if compare_to_exact:
+                quantiles = np.linspace(0 + 1e-5, 1 - 1e-5, n_samples)
+                x_data = scipy_binom.ppf(quantiles, n, p_val)
+                xlabel = "Theoretical Quantiles"
+            else:
+                x_data = np.sort(np.array(jax_samples))
+                xlabel = "JAX Binomial Quantiles"
+
             # Add jitter to reduce overplotting
-            x_range = (
-                float(sorted_jax[-1] - sorted_jax[0]) if len(sorted_jax) > 1 else 1.0
+            np.random.seed(seed)
+            x_jitter = np.random.normal(
+                0, np.ptp(x_data) * jitter_scale, size=len(x_data)
             )
-            y_range = (
-                float(sorted_rbinom[-1] - sorted_rbinom[0])
-                if len(sorted_rbinom) > 1
-                else 1.0
-            )
-            np.random.seed(42)  # For reproducibility
-            x_jitter = np.random.normal(0, x_range * jitter_scale, size=len(sorted_jax))
             y_jitter = np.random.normal(
-                0, y_range * jitter_scale, size=len(sorted_rbinom)
+                0, np.ptp(sorted_approx) * jitter_scale, size=len(sorted_approx)
             )
-            # Plot quantiles with jitter
-            ax_qq.scatter(
-                sorted_jax + x_jitter,
-                sorted_rbinom + y_jitter,
+            ax.scatter(
+                x_data + x_jitter,
+                sorted_approx + y_jitter,
                 alpha=0.2,
-                s=10,
-                color="C0",
+                s=5,
+                color="blue",
             )
-            # Add y=x reference line
-            min_val = min(float(sorted_jax[0]), float(sorted_rbinom[0]))
-            max_val = max(float(sorted_jax[-1]), float(sorted_rbinom[-1]))
-            ax_qq.plot(
-                [min_val, max_val], [min_val, max_val], "r--", alpha=0.7, label="y=x"
-            )
-            if row == len(n_trials_list) - 1 and col == 1:
-                ax_qq.set_xlabel("jax.random.binomial quantiles")
+            if row == n_rows - 1:
+                ax.set_xlabel(xlabel, fontsize=8)
+
+            # y=x line
+            limit = [min(sorted_approx), max(sorted_approx)]
+            ax.plot(limit, limit, "r--", alpha=0.8)
             if col == 0:
-                ax_qq.set_ylabel("pp.fast_approx_rbinom quantiles")
-            ax_qq.set_title(r"$n$ = {}, $p$ = {:.2f}".format(n, p_val))
-            if row == len(n_trials_list) - 1 and col == len(prob_vals) - 1:
-                ax_qq.legend()
+                ax.set_ylabel("Approx Quantiles", fontsize=8)
+            ax.set_title(f"n={n}, p={p_val:.4f}", fontsize=8)
+            ax.tick_params(axis="both", which="major", labelsize=7)
 
     fig_qq.tight_layout()
-    # Show both figures at the same time
     plt.show()
 
 

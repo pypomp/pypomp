@@ -1,3 +1,4 @@
+import gc
 import jax
 import jax.numpy as jnp
 import pandas as pd
@@ -222,6 +223,16 @@ class PanelEstimationMixin(Base):
                 filter_mean=filter_mean,
                 prediction_mean=prediction_mean,
             )
+
+            # Clear JAX caches and collect garbage to avoid memory leaks.
+            # Each time pfilter is run for a different unit, compiled code is cached and accumulated.
+            # This happens even if rproc, dmeas, etc. are functionally the same for all units, because the current implementation of this stuff causes JAX to treat the code as being different for each unit.
+            # Clearing the caches is a bandaid, but also helpful when the functions really are different.
+            # The runtime cost of clearing the caches is negligible, and recompilation times shouldn't be too much of an issue either.
+            # There are probably better ways to deal with this which could be explored in the future, but this is a simple workaround for now.
+            jax.clear_caches()
+            gc.collect()
+
             unit_result = obj.results_history[-1]
             results.loc[:, unit, :] = unit_result.logLiks
 

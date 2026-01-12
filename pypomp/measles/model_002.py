@@ -44,6 +44,7 @@ param_names = (
 )
 
 statenames = ["S", "E", "I", "R", "W", "C"]
+accumvars = ["W", "C"]
 
 
 def rinit(theta_, key, covars, t0=None):

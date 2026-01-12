@@ -81,7 +81,8 @@ class Pomp:
     _dt_array_extended: jax.Array
     _max_steps_per_interval: int
     ydim: int | None
-    accumvars: tuple[int, ...] | None
+    accumvars: list[str] | None
+    _accumvars_indices: tuple[int, ...] | None
     results_history: ResultsHistory
     fresh_key: jax.Array | None
 
@@ -89,7 +90,7 @@ class Pomp:
         self,
         ys: pd.DataFrame,
         theta: dict | list[dict] | PompParameters,
-        statenames: list[str],
+        statenames: tuple[str, ...] | list[str],
         t0: float,
         rinit: Callable,
         rproc: Callable,
@@ -99,7 +100,7 @@ class Pomp:
         nstep: int | None = None,
         dt: float | None = None,
         ydim: int | None = None,
-        accumvars: tuple[int, ...] | None = None,
+        accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
     ):
         """
@@ -150,9 +151,21 @@ class Pomp:
         if not isinstance(statenames, list) or not all(
             isinstance(name, str) for name in statenames
         ):
-            raise ValueError("statenames must be a list of strings")
+            raise ValueError("statenames must be a tuple or list of strings")
 
-        self.statenames = statenames
+        if accumvars is not None:
+            if not all(isinstance(name, str) for name in accumvars):
+                raise ValueError("accumvars must be a tuple or list of strings")
+            if not all(name in statenames for name in accumvars):
+                raise ValueError("all accumvars must be in statenames")
+            self._accumvars_indices = tuple(
+                tuple(statenames).index(name) for name in accumvars
+            )
+        else:
+            self._accumvars_indices = None
+
+        self.statenames = list(statenames)
+        self.accumvars = list(accumvars) if accumvars is not None else None
         self.ys = ys
         self.covars = covars
         self.t0 = float(t0)
@@ -167,7 +180,7 @@ class Pomp:
         self.par_trans = par_trans or ParTrans()
         self.rinit = RInit(
             struct=rinit,
-            statenames=statenames,
+            statenames=self.statenames,
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
             par_trans=self.par_trans,
@@ -175,19 +188,19 @@ class Pomp:
 
         self.rproc = RProc(
             struct=rproc,
-            statenames=statenames,
+            statenames=self.statenames,
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
             par_trans=self.par_trans,
             nstep=nstep,
             dt=dt,
-            accumvars=accumvars,
+            accumvars=self._accumvars_indices,
         )
 
         if dmeas is not None:
             self.dmeas = DMeas(
                 struct=dmeas,
-                statenames=statenames,
+                statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
@@ -202,7 +215,7 @@ class Pomp:
             self.rmeas = RMeas(
                 struct=rmeas,
                 ydim=ydim,
-                statenames=statenames,
+                statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,

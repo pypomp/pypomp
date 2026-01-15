@@ -100,21 +100,11 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
-    # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-    # dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=1) * sigmaSE**2
     dw = rgamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
     # Poisson births
-    # births = jax.random.poisson(keys[1], br * dt)
-    # births = fast_approx_poisson(
-    #     keys[1],
-    #     br * dt,
-    #     max_rejections_ptrs=1,
-    #     max_rejections_knuth=10,
-    #     lam_cutoff=5.0,
-    # )
     births = fast_approx_rpoisson(keys[1], br * dt)
 
     # transitions between classes
@@ -133,15 +123,6 @@ def rproc(X_, theta_, key, covars, t, dt):
         .set(p0_values)
     )
 
-    # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    # transitions = fast_approx_multinomial(
-    #     keys[2],
-    #     populations,
-    #     rt_final,
-    #     max_rejections_btrs=1,
-    #     max_rejections_inversion=50,
-    #     np_cutoff=5.0,
-    # )
     transitions = fast_approx_rmultinom(keys[2], populations, rt_final)
 
     trans_S = transitions[0]

@@ -9,6 +9,7 @@ test/test_scratch
 .cursor
 scratch/
 makefile
+.claude
 
 
 #### the following is the default Python package gitignore from GitHub ####

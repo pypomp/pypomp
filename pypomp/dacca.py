@@ -92,6 +92,7 @@ theta_names = (
 
 
 statenames = ["S", "I", "Y", "Mn", "R1", "R2", "R3", "count"]
+accumvars = ["Mn"]
 
 
 def rinit(theta_, key, covars, t0=None):
@@ -409,7 +410,7 @@ def dacca(
         t0=1891.0,
         nstep=nstep,
         dt=dt,
-        accumvars=(3,),
+        accumvars=accumvars,
         ydim=1,
         theta=theta,
         covars=covars,

@@ -1,11 +1,12 @@
 """
-He10 model without alpha or mu parameters.
+He10 model without alpha or mu parameters. iota varies linearly with population size according to iota = exp(iota1 + iota2 * log(pop)). iota1 and iota2 are intended to be shared parameters in a panel model.
 
 Parameters:
 - R0: Basic reproduction number
 - sigma: Rate of transition from susceptible to exposed
 - gamma: Rate of transition from exposed to infectious
-- iota: Imported cases
+- iota1: Baseline imported cases
+- iota2: Rate at which imported cases increase with population size
 - sigmaSE: Rate of stochastic extrademographic variation
 - cohort: Cohort effect
 - amplitude: Seasonality amplitude
@@ -29,16 +30,17 @@ param_names = (
     "R0",  # 0
     "sigma",  # 1
     "gamma",  # 2
-    "iota",  # 3
-    "rho",  # 4
-    "sigmaSE",  # 5
-    "psi",  # 6
-    "cohort",  # 7
-    "amplitude",  # 8
-    "S_0",  # 9
-    "E_0",  # 10
-    "I_0",  # 11
-    "R_0",  # 12
+    "iota1",  # 3
+    "iota2",  # 4
+    "rho",  # 5
+    "sigmaSE",  # 6
+    "psi",  # 7
+    "cohort",  # 8
+    "amplitude",  # 9
+    "S_0",  # 10
+    "E_0",  # 11
+    "I_0",  # 12
+    "R_0",  # 13
 )
 
 statenames = ["S", "E", "I", "R", "W", "C"]
@@ -66,13 +68,18 @@ def rproc(X_, theta_, key, covars, t, dt):
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
     gamma = theta_["gamma"]
-    iota = theta_["iota"]
+    iota1 = theta_["iota1"]
+    iota2 = theta_["iota2"]
     sigmaSE = theta_["sigmaSE"]
     cohort = theta_["cohort"]
     amplitude = theta_["amplitude"]
     pop = covars["pop"]
     birthrate = covars["birthrate"]
     mu = 0.02
+
+    iota = jnp.exp(
+        iota1 + iota2 * jnp.log(pop)
+    )  # TODO: change pop to 1950 pop, maybe also standardize pop
 
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
@@ -184,7 +191,8 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "R0": jnp.log(theta["R0"]),
         "sigma": jnp.log(theta["sigma"]),
         "gamma": jnp.log(theta["gamma"]),
-        "iota": jnp.log(theta["iota"]),
+        "iota1": theta["iota1"],
+        "iota2": theta["iota2"],
         "sigmaSE": jnp.log(theta["sigmaSE"]),
         "psi": jnp.log(theta["psi"]),
         "cohort": jspecial.logit(theta["cohort"]),
@@ -206,7 +214,8 @@ def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "R0": jnp.exp(theta["R0"]),
         "sigma": jnp.exp(theta["sigma"]),
         "gamma": jnp.exp(theta["gamma"]),
-        "iota": jnp.exp(theta["iota"]),
+        "iota1": theta["iota1"],
+        "iota2": theta["iota2"],
         "sigmaSE": jnp.exp(theta["sigmaSE"]),
         "psi": jnp.exp(theta["psi"]),
         "cohort": jspecial.expit(theta["cohort"]),

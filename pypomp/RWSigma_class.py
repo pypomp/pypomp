@@ -3,6 +3,11 @@ import jax.numpy as jnp
 
 
 class RWSigma:
+    sigmas: dict[str, float]
+    init_names: list[str]
+    not_init_names: list[str]
+    all_names: list[str]
+
     """
     Class for representing the random walk sigma parameters for the iterated filtering (IF2) algorithm.
 
@@ -104,3 +109,44 @@ class RWSigma:
             raise ValueError("factor should be between 0 and 1")
         for key in self.sigmas:
             self.sigmas[key] *= factor
+
+    def __setitem__(self, param_name: str, value: float) -> None:
+        """
+        Set the value of a sigma for a given parameter name using the indexing syntax.
+
+        Args:
+            param_name (str): The name of the parameter whose sigma value you wish to set.
+            value (float): The new sigma value.
+
+        Raises:
+            KeyError: If param_name is not found in sigmas.
+            TypeError: If value cannot be coerced to a float.
+            ValueError: If the value is negative.
+        """
+        if param_name not in self.sigmas:
+            raise KeyError(f"Parameter '{param_name}' not found in sigmas.")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise TypeError(
+                "Sigma value must be a float or numeric type that can be coerced to float."
+            )
+        if value < 0:
+            raise ValueError("Sigma value must be non-negative.")
+
+        self.sigmas[param_name] = value
+
+    def __eq__(self, other) -> bool:
+        """
+        Check equality with another RWSigma object.
+
+        Two RWSigma instances are equal if they have the same sigmas
+        and init_names.
+        """
+        if not isinstance(other, type(self)):
+            return False
+        if self.sigmas != other.sigmas:
+            return False
+        if self.init_names != other.init_names:
+            return False
+        return True

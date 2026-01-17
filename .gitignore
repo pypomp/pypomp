@@ -9,6 +9,7 @@ test/test_scratch
 .cursor
 scratch/
 makefile
+.claude
 
 
 #### the following is the default Python package gitignore from GitHub ####
@@ -84,7 +85,7 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+docs/build/
 
 # PyBuilder
 .pybuilder/

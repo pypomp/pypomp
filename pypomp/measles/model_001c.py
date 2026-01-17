@@ -1,10 +1,27 @@
-"""He10 model without alpha or deaths"""
+"""
+He10 model without alpha or deaths. This may run significantly faster than model_001b because it does not have to simulate deaths.
+
+Parameters:
+- R0: Basic reproduction number
+- sigma: Rate of transition from susceptible to exposed
+- gamma: Rate of transition from exposed to infectious
+- iota: Imported cases
+- sigmaSE: Rate of stochastic extrademographic variation
+- cohort: Cohort effect
+- amplitude: Seasonality amplitude
+- rho: Reporting probability
+- psi: Reporting error over-dispersion
+- S_0: Initial susceptible population proportion
+- E_0: Initial exposed population proportion
+- I_0: Initial infectious population proportion
+- R_0: Initial recovered population proportion
+"""
 
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.random.poissoninvf import rpoisson
-from pypomp.random.binominvf import rbinom
+from pypomp.random.poissoninvf import fast_approx_rpoisson
+from pypomp.random.binominvf import fast_approx_rbinom
 from pypomp.random.gammainvf import rgamma
 
 
@@ -25,6 +42,7 @@ param_names = (
 )
 
 statenames = ["S", "E", "I", "R", "W", "C"]
+accumvars = ["W", "C"]
 
 
 def rinit(theta_, key, covars, t0=None):
@@ -88,7 +106,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = rpoisson(keys[1], br * dt)
+    births = fast_approx_rpoisson(keys[1], br * dt)
 
     # transitions between classes
     # rt_final = jnp.zeros((3, 2))
@@ -100,7 +118,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # rt_final = rt_final.at[:, 0].set(1 - p0_values).at[:, 1].set(p0_values)
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = rbinom(keys[2], populations, p0_values)
+    transitions = fast_approx_rbinom(keys[2], populations, p0_values)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

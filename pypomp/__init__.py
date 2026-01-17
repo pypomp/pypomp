@@ -10,3 +10,4 @@ from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
 from .mcap import mcap
 from .SIS import SIS
+from .parameters import PompParameters, PanelParameters

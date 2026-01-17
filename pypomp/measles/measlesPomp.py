@@ -4,9 +4,8 @@ import os
 import pickle
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
-import pypomp.measles.model_001d as m001d  
-from scipy.interpolate import make_splrep
-from scipy.interpolate import splev
+import pypomp.measles.model_002 as m002
+from scipy.interpolate import make_smoothing_spline
 from pypomp.pomp_class import Pomp
 import copy
 from pypomp.ParTrans_class import ParTrans
@@ -208,10 +207,10 @@ class UKMeasles:
         times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
         if interp_method == "shifted_splines":
             # TODO fix exploding birthrate below year 1950
-            pop_bspl = make_splrep(demog["year"], demog["pop"])
-            births_bspl = make_splrep(demog["year"] + 0.5, demog["births"])
-            pop_interp = splev(times, pop_bspl)
-            births_interp = splev(times - 4, births_bspl)
+            pop_bspl = make_smoothing_spline(demog["year"], demog["pop"])
+            births_bspl = make_smoothing_spline(demog["year"] + 0.5, demog["births"])
+            pop_interp = pop_bspl(times)
+            births_interp = births_bspl(times - 4)
         elif interp_method == "linear":
             pop_interp = np.interp(times, demog["year"], demog["pop"])
             births_interp = np.interp(times - 4, demog["year"], demog["births"])
@@ -228,7 +227,7 @@ class UKMeasles:
         mod = {
             "001b": m001b,
             "001c": m001c,
-            "001d": m001d,  
+            "002": m002,
         }[model]
 
         # For 001d we have extra state "logw" that should be reset each obs interval.
@@ -247,7 +246,7 @@ class UKMeasles:
             nstep=None,
             dt=dt,
             ydim=1,
-            accumvars=accumvars,
+            accumvars=mod.accumvars,
             statenames=mod.statenames,
             rinit=mod.rinit,
             rproc=mod.rproc,

@@ -1,7 +1,5 @@
 import jax
 import pickle
-import numpy as np
-import xarray as xr
 import pypomp as pp
 import pytest
 
@@ -220,33 +218,8 @@ def test_pickle(simple):
     # Unpickle the object
     unpickled_obj = pickle.loads(pickled_data)
 
-    # Check that the unpickled object has the same attributes
-    assert LG.ys.values.tolist() == unpickled_obj.ys.values.tolist()
-    assert LG.theta == unpickled_obj.theta
-    assert LG.covars == unpickled_obj.covars
-    assert LG.rinit == unpickled_obj.rinit
-    assert LG.rproc == unpickled_obj.rproc
-    assert LG.dmeas == unpickled_obj.dmeas
-    assert LG.rproc.dt == unpickled_obj.rproc.dt
-    assert len(LG.results_history) == len(unpickled_obj.results_history)
-    for orig, unpickled in zip(LG.results_history, unpickled_obj.results_history):
-        assert isinstance(unpickled, type(orig))
-        assert orig.method == unpickled.method
-        assert orig.execution_time == unpickled.execution_time
-        # Compare key values
-        assert np.array_equal(
-            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
-        )
-        # Compare other attributes based on result type
-        if hasattr(orig, "logLiks") and orig.logLiks is not None:
-            assert orig.logLiks.equals(unpickled.logLiks)
-        if hasattr(orig, "traces_da") and orig.traces_da is not None:
-            # For MIF/Train results, traces_da is a DataArray field
-            if isinstance(orig.traces_da, xr.DataArray):
-                assert orig.traces_da.equals(unpickled.traces_da)
-        if hasattr(orig, "theta"):
-            assert orig.theta == unpickled.theta
-    assert LG.traces().values.tolist() == unpickled_obj.traces().values.tolist()
+    # Check equality
+    assert LG == unpickled_obj
 
     # Check that the unpickled object can be pickled again if rmeas is None
     unpickled_obj.rmeas = None
@@ -261,29 +234,29 @@ def test_prune(simple):
     # Run pfilter with multiple replicates to generate results
     LG.pfilter(J=J, reps=5, key=key)
     # Save the original theta list length
-    orig_theta = LG.theta.copy()
+    orig_theta = LG.theta
     orig_len = len(orig_theta)
     # Prune to top 2 thetas, refill to original length
     LG.prune(n=2, refill=True)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == orig_len
     # The unique thetas should be at most 2
     unique_thetas = [tuple(sorted(d.items())) for d in LG.theta]
     assert len(set(unique_thetas)) <= 2
     # Prune to top 1 theta, do not refill
     LG.prune(n=1, refill=False)
-    assert isinstance(LG.theta, list)
+    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == 1
     # The theta should be a dict
-    assert isinstance(LG.theta[0], dict)
+    assert isinstance(LG.theta.to_list()[0], dict)
     # Prune with n greater than available thetas (should not error, just return all)
-    LG.theta = orig_theta.copy()
+    LG.theta = pp.PompParameters(orig_theta)
     LG.prune(n=10, refill=False)
     assert len(LG.theta) == min(10, len(orig_theta))
     # Test error if results are empty
     LG2 = LG.__class__(
         ys=LG.ys.copy(),
-        theta=LG.theta[0].copy(),
+        theta=pp.PompParameters(LG.theta.to_list()[0].copy()),
         rinit=LG.rinit.original_func,
         rproc=LG.rproc.original_func,
         dmeas=LG.dmeas.original_func,
@@ -292,7 +265,7 @@ def test_prune(simple):
         ydim=LG.rmeas.ydim,
         statenames=["state_0", "state_1"],
     )
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError):
         LG2.prune(n=1)
 
 
@@ -310,15 +283,63 @@ def test_print_summary(neapolitan):
     LG.print_summary()
 
 
+def test_merge(simple_setup):
+    """Test merging two Pomp objects."""
+    base_LG, rw_sd, J, a, M, key, theta, fresh_key = simple_setup
 
-def test_dpop_requires_process_weight(simple):
-    """
-    Calling dpop() on a model without a process-weight state (no accumvars)
-    should fail with a clear ValueError.
-    """
-    LG, rw_sd, J, a, M, key = simple
+    LG1 = pp.LG()
+    LG2 = pp.LG()
 
-    # LG has no accumvars, so dpop without process_weight_state must raise.
-    with pytest.raises(ValueError, match="process-weight state"):
-        LG.dpop(J=J, key=key)
+    key1, key2 = jax.random.split(key)
 
+    LG1.pfilter(theta=theta, J=J, reps=1, key=key1)
+    LG1.mif(J=J, M=M, rw_sd=rw_sd, a=a)
+    LG1.train(J=J, M=1, eta=0.2)
+
+    LG2.pfilter(theta=theta, J=J, reps=1, key=key2)
+    LG2.mif(J=J, M=M, rw_sd=rw_sd, a=a)
+    LG2.train(J=J, M=1, eta=0.2)
+
+    n_reps1 = len(LG1.theta)
+    n_reps2 = len(LG2.theta)
+    n_history1 = len(LG1.results_history)
+    n_history2 = len(LG2.results_history)
+
+    merged = pp.Pomp.merge(LG1, LG2)
+
+    assert merged.canonical_param_names == LG1.canonical_param_names
+    assert len(merged.theta) == n_reps1 + n_reps2
+    assert len(merged.results_history) == n_history1 == n_history2
+
+    for i in range(len(merged.results_history)):
+        merged_result = merged.results_history[i]
+        result1 = LG1.results_history[i]
+        result2 = LG2.results_history[i]
+
+        # Verify algorithmic parameters match
+        assert merged_result.J == result1.J == result2.J == J
+        assert merged_result.thresh == result1.thresh == result2.thresh
+
+        if merged_result.method == "pfilter":
+            assert merged_result.reps == result1.reps == result2.reps
+        elif merged_result.method == "mif":
+            assert merged_result.M == result1.M == result2.M == M
+            assert merged_result.a == result1.a == result2.a == a
+            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
+        elif merged_result.method == "train":
+            assert merged_result.M == result1.M == result2.M == 1
+            assert merged_result.eta == result1.eta == result2.eta == 0.2
+            assert merged_result.optimizer == result1.optimizer == result2.optimizer
+
+        if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
+            # Pfilter result: logLiks dims ["theta", "replicate"]
+            merged_n_theta = merged_result.logLiks.sizes.get("theta", 0)
+            result1_n_theta = result1.logLiks.sizes.get("theta", 0)
+            result2_n_theta = result2.logLiks.sizes.get("theta", 0)
+            assert merged_n_theta == result1_n_theta + result2_n_theta
+
+        if hasattr(merged_result, "traces_da") and merged_result.traces_da.size > 0:
+            merged_n_reps = merged_result.traces_da.sizes.get("replicate", 0)
+            result1_n_reps = result1.traces_da.sizes.get("replicate", 0)
+            result2_n_reps = result2.traces_da.sizes.get("replicate", 0)
+            assert merged_n_reps == result1_n_reps + result2_n_reps

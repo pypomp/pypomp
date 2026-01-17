@@ -26,7 +26,7 @@ def test_class_basic_default(simple):
 
 def test_reps_default(simple):
     LG, key, J = simple
-    theta = LG.theta
+    theta = LG.theta.to_list()
     theta_list = [theta[0], {k: v * 2 for k, v in theta[0].items()}]
     LG.pfilter(J=J, key=key, theta=theta_list, reps=2)
     val1 = LG.results_history[-1].logLiks
@@ -37,7 +37,7 @@ def test_reps_default(simple):
 def test_order_of_parameters_consistency(simple):
     # check that the order of parameters in the theta dict does not affect the results
     LG, key, J = simple
-    theta_orig = LG.theta[0]
+    theta_orig = LG.theta.to_list()[0]
 
     keys = list(theta_orig.keys())
     reversed_keys = list(reversed(keys))
@@ -59,7 +59,7 @@ def test_order_of_parameters_consistency(simple):
 def test_diagnostics(simple):
     # (theta, reps, expected shape)
     LG, key, J = simple
-    theta = LG.theta
+    theta = LG.theta.to_list()
     ys = LG.ys
     theta_cases = [
         (theta[0], 1, (1, 1)),

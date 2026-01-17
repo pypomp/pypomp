@@ -8,10 +8,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .RWSigma_class import RWSigma
+    from .parameters import PanelParameters
 else:
     RWSigma = object
+    PanelParameters = object
 
 from .util import logmeanexp, logmeanexp_se
+from .parameters import PanelParameters
 
 
 @dataclass
@@ -26,6 +29,37 @@ class BaseResult(ABC):
     def __post_init__(self):
         """Post-initialization hook."""
         pass
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for all result types.
+
+        Compares:
+        - type
+        - method string
+        - execution_time
+        - timestamp
+        - JAX key contents (via key_data)
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        if self.method != other.method:
+            return False
+
+        if self.execution_time != other.execution_time:
+            return False
+
+        if self.timestamp != other.timestamp:
+            return False
+
+        # Compare JAX keys by underlying data
+        if not jax.numpy.array_equal(
+            jax.random.key_data(self.key), jax.random.key_data(other.key)
+        ):
+            return False
+
+        return True
 
     @abstractmethod
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
@@ -44,13 +78,44 @@ class PompBaseResult(BaseResult):
 
     theta: list[dict] = field(default_factory=list)
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for Pomp result types.
+
+        Extends BaseResult equality by comparing theta.
+        """
+        if not super().__eq__(other):
+            return False
+
+        # theta is a list of plain dicts; rely on Python's structural equality
+        if self.theta != other.theta:
+            return False
+
+        return True
+
 
 @dataclass
 class PanelPompBaseResult(BaseResult):
     """Base class for PanelPomp results."""
 
-    shared: list[pd.DataFrame] | None = None
-    unit_specific: list[pd.DataFrame] | None = None
+    theta: "PanelParameters | None" = None
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for PanelPomp result types.
+
+        Extends BaseResult equality by comparing PanelParameters.
+        """
+        if not super().__eq__(other):
+            return False
+
+        if (self.theta is None) != (other.theta is None):
+            return False
+
+        if self.theta is not None and self.theta != other.theta:
+            return False
+
+        return True
 
 
 @dataclass
@@ -70,64 +135,97 @@ class PompPFilterResult(PompBaseResult):
         """Set method to pfilter."""
         self.method = "pfilter"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including log-likelihoods and diagnostics."""
+        if not super().__eq__(other):
+            return False
+
+        if self.J != other.J or self.reps != other.reps or self.thresh != other.thresh:
+            return False
+
+        # logLiks
+        if isinstance(self.logLiks, xr.DataArray) and isinstance(
+            other.logLiks, xr.DataArray
+        ):
+            if not self.logLiks.equals(other.logLiks):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.logLiks), np.asarray(other.logLiks), equal_nan=True
+            ):
+                return False
+
+        # Optional diagnostics
+        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if (a is None) != (b is None):
+                return False
+            if a is not None and b is not None:
+                if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                    if not a.equals(b):
+                        return False
+                else:
+                    if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                        return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert pfilter result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        for param_idx, (logLik_arr, theta_dict) in enumerate(
-            zip(self.logLiks, self.theta)
-        ):
-            # Use underlying NumPy array if available to avoid copies
-            arr = getattr(logLik_arr, "values", logLik_arr)
-            logLik_arr_np = np.asarray(arr)
-            logLik = float(logmeanexp(logLik_arr_np, ignore_nan=ignore_nan))
-            se = (
-                float(logmeanexp_se(logLik_arr_np, ignore_nan=ignore_nan))
-                if len(logLik_arr_np) > 1
-                else np.nan
+        if not self.theta or self.logLiks.size == 0:
+            return pd.DataFrame()
+
+        arr = getattr(self.logLiks, "values", self.logLiks)
+        logLik_arr_np = np.asarray(arr)
+
+        logLik = np.apply_along_axis(
+            logmeanexp, -1, logLik_arr_np, ignore_nan=ignore_nan
+        )
+
+        if logLik_arr_np.shape[-1] > 1:
+            se = np.apply_along_axis(
+                logmeanexp_se, -1, logLik_arr_np, ignore_nan=ignore_nan
             )
-            row = {"logLik": logLik, "se": se}
-            row.update({param: float(theta_dict[param]) for param in param_names})
-            rows.append(row)
-        return pd.DataFrame(rows)
+        else:
+            se = np.full_like(logLik, np.nan, dtype=float)
+
+        theta_df = pd.DataFrame(self.theta)
+
+        df = pd.DataFrame(
+            {
+                "logLik": logLik.astype(float),
+                "se": se.astype(float),
+            }
+        )
+
+        return pd.concat(
+            [df.reset_index(drop=True), theta_df.reset_index(drop=True)], axis=1
+        )
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this pfilter result."""
         if not self.theta or not len(self.logLiks):
             return pd.DataFrame()
 
-        param_names = list(self.theta[0].keys())
+        arr = getattr(self.logLiks, "values", self.logLiks)
+        logLik_arr_np = np.asarray(arr)
+        logliks = np.apply_along_axis(logmeanexp, -1, logLik_arr_np)
+
         n_reps = len(self.theta)
 
-        # Vectorize loglik computation
-        logliks = []
-        for logLik_arr in self.logLiks:
-            arr = getattr(logLik_arr, "values", logLik_arr)
-            logLik_arr_np = np.asarray(arr)
-            logliks.append(float(logmeanexp(logLik_arr_np)))
+        base_df = pd.DataFrame(
+            {
+                "replicate": np.arange(n_reps, dtype=int),
+                "iteration": np.zeros(n_reps, dtype=int),
+                "method": self.method,
+                "logLik": logliks.astype(float),
+            }
+        )
 
-        # Vectorize replicate, iteration, and method lists
-        replicate_list = np.arange(n_reps).tolist()
-        iteration_list = [0] * n_reps  # Local iteration for pfilter
-        method_list = ["pfilter"] * n_reps
-        loglik_list = logliks
+        theta_df = pd.DataFrame(self.theta).reset_index(drop=True)
 
-        # Vectorize parameter extraction
-        param_columns = {}
-        for p in param_names:
-            param_columns[p] = [
-                float(self.theta[rep_idx][p]) for rep_idx in range(n_reps)
-            ]
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
+        return pd.concat([base_df.reset_index(drop=True), theta_df], axis=1)
 
     def print_summary(self):
         """Print summary of pfilter result."""
@@ -141,6 +239,87 @@ class PompPFilterResult(PompBaseResult):
             print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
+
+    @staticmethod
+    def merge(*results: "PompPFilterResult") -> "PompPFilterResult":
+        """
+        Merge replications from an arbitrary number of PompPFilterResult objects into a single PompPFilterResult object.
+        All objects must have the same J (number of particles), thresh (resampling threshold), and reps (number of replicates).
+        Execution time is the maximum execution time of the merged objects, and the key is the key from the first object.
+        """
+        # TODO: handle keys in a better way
+        if len(results) == 0:
+            raise ValueError("At least one PompPFilterResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompPFilterResult.")
+            if result.J != first.J:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same J (number of particles)."
+                )
+            if result.thresh != first.thresh:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same thresh (resampling threshold)."
+                )
+            if result.reps != first.reps:
+                raise ValueError(
+                    "All PompPFilterResult objects must have the same reps (number of replicates)."
+                )
+
+        # Merge theta lists
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        # Concatenate logLiks along the "theta" dimension
+        logLik_arrays = []
+        for result in results:
+            if result.logLiks.size > 0:
+                logLik_arrays.append(result.logLiks)
+        if logLik_arrays:
+            merged_logLiks: xr.DataArray = xr.concat(logLik_arrays, dim="theta")  # type: ignore[assignment]
+        else:
+            merged_logLiks = xr.DataArray([])
+
+        # Concatenate optional diagnostics along the "theta" dimension
+        def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
+            arrays = []
+            for result in results:
+                diag = getattr(result, name)
+                if diag is not None and diag.size > 0:
+                    arrays.append(diag)
+            if arrays:
+                return xr.concat(arrays, dim="theta")  # type: ignore[return-value]
+            return None
+
+        merged_CLL = merge_optional_diagnostic("CLL")
+        merged_ESS = merge_optional_diagnostic("ESS")
+        merged_filter_mean = merge_optional_diagnostic("filter_mean")
+        merged_prediction_mean = merge_optional_diagnostic("prediction_mean")
+
+        # Use max execution time if available
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        merged_result = PompPFilterResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            logLiks=merged_logLiks,
+            J=first.J,
+            reps=first.reps,
+            thresh=first.thresh,
+            CLL=merged_CLL,
+            ESS=merged_ESS,
+            filter_mean=merged_filter_mean,
+            prediction_mean=merged_prediction_mean,
+        )
+        return merged_result
 
 
 @dataclass
@@ -158,68 +337,72 @@ class PompMIFResult(PompBaseResult):
         """Set method to mif."""
         self.method = "mif"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces and algorithmic settings."""
+        if not super().__eq__(other):
+            return False
+
+        if (
+            self.J != other.J
+            or self.M != other.M
+            or self.a != other.a
+            or self.thresh != other.thresh
+        ):
+            return False
+
+        # rw_sd comparison: rely on its own __eq__ if present
+        if (self.rw_sd is None) != (other.rw_sd is None):
+            return False
+        if self.rw_sd is not None and self.rw_sd != other.rw_sd:
+            return False
+
+        # traces_da
+        if isinstance(self.traces_da, xr.DataArray) and isinstance(
+            other.traces_da, xr.DataArray
+        ):
+            if not self.traces_da.equals(other.traces_da):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.traces_da),
+                np.asarray(other.traces_da),
+                equal_nan=True,
+            ):
+                return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert mif result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        # traces_da is an xarray.DataArray with dims: (replicate, iteration, variable)
         traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if traces_da is None or not hasattr(traces_da, "sizes") or not traces_da.sizes:
             return pd.DataFrame()
-        n_reps = traces_da.sizes["replicate"]
-        last_idx = traces_da.sizes["iteration"] - 1
-        for rep in range(n_reps):
-            last_row = traces_da.sel(replicate=rep, iteration=last_idx)
-            logLik_val = float(last_row.sel(variable="logLik").values)
-            row = {"logLik": logLik_val, "se": np.nan}
-            for param in param_names:
-                row[param] = float(last_row.sel(variable=param).values)
-            rows.append(row)
-        return pd.DataFrame(rows)
+
+        df = (
+            traces_da.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+        )
+
+        param_names = list(self.theta[0].keys())
+        cols = ["logLik"] + param_names
+        df = pd.DataFrame(df[cols])
+        df.insert(1, "se", np.nan)
+
+        return df
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this mif result."""
-        traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if self.traces_da is None:
             return pd.DataFrame()
 
-        n_rep = traces_da.sizes["replicate"]
-        n_iter = traces_da.sizes["iteration"]
-        variable_names = list(traces_da.coords["variable"].values)
-
-        traces_array = traces_da.values
-        loglik_idx = variable_names.index("logLik")
-
-        param_names = list(self.theta[0].keys())
-        param_indices = np.array([variable_names.index(p) for p in param_names])
-
-        # Vectorize index creation using meshgrid
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        return (
+            self.traces_da.to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+            .assign(method="mif")
         )
-        replicate_list = rep_indices.flatten().tolist()
-        iteration_list = iter_indices.flatten().tolist()
-        method_list = ["mif"] * (n_rep * n_iter)
-
-        # Vectorize loglik extraction
-        loglik_list = traces_array[:, :, loglik_idx].flatten().astype(float).tolist()
-
-        # Vectorize parameter extraction
-        param_columns = {}
-        for i, p in enumerate(param_names):
-            param_columns[p] = (
-                traces_array[:, :, param_indices[i]].flatten().astype(float).tolist()
-            )
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
 
     def print_summary(self):
         """Print summary of mif result."""
@@ -234,6 +417,59 @@ class PompMIFResult(PompBaseResult):
             print("\nTop 5 Results:")
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
+
+    @staticmethod
+    def merge(*results: "PompMIFResult") -> "PompMIFResult":
+        """Merge replications from multiple PompMIFResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PompMIFResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompMIFResult.")
+            if (
+                result.J != first.J
+                or result.M != first.M
+                or result.a != first.a
+                or result.thresh != first.thresh
+            ):
+                raise ValueError(
+                    "All PompMIFResult objects must have the same J, M, a, and thresh."
+                )
+            if (result.rw_sd is None) != (first.rw_sd is None) or (
+                result.rw_sd is not None and result.rw_sd != first.rw_sd
+            ):
+                raise ValueError("All PompMIFResult objects must have the same rw_sd.")
+
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
+        merged_traces = (
+            xr.concat(trace_arrays, dim="replicate")
+            if trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PompMIFResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_traces,
+            J=first.J,
+            M=first.M,
+            rw_sd=first.rw_sd,
+            a=first.a,
+            thresh=first.thresh,
+        )
 
 
 @dataclass
@@ -255,68 +491,73 @@ class PompTrainResult(PompBaseResult):
         """Set method to train."""
         self.method = "train"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces and optimizer settings."""
+        if not super().__eq__(other):
+            return False
+
+        scalar_fields = [
+            "optimizer",
+            "J",
+            "M",
+            "eta",
+            "alpha",
+            "thresh",
+            "ls",
+            "c",
+            "max_ls_itn",
+        ]
+        for name in scalar_fields:
+            if getattr(self, name) != getattr(other, name):
+                return False
+
+        # traces_da
+        if isinstance(self.traces_da, xr.DataArray) and isinstance(
+            other.traces_da, xr.DataArray
+        ):
+            if not self.traces_da.equals(other.traces_da):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.traces_da),
+                np.asarray(other.traces_da),
+                equal_nan=True,
+            ):
+                return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert train result to DataFrame."""
-        rows = []
-        param_names = list(self.theta[0].keys())
-        # traces_da is an xarray.DataArray with dims: (replicate, iteration, variable)
         traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if traces_da is None or not hasattr(traces_da, "sizes") or not traces_da.sizes:
             return pd.DataFrame()
-        n_reps = traces_da.sizes["replicate"]
-        last_idx = traces_da.sizes["iteration"] - 1
-        for rep in range(n_reps):
-            last_row = traces_da.sel(replicate=rep, iteration=last_idx)
-            logLik_val = float(last_row.sel(variable="logLik").values)
-            row = {"logLik": logLik_val, "se": np.nan}
-            for param in param_names:
-                row[param] = float(last_row.sel(variable=param).values)
-            rows.append(row)
-        return pd.DataFrame(rows)
+
+        df = (
+            traces_da.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+        )
+
+        param_names = list(self.theta[0].keys())
+        cols = ["logLik"] + param_names
+        df = pd.DataFrame(df[cols])
+        df.insert(1, "se", np.nan)
+
+        return df
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this train result."""
-        traces_da: xr.DataArray = self.traces_da
-        if traces_da is None or not hasattr(traces_da, "sizes"):
+        if self.traces_da is None:
             return pd.DataFrame()
 
-        n_rep = traces_da.sizes["replicate"]
-        n_iter = traces_da.sizes["iteration"]
-        variable_names = list(traces_da.coords["variable"].values)
-
-        traces_array = traces_da.values
-        loglik_idx = variable_names.index("logLik")
-
-        param_names = list(self.theta[0].keys())
-        param_indices = np.array([variable_names.index(p) for p in param_names])
-
-        # Vectorize index creation using meshgrid
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        return (
+            self.traces_da.to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+            .assign(method="train")
         )
-        replicate_list = rep_indices.flatten().tolist()
-        iteration_list = iter_indices.flatten().tolist()
-        method_list = ["train"] * (n_rep * n_iter)
-
-        # Vectorize loglik extraction
-        loglik_list = traces_array[:, :, loglik_idx].flatten().astype(float).tolist()
-
-        # Vectorize parameter extraction
-        param_columns = {}
-        for i, p in enumerate(param_names):
-            param_columns[p] = (
-                traces_array[:, :, param_indices[i]].flatten().astype(float).tolist()
-            )
-
-        data = {
-            "replicate": replicate_list,
-            "iteration": iteration_list,
-            "method": method_list,
-            "loglik": loglik_list,
-        }
-        data.update(param_columns)
-
-        return pd.DataFrame(data)
 
     def print_summary(self):
         """Print summary of train result."""
@@ -338,6 +579,66 @@ class PompTrainResult(PompBaseResult):
             df_sorted = df.sort_values("logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PompTrainResult") -> "PompTrainResult":
+        """Merge replications from multiple PompTrainResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PompTrainResult object must be provided.")
+        first = results[0]
+
+        scalar_fields = [
+            "optimizer",
+            "J",
+            "M",
+            "eta",
+            "alpha",
+            "thresh",
+            "ls",
+            "c",
+            "max_ls_itn",
+        ]
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError("All merged objects must be of type PompTrainResult.")
+            for field_name in scalar_fields:
+                if getattr(result, field_name) != getattr(first, field_name):
+                    raise ValueError(
+                        f"All PompTrainResult objects must have the same {field_name}."
+                    )
+
+        merged_theta = []
+        for result in results:
+            merged_theta.extend(result.theta)
+
+        trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
+        merged_traces = (
+            xr.concat(trace_arrays, dim="replicate")
+            if trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PompTrainResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_traces,
+            optimizer=first.optimizer,
+            J=first.J,
+            M=first.M,
+            eta=first.eta,
+            alpha=first.alpha,
+            thresh=first.thresh,
+            ls=first.ls,
+            c=first.c,
+            max_ls_itn=first.max_ls_itn,
+        )
+
 
 @dataclass
 class PanelPompPFilterResult(PanelPompBaseResult):
@@ -347,239 +648,142 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     J: int = 0
     reps: int = 1
     thresh: float = 0.0
+    theta: "PanelParameters | None" = None
+    CLL: xr.DataArray | None = None
+    ESS: xr.DataArray | None = None
+    filter_mean: xr.DataArray | None = None
+    prediction_mean: xr.DataArray | None = None
 
     def __post_init__(self):
         """Set method to pfilter."""
         self.method = "pfilter"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including panel log-likelihoods and diagnostics."""
+        if not super().__eq__(other):
+            return False
+
+        if self.J != other.J or self.reps != other.reps or self.thresh != other.thresh:
+            return False
+
+        if isinstance(self.logLiks, xr.DataArray) and isinstance(
+            other.logLiks, xr.DataArray
+        ):
+            if not self.logLiks.equals(other.logLiks):
+                return False
+        else:
+            if not np.array_equal(
+                np.asarray(self.logLiks),
+                np.asarray(other.logLiks),
+                equal_nan=True,
+            ):
+                return False
+
+        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if (a is None) != (b is None):
+                return False
+            if a is not None and b is not None:
+                if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                    if not a.equals(b):
+                        return False
+                else:
+                    if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                        return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
-        unit_names = list(self.logLiks.coords["unit"].values)
-        n_reps = self.logLiks.sizes["theta"]
-
-        logliks_array = self.logLiks.values
-
-        unit_logliks = np.array(
-            [
-                [
-                    logmeanexp(logliks_array[rep, unit_idx, :], ignore_nan=ignore_nan)
-                    for unit_idx in range(len(unit_names))
-                ]
-                for rep in range(n_reps)
-            ]
+        ll = np.apply_along_axis(
+            logmeanexp, -1, self.logLiks.values, ignore_nan=ignore_nan
+        )
+        df = (
+            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
+            .assign(
+                replicate=lambda x: range(len(x)),
+                **{"shared logLik": lambda x: x.sum(axis=1)},
+            )
+            .melt(
+                id_vars=["replicate", "shared logLik"],
+                var_name="unit",
+                value_name="unit logLik",
+            )
         )
 
-        shared_logliks = np.sum(unit_logliks, axis=1)
+        # Extract shared/unit_specific from theta
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
+            if shared_list:
+                s_params = pd.concat(shared_list, axis=1).T.reset_index(drop=True)
+                df = df.join(s_params, on="replicate")
 
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
+            if unit_specific_list:
+                u_params = (
+                    pd.concat(unit_specific_list, keys=range(len(unit_specific_list)))
+                    .stack()
+                    .unstack(level=1)
+                    .reset_index()
+                )
+                col_names = list(u_params.columns)
+                u_params.rename(
+                    columns={col_names[0]: "replicate", col_names[1]: "unit"},
+                    inplace=True,
+                )
+                df = df.merge(u_params, on=["replicate", "unit"], how="left")
 
-        if self.shared and len(self.shared) > 0:
-            shared_param_data = {}
-            for rep in range(min(n_reps, len(self.shared))):
-                shared_df = self.shared[rep]
-                if hasattr(shared_df, "values") and shared_df.shape[1] >= 1:
-                    shared_vals = shared_df.iloc[:, 0].values
-                    shared_names = (
-                        list(shared_df.columns) if hasattr(shared_df, "columns") else []
-                    )
-                    for i, param_name in enumerate(shared_names):
-                        if param_name not in shared_param_data:
-                            shared_param_data[param_name] = np.full(n_reps, np.nan)
-                        shared_param_data[param_name][rep] = (
-                            shared_vals[i] if i < len(shared_vals) else np.nan
-                        )
-
-            for param_name, values in shared_param_data.items():
-                data[param_name] = values[rep_indices]
-
-        if self.unit_specific and len(self.unit_specific) > 0:
-            unit_param_data = {}
-            for rep in range(min(n_reps, len(self.unit_specific))):
-                unit_df = self.unit_specific[rep]
-                if hasattr(unit_df, "columns"):
-                    unit_param_names = (
-                        list(unit_df.index) if hasattr(unit_df, "index") else []
-                    )
-                    for param_name in unit_param_names:
-                        if param_name not in unit_param_data:
-                            unit_param_data[param_name] = np.full(
-                                (n_reps, len(unit_names)), np.nan
-                            )
-                        for unit_idx, unit in enumerate(unit_names):
-                            if unit in unit_df.columns:
-                                unit_param_data[param_name][rep, unit_idx] = (
-                                    unit_df.loc[param_name, unit]
-                                )
-
-            for param_name, values in unit_param_data.items():
-                data[param_name] = values[rep_indices, unit_indices]
-
-        return pd.DataFrame(data)
+        return df
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this panel pfilter result."""
-        unit_names = list(self.logLiks.coords["unit"].values)
-        shared_list = self.shared
-        unit_list = self.unit_specific
+        """Return pfilter results formatted as traces (long format)."""
+        ll = np.apply_along_axis(logmeanexp, -1, self.logLiks.values)
+        reps = np.arange(len(ll))
 
-        n_theta = self.logLiks.sizes["theta"]
-        n_units = len(unit_names)
-
-        if n_theta == 0:
-            return pd.DataFrame()
-
-        logliks_array = self.logLiks.values
-        # Vectorize unit_avgs calculation
-        unit_avgs = np.array(
-            [
-                [logmeanexp(logliks_array[rep_idx, u_i, :]) for u_i in range(n_units)]
-                for rep_idx in range(n_theta)
-            ]
+        df_s = pd.DataFrame(
+            {"replicate": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
         )
-        shared_totals = np.sum(unit_avgs, axis=1)
 
-        # Get param names
-        shared_param_names = []
-        unit_param_names = []
-        if shared_list:
-            shared_df = shared_list[0]
-            if hasattr(shared_df, "index"):
-                shared_param_names = list(shared_df.index)
-        if unit_list:
-            unit_df = unit_list[0]
-            if hasattr(unit_df, "index"):
-                unit_param_names = list(unit_df.index)
+        df_u = (
+            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values, index=reps)
+            .melt(ignore_index=False, var_name="unit", value_name="logLik")
+            .reset_index()
+            .rename(columns={"index": "replicate"})
+        )
 
-        all_param_names = shared_param_names + unit_param_names
+        if self.theta is not None:
+            shared_list: list[pd.DataFrame] = []
+            unit_specific_list: list[pd.DataFrame] = []
+            for i in range(len(self.theta._theta)):
+                shared_df = self.theta._theta[i].get("shared")
+                unit_specific_df = self.theta._theta[i].get("unit_specific")
+                if shared_df is not None:
+                    shared_list.append(shared_df)
+                if unit_specific_df is not None:
+                    unit_specific_list.append(unit_specific_df)
 
-        shared_param_data = {}
-        if isinstance(shared_list, list):
-            for rep_idx in range(min(n_theta, len(shared_list))):
-                df = shared_list[rep_idx]
-                if hasattr(df, "index") and df.shape[1] >= 1:
-                    for name in df.index:
-                        if name not in shared_param_data:
-                            shared_param_data[name] = np.full(n_theta, np.nan)
-                        shared_param_data[name][rep_idx] = float(
-                            df.loc[name, df.columns[0]]
-                        )
+            if shared_list:
+                p_s = pd.concat(shared_list, axis=1).T.set_axis(reps, axis=0)
+                df_s = df_s.join(p_s, on="replicate")
+                df_u = df_u.join(p_s, on="replicate")
 
-        unit_param_data = {}
-        if isinstance(unit_list, list):
-            for rep_idx in range(min(n_theta, len(unit_list))):
-                df = unit_list[rep_idx]
-                if hasattr(df, "columns"):
-                    for name in df.index:
-                        if name not in unit_param_data:
-                            unit_param_data[name] = np.full((n_theta, n_units), np.nan)
-                        for unit_idx, unit in enumerate(unit_names):
-                            if str(unit) in df.columns:
-                                unit_param_data[name][rep_idx, unit_idx] = float(
-                                    df.loc[name, str(unit)]
-                                )
+            if unit_specific_list:
+                p_u = pd.concat(unit_specific_list, keys=reps).stack().unstack(level=1)
+                p_u.index.names = ["replicate", "unit"]
+                df_u = df_u.join(p_u, on=["replicate", "unit"])
 
-        # Vectorize row creation
-        # Create shared rows: one per replicate
-        rep_indices_shared = np.arange(n_theta)
-        # Create unit rows: n_units per replicate
-        rep_indices_units = np.repeat(np.arange(n_theta), n_units)
-        unit_indices = np.tile(np.arange(n_units), n_theta)
-
-        # Build shared rows data
-        shared_data = {
-            "replicate": rep_indices_shared.tolist(),
-            "unit": ["shared"] * n_theta,
-            "iteration": [0] * n_theta,
-            "method": ["pfilter"] * n_theta,
-            "logLik": shared_totals.astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in shared_param_data:
-                shared_data[name] = shared_param_data[name].astype(float).tolist()
-            else:
-                shared_data[name] = [float("nan")] * n_theta
-
-        # Build unit rows data
-        unit_data = {
-            "replicate": rep_indices_units.tolist(),
-            "unit": [str(unit_names[i]) for i in unit_indices],
-            "iteration": [0] * (n_theta * n_units),
-            "method": ["pfilter"] * (n_theta * n_units),
-            "logLik": unit_avgs[rep_indices_units, unit_indices].astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in unit_param_data:
-                unit_data[name] = (
-                    unit_param_data[name][rep_indices_units, unit_indices]
-                    .astype(float)
-                    .tolist()
-                )
-            elif name in shared_param_data:
-                unit_data[name] = (
-                    shared_param_data[name][rep_indices_units].astype(float).tolist()
-                )
-            else:
-                unit_data[name] = [float("nan")] * (n_theta * n_units)
-
-        # Combine shared and unit rows, interleaving by replicate
-        # Build interleaved structure directly using numpy for efficiency
-        n_total = n_theta * (1 + n_units)  # 1 shared + n_units per replicate
-
-        # Create interleaved structure: for each rep, [shared, unit1, unit2, ...]
-        # Shared positions: 0, 1+n_units, 2*(1+n_units), ...
-        shared_positions = np.arange(0, n_total, 1 + n_units)
-        # Unit positions: everything else
-        unit_positions = np.setdiff1d(np.arange(n_total), shared_positions)
-
-        # Build combined data dict directly
-        combined_data = {}
-
-        # Handle "unit" column specially
-        shared_units = np.array(["shared"] * n_theta, dtype=object)
-        unit_units = np.array([str(unit_names[i]) for i in unit_indices], dtype=object)
-        combined_units = np.empty(n_total, dtype=object)
-        combined_units[shared_positions] = shared_units
-        combined_units[unit_positions] = unit_units
-        combined_data["unit"] = combined_units.tolist()
-
-        # Handle other columns
-        for col in ["replicate", "iteration", "method", "logLik"]:
-            shared_vals = np.array(shared_data[col])
-            unit_vals = np.array(unit_data[col])
-            combined_vals = np.empty(n_total, dtype=shared_vals.dtype)
-            combined_vals[shared_positions] = shared_vals
-            combined_vals[unit_positions] = unit_vals
-            combined_data[col] = combined_vals.tolist()
-
-        # Handle parameter columns
-        for name in all_param_names:
-            if name in shared_param_data:
-                shared_vals = shared_param_data[name]
-            else:
-                shared_vals = np.full(n_theta, np.nan)
-
-            if name in unit_param_data:
-                unit_vals = unit_param_data[name][rep_indices_units, unit_indices]
-            elif name in shared_param_data:
-                unit_vals = shared_param_data[name][rep_indices_units]
-            else:
-                unit_vals = np.full(n_theta * n_units, np.nan)
-
-            combined_vals = np.empty(n_total, dtype=float)
-            combined_vals[shared_positions] = shared_vals.astype(float)
-            combined_vals[unit_positions] = unit_vals.astype(float)
-            combined_data[name] = combined_vals.tolist()
-
-        df = pd.DataFrame(combined_data)
-        return df
+        return pd.concat([df_s, df_u], ignore_index=True).assign(
+            method="pfilter", iteration=1
+        )
 
     def print_summary(self):
         """Print summary of panel pfilter result."""
@@ -594,6 +798,68 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PanelPompPFilterResult") -> "PanelPompPFilterResult":
+        """Merge replications from multiple PanelPompPFilterResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError(
+                "At least one PanelPompPFilterResult object must be provided."
+            )
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError(
+                    "All merged objects must be of type PanelPompPFilterResult."
+                )
+            if (
+                result.J != first.J
+                or result.reps != first.reps
+                or result.thresh != first.thresh
+            ):
+                raise ValueError(
+                    "All PanelPompPFilterResult objects must have the same J, reps, and thresh."
+                )
+
+        merged_theta = (
+            PanelParameters.merge(*[r.theta for r in results if r.theta is not None])
+            if any(r.theta is not None for r in results)
+            else None
+        )
+
+        logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
+        merged_logLiks = (
+            xr.concat(logLik_arrays, dim="theta") if logLik_arrays else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
+            arrays = [
+                getattr(r, name)
+                for r in results
+                if getattr(r, name) is not None and getattr(r, name).size > 0
+            ]
+            return xr.concat(arrays, dim="theta") if arrays else None  # type: ignore[return-value]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PanelPompPFilterResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            logLiks=merged_logLiks,
+            J=first.J,
+            reps=first.reps,
+            thresh=first.thresh,
+            CLL=merge_optional_diagnostic("CLL"),
+            ESS=merge_optional_diagnostic("ESS"),
+            filter_mean=merge_optional_diagnostic("filter_mean"),
+            prediction_mean=merge_optional_diagnostic("prediction_mean"),
+        )
+
 
 @dataclass
 class PanelPompMIFResult(PanelPompBaseResult):
@@ -602,6 +868,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
     shared_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    theta: "PanelParameters | None" = None
     J: int = 0
     M: int = 0
     rw_sd: RWSigma | None = None
@@ -613,190 +880,97 @@ class PanelPompMIFResult(PanelPompBaseResult):
         """Set method to mif."""
         self.method = "mif"
 
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces, log-likelihoods, and settings."""
+        if not super().__eq__(other):
+            return False
+
+        if (
+            self.J != other.J
+            or self.M != other.M
+            or self.a != other.a
+            or self.thresh != other.thresh
+            or self.block != other.block
+        ):
+            return False
+
+        # rw_sd comparison
+        if (self.rw_sd is None) != (other.rw_sd is None):
+            return False
+        if self.rw_sd is not None and self.rw_sd != other.rw_sd:
+            return False
+
+        # shared_traces, unit_traces, logLiks
+        for name in ["shared_traces", "unit_traces", "logLiks"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                if not a.equals(b):
+                    return False
+            else:
+                if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                    return False
+
+        return True
+
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel mif result to DataFrame."""
-        shared_da = self.shared_traces
-        unit_da = self.unit_traces
+        s_df = (
+            self.shared_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"logLik": "shared logLik"})
+        )
 
-        all_shared_vars = list(shared_da.coords["variable"].values)
-        shared_names = all_shared_vars[1:] if len(all_shared_vars) > 1 else []
+        u_df = (
+            self.unit_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"unitLogLik": "unit logLik"})
+        )
 
-        all_unit_vars = list(unit_da.coords["variable"].values)
-        unit_names = list(unit_da.coords["unit"].values)
-        n_reps = shared_da.sizes["replicate"]
+        # Avoid duplicate "iteration" column on join; keep the one from u_df
+        if "iteration" in s_df.columns:
+            s_df = s_df.drop(columns=["iteration"])
 
-        shared_final_values = shared_da.isel(iteration=-1).values
-        unit_final_values = unit_da.isel(iteration=-1).values
+        u_df = u_df.join(s_df, on="replicate").reset_index()
 
-        shared_logliks = self.logLiks[:, 0].values
-        unit_logliks = self.logLiks[:, 1:].values
+        cols = ["replicate", "iteration", "shared logLik", "unit", "unit logLik"] + [
+            c
+            for c in u_df.columns
+            if c
+            not in {"replicate", "iteration", "shared logLik", "unit", "unit logLik"}
+        ]
+        u_df = u_df[cols]
 
-        rep_indices = np.repeat(np.arange(n_reps), len(unit_names))
-        unit_indices = np.tile(np.arange(len(unit_names)), n_reps)
+        assert isinstance(u_df, pd.DataFrame)
 
-        data = {
-            "replicate": rep_indices,
-            "unit": [unit_names[i] for i in unit_indices],
-            "shared logLik": shared_logliks[rep_indices],
-            "unit logLik": unit_logliks[rep_indices, unit_indices],
-        }
-
-        if shared_names:
-            shared_param_values = shared_final_values[:, 1:]
-            for i, param_name in enumerate(shared_names):
-                data[param_name] = shared_param_values[rep_indices, i]
-
-        unit_param_values = unit_final_values[:, 1:, :]
-        for i, param_name in enumerate(all_unit_vars[1:]):
-            data[param_name] = unit_param_values[rep_indices, i, unit_indices]
-
-        return pd.DataFrame(data)
+        return u_df
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this panel mif result."""
-        shared_da = self.shared_traces
-        unit_da = self.unit_traces
-        unit_names = list(unit_da.coords["unit"].values)
-        shared_vars = list(shared_da.coords["variable"].values)
-        unit_vars = list(unit_da.coords["variable"].values)
-
-        n_rep = shared_da.sizes["replicate"]
-        n_iter = shared_da.sizes["iteration"]
-        n_units = len(unit_names)
-
-        if n_rep == 0 or n_iter == 0:
+        """Return panel mif results formatted as traces (long format)."""
+        if self.shared_traces.size == 0:
             return pd.DataFrame()
 
-        shared_values = shared_da.values
-        unit_values = unit_da.values
-
-        shared_param_indices = {name: i for i, name in enumerate(shared_vars[1:])}
-        unit_param_indices = {name: i for i, name in enumerate(unit_vars[1:])}
-
-        shared_param_names = list(shared_param_indices.keys())
-        unit_param_names = list(unit_param_indices.keys())
-        all_param_names = shared_param_names + unit_param_names
-
-        # Vectorize index creation
-        rep_indices, iter_indices = np.meshgrid(
-            np.arange(n_rep), np.arange(n_iter), indexing="ij"
+        df_s = (
+            self.shared_traces.to_dataset(dim="variable").to_dataframe().reset_index()
         )
-        rep_indices_flat = rep_indices.flatten()
-        iter_indices_flat = iter_indices.flatten()
+        df_s["unit"] = "shared"
 
-        # Extract shared logliks and params vectorized
-        shared_logliks = shared_values[:, :, 0].flatten()
-        shared_param_arrays = {}
-        for name in shared_param_names:
-            idx = shared_param_indices[name] + 1
-            shared_param_arrays[name] = shared_values[:, :, idx].flatten()
+        df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
+        df_u = df_u.rename(columns={"unitLogLik": "logLik"})
 
-        # Extract unit logliks and params vectorized
-        unit_logliks = unit_values[:, :, 0, :].reshape(n_rep * n_iter, n_units)
-        unit_param_arrays = {}
-        for name in unit_param_names:
-            idx = unit_param_indices[name] + 1
-            unit_param_arrays[name] = unit_values[:, :, idx, :].reshape(
-                n_rep * n_iter, n_units
+        meta_cols = {"replicate", "iteration", "logLik", "unit"}
+        shared_params = [c for c in df_s.columns if c not in meta_cols]
+
+        if shared_params:
+            df_u = df_u.merge(
+                df_s[["replicate", "iteration"] + shared_params],
+                on=["replicate", "iteration"],
+                how="left",
             )
 
-        # Build shared rows
-        shared_data = {
-            "replicate": rep_indices_flat.tolist(),
-            "unit": ["shared"] * (n_rep * n_iter),
-            "iteration": iter_indices_flat.tolist(),
-            "method": ["mif"] * (n_rep * n_iter),
-            "logLik": shared_logliks.astype(float).tolist(),
-        }
-        for name in all_param_names:
-            if name in shared_param_arrays:
-                shared_data[name] = shared_param_arrays[name].astype(float).tolist()
-            else:
-                shared_data[name] = [float("nan")] * (n_rep * n_iter)
-
-        # Build unit rows
-        # Repeat each (rep, iter) combination for each unit
-        rep_indices_units = np.repeat(rep_indices_flat, n_units)
-        iter_indices_units = np.repeat(iter_indices_flat, n_units)
-        unit_indices_flat = np.tile(np.arange(n_units), n_rep * n_iter)
-
-        unit_data = {
-            "replicate": rep_indices_units.tolist(),
-            "unit": [str(unit_names[i]) for i in unit_indices_flat],
-            "iteration": iter_indices_units.tolist(),
-            "method": ["mif"] * (n_rep * n_iter * n_units),
-            "logLik": unit_logliks.flatten().astype(float).tolist(),
-        }
-
-        # Map flat indices back to (rep*iter, unit) for unit params
-        flat_to_repiter = np.repeat(np.arange(n_rep * n_iter), n_units)
-
-        for name in all_param_names:
-            if name in unit_param_arrays:
-                unit_data[name] = (
-                    unit_param_arrays[name].flatten().astype(float).tolist()
-                )
-            elif name in shared_param_arrays:
-                # Broadcast shared params to units
-                unit_data[name] = (
-                    shared_param_arrays[name][flat_to_repiter].astype(float).tolist()
-                )
-            else:
-                unit_data[name] = [float("nan")] * (n_rep * n_iter * n_units)
-
-        # Combine shared and unit rows, interleaving by (rep, iter)
-        # Build interleaved structure directly using numpy for efficiency
-        n_total = n_rep * n_iter * (1 + n_units)  # 1 shared + n_units per (rep, iter)
-
-        # Create interleaved structure: for each (rep, iter), [shared, unit1, unit2, ...]
-        # Shared positions: 0, 1+n_units, 2*(1+n_units), ...
-        shared_positions = np.arange(0, n_total, 1 + n_units)
-        # Unit positions: everything else
-        unit_positions = np.setdiff1d(np.arange(n_total), shared_positions)
-
-        # Build combined data dict directly
-        combined_data = {}
-
-        # Handle "unit" column specially
-        shared_units = np.array(["shared"] * (n_rep * n_iter), dtype=object)
-        unit_units = np.array(
-            [str(unit_names[i]) for i in unit_indices_flat], dtype=object
-        )
-        combined_units = np.empty(n_total, dtype=object)
-        combined_units[shared_positions] = shared_units
-        combined_units[unit_positions] = unit_units
-        combined_data["unit"] = combined_units.tolist()
-
-        # Handle other columns
-        for col in ["replicate", "iteration", "method", "logLik"]:
-            shared_vals = np.array(shared_data[col])
-            unit_vals = np.array(unit_data[col])
-            combined_vals = np.empty(n_total, dtype=shared_vals.dtype)
-            combined_vals[shared_positions] = shared_vals
-            combined_vals[unit_positions] = unit_vals
-            combined_data[col] = combined_vals.tolist()
-
-        # Handle parameter columns
-        for name in all_param_names:
-            if name in shared_param_arrays:
-                shared_vals = shared_param_arrays[name]
-            else:
-                shared_vals = np.full(n_rep * n_iter, np.nan)
-
-            if name in unit_param_arrays:
-                unit_vals = unit_param_arrays[name].flatten()
-            elif name in shared_param_arrays:
-                unit_vals = shared_param_arrays[name][flat_to_repiter]
-            else:
-                unit_vals = np.full(n_rep * n_iter * n_units, np.nan)
-
-            combined_vals = np.empty(n_total, dtype=float)
-            combined_vals[shared_positions] = shared_vals.astype(float)
-            combined_vals[unit_positions] = unit_vals.astype(float)
-            combined_data[name] = combined_vals.tolist()
-
-        df = pd.DataFrame(combined_data)
-        return df
+        return pd.concat([df_s, df_u], ignore_index=True).assign(method="mif")
 
     def print_summary(self):
         """Print summary of panel mif result."""
@@ -813,16 +987,116 @@ class PanelPompMIFResult(PanelPompBaseResult):
             df_sorted = df.sort_values("shared logLik", ascending=False).head(5)
             print(df_sorted.to_string())
 
+    @staticmethod
+    def merge(*results: "PanelPompMIFResult") -> "PanelPompMIFResult":
+        """Merge replications from multiple PanelPompMIFResult objects into a single object."""
+        if len(results) == 0:
+            raise ValueError("At least one PanelPompMIFResult object must be provided.")
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError(
+                    "All merged objects must be of type PanelPompMIFResult."
+                )
+            if (
+                result.J != first.J
+                or result.M != first.M
+                or result.a != first.a
+                or result.thresh != first.thresh
+                or result.block != first.block
+            ):
+                raise ValueError(
+                    "All PanelPompMIFResult objects must have the same J, M, a, thresh, and block."
+                )
+            if (result.rw_sd is None) != (first.rw_sd is None) or (
+                result.rw_sd is not None and result.rw_sd != first.rw_sd
+            ):
+                raise ValueError(
+                    "All PanelPompMIFResult objects must have the same rw_sd."
+                )
+
+        merged_theta = (
+            PanelParameters.merge(*[r.theta for r in results if r.theta is not None])
+            if any(r.theta is not None for r in results)
+            else None
+        )
+
+        shared_trace_arrays = [
+            r.shared_traces for r in results if r.shared_traces.size > 0
+        ]
+        merged_shared_traces = (
+            xr.concat(shared_trace_arrays, dim="replicate")
+            if shared_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        unit_trace_arrays = [r.unit_traces for r in results if r.unit_traces.size > 0]
+        merged_unit_traces = (
+            xr.concat(unit_trace_arrays, dim="replicate")
+            if unit_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
+        merged_logLiks = (
+            xr.concat(logLik_arrays, dim="replicate")
+            if logLik_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PanelPompMIFResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            shared_traces=merged_shared_traces,
+            unit_traces=merged_unit_traces,
+            logLiks=merged_logLiks,
+            J=first.J,
+            M=first.M,
+            rw_sd=first.rw_sd,
+            a=first.a,
+            thresh=first.thresh,
+            block=first.block,
+        )
+
 
 class ResultsHistory:
     """Container class for managing result history."""
 
+    _entries: list[BaseResult] = field(default_factory=list)
+
     def __init__(self):
-        self._entries: list[BaseResult] = []
+        self._entries = []
 
     def add(self, result: BaseResult):
         """Add a result entry."""
         self._entries.append(result)
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """
+        Structural equality for ResultsHistory.
+
+        Two histories are equal if they contain the same sequence of result
+        objects (compared via their own __eq__ implementations).
+        """
+        if not isinstance(other, type(self)):
+            return False
+
+        if len(self._entries) != len(other._entries):
+            return False
+
+        for a, b in zip(self._entries, other._entries):
+            if a != b:
+                return False
+
+        return True
 
     def __getitem__(self, index):
         """Get result by index."""
@@ -831,6 +1105,10 @@ class ResultsHistory:
     def __len__(self):
         """Get number of entries."""
         return len(self._entries)
+
+    def __iter__(self):
+        """Iterate over entries."""
+        return iter(self._entries)
 
     def clear(self):
         """Clear all entries from the history."""
@@ -841,17 +1119,6 @@ class ResultsHistory:
         if not self._entries:
             raise ValueError("History is empty")
         return self._entries[-1]
-
-    def get_best_run(self) -> BaseResult | None:
-        """Find run with highest log-likelihood."""
-        if not self._entries:
-            return None
-        return max(
-            self._entries,
-            key=lambda x: getattr(
-                x, "total_log_lik", getattr(x, "best_log_lik", -float("inf"))
-            ),
-        )
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """Get results DataFrame for entry at index."""
@@ -872,74 +1139,50 @@ class ResultsHistory:
         return df
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame from entire result history."""
+        """
+        Return traces DataFrame from entire result history.
+
+        Handles continuous iteration counting across chained runs
+        (e.g., MIF -> MIF) and aligns checkpoints (PFilter).
+        """
         if not self._entries:
             return pd.DataFrame()
 
         all_dfs = []
-        global_iters: dict[int, int] = {}  # replicate -> current global iteration
+        global_iter_counters: dict[int, int] = {}
 
         for res in self._entries:
-            # Check if the result class has a traces() method (not just a traces attribute)
-            traces_method = getattr(type(res), "traces", None)
-            if not callable(traces_method):
+            if not hasattr(res, "traces"):
                 continue
-            df = res.traces()  # type: ignore[attr-defined]
+            df = res.traces()  # pyright: ignore[reportAttributeAccessIssue]
             if df.empty:
                 continue
 
-            # Adjust iteration numbers to be global (vectorized)
-            rep_indices = df["replicate"].values.astype(int)
-            local_iters = df["iteration"].values.astype(int)
+            is_estimation = res.method in ["mif", "train"]
 
-            # Initialize global_iters for any new replicates
-            unique_reps = np.unique(rep_indices)
-            for rep_idx in unique_reps:
-                if rep_idx not in global_iters:
-                    global_iters[rep_idx] = 0
+            unique_reps = df["replicate"].unique()
+            offsets_map = {r: global_iter_counters.get(r, 0) for r in unique_reps}
 
-            # Vectorized processing based on result type
-            if isinstance(res, (PompMIFResult, PompTrainResult, PanelPompMIFResult)):
-                # For mif/train: skip starting parameters beyond the first round
-                keep_mask = np.ones(len(df), dtype=bool)
-                new_iterations = np.zeros(len(df), dtype=int)
+            row_offsets = df["replicate"].map(offsets_map)
 
-                for rep_idx in unique_reps:
-                    rep_mask = rep_indices == rep_idx
-                    local_iters_rep = local_iters[rep_mask]
-                    rep_indices_in_df = np.where(rep_mask)[0]
+            if is_estimation:
+                mask = (df["iteration"] > 0) | (row_offsets == 0)
+                df = df.loc[mask].copy()
 
-                    # Skip starting parameters beyond first round
-                    if global_iters[rep_idx] == 0:
-                        # Keep all rows for first round
-                        # Update iterations sequentially
-                        for i, idx_in_df in enumerate(rep_indices_in_df):
-                            new_iterations[idx_in_df] = global_iters[rep_idx]
-                            global_iters[rep_idx] += 1
-                    else:
-                        # Skip rows with local_iter == 0 (starting params)
-                        skip_mask = local_iters_rep == 0
-                        keep_mask[rep_indices_in_df[skip_mask]] = False
-                        # Update iterations for kept rows
-                        kept_mask = ~skip_mask
-                        for i, idx_in_df in enumerate(rep_indices_in_df[kept_mask]):
-                            new_iterations[idx_in_df] = global_iters[rep_idx]
-                            global_iters[rep_idx] += 1
+                row_offsets = df["replicate"].map(offsets_map)
 
-                df = df[keep_mask].copy()
-                df["iteration"] = new_iterations[keep_mask]
+                df["iteration"] = df["iteration"] + row_offsets
 
-            elif isinstance(res, (PompPFilterResult, PanelPompPFilterResult)):
-                # For pfilter, use the last global iteration (or 1 if first)
-                new_iterations = np.zeros(len(df), dtype=int)
-                for rep_idx in unique_reps:
-                    rep_mask = rep_indices == rep_idx
-                    last_iter = global_iters.get(rep_idx, 1) - 1
-                    new_iter = last_iter if last_iter > 0 else 1
-                    new_iterations[rep_mask] = new_iter
+                new_maxes = df.groupby("replicate")["iteration"].max()
+                for r, mx in new_maxes.items():
+                    global_iter_counters[r] = int(mx)
 
+            else:
+                # LOGIC: PFilter is a snapshot.
+                # Plot it at the current "end" of the timeline.
                 df = df.copy()
-                df["iteration"] = new_iterations
+                df["iteration"] = row_offsets
+                # We do NOT increment the global_iter_counters here
 
             if not df.empty:
                 all_dfs.append(df)
@@ -947,21 +1190,22 @@ class ResultsHistory:
         if not all_dfs:
             return pd.DataFrame()
 
-        # Concatenate all DataFrames
         result_df = pd.concat(all_dfs, ignore_index=True)
 
-        # Sort by iteration and replicate
+        sort_cols = ["replicate", "iteration"]
         if "unit" in result_df.columns:
-            # Panel results: sort by replicate, unit, iteration
-            result_df = result_df.sort_values(
-                ["replicate", "unit", "iteration"]
-            ).reset_index(drop=True)
-        else:
-            # Regular results: sort by iteration, replicate
-            result_df = result_df.sort_values(["iteration", "replicate"]).reset_index(
-                drop=True
-            )
+            sort_cols.insert(1, "unit")
 
+        result_df = result_df.sort_values(sort_cols).reset_index(drop=True)
+
+        canonical_first = ["replicate", "unit", "iteration", "method", "logLik"]
+        existing_first = [c for c in canonical_first if c in result_df.columns]
+        remaining = [c for c in result_df.columns if c not in existing_first]
+        result_df = result_df[existing_first + remaining]
+
+        assert isinstance(result_df, pd.DataFrame), (
+            "result_df is not a DataFrame; something went wrong"
+        )
         return result_df
 
     def print_summary(self):
@@ -976,3 +1220,44 @@ class ResultsHistory:
             print(f"Results entry {idx}:")
             entry.print_summary()
             print()
+
+    @staticmethod
+    def merge(*histories: "ResultsHistory") -> "ResultsHistory":
+        """Merge replications from multiple ResultsHistory objects into a single object."""
+        if len(histories) == 0:
+            raise ValueError("At least one ResultsHistory object must be provided.")
+
+        # Check if all histories have the same number of entries
+        entry_lengths = [len(h._entries) for h in histories]
+        if len(set(entry_lengths)) != 1:
+            raise ValueError(
+                f"Cannot merge ResultsHistory objects: differing number of entries ({entry_lengths})"
+            )
+
+        merged_history = ResultsHistory()
+
+        for i in range(entry_lengths[0]):
+            results_at_position = []
+            for history in histories:
+                if i < len(history._entries):
+                    results_at_position.append(history._entries[i])
+
+            if not results_at_position:
+                continue
+
+            first_result = results_at_position[0]
+            result_type = type(first_result)
+            if not all(isinstance(r, result_type) for r in results_at_position):
+                raise ValueError(
+                    f"Results at position {i} have different types and cannot be merged."
+                )
+
+            if hasattr(result_type, "merge"):
+                merged_result = result_type.merge(*results_at_position)
+                merged_history.add(merged_result)
+            else:
+                raise ValueError(
+                    f"Result type {result_type} does not have a merge method."
+                )
+
+        return merged_history

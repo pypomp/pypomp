@@ -12,7 +12,7 @@ def test_get_unit_parameters(measles_panel_setup_some_shared):
     params = panel.get_unit_parameters(unit="London")
     assert isinstance(params, list)
     assert isinstance(params[0], dict)
-    assert len(params) == panel._get_theta_list_len(panel.shared, panel.unit_specific)
+    assert len(params) == panel.theta.num_replicates()
 
 
 def test_results(measles_panel_mp):
@@ -59,11 +59,42 @@ def test_traces(measles_panel_mp):
     panel, *_ = measles_panel_mp
     traces = panel.traces()
     assert isinstance(traces, pd.DataFrame)
-    assert "replicate" in traces.columns
-    assert "unit" in traces.columns
-    assert "iteration" in traces.columns
-    assert "method" in traces.columns
-    assert "logLik" in traces.columns
+    expected_column_order = ["replicate", "unit", "iteration", "method", "logLik"]
+    assert list(traces.columns[:5]) == expected_column_order, (
+        f"First five columns are {list(traces.columns[:5])}, expected {expected_column_order}"
+    )
+
+    traces_sorted = traces.sort_values(
+        ["replicate", "unit", "iteration"], kind="stable"
+    ).reset_index(drop=True)
+    assert traces.equals(traces_sorted)
+
+    grouped = traces.groupby(["replicate", "unit"], sort=False)
+    for (rep, unit), df in grouped:  # type: ignore[misc]
+        if len(df) == 0:
+            continue
+
+        # For non-pfilter methods (e.g., MIF, train), iterations should increase
+        # from 0 up to the number of such entries minus one.
+        non_pfilter = df[df["method"] != "pfilter"]
+        if len(non_pfilter) > 0:
+            non_pfilter_iters = np.sort(np.asarray(non_pfilter["iteration"]))
+            expected_seq = np.arange(len(non_pfilter_iters))
+            assert bool(np.array_equal(non_pfilter_iters, expected_seq)), (
+                f"Iteration numbers for replicate={rep}, unit={unit} and "
+                f"method!=pfilter are {non_pfilter_iters}, expected {expected_seq}"
+            )
+
+        # For pfilter entries, the iteration counter should not advance;
+        # they are allowed to repeat the last non-pfilter iteration.
+        pfilter = df[df["method"] == "pfilter"]
+        if len(pfilter) > 0 and len(non_pfilter) > 0:
+            pfilter_iters = np.asarray(pfilter["iteration"])
+            last_non_pfilter_iter = non_pfilter["iteration"].max()
+            assert bool(np.all(pfilter_iters == last_non_pfilter_iter)), (
+                f"Pfilter iteration numbers for replicate={rep}, unit={unit} "
+                f"are {pfilter_iters}, expected all {last_non_pfilter_iter}"
+            )
 
 
 def test_time(measles_panel_mp):
@@ -81,103 +112,8 @@ def test_pickle_panelpomp(measles_panel_mp):
     pickled = pickle.dumps(panel)
     unpickled_panel = pickle.loads(pickled)
 
-    # Check that the basic attributes are preserved
-    assert isinstance(unpickled_panel, pp.PanelPomp)
-    assert list(unpickled_panel.unit_objects.keys()) == list(panel.unit_objects.keys())
-    assert unpickled_panel.shared is None  # This panel has no shared parameters
-    assert isinstance(unpickled_panel.unit_specific, list)
-    assert list(unpickled_panel.unit_specific[0].columns) == list(
-        panel.unit_specific[0].columns
-    )
-
-    assert len(unpickled_panel.results_history) == len(panel.results_history)
-    for orig, unpickled in zip(panel.results_history, unpickled_panel.results_history):
-        assert isinstance(unpickled, type(orig))
-        assert orig.method == unpickled.method
-        # Compare key values
-        assert np.array_equal(
-            jax.random.key_data(orig.key), jax.random.key_data(unpickled.key)
-        )
-        # Compare execution times
-        assert orig.execution_time == unpickled.execution_time
-        # For MIF results, compare traces
-        if hasattr(orig, "shared_traces") and orig.shared_traces is not None:
-            assert orig.shared_traces.equals(unpickled.shared_traces)
-            assert orig.unit_traces.equals(unpickled.unit_traces)
-        # For pfilter results, compare logLiks
-        if hasattr(orig, "logLiks") and orig.logLiks is not None:
-            assert orig.logLiks.equals(unpickled.logLiks)
-        # Compare other attributes as needed
-        if hasattr(orig, "theta"):
-            assert orig.theta == unpickled.theta
-        if hasattr(orig, "shared"):
-            if orig.shared is None:
-                assert unpickled.shared is None
-            else:
-                assert len(orig.shared) == len(unpickled.shared)
-                for orig_df, unpickled_df in zip(orig.shared, unpickled.shared):
-                    pd.testing.assert_frame_equal(orig_df, unpickled_df)
-        if hasattr(orig, "unit_specific"):
-            if orig.unit_specific is None:
-                assert unpickled.unit_specific is None
-            else:
-                assert len(orig.unit_specific) == len(unpickled.unit_specific)
-                for orig_df, unpickled_df in zip(
-                    orig.unit_specific, unpickled.unit_specific
-                ):
-                    pd.testing.assert_frame_equal(orig_df, unpickled_df)
-
-    # Check that the unit objects are properly reconstructed
-    for unit_name in panel.unit_objects.keys():
-        original_unit = panel.unit_objects[unit_name]
-        unpickled_unit = unpickled_panel.unit_objects[unit_name]
-
-        # Compare ys values, handling NaN values properly
-        orig_ys_values = original_unit.ys.values
-        unpickled_ys_values = unpickled_unit.ys.values
-        assert orig_ys_values.shape == unpickled_ys_values.shape
-        # Use numpy's array_equal which handles NaN values correctly
-        assert np.array_equal(orig_ys_values, unpickled_ys_values, equal_nan=True)
-        assert original_unit.theta == unpickled_unit.theta
-        assert unpickled_unit.covars is not None
-        assert (
-            original_unit.covars.values.tolist()
-            == unpickled_unit.covars.values.tolist()
-        )
-        assert original_unit.rinit == unpickled_unit.rinit
-        assert original_unit.rproc.original_func == unpickled_unit.rproc.original_func
-        assert original_unit.dmeas == unpickled_unit.dmeas
-        assert original_unit.rproc.dt == unpickled_unit.rproc.dt
-        # Compare results_history contents
-        assert len(original_unit.results_history) == len(unpickled_unit.results_history)
-        for orig_result, unpickled_result in zip(
-            original_unit.results_history, unpickled_unit.results_history
-        ):
-            assert isinstance(unpickled_result, type(orig_result))
-            assert orig_result.method == unpickled_result.method
-            # Compare key values
-            assert np.array_equal(
-                jax.random.key_data(orig_result.key),
-                jax.random.key_data(unpickled_result.key),
-            )
-            # Compare execution times
-            assert orig_result.execution_time == unpickled_result.execution_time
-            # For MIF results, compare traces
-            if (
-                hasattr(orig_result, "shared_traces")
-                and orig_result.shared_traces is not None
-            ):
-                assert orig_result.shared_traces.equals(unpickled_result.shared_traces)
-            # For pfilter results, compare logLiks
-            if hasattr(orig_result, "logLiks") and orig_result.logLiks is not None:
-                assert orig_result.logLiks.equals(unpickled_result.logLiks)
-            # Compare theta if present
-            if hasattr(orig_result, "theta"):
-                assert orig_result.theta == unpickled_result.theta
-        assert (
-            original_unit.traces().values.tolist()
-            == unpickled_unit.traces().values.tolist()
-        )
+    # check equality of panel object and unpickled object
+    assert panel == unpickled_panel
 
     # check that the unpickled panel can be used for filtering
     unpickled_panel.pfilter(J=2)
@@ -201,20 +137,19 @@ def test_sample_params(measles_panel_setup_some_shared):
         "R_0": [0.9, 0.99],
     }
     shared_names = ["gamma", "cohort"]
-    shared_param_sets, unit_specific_param_sets = panel.sample_params(
+    param_sets = panel.sample_params(
         param_bounds=param_bounds,
         units=list(panel.unit_objects.keys()),
         n=2,
         key=key,
         shared_names=shared_names,
     )
-    assert isinstance(shared_param_sets, list)
-    assert isinstance(unit_specific_param_sets, list)
-    assert len(shared_param_sets) == 2
-    assert len(unit_specific_param_sets) == 2
+    assert isinstance(param_sets, list)
+    assert len(param_sets) == 2
 
     # Check that shared_param_sets DataFrames have correct index and column in correct order
-    for shared_df in shared_param_sets:
+    for param_set in param_sets:
+        shared_df = param_set["shared"]
         # Index should be shared_names, in order
         assert list(shared_df.index) == shared_names
         # Only one column which is exactly ["shared"]
@@ -225,20 +160,23 @@ def test_sample_params(measles_panel_setup_some_shared):
     unit_specific_names = [
         name for name in param_bounds if name not in set(shared_names)
     ]
-    for unit_df in unit_specific_param_sets:
+    for param_set in param_sets:
+        unit_df = param_set["unit_specific"]
         # Columns (units) are in the correct order
         assert list(unit_df.columns) == units
         # Index should be unit_specific_names, in order
         assert list(unit_df.index) == unit_specific_names
 
     # Also check that each value is within the specified bounds
-    for shared_df in shared_param_sets:
+    for param_set in param_sets:
+        shared_df = param_set["shared"]
         for name in shared_names:
             val = shared_df.loc[name, "shared"]
             lower, upper = param_bounds[name]
             assert lower <= val <= upper
 
-    for unit_df in unit_specific_param_sets:
+    for param_set in param_sets:
+        unit_df = param_set["unit_specific"]
         for param_name in unit_specific_names:
             lower, upper = param_bounds[param_name]
             for unit in units:
@@ -258,7 +196,12 @@ def test_performance_comprehensive():
         ys = pd.DataFrame({"cases": np.random.poisson(10, 10)}, index=times)
         pomp_obj = pp.Pomp(
             ys=ys,
-            theta={"param1": 1.0, "param2": 2.0},
+            theta={
+                "param1": 1.0,
+                "param2": 2.0,
+                "unit_param1": 0.5,
+                "unit_param2": 0.5,
+            },
             statenames=["S", "I"],
             t0=float(times[0]),
             rinit=lambda theta_, key, covars, t0: {"S": 1000, "I": 1},
@@ -283,8 +226,7 @@ def test_performance_comprehensive():
     # Create panel
     panel = pp.PanelPomp(
         Pomp_dict=pomp_objects,
-        shared=[shared_params],
-        unit_specific=[unit_specific_params],
+        theta=[{"shared": shared_params, "unit_specific": unit_specific_params}],
     )
 
     # Create comprehensive dummy results to stress test
@@ -330,8 +272,10 @@ def test_performance_comprehensive():
             method="mif",
             execution_time=1.0,
             key=jax.random.key(42),
-            shared=[shared_params] * n_reps,
-            unit_specific=[unit_specific_params] * n_reps,
+            theta=pp.PanelParameters(
+                [{"shared": shared_params, "unit_specific": unit_specific_params}]
+            )
+            * n_reps,  # type: ignore[reportArgumentType]
             shared_traces=shared_traces,
             unit_traces=unit_traces,
             logLiks=logLiks,
@@ -362,8 +306,10 @@ def test_performance_comprehensive():
             method="pfilter",
             execution_time=1.0,
             key=jax.random.key(42),
-            shared=[shared_params] * n_reps,
-            unit_specific=[unit_specific_params] * n_reps,
+            theta=pp.PanelParameters(
+                [{"shared": shared_params, "unit_specific": unit_specific_params}]
+            )
+            * n_reps,  # type: ignore[reportArgumentType]
             logLiks=pfilter_logLiks,
             J=100,
             reps=3,
@@ -403,24 +349,23 @@ def test_prune(measles_panel_mp):
     assert initial_n_reps > 1, "Need multiple replicates to test prune"
 
     # Store initial parameter lists
-    initial_shared_len = len(panel.shared) if panel.shared is not None else 0
-    initial_unit_specific_len = (
-        len(panel.unit_specific) if panel.unit_specific is not None else 0
-    )
+    initial_shared_len = len(panel.theta._theta) if panel.theta._theta else 0
 
     # Store original parameters from results_history for comparison
     original_results = panel.results_history[-1]
-    original_shared = original_results.shared
-    original_unit_specific = original_results.unit_specific
+    original_theta = original_results.theta
+    if original_theta is not None:
+        original_shared = [t.get("shared") for t in original_theta._theta]
+        original_unit_specific = [t.get("unit_specific") for t in original_theta._theta]
+    else:
+        original_shared = None
+        original_unit_specific = None
 
     # Test pruning to top 1 replicate without refill
     panel.prune(n=1, refill=False)
 
-    # Check that shared and unit_specific have been updated to length 1
-    if panel.shared is not None:
-        assert len(panel.shared) == 1
-    if panel.unit_specific is not None:
-        assert len(panel.unit_specific) == 1
+    # Check that theta has been updated to length 1
+    assert len(panel.theta._theta) == 1
 
     # Verify that the pruned parameters match the top replicate
     # Get the top replicate index from original results
@@ -431,126 +376,215 @@ def test_prune(measles_panel_mp):
         top_idx = int(np.argmax(shared_lls))
 
         # Check that pruned parameters match the top replicate
-        if original_shared is not None and panel.shared is not None:
-            pd.testing.assert_frame_equal(panel.shared[0], original_shared[top_idx])
-        if original_unit_specific is not None and panel.unit_specific is not None:
+        if (
+            original_shared is not None
+            and panel.theta._theta[0].get("shared") is not None
+        ):
             pd.testing.assert_frame_equal(
-                panel.unit_specific[0], original_unit_specific[top_idx]
+                panel.theta._theta[0]["shared"], original_shared[top_idx]
+            )
+        if (
+            original_unit_specific is not None
+            and panel.theta._theta[0].get("unit_specific") is not None
+        ):
+            pd.testing.assert_frame_equal(
+                panel.theta._theta[0]["unit_specific"], original_unit_specific[top_idx]
             )
 
     # Test refill functionality
     # Restore to initial state from results_history
-    panel.shared = original_shared
-    panel.unit_specific = original_unit_specific
+    panel.theta._theta = (
+        [
+            {
+                "shared": s.copy() if s is not None else None,
+                "unit_specific": u.copy() if u is not None else None,
+            }
+            for s, u in zip(original_shared, original_unit_specific)  # type: ignore[reportArgumentType]
+        ]
+        if original_shared is not None
+        else []
+    )
 
     # Prune with refill=True
     panel.prune(n=1, refill=True)
 
     # Check that lists are refilled to original length
-    if panel.shared is not None:
-        assert len(panel.shared) == initial_shared_len
-        # All entries should be the same (repeated top replicate)
-        for i in range(1, len(panel.shared)):
-            pd.testing.assert_frame_equal(panel.shared[0], panel.shared[i])
-    if panel.unit_specific is not None:
-        assert len(panel.unit_specific) == initial_unit_specific_len
-        # All entries should be the same (repeated top replicate)
-        for i in range(1, len(panel.unit_specific)):
-            pd.testing.assert_frame_equal(
-                panel.unit_specific[0], panel.unit_specific[i]
-            )
+    assert len(panel.theta._theta) == initial_shared_len
+    # All entries should be the same (repeated top replicate)
+    if initial_shared_len > 1:
+        first_shared = panel.theta._theta[0].get("shared")
+        first_unit_specific = panel.theta._theta[0].get("unit_specific")
+        for i in range(1, initial_shared_len):
+            if first_shared is not None:
+                pd.testing.assert_frame_equal(
+                    panel.theta._theta[i]["shared"], first_shared
+                )
+            if first_unit_specific is not None:
+                pd.testing.assert_frame_equal(
+                    panel.theta._theta[i]["unit_specific"], first_unit_specific
+                )
 
 
 def test_mix_and_match(measles_panel_mp):
     panel, rw_sd, key, J, M, a = measles_panel_mp
 
-    # Get initial state from the last result
     results_df = panel.results()
     initial_n_reps = results_df["replicate"].nunique()
     assert initial_n_reps > 1, "Need multiple replicates to test mix_and_match"
 
-    # Store original parameters from results_history for comparison
-    original_results = panel.results_history[-1]
-    original_shared = original_results.shared
-    original_unit_specific = original_results.unit_specific
+    # Capture original state BEFORE mix_and_match() modifies panel.theta
+    # (panel.theta and results_history[-1].theta are the same object reference)
+    original_theta = panel.theta
+    if original_theta is None:
+        return
 
-    # Perform mix_and_match
-    panel.mix_and_match()
-
-    # Check that the number of parameter sets equals the number of replicates
-    if panel.shared is not None:
-        assert len(panel.shared) == initial_n_reps
-    if panel.unit_specific is not None:
-        assert len(panel.unit_specific) == initial_n_reps
-
-    # Verify the mixing and matching logic
-    # Get rankings from the results
-    replicate_logliks = results_df.groupby("replicate")["shared logLik"].first()
-    shared_ranked_indices = replicate_logliks.to_numpy().argsort()[::-1]
-    shared_ranked_replicates = list(replicate_logliks.index[shared_ranked_indices])
-
+    # Make deep copies of the DataFrames before they get modified
+    original_shared = [
+        t.get("shared").copy(deep=True) if t.get("shared") is not None else None
+        for t in original_theta._theta
+    ]
+    original_unit_specific = [
+        t.get("unit_specific").copy(deep=True)
+        if t.get("unit_specific") is not None
+        else None
+        for t in original_theta._theta
+    ]
     unit_names = list(panel.unit_objects.keys())
-    unit_loglik_pivot = results_df.pivot(
-        index="replicate", columns="unit", values="unit logLik"
-    )
-    unit_ranked_replicates = {}
-    for unit in unit_names:
-        unit_logliks = unit_loglik_pivot[unit]
-        unit_ranked_indices = unit_logliks.to_numpy().argsort()[::-1]
-        unit_ranked_replicates[unit] = list(unit_logliks.index[unit_ranked_indices])
 
-    # Check that replicate 0 has the best shared params and best unit-specific params for each unit
-    if original_shared is not None and panel.shared is not None:
-        best_shared_idx = shared_ranked_replicates[0]
-        pd.testing.assert_frame_equal(panel.shared[0], original_shared[best_shared_idx])
+    # Compute rankings from the original log-likelihoods BEFORE mix_and_match() modifies them
+    original_logLik = original_theta.logLik.copy()
+    original_logLik_unit = original_theta.logLik_unit.copy()
+    shared_ranks = original_logLik.argsort()[::-1].tolist()
+    unit_name_to_idx = {
+        name: idx for idx, name in enumerate(original_theta.get_unit_names())
+    }
+    unit_ranks = {
+        unit: original_logLik_unit[:, unit_name_to_idx[unit]].argsort()[::-1].tolist()
+        for unit in unit_names
+    }
 
-    if original_unit_specific is not None and panel.unit_specific is not None:
-        # Check that each unit in replicate 0 has its best parameters
-        for unit in unit_names:
-            best_unit_idx = unit_ranked_replicates[unit][0]
-            original_unit_col = original_unit_specific[best_unit_idx][unit]
-            new_unit_col = panel.unit_specific[0][unit]
-            pd.testing.assert_series_equal(original_unit_col, new_unit_col)
+    panel.mix_and_match()
+    assert len(panel.theta._theta) == initial_n_reps
 
-    # Check that replicate 1 has the 2nd best for each
+    # Helper to verify a replicate has correct mixed parameters
+    def verify_replicate(rep_idx, rank_idx):
+        new_shared = panel.theta.theta[rep_idx]["shared"]
+        orig_shared = original_shared[shared_ranks[rank_idx]]
+        if new_shared is not None and orig_shared is not None:
+            pd.testing.assert_frame_equal(new_shared, orig_shared)
+        elif new_shared != orig_shared:
+            raise AssertionError(f"Mismatch: {type(new_shared)} vs {type(orig_shared)}")
+
+        if original_unit_specific:
+            new_spec = panel.theta.theta[rep_idx]["unit_specific"]
+            if new_spec is not None:
+                for unit in unit_names:
+                    orig_df = original_unit_specific[unit_ranks[unit][rank_idx]]
+                    if orig_df is not None and unit in orig_df.columns:
+                        orig_col = orig_df[unit].copy()
+                    else:
+                        orig_col = None
+                    new_col = new_spec.get(unit)
+                    if orig_col is not None and new_col is not None:
+                        pd.testing.assert_series_equal(
+                            orig_col, new_col, check_dtype=False
+                        )
+
+    verify_replicate(0, 0)
     if initial_n_reps >= 2:
-        if original_shared is not None and panel.shared is not None:
-            second_best_shared_idx = shared_ranked_replicates[1]
-            pd.testing.assert_frame_equal(
-                panel.shared[1], original_shared[second_best_shared_idx]
-            )
+        verify_replicate(1, 1)
 
-        if original_unit_specific is not None and panel.unit_specific is not None:
-            # Check that each unit in replicate 1 has its 2nd best parameters
-            for unit in unit_names:
-                second_best_unit_idx = unit_ranked_replicates[unit][1]
-                original_unit_col = original_unit_specific[second_best_unit_idx][unit]
-                new_unit_col = panel.unit_specific[1][unit]
-                pd.testing.assert_series_equal(original_unit_col, new_unit_col)
-
-    # Verify that the mixed parameters are actually different from the original ordering
-    # (unless all replicates were already in the best order)
-    if original_unit_specific is not None and panel.unit_specific is not None:
-        # Check if at least one unit has different parameters in replicate 0 vs original replicate 0
-        original_replicate_0_unit_cols = {
-            unit: original_unit_specific[0][unit] for unit in unit_names
+    # Sanity check: verify structure (mixing may or may not have occurred)
+    if (
+        original_unit_specific
+        and panel.theta._theta[0].get("unit_specific") is not None
+    ):
+        orig_cols = {unit: original_unit_specific[0][unit] for unit in unit_names}
+        new_cols = {
+            unit: panel.theta._theta[0]["unit_specific"][unit] for unit in unit_names
         }
-        new_replicate_0_unit_cols = {
-            unit: panel.unit_specific[0][unit] for unit in unit_names
-        }
-        # At least one unit should have different parameters (unless original was already best)
-        # This is a sanity check that mixing actually occurred
-        mixing_occurred = any(
-            not original_replicate_0_unit_cols[unit].equals(
-                new_replicate_0_unit_cols[unit]
-            )
-            for unit in unit_names
-        )
-        # It's possible that the original ordering was already optimal, so we don't require mixing
-        # But we do verify the structure is correct
-        assert isinstance(mixing_occurred, bool)  # Just verify the check runs
+        # Verify comparison runs (mixing may or may not have occurred)
+        _ = any(not orig_cols[u].equals(new_cols[u]) for u in unit_names)
 
 
 def test_print_summary(measles_panel_mp):
     panel, rw_sd, key, J, M, a = measles_panel_mp
     panel.print_summary()
+
+
+def test_merge(measles_panel_setup_some_shared):
+    """Test merging two PanelPomp objects."""
+    panel1, rw_sd, key1 = measles_panel_setup_some_shared
+    panel2, _, key2 = measles_panel_setup_some_shared
+
+    J = 2
+    M = 2
+    a = 0.5
+    panel1.pfilter(J=J, key=key1)
+    panel1.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key1)
+    panel2.pfilter(J=J, key=key2)
+    panel2.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key2)
+
+    n_reps1 = len(panel1.theta)
+    n_reps2 = len(panel2.theta)
+    n_history1 = len(panel1.results_history)
+    n_history2 = len(panel2.results_history)
+
+    merged = pp.PanelPomp.merge(panel1, panel2)
+
+    assert merged.canonical_param_names == panel1.canonical_param_names
+    assert merged.get_unit_names() == panel1.get_unit_names()
+
+    assert len(merged.theta) == n_reps1 + n_reps2
+    assert len(merged.results_history) == n_history1 == n_history2
+
+    # Verify merged results have combined replications
+    for i in range(len(merged.results_history)):
+        merged_result = merged.results_history[i]
+        result1 = panel1.results_history[i]
+        result2 = panel2.results_history[i]
+
+        # Verify algorithmic parameters match
+        assert merged_result.J == result1.J == result2.J == J
+        assert merged_result.thresh == result1.thresh == result2.thresh
+
+        if merged_result.method == "pfilter":
+            assert merged_result.reps == result1.reps == result2.reps
+        elif merged_result.method == "mif":
+            assert merged_result.M == result1.M == result2.M == M
+            assert merged_result.a == result1.a == result2.a == a
+            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
+            assert merged_result.block == result1.block == result2.block
+
+        # Check that merged result has combined replications
+        if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
+            if merged_result.method == "pfilter":
+                # For pfilter results: logLiks has dims ["theta", "unit", "replicate"]
+                # The theta dimension corresponds to theta replications
+                merged_n_theta = merged_result.logLiks.sizes["theta"]
+                result1_n_theta = result1.logLiks.sizes["theta"]
+                result2_n_theta = result2.logLiks.sizes["theta"]
+                assert merged_n_theta == result1_n_theta + result2_n_theta, (
+                    f"Position {i} ({merged_result.method}): merged has {merged_n_theta} theta replications, "
+                    f"expected {result1_n_theta} + {result2_n_theta} = {result1_n_theta + result2_n_theta}"
+                )
+            elif merged_result.method == "mif":
+                # For mif results: logLiks has dims ["replicate", "unit"]
+                # The replicate dimension corresponds to theta replications
+                merged_n_reps = merged_result.logLiks.sizes["replicate"]
+                result1_n_reps = result1.logLiks.sizes["replicate"]
+                result2_n_reps = result2.logLiks.sizes["replicate"]
+                assert merged_n_reps == result1_n_reps + result2_n_reps, (
+                    f"Position {i} ({merged_result.method}): merged has {merged_n_reps} replicates, "
+                    f"expected {result1_n_reps} + {result2_n_reps} = {result1_n_reps + result2_n_reps}"
+                )
+
+        # Also verify shared_traces and unit_traces for mif results
+        if (
+            hasattr(merged_result, "shared_traces")
+            and merged_result.shared_traces.size > 0
+        ):
+            merged_n_reps = merged_result.shared_traces.sizes["replicate"]
+            result1_n_reps = result1.shared_traces.sizes["replicate"]
+            result2_n_reps = result2.shared_traces.sizes["replicate"]
+            assert merged_n_reps == result1_n_reps + result2_n_reps

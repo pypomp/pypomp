@@ -1,15 +1,19 @@
+import gc
 import jax
 import jax.numpy as jnp
 import pandas as pd
 import xarray as xr
 import numpy as np
 import time
-from typing import TYPE_CHECKING
+from copy import deepcopy
+from typing import TYPE_CHECKING, Union, cast
 
 from ..mif import _jv_panel_mif_internal
 from ..internal_functions import _shard_rows
 from ..RWSigma_class import RWSigma
 from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
+from ..parameters import PanelParameters
+from ..util import logmeanexp
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -32,6 +36,24 @@ class PanelEstimationMixin(Base):
             )
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
+
+    def _prepare_theta_input(
+        self,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ],
+    ) -> PanelParameters:
+        """Convert various theta inputs to PanelParameters."""
+        if isinstance(theta, PanelParameters):
+            return theta
+        if theta is None:
+            if self.theta is None:
+                raise ValueError("theta must be provided or self.theta must exist")
+            return self.theta
+        return PanelParameters(theta=theta)
 
     def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
         unit_canonical = self.unit_objects[unit_name].canonical_param_names
@@ -56,19 +78,19 @@ class PanelEstimationMixin(Base):
     def get_unit_parameters(
         self,
         unit: str,
-        shared: list[pd.DataFrame] | None = None,
-        unit_specific: list[pd.DataFrame] | None = None,
-    ) -> list[dict]:
-        shared = shared or self.shared
-        unit_specific = unit_specific or self.unit_specific
-        tll = self._get_theta_list_len(shared, unit_specific)
+        theta: PanelParameters | None = None,
+    ) -> list[dict[str, float]]:
+        theta = self._prepare_theta_input(theta)
+
+        tll = theta.num_replicates()
         params = [{} for _ in range(tll)]
 
         for i in range(tll):
-            if shared is not None:
-                params[i].update(shared[i]["shared"].to_dict())
-            if unit_specific is not None:
-                params[i].update(unit_specific[i][unit].to_dict())
+            theta_dict = theta.theta[i]
+            if theta_dict["shared"] is not None:
+                params[i].update(theta_dict["shared"].iloc[:, 0].to_dict())
+            if theta_dict["unit_specific"] is not None:
+                params[i].update(theta_dict["unit_specific"][unit].to_dict())
 
         return params
 
@@ -79,101 +101,62 @@ class PanelEstimationMixin(Base):
         n: int,
         key: jax.Array,
         shared_names: list[str] | None = None,
-    ) -> tuple[list[pd.DataFrame] | None, list[pd.DataFrame] | None]:
-        param_keys = jax.random.split(key, n)
-        param_names = list(param_bounds.keys())
-        if shared_names is not None:
-            unit_specific_names = [
-                name for name in param_names if name not in set(shared_names)
-            ]
-        else:
-            unit_specific_names = list(param_names)
-        shared_param_sets: list[pd.DataFrame] | None = (
-            [] if shared_names is not None and len(shared_names) > 0 else None
-        )
-        unit_specific_param_sets: list[pd.DataFrame] | None = (
-            []
-            if unit_specific_names is not None and len(unit_specific_names) > 0
-            else None
-        )
+    ) -> list[dict[str, pd.DataFrame | None]]:
+        """Sample parameters for PanelPomp models using vectorized operations."""
+        shared = shared_names or []
+        specific = [k for k in param_bounds if k not in shared]
+        keys = jax.random.split(key, n)
 
+        def _sample(k, names, n_cols):
+            if not names:
+                return None
+            # Create arrays of shape (n_params, 1) for broadcasting
+            low = jnp.array([param_bounds[p][0] for p in names])[:, None]
+            high = jnp.array([param_bounds[p][1] for p in names])[:, None]
+            # Sample (n_params, n_cols)
+            return low + jax.random.uniform(k, (len(names), n_cols)) * (high - low)
+
+        results = []
         for i in range(n):
-            if (
-                shared_names is not None
-                and len(shared_names) > 0
-                and shared_param_sets is not None
-            ):
-                shared_keys = jax.random.split(param_keys[i], len(shared_names))
-                shared_values: list[float] = []
-                for j_idx, param_name in enumerate(shared_names):
-                    lower, upper = param_bounds[param_name]
-                    val = float(
-                        jax.random.uniform(
-                            shared_keys[j_idx], shape=(), minval=lower, maxval=upper
-                        )
+            k_s, k_u = jax.random.split(keys[i])
+            s_arr = _sample(k_s, shared, 1)
+            u_arr = _sample(k_u, specific, len(units))
+
+            results.append(
+                {
+                    "shared": pd.DataFrame(
+                        s_arr, index=pd.Index(shared), columns=pd.Index(["shared"])
                     )
-                    shared_values.append(val)
-                shared_df = pd.DataFrame(
-                    shared_values,
-                    index=pd.Index(shared_names),
-                    columns=pd.Index(["shared"]),
-                )
-                shared_param_sets.append(shared_df)
-
-            if (
-                unit_specific_names is not None
-                and len(unit_specific_names) > 0
-                and unit_specific_param_sets is not None
-            ):
-                total_needed = len(unit_specific_names) * len(units)
-                unit_keys = jax.random.split(param_keys[i], total_needed)
-                values_by_param: dict[str, list[float]] = {
-                    name: [] for name in unit_specific_names
+                    if shared
+                    else None,
+                    "unit_specific": pd.DataFrame(
+                        u_arr, index=pd.Index(specific), columns=pd.Index(units)
+                    )
+                    if specific
+                    else None,
                 }
-                k = 0
-                for param_name in unit_specific_names:
-                    lower, upper = param_bounds[param_name]
-                    col_values: list[float] = []
-                    for _unit in units:
-                        val = float(
-                            jax.random.uniform(
-                                unit_keys[k], shape=(), minval=lower, maxval=upper
-                            )
-                        )
-                        col_values.append(val)
-                        k += 1
-                    values_by_param[param_name] = col_values
+            )
 
-                unit_df: pd.DataFrame | None = pd.DataFrame(
-                    data={
-                        u: [values_by_param[p][ui] for p in unit_specific_names]
-                        for ui, u in enumerate(units)
-                    },
-                    index=pd.Index(unit_specific_names),
-                    columns=pd.Index(units),
-                )
-                unit_specific_param_sets.append(unit_df)
-
-        return shared_param_sets, unit_specific_param_sets
+        return results
 
     def simulate(
         self,
         key: jax.Array,
-        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
-        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ] = None,
         times: jax.Array | None = None,
         nsim: int = 1,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        shared = shared or self.shared
-        unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, *_ = self._validate_params_and_units(
-            shared, unit_specific, self.unit_objects
-        )
+        theta = self._prepare_theta_input(theta)
 
         X_sims_list = []
         Y_sims_list = []
         for unit, obj in self.unit_objects.items():
-            theta_list = self.get_unit_parameters(unit, shared, unit_specific)
+            theta_list = self.get_unit_parameters(unit, theta=theta)
             key, subkey = jax.random.split(key)
             X_sims, Y_sims = obj.simulate(
                 key=subkey,
@@ -193,27 +176,41 @@ class PanelEstimationMixin(Base):
         self,
         J: int,
         key: jax.Array | None = None,
-        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
-        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ] = None,
         thresh: float = 0.0,
         reps: int = 1,
+        CLL: bool = False,
+        ESS: bool = False,
+        filter_mean: bool = False,
+        prediction_mean: bool = False,
     ) -> None:
         start_time = time.time()
-        shared = shared or self.shared
-        unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, *_ = self._validate_params_and_units(
-            shared, unit_specific, self.unit_objects
-        )
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+
         key, old_key = self._update_fresh_key(key)
 
-        tll = self._get_theta_list_len(shared, unit_specific)
+        n_theta_reps = theta_obj_in.num_replicates()
+        unit_names = list(self.unit_objects.keys())
+        n_units = len(unit_names)
+
         results = xr.DataArray(
-            np.zeros((tll, len(self.unit_objects), reps)),
+            np.zeros((n_theta_reps, n_units, reps)),
             dims=["theta", "unit", "replicate"],
-            coords={"unit": list(self.unit_objects.keys()), "replicate": range(reps)},
+            coords={"unit": unit_names, "replicate": range(reps)},
         )
+
+        CLL_list = []
+        ESS_list = []
+        filter_mean_list = []
+        prediction_mean_list = []
+
         for unit, obj in self.unit_objects.items():
-            theta_list = self.get_unit_parameters(unit, shared, unit_specific)
+            theta_list = self.get_unit_parameters(unit, theta=theta_obj_in)
             key, subkey = jax.random.split(key)  # pyright: ignore[reportArgumentType]
             obj.pfilter(
                 J=J,
@@ -221,9 +218,90 @@ class PanelEstimationMixin(Base):
                 theta=theta_list,
                 thresh=thresh,
                 reps=reps,
+                CLL=CLL,
+                ESS=ESS,
+                filter_mean=filter_mean,
+                prediction_mean=prediction_mean,
             )
-            results.loc[:, unit, :] = obj.results_history[-1].logLiks
+
+            # Clear JAX caches and collect garbage to avoid memory leaks.
+            # Each time pfilter is run for a different unit, compiled code is cached and accumulated.
+            # This happens even if rproc, dmeas, etc. are functionally the same for all units, because the current implementation of this stuff causes JAX to treat the code as being different for each unit.
+            # Clearing the caches is a bandaid, but also helpful when the functions really are different.
+            # The runtime cost of clearing the caches is negligible, and recompilation times shouldn't be too much of an issue either.
+            # There are probably better ways to deal with this which could be explored in the future, but this is a simple workaround for now.
+            jax.clear_caches()
+            gc.collect()
+
+            unit_result = obj.results_history[-1]
+            results.loc[:, unit, :] = unit_result.logLiks
+
+            if CLL and unit_result.CLL is not None:
+                CLL_list.append(unit_result.CLL)
+            if ESS and unit_result.ESS is not None:
+                ESS_list.append(unit_result.ESS)
+            if filter_mean and unit_result.filter_mean is not None:
+                filter_mean_list.append(unit_result.filter_mean)
+            if prediction_mean and unit_result.prediction_mean is not None:
+                prediction_mean_list.append(unit_result.prediction_mean)
+
             obj.results_history = ResultsHistory()
+
+        # results has shape (n_theta_reps, len(self.unit_objects), reps)
+        results_np = np.array(results.values)
+        logLik_unit = np.apply_along_axis(
+            logmeanexp, -1, results_np, ignore_nan=False
+        )  # shape: (n_theta_reps, len(self.unit_objects))
+
+        self.theta.logLik_unit = logLik_unit
+
+        def _stack_diagnostics(diag_list, dims, coord_names):
+            """Stack unit diagnostics and create DataArray with unit dimension."""
+            if not diag_list:
+                return None
+            arrays = [np.array(arr.values) for arr in diag_list]
+            stacked = np.stack(arrays, axis=1)
+            coords = {"unit": unit_names, "replicate": range(reps)}
+            for i, coord_name in enumerate(coord_names):
+                coord_idx = -(len(coord_names) - i)
+                if coord_name in diag_list[0].coords:
+                    coords[coord_name] = diag_list[0].coords[coord_name]
+                else:
+                    coords[coord_name] = range(stacked.shape[coord_idx])
+            return xr.DataArray(stacked, dims=dims, coords=coords)
+
+        CLL_da = (
+            _stack_diagnostics(
+                CLL_list, ["theta", "unit", "replicate", "time"], ["time"]
+            )
+            if CLL
+            else None
+        )
+        ESS_da = (
+            _stack_diagnostics(
+                ESS_list, ["theta", "unit", "replicate", "time"], ["time"]
+            )
+            if ESS
+            else None
+        )
+        filter_mean_da = (
+            _stack_diagnostics(
+                filter_mean_list,
+                ["theta", "unit", "replicate", "time", "state"],
+                ["time", "state"],
+            )
+            if filter_mean
+            else None
+        )
+        prediction_mean_da = (
+            _stack_diagnostics(
+                prediction_mean_list,
+                ["theta", "unit", "replicate", "time", "state"],
+                ["time", "state"],
+            )
+            if prediction_mean
+            else None
+        )
 
         execution_time = time.time() - start_time
 
@@ -231,12 +309,15 @@ class PanelEstimationMixin(Base):
             method="pfilter",
             execution_time=execution_time,
             key=old_key,
-            shared=shared,
-            unit_specific=unit_specific,
+            theta=theta_obj_in,
             logLiks=results,
             J=J,
             reps=reps,
             thresh=thresh,
+            CLL=CLL_da,
+            ESS=ESS_da,
+            filter_mean=filter_mean_da,
+            prediction_mean=prediction_mean_da,
         )
 
         self.results_history.add(result)
@@ -248,17 +329,20 @@ class PanelEstimationMixin(Base):
         rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
-        shared: pd.DataFrame | list[pd.DataFrame] | None = None,
-        unit_specific: pd.DataFrame | list[pd.DataFrame] | None = None,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ] = None,
         thresh: float = 0,
         block: bool = True,
     ) -> None:
         start_time = time.time()
-        shared = shared or self.shared
-        unit_specific = unit_specific or self.unit_specific
-        shared, unit_specific, *_ = self._validate_params_and_units(
-            shared, unit_specific, self.unit_objects
-        )
+        theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
+        if theta_obj_in is None:
+            raise ValueError("theta must be provided or self.theta must exist")
+
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
         )
@@ -271,7 +355,8 @@ class PanelEstimationMixin(Base):
             raise ValueError("a should be between 0 and 1.")
         if block is False:
             raise NotImplementedError("block=False is not supported yet.")
-        unit_names = list(self.unit_objects.keys())
+
+        unit_names = self.get_unit_names()
         U = len(unit_names)
         rep_unit = self.unit_objects[unit_names[0]]
 
@@ -307,21 +392,47 @@ class PanelEstimationMixin(Base):
         else:
             covars_per_unit = None
 
-        n_reps = self._get_theta_list_len(shared, unit_specific)
+        n_reps = theta_obj_in.num_replicates()
 
-        shared_list = shared if isinstance(shared, list) else None
-        spec_list = unit_specific if isinstance(unit_specific, list) else None
-        shared_trans_list, spec_trans_list = rep_unit.par_trans.panel_transform_list(
-            shared_list, spec_list, direction="to_est"
-        )
+        # Extract theta list from PanelParameters and transform to estimation scale if needed
+        theta_list = theta_obj_in.theta
+        if not theta_obj_in.estimation_scale:
+            # Create a copy to avoid modifying the original
+            theta_list = [
+                {
+                    "shared": t["shared"].copy() if t["shared"] is not None else None,
+                    "unit_specific": (
+                        t["unit_specific"].copy()
+                        if t["unit_specific"] is not None
+                        else None
+                    ),
+                }
+                for t in theta_list
+            ]
+            theta_trans_list = rep_unit.par_trans.panel_transform_list(
+                theta_list, direction="to_est"
+            )
+        else:
+            theta_trans_list = theta_list
 
-        if len(shared_trans_list) == 0:
+        # Extract shared and unit_specific DataFrames from transformed list
+        shared_trans_list = [t.get("shared") for t in theta_trans_list]
+        spec_trans_list = [t.get("unit_specific") for t in theta_trans_list]
+
+        # Store original shared/unit_specific for later use
+        shared = [t.get("shared") for t in theta_list]
+        unit_specific = [t.get("unit_specific") for t in theta_list]
+
+        if all(df is None for df in shared_trans_list):
             n_shared = 0
             shared_array = jnp.zeros((n_reps, 0, J))
             shared_index: list[str] = []
         else:
             shared_index = self.canonical_shared_param_names
             n_shared = len(shared_index)
+            # PanelParameters ensures all shared are None or all are not None
+            # Cast to list[pd.DataFrame] since we know all are not None here
+            shared_trans_list_nonnull = cast(list[pd.DataFrame], shared_trans_list)
             shared_array = jnp.stack(
                 [
                     jnp.tile(
@@ -330,18 +441,21 @@ class PanelEstimationMixin(Base):
                         ).reshape(n_shared, 1),
                         (1, J),
                     )
-                    for df in shared_trans_list
+                    for df in shared_trans_list_nonnull
                 ],
                 axis=0,
             )
 
-        if len(spec_trans_list) == 0:
+        if all(df is None for df in spec_trans_list):
             n_spec = 0
             unit_array = jnp.zeros((n_reps, 0, J, U))
             spec_index: list[str] = []
         else:
             spec_index = self.canonical_unit_param_names
             n_spec = len(spec_index)
+            # PanelParameters ensures all unit_specific are None or all are not None
+            # Cast to list[pd.DataFrame] since we know all are not None here
+            spec_trans_list_nonnull = cast(list[pd.DataFrame], spec_trans_list)
             unit_array = jnp.stack(
                 [
                     jnp.stack(
@@ -356,7 +470,7 @@ class PanelEstimationMixin(Base):
                         ],
                         axis=2,
                     )
-                    for df in spec_trans_list
+                    for df in spec_trans_list_nonnull
                 ],
                 axis=0,
             )
@@ -456,7 +570,8 @@ class PanelEstimationMixin(Base):
             coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},
         )
 
-        if shared is not None:
+        # PanelParameters ensures all shared are None or all are not None
+        if shared and shared[0] is not None:
             shared_list_out = [
                 pd.DataFrame(
                     shared_traces[rep, -1, 1:].reshape(-1, 1),
@@ -468,7 +583,8 @@ class PanelEstimationMixin(Base):
         else:
             shared_list_out = None
 
-        if unit_specific is not None:
+        # PanelParameters ensures all unit_specific are None or all are not None
+        if unit_specific and unit_specific[0] is not None:
             specific_list_out = [
                 pd.DataFrame(
                     unit_traces[rep, -1, 1:, :],
@@ -480,8 +596,20 @@ class PanelEstimationMixin(Base):
         else:
             specific_list_out = None
 
-        self.shared = shared_list_out
-        self.unit_specific = specific_list_out
+        theta_list_out = [
+            {
+                "shared": shared_list_out[rep] if shared_list_out else None,
+                "unit_specific": specific_list_out[rep] if specific_list_out else None,
+            }
+            for rep in range(n_reps)
+        ]
+
+        # unit_final_logliks has shape (n_reps, U)
+        logLik_unit_out = np.array(unit_final_logliks)
+
+        self.theta.theta = theta_list_out
+        self.theta.logLik_unit = logLik_unit_out
+        self.theta.estimation_scale = False
 
         execution_time = time.time() - start_time
 
@@ -489,8 +617,7 @@ class PanelEstimationMixin(Base):
             method="mif",
             execution_time=execution_time,
             key=old_key,
-            shared=shared,
-            unit_specific=unit_specific,
+            theta=theta_obj_in,
             shared_traces=shared_da,
             unit_traces=unit_da,
             logLiks=full_logliks,

@@ -6,6 +6,7 @@ import numpy as np
 import warnings
 import jax
 import jax.numpy as jnp
+from typing import Callable
 
 
 # TODO remove this function, as covars should always be dim 2
@@ -405,3 +406,48 @@ def _shard_rows(array: jax.Array) -> jax.Array:
 
     sharded = jax.device_put_sharded(shards, devices)
     return jnp.reshape(sharded, array.shape)
+
+
+def _chunked_vmap(fun: Callable, chunk_size: int) -> Callable:
+    """
+    A wrapper that acts like vmap, but processes the input in sequential chunks
+    to avoid OOM errors.
+
+    Args:
+        fun: The function to be vectorized.
+        chunk_size: The size of the batch chunks to process sequentially.
+    """
+    # 1. Create the standard vmapped function for a single chunk
+    vmapped_fun = jax.vmap(fun)
+
+    @jax.jit
+    def wrapped(*args):
+        # Helper to reshape any array: (N, ...) -> (N // chunk, chunk, ...)
+        def reshape_input(x):
+            # We assume the first dimension is the batch dimension
+            n = x.shape[0]
+            if n % chunk_size != 0:
+                raise ValueError(
+                    f"Batch size {n} must be divisible by chunk size {chunk_size}"
+                )
+            return x.reshape((n // chunk_size, chunk_size, *x.shape[1:]))
+
+        # Helper to flatten output: (N // chunk, chunk, ...) -> (N, ...)
+        def flatten_output(x):
+            return x.reshape((-1, *x.shape[2:]))
+
+        # 2. Reshape all inputs (supports PyTrees/Multiple Args automatically)
+        chunked_inputs = jax.tree_util.tree_map(reshape_input, args)
+
+        # 3. Use lax.map to loop over the first dimension (the chunks)
+        # lax.map passes a tuple of args to the lambda if args is a tuple
+        if len(args) == 1:
+            chunked_outputs = jax.lax.map(vmapped_fun, chunked_inputs[0])
+        else:
+            # If multiple args, lax.map passes them as a tuple, so we unpack
+            chunked_outputs = jax.lax.map(lambda x: vmapped_fun(*x), chunked_inputs)
+
+        # 4. Flatten the results back to the original shape
+        return jax.tree_util.tree_map(flatten_output, chunked_outputs)
+
+    return wrapped

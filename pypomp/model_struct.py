@@ -144,9 +144,19 @@ def _time_interp(
 
 
 class RInit:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [dict[str, float], jax.Array, dict[str, float], float], dict[str, float]
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -208,9 +218,34 @@ class RInit:
 
 
 class RProc:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+    struct_interp: Callable
+    struct_pf_interp: Callable
+    struct_per_interp: Callable
+    nstep: int | None
+    dt: float | None
+    accumvars: tuple[int, ...] | None
+    _max_steps_bound: int | None
+
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [
+                dict[str, float],
+                dict[str, float],
+                jax.Array,
+                dict[str, float],
+                float,
+                float,
+            ],
+            dict[str, float],
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -335,9 +370,27 @@ class RProc:
 
 
 class DMeas:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    y_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [
+                dict[str, float],
+                dict[str, float],
+                dict[str, float],
+                dict[str, float],
+                float,
+            ],
+            float,
+        ],
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -403,9 +456,21 @@ class DMeas:
 
 
 class RMeas:
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+    original_func: Callable
+    ydim: int
+
     def __init__(
         self,
-        struct: Callable,
+        struct: Callable[
+            [dict[str, float], dict[str, float], jax.Array, dict[str, float], float],
+            jax.Array,
+        ],
         ydim: int,
         statenames: list[str],
         param_names: list[str],

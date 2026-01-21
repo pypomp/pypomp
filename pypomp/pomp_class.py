@@ -42,10 +42,15 @@ class Pomp:
     initial state distribution, process model, and measurement model.
 
     The class provides methods for:
+
     - Simulation of the model
+
     - Particle filtering
+
     - Maximum likelihood estimation
+
     - Iterated filtering
+
     - Model training using a differentiable particle filter
 
     Attributes:
@@ -337,8 +342,7 @@ class Pomp:
                 Defaults to 0.97.
 
         Returns:
-            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model
-                parameters. Always a list, even if only one theta is provided.
+            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model parameters. Always a list, even if only one theta is provided.
         """
         theta_obj = self._prepare_theta_input(theta)
 
@@ -712,7 +716,7 @@ class Pomp:
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "SGD", "Newton", "WeightedNewton", and "BFGS".
-                Note: options other than "SGD" might be quite slow.
+                Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
@@ -721,11 +725,11 @@ class Pomp:
             ls (bool, optional): Boolean flag controlling whether to use the line
                 search algorithm. Note: the line search algorithm can be quite slow.
             Line Search Parameters (only used when ls=True):
-                c (float, optional): The Armijo condition constant for line search,
-                    which controls how much the negative log-likelihood needs to
-                    decrease before the line search algorithm continues.
-                max_ls_itn (int, optional): Maximum number of iterations for the line
-                    search algorithm.
+
+                c (float, optional): The Armijo condition constant for line search which controls how much the negative log-likelihood needs to decrease before the line search algorithm continues.
+
+                max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
+
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
@@ -944,13 +948,11 @@ class Pomp:
         Returns a DataFrame with the results of the method run at the given index.
 
         Args:
-            index (int): The index of the result to return. Defaults to -1 (the last
-                result).
+            index (int): The index of the result to return. Defaults to -1 (the last result).
             ignore_nan (bool): If True, ignore NaNs when computing the log-likelihood.
 
         Returns:
-            pd.DataFrame: A DataFrame with the results of the method run at the given
-                index.
+            pd.DataFrame: A DataFrame with the results of the method run at the given index.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
@@ -976,7 +978,7 @@ class Pomp:
         """
         self.theta.prune(n=n, refill=refill)
 
-    def plot_traces(self, show: bool = True):
+    def plot_traces(self, show: bool = True) -> sns.FacetGrid | None:
         """
         Plot the parameter and log-likelihood traces from the entire result history.
         Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.

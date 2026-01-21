@@ -109,14 +109,13 @@ def spx():
     Returns
     -------
     Pomp
-        A POMP model object containing:
+        A POMP model object containing, among other things:
+
         - ys: S&P 500 log returns data.
+
         - theta: Model parameters including mu, kappa, theta, xi, rho, and V_0.
-        - rinit: Initial state distribution function.
-        - rproc: Process model function implementing the stochastic volatility dynamics.
-        - dmeas: Measurement model function for the log returns.
-        - covars: Covariates used in the model. In this case, the log returns of the
-            S&P 500 stock index at the previous time step.
+
+        - covars: Covariates used in the model. In this case, the log returns of the S&P 500 stock index at the previous time step.
     """
     assert isinstance(sp500, pd.DataFrame)
     return Pomp(

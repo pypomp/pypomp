@@ -295,13 +295,13 @@ def rproc_gamma(X_, theta_, key, covars, t, dt):
     }
 
 
-def dmeas_helper(y, deaths, v, tol, ltol):
+def _dmeas_helper(y, deaths, v, tol, ltol):
     return jnp.logaddexp(
         jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v + tol), ltol
     ).reshape(-1)
 
 
-def dmeas_helper_tol(y, deaths, v, tol, ltol):
+def _dmeas_helper_tol(y, deaths, v, tol, ltol):
     return jnp.array([ltol])
 
 
@@ -318,8 +318,8 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
         jnp.logical_or(
             (1 - jnp.isfinite(v)).astype(bool), count > 0
         ),  # if Y < 0 then count violation
-        dmeas_helper_tol,
-        dmeas_helper,
+        _dmeas_helper_tol,
+        _dmeas_helper,
         *(y, deaths, v, tol, ltol),
     )
 
@@ -331,7 +331,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jax.random.normal(key) * v + deaths
 
 
-def to_est(theta):
+def to_est(theta: dict) -> dict:
     return {
         "gamma": jnp.log(theta["gamma"]),
         "m": jnp.log(theta["m"]),
@@ -347,7 +347,7 @@ def to_est(theta):
     }
 
 
-def from_est(theta):
+def from_est(theta: dict) -> dict:
     return {
         "gamma": jnp.exp(theta["gamma"]),
         "m": jnp.exp(theta["m"]),

@@ -102,7 +102,19 @@ class PanelEstimationMixin(Base):
         key: jax.Array,
         shared_names: list[str] | None = None,
     ) -> list[dict[str, pd.DataFrame | None]]:
-        """Sample parameters for PanelPomp models using vectorized operations."""
+        """
+        Sample parameters for PanelPomp models.
+
+        Args:
+            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds.
+            units (list[str]): List of unit names.
+            n (int): Number of parameter sets to sample.
+            key (jax.Array): JAX random key for reproducibility.
+            shared_names (list[str], optional): List of shared parameter names. If None, all parameters are considered unit-specific.
+
+        Returns:
+            list[dict[str, pd.DataFrame | None]]: List of n dictionaries containing sampled parameters. Each dictionary contains "shared" and "unit_specific" keys mapping to DataFrames or None.
+        """
         shared = shared_names or []
         specific = [k for k in param_bounds if k not in shared]
         keys = jax.random.split(key, n)

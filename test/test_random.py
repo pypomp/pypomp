@@ -144,7 +144,7 @@ def test_rmultinom_edges_and_invalid():
 def test_rgamma():
     key = jax.random.key(0)
     alpha = jnp.array([1.0, 2.0, 3.0])
-    x = ppr.rgamma(key, alpha)
+    x = ppr.fast_approx_rgamma(key, alpha)
     assert x.shape == (3,)
     assert x.dtype == jnp.float32
     assert x.min() >= 0
@@ -242,7 +242,7 @@ def test_rgamma_moments(n_moments=3):
 
     for alpha in alpha_vals:
         alpha_arr = jnp.full((n_samples,), alpha, dtype=jnp.float32)
-        samples = np.array(ppr.rgamma(key, alpha_arr))
+        samples = np.array(ppr.fast_approx_rgamma(key, alpha_arr))
 
         # Theoretical moments for Gamma(shape=alpha, scale=1)
         mean_th = alpha

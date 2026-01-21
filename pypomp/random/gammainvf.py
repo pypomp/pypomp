@@ -101,7 +101,9 @@ def gammainvf(u: Array, alpha: Array) -> Array:
 
 
 @partial(jax.jit, static_argnames=["adjustment_size"])
-def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
+def fast_approx_rgamma(
+    key: jax.Array, alpha: jax.Array, adjustment_size: int = 3
+) -> jax.Array:
     """
     Generate a Gamma random variable with given shape parameter.
 
@@ -116,7 +118,7 @@ def rgamma(key: Array, alpha: Array, adjustment_size: int = 3) -> Array:
             alpha < 2).
 
     Returns:
-        A Gamma random variable.
+        A jax.Array with the same shape as alpha.
 
     References:
         * Temme, N. M. “Asymptotic Inversion of Incomplete Gamma Functions.” Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.

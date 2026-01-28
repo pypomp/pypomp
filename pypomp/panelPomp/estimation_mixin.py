@@ -9,7 +9,6 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast
 
 from ..mif import _jv_panel_mif_internal
-from ..internal_functions import _shard_rows
 from ..RWSigma_class import RWSigma
 from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
 from ..parameters import PanelParameters
@@ -494,16 +493,14 @@ class PanelEstimationMixin(Base):
         old_key = key
         keys = jax.random.split(key, n_reps)
 
-        shared_sharded = _shard_rows(shared_array)
-        unit_sharded = _shard_rows(unit_array)
         (
             shared_array_f,
             unit_array_f,
             shared_traces,
             unit_traces,
         ) = _jv_panel_mif_internal(
-            shared_sharded,
-            unit_sharded,
+            shared_array,
+            unit_array,
             dt_array_extended,
             nstep_array,
             t0,

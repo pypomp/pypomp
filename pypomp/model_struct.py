@@ -4,6 +4,7 @@ This file contains the classes for components that define the model structure.
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from functools import partial
 from typing import Callable, Literal
 from .ParTrans_class import ParTrans
@@ -339,15 +340,15 @@ class RProc:
         )
 
     def rebuild_interp(
-        self, nstep_array: jax.Array | None, max_steps_bound: int | None
+        self, nstep_array: np.ndarray | None, max_steps_bound: int | None
     ) -> None:
         """
         Set the maximum number of sub-steps allowed within any observation interval, and
         use a fixed nstep if nstep_array contains only one value. Rebuilds interpolator
         functions to honor this bound and set the nstep attribute.
         """
-        if nstep_array is not None and jnp.min(nstep_array) == jnp.max(nstep_array):
-            self.nstep = int(jnp.min(nstep_array))
+        if nstep_array is not None and np.min(nstep_array) == np.max(nstep_array):
+            self.nstep = int(np.min(nstep_array))
 
         self._max_steps_bound = (
             int(max_steps_bound) if max_steps_bound is not None else None

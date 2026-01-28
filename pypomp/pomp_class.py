@@ -81,9 +81,9 @@ class Pomp:
     rmeas: RMeas | None
     par_trans: ParTrans
     covars: pd.DataFrame | None
-    _covars_extended: jax.Array | None
-    _nstep_array: jax.Array
-    _dt_array_extended: jax.Array
+    _covars_extended: np.ndarray | None
+    _nstep_array: np.ndarray
+    _dt_array_extended: np.ndarray
     _max_steps_per_interval: int
     ydim: int | None
     accumvars: list[str] | None
@@ -365,15 +365,17 @@ class Pomp:
                         [theta_i[name] for name in self.canonical_param_names]
                     ),
                     ys=jnp.array(self.ys),
-                    dt_array_extended=self._dt_array_extended,
-                    nstep_array=self._nstep_array,
+                    dt_array_extended=jnp.array(self._dt_array_extended),
+                    nstep_array=jnp.array(self._nstep_array),
                     t0=self.t0,
                     times=jnp.array(self.ys.index),
                     J=J,
                     rinitializer=self.rinit.struct_pf,
                     rprocess_interp=self.rproc.struct_pf_interp,
                     dmeasure=self.dmeas.struct_pf,
-                    covars_extended=self._covars_extended,
+                    covars_extended=jnp.array(self._covars_extended)
+                    if self._covars_extended is not None
+                    else None,
                     accumvars=self.rproc.accumvars,
                     alpha=alpha,
                     key=k,
@@ -446,8 +448,8 @@ class Pomp:
 
         results = _vmapped_pfilter_internal2(
             thetas_sharded,
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -456,7 +458,9 @@ class Pomp:
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             thresh,
             rep_keys,
             CLL,
@@ -597,8 +601,8 @@ class Pomp:
 
         nLLs, theta_ests = _jv_mif_internal(
             theta_sharded,
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -608,7 +612,9 @@ class Pomp:
             sigmas_array,
             sigmas_init_array,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             M,
             a,
             J,
@@ -762,15 +768,17 @@ class Pomp:
         nLLs, theta_ests = _vmapped_train_internal(
             theta_sharded,
             jnp.array(self.ys),
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             self.rinit.struct_pf,
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             J,
             optimizer,
             M,
@@ -896,10 +904,12 @@ class Pomp:
             thetas_array,
             self.t0,
             times_array,
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.rmeas.ydim,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             self.rproc.accumvars,
             nsim,
             keys,

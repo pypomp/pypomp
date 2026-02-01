@@ -21,7 +21,7 @@ from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
 from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _calc_ys_covars, _shard_rows
+from .internal_functions import _calc_ys_covars
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
 from .results import (
@@ -44,10 +44,15 @@ class Pomp:
     initial state distribution, process model, and measurement model.
 
     The class provides methods for:
+
     - Simulation of the model
+
     - Particle filtering
+
     - Maximum likelihood estimation
+
     - Iterated filtering
+
     - Model training using a differentiable particle filter
 
     Attributes:
@@ -78,9 +83,9 @@ class Pomp:
     rmeas: RMeas | None
     par_trans: ParTrans
     covars: pd.DataFrame | None
-    _covars_extended: jax.Array | None
-    _nstep_array: jax.Array
-    _dt_array_extended: jax.Array
+    _covars_extended: np.ndarray | None
+    _nstep_array: np.ndarray
+    _dt_array_extended: np.ndarray
     _max_steps_per_interval: int
     ydim: int | None
     accumvars: list[str] | None
@@ -339,8 +344,7 @@ class Pomp:
                 Defaults to 0.97.
 
         Returns:
-            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model
-                parameters. Always a list, even if only one theta is provided.
+            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model parameters. Always a list, even if only one theta is provided.
         """
         theta_obj = self._prepare_theta_input(theta)
 
@@ -363,15 +367,17 @@ class Pomp:
                         [theta_i[name] for name in self.canonical_param_names]
                     ),
                     ys=jnp.array(self.ys),
-                    dt_array_extended=self._dt_array_extended,
-                    nstep_array=self._nstep_array,
+                    dt_array_extended=jnp.array(self._dt_array_extended),
+                    nstep_array=jnp.array(self._nstep_array),
                     t0=self.t0,
                     times=jnp.array(self.ys.index),
                     J=J,
                     rinitializer=self.rinit.struct_pf,
                     rprocess_interp=self.rproc.struct_pf_interp,
                     dmeasure=self.dmeas.struct_pf,
-                    covars_extended=self._covars_extended,
+                    covars_extended=jnp.array(self._covars_extended)
+                    if self._covars_extended is not None
+                    else None,
                     accumvars=self.rproc.accumvars,
                     alpha=alpha,
                     key=k,
@@ -535,14 +541,12 @@ class Pomp:
             [jnp.tile(thetas_array[i], (reps, 1)) for i in range(n_theta_reps)]
         )
 
-        thetas_sharded = _shard_rows(thetas_repl)
-
-        rep_keys = jax.random.split(new_key, thetas_sharded.shape[0])
+        rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
         results = _vmapped_pfilter_internal2(
-            thetas_sharded,
-            self._dt_array_extended,
-            self._nstep_array,
+            thetas_repl,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -551,7 +555,9 @@ class Pomp:
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             thresh,
             rep_keys,
             CLL,
@@ -685,15 +691,10 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        theta_tiled_T = jnp.transpose(theta_tiled, (1, 0, 2))
-        theta_sharded_T = _shard_rows(theta_tiled_T)
-        theta_sharded = jnp.transpose(theta_sharded_T, (1, 0, 2))
-        keys_sharded = _shard_rows(keys)
-
         nLLs, theta_ests = _jv_mif_internal(
-            theta_sharded,
-            self._dt_array_extended,
-            self._nstep_array,
+            theta_tiled,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             jnp.array(self.ys),
@@ -703,12 +704,14 @@ class Pomp:
             sigmas_array,
             sigmas_init_array,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             M,
             a,
             J,
             thresh,
-            keys_sharded,
+            keys,
         )
 
         final_theta_ests = []
@@ -811,7 +814,7 @@ class Pomp:
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "SGD", "Newton", "WeightedNewton", and "BFGS".
-                Note: options other than "SGD" might be quite slow.
+                Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
@@ -820,11 +823,11 @@ class Pomp:
             ls (bool, optional): Boolean flag controlling whether to use the line
                 search algorithm. Note: the line search algorithm can be quite slow.
             Line Search Parameters (only used when ls=True):
-                c (float, optional): The Armijo condition constant for line search,
-                    which controls how much the negative log-likelihood needs to
-                    decrease before the line search algorithm continues.
-                max_ls_itn (int, optional): Maximum number of iterations for the line
-                    search algorithm.
+
+                c (float, optional): The Armijo condition constant for line search which controls how much the negative log-likelihood needs to decrease before the line search algorithm continues.
+
+                max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
+
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
@@ -852,20 +855,20 @@ class Pomp:
 
         n_obs = len(self.ys)
 
-        theta_sharded = _shard_rows(theta_array)
-
         nLLs, theta_ests = _vmapped_train_internal(
-            theta_sharded,
+            theta_array,
             jnp.array(self.ys),
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.t0,
             jnp.array(self.ys.index),
             self.rinit.struct_pf,
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             J,
             optimizer,
             M,
@@ -1146,10 +1149,12 @@ class Pomp:
             thetas_array,
             self.t0,
             times_array,
-            self._dt_array_extended,
-            self._nstep_array,
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
             self.rmeas.ydim,
-            self._covars_extended,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
             self.rproc.accumvars,
             nsim,
             keys,
@@ -1198,13 +1203,11 @@ class Pomp:
         Returns a DataFrame with the results of the method run at the given index.
 
         Args:
-            index (int): The index of the result to return. Defaults to -1 (the last
-                result).
+            index (int): The index of the result to return. Defaults to -1 (the last result).
             ignore_nan (bool): If True, ignore NaNs when computing the log-likelihood.
 
         Returns:
-            pd.DataFrame: A DataFrame with the results of the method run at the given
-                index.
+            pd.DataFrame: A DataFrame with the results of the method run at the given index.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
@@ -1230,7 +1233,7 @@ class Pomp:
         """
         self.theta.prune(n=n, refill=refill)
 
-    def plot_traces(self, show: bool = True):
+    def plot_traces(self, show: bool = True) -> sns.FacetGrid | None:
         """
         Plot the parameter and log-likelihood traces from the entire result history.
         Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.

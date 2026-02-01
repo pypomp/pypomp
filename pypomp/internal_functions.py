@@ -323,7 +323,7 @@ def _calc_ys_covars(
     dt: float | None,
     nstep: int | None,
     order: str = "linear",
-) -> tuple[jax.Array | None, jax.Array, jax.Array, int]:
+) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, int]:
     """
     Construct extended ys and covars arrays.
     """
@@ -344,9 +344,9 @@ def _calc_ys_covars(
         assert interp_covars_array.shape[0] == dt_array_extended.shape[0] + 1
 
     return (
-        None if interp_covars_array is None else jnp.array(interp_covars_array),
-        jnp.array(dt_array_extended),
-        jnp.array(nstep_array),
+        None if interp_covars_array is None else np.array(interp_covars_array),
+        np.array(dt_array_extended),
+        np.array(nstep_array),
         int(nstep_array.max() if nstep_array.size > 0 else 0),
     )
 

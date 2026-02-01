@@ -9,7 +9,6 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast
 
 from ..mif import _jv_panel_mif_internal
-from ..internal_functions import _shard_rows
 from ..RWSigma_class import RWSigma
 from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
 from ..parameters import PanelParameters
@@ -102,7 +101,19 @@ class PanelEstimationMixin(Base):
         key: jax.Array,
         shared_names: list[str] | None = None,
     ) -> list[dict[str, pd.DataFrame | None]]:
-        """Sample parameters for PanelPomp models using vectorized operations."""
+        """
+        Sample parameters for PanelPomp models.
+
+        Args:
+            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds.
+            units (list[str]): List of unit names.
+            n (int): Number of parameter sets to sample.
+            key (jax.Array): JAX random key for reproducibility.
+            shared_names (list[str], optional): List of shared parameter names. If None, all parameters are considered unit-specific.
+
+        Returns:
+            list[dict[str, pd.DataFrame | None]]: List of n dictionaries containing sampled parameters. Each dictionary contains "shared" and "unit_specific" keys mapping to DataFrames or None.
+        """
         shared = shared_names or []
         specific = [k for k in param_bounds if k not in shared]
         keys = jax.random.split(key, n)
@@ -482,16 +493,14 @@ class PanelEstimationMixin(Base):
         old_key = key
         keys = jax.random.split(key, n_reps)
 
-        shared_sharded = _shard_rows(shared_array)
-        unit_sharded = _shard_rows(unit_array)
         (
             shared_array_f,
             unit_array_f,
             shared_traces,
             unit_traces,
         ) = _jv_panel_mif_internal(
-            shared_sharded,
-            unit_sharded,
+            shared_array,
+            unit_array,
             dt_array_extended,
             nstep_array,
             t0,

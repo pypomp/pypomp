@@ -8,7 +8,7 @@ import pandas as pd
 from pypomp.pomp_class import Pomp
 
 
-def get_thetas(theta):
+def _get_thetas(theta):
     """
     Cast a theta vector into A, C, Q, and R matrices as if casting iron.
     """
@@ -19,7 +19,7 @@ def get_thetas(theta):
     return A, C, Q, R
 
 
-def transform_thetas(A, C, Q, R):
+def _transform_thetas(A, C, Q, R):
     """
     Take A, C, Q, and R matrices and melt them into a single 1D array.
     """
@@ -29,14 +29,14 @@ def transform_thetas(A, C, Q, R):
 # TODO: Add custom starting position.
 def rinit(theta_, key, covars=None, t0=None):
     """Initial state process simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta_)
+    A, C, Q, R = _get_thetas(theta_)
     result = jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
     return {"X1": result[0], "X2": result[1]}
 
 
 def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     """Process simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta_)
+    A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     result = jax.random.multivariate_normal(key=key, mean=A @ X_array, cov=Q)
     return {"X1": result[0], "X2": result[1]}
@@ -44,7 +44,7 @@ def rproc(X_, theta_, key, covars=None, t=None, dt=None):
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
     """Measurement model distribution for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta_)
+    A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     Y_array = jnp.array([Y_["Y1"], Y_["Y2"]])
     return jax.scipy.stats.multivariate_normal.logpdf(Y_array, X_array, R)
@@ -52,7 +52,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
 def rmeas(X_, theta_, key, covars=None, t=None):
     """Measurement simulator for the linear Gaussian model"""
-    A, C, Q, R = get_thetas(theta_)
+    A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
 
@@ -95,7 +95,7 @@ def LG(
         the generated data.
     """
     theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
-    theta = dict(zip(theta_names, transform_thetas(A, C, Q, R).tolist()))
+    theta = dict(zip(theta_names, _transform_thetas(A, C, Q, R).tolist()))
 
     ys_temp = pd.DataFrame(
         0, index=np.arange(1, T + 1, dtype=float), columns=pd.Index(["Y1", "Y2"])

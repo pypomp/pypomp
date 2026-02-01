@@ -23,8 +23,8 @@ class ParTrans:
         to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
         from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
     ):
-        self.to_est = to_est or to_est_default
-        self.from_est = from_est or from_est_default
+        self.to_est = to_est or _to_est_default
+        self.from_est = from_est or _from_est_default
 
     def panel_transform(
         self,
@@ -341,7 +341,7 @@ class ParTrans:
         # Reconstruct to_est
         if "_to_est_is_lambda" in state:
             # Can't reconstruct lambdas - use default
-            self.to_est = to_est_default
+            self.to_est = _to_est_default
         else:
             module = importlib.import_module(state["_to_est_module"])
             self.to_est = getattr(module, state["_to_est_name"])
@@ -349,15 +349,15 @@ class ParTrans:
         # Reconstruct from_est
         if "_from_est_is_lambda" in state:
             # Can't reconstruct lambdas - use default
-            self.from_est = from_est_default
+            self.from_est = _from_est_default
         else:
             module = importlib.import_module(state["_from_est_module"])
             self.from_est = getattr(module, state["_from_est_name"])
 
 
-def to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def _to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return theta
 
 
-def from_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def _from_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return theta

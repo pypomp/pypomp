@@ -35,12 +35,26 @@ class PanelAnalysisMixin(Base):
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
     def time(self):
+        """
+        Return a DataFrame summarizing the execution times of methods run.
+
+        Returns:
+            pd.DataFrame: A DataFrame where each row contains:
+                - 'method': The name of the method run.
+                - 'time': The execution time in seconds.
+        """
         return self.results_history.time()
 
     def traces(self) -> pd.DataFrame:
+        """
+        Return a tidy DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
+        """
         return self.results_history.traces()
 
     def plot_traces(self, which: str = "shared", show: bool = True):
+        """
+        Plots the parameter and log-likelihood traces from the entire result history.
+        """
         traces = self.traces()
         assert isinstance(traces, pd.DataFrame)
         if traces.empty:

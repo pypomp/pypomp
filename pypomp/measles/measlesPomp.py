@@ -13,11 +13,11 @@ from pypomp.ParTrans_class import ParTrans
 
 # Not sure if this is the best way to implement this.
 class UKMeasles:
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(module_dir, os.pardir, "data/uk_measles")
-    data_file = os.path.join(data_dir, "uk_measles.pkl")
-    with open(data_file, "rb") as f:
-        data = pickle.load(f)
+    _module_dir = os.path.dirname(os.path.abspath(__file__))
+    _data_dir = os.path.join(_module_dir, os.pardir, "data/uk_measles")
+    _data_file = os.path.join(_data_dir, "uk_measles.pkl")
+    with open(_data_file, "rb") as _f:
+        _data = pickle.load(_f)
 
     @staticmethod
     def subset(units=None, clean=False):
@@ -35,10 +35,9 @@ class UKMeasles:
 
         Returns
         -------
-        A dictionary with the same structure as UKMeasles.data, but with the
-        data subsetted to only include the given units.
+        A dictionary with the same structure as UKMeasles.data, but with the data subsetted to only include the given units.
         """
-        data = copy.deepcopy(UKMeasles.data)
+        data = copy.deepcopy(UKMeasles._data)
 
         if clean:
             # London 1955-08-12   124

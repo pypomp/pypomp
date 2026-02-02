@@ -18,6 +18,10 @@ import jax
 from jax import Array, lax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
+import numpy as np
+from jax._src import dtypes
+
+from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
 
 
 def _q_n0(
@@ -36,11 +40,7 @@ def _q_n0(
 
     Q_N0 = np + sqrt(npq)w + (2 + 2p + (q-p)w^2) / 6
     """
-    return (
-        np_
-        + sqrt_npq * w
-        + (jnp.float32(2.0) + jnp.float32(2.0) * p + (q - p) * w2) / jnp.float32(6.0)
-    )
+    return np_ + sqrt_npq * w + (2.0 + 2.0 * p + (q - p) * w2) / 6.0
 
 
 def _q_n1(
@@ -61,10 +61,8 @@ def _q_n1(
     """
     q_n0 = _q_n0(u, n, p, q, w, w2, np_, sqrt_npq, pq)
     w3 = w2 * w
-    numerator_t2 = (jnp.float32(-2.0) + jnp.float32(14.0) * pq) * w + (
-        jnp.float32(-1.0) - jnp.float32(2.0) * pq
-    ) * w3
-    denominator_t2 = jnp.float32(72.0) * sqrt_npq
+    numerator_t2 = (-2.0 + 14.0 * pq) * w + (-1.0 - 2.0 * pq) * w3
+    denominator_t2 = 72.0 * sqrt_npq
     term2 = numerator_t2 / jnp.maximum(denominator_t2, jnp.finfo(jnp.float32).tiny)
     return q_n0 + term2
 
@@ -89,36 +87,36 @@ def _q_n2(
     w3 = w2 * w
     w4 = w3 * w
     npq_ = sqrt_npq * sqrt_npq  # npq
-    numerator_t3 = (
-        (p - q)
-        * (jnp.float32(2.0) + pq)
-        * (jnp.float32(16.0) - jnp.float32(7.0) * w2 - jnp.float32(3.0) * w4)
-    )
-    denominator_t3 = jnp.float32(1620.0) * npq_
+    numerator_t3 = (p - q) * (2.0 + pq) * (16.0 - 7.0 * w2 - 3.0 * w4)
+    denominator_t3 = 1620.0 * npq_
     term3 = numerator_t3 / jnp.maximum(denominator_t3, jnp.finfo(jnp.float32).tiny)
     return q_n1 + term3
 
 
 def _binom_bottom_up(
-    u: Array, n: Array, p: Array, approx: Array, max_k: int = 20
+    u: Array,
+    n: Array,
+    p: Array,
+    approx: Array,
+    dtype,
+    max_k: int = 20,
 ) -> Array:
     """
     Compute the exact inverse CDF for small k by accumulating the binomial CDF.
     Includes protection against float32 numerical stalling in the tail.
     """
-    dtype = jnp.float32
     tiny = jnp.finfo(dtype).tiny
     epsilon = 1e-7  # Approx machine epsilon for float32
 
-    q = jnp.clip(jnp.float32(1.0) - p, tiny, jnp.float32(1.0))
-    p_safe = jnp.clip(p, jnp.float32(0.0), jnp.float32(1.0))
-    q_safe = jnp.clip(q, tiny, jnp.float32(1.0))
+    q = jnp.clip(1.0 - p, tiny, 1.0)
+    p_safe = jnp.clip(p, 0.0, 1.0)
+    q_safe = jnp.clip(q, tiny, 1.0)
     ratio_multiplier = p_safe / q_safe
 
     log_q = jnp.log1p(-p_safe)
     pmf = jnp.where(
-        n == jnp.float32(0.0),
-        jnp.float32(1.0),
+        n == 0.0,
+        1.0,
         jnp.exp(n * log_q),
     )
     cdf = pmf
@@ -126,15 +124,15 @@ def _binom_bottom_up(
     found = cdf >= u
 
     # Initialize result with approx (fallback), but if found at k=0, use 0.
-    result = cast(Array, jnp.where(found, jnp.float32(0.0), approx))
+    result = cast(Array, jnp.where(found, 0.0, approx))
 
     for i in range(1, max_k):
-        k_curr_val = jnp.float32(i)
+        k_curr_val = i
         k_curr = jnp.full_like(result, k_curr_val)
-        k_prev = jnp.float32(i - 1)
+        k_prev = i - 1
 
         # Recurrence: P(k) = P(k-1) * ((n - k + 1) / k) * (p / q)
-        num = jnp.maximum(n - k_prev, jnp.float32(0.0))
+        num = jnp.maximum(n - k_prev, 0.0)
         den = k_curr_val
 
         pmf = pmf * (num / den) * ratio_multiplier
@@ -143,7 +141,10 @@ def _binom_bottom_up(
         # Check for numerical stall:
         # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further
         # in float32. We claim any remaining u values belong to this tail bucket.
-        is_stalled = (cdf > 0.95) & (pmf < epsilon)
+        if dtype == jnp.float32:
+            is_stalled = (cdf > 0.95) & (pmf < epsilon)
+        else:
+            is_stalled = False
 
         found_now = (cdf >= u) | is_stalled
 
@@ -152,7 +153,7 @@ def _binom_bottom_up(
 
         found = jnp.logical_or(found, found_now)
 
-    return cast(Array, jnp.clip(result, jnp.float32(0.0), n))
+    return cast(Array, jnp.clip(result, 0.0, n))
 
 
 def _binominvf_scalar(
@@ -179,17 +180,17 @@ def _binominvf_scalar(
     # Handle edge cases
     nan = jnp.array(jnp.nan, dtype=dtype)
 
-    invalid_n = n < jnp.float32(0.0)
-    invalid_p = (p < jnp.float32(0.0)) | (p > jnp.float32(1.0))
-    invalid_u = (u < jnp.float32(0.0)) | (u > jnp.float32(1.0))
+    invalid_n = n < 0.0
+    invalid_p = (p < 0.0) | (p > 1.0)
+    invalid_u = (u < 0.0) | (u > 1.0)
     invalid = invalid_n | invalid_p | invalid_u
 
     # Special cases
-    n_is_zero = n == jnp.float32(0.0)
-    u_is_zero = u == jnp.float32(0.0)
-    u_is_one = u == jnp.float32(1.0)
-    p_is_zero = p == jnp.float32(0.0)
-    p_is_one = p == jnp.float32(1.0)
+    n_is_zero = n == 0.0
+    u_is_zero = u == 0.0
+    u_is_one = u == 1.0
+    p_is_zero = p == 0.0
+    p_is_one = p == 1.0
 
     # For p = 0, all outcomes are 0
     # For p = 1, all outcomes are n
@@ -198,19 +199,19 @@ def _binominvf_scalar(
 
     # Use symmetry: if p > 0.5, work with 1-p and flip result
     p_val = jnp.asarray(p, dtype=dtype)
-    flip = p_val > jnp.float32(0.5)
-    p_safe = cast(Array, jnp.where(flip, jnp.float32(1.0) - p_val, p_val))
-    u_flipped = cast(Array, jnp.where(flip, jnp.float32(1.0) - u, u))
+    flip = p_val > 0.5
+    p_safe = cast(Array, jnp.where(flip, 1.0 - p_val, p_val))
+    u_flipped = cast(Array, jnp.where(flip, 1.0 - u, u))
 
-    n_safe = cast(Array, jnp.where(invalid_n, jnp.float32(1.0), n))
-    p_safe = cast(Array, jnp.clip(p_safe, jnp.float32(0.0), jnp.float32(1.0)))
+    n_safe = cast(Array, jnp.where(invalid_n, 1.0, n))
+    p_safe = cast(Array, jnp.clip(p_safe, 0.0, 1.0))
     u_safe = cast(
         Array,
-        jnp.clip(u_flipped, jnp.float32(1e-9), jnp.float32(1.0) - jnp.float32(1e-9)),
+        jnp.clip(u_flipped, 1e-9, 1.0 - 1e-9),
     )  # Clip to avoid inf from norm.ppf
 
     # Pre-compute shared values for the approximation formulas
-    q = jnp.float32(1.0) - p_safe
+    q = 1.0 - p_safe
     w = norm.ppf(u_safe)  # w = Φ^{-1}(u)
     w2 = w * w
     np_ = n_safe * p_safe
@@ -224,7 +225,7 @@ def _binominvf_scalar(
     # Use lax.switch to select the correct function based on order
     # Order is a static Python int, so we clamp it in Python and convert to JAX int
     safe_order = max(0, min(2, int(order)))
-    order_idx = jnp.int32(safe_order)
+    order_idx = safe_order
     branches = [
         lambda x: _q_n0(*x),
         lambda x: _q_n1(*x),
@@ -234,13 +235,15 @@ def _binominvf_scalar(
 
     # The paper states \overline{C}^{-1}(u) = floor(C^{-1}(u))
     # Clip to valid range [0, n] and take floor
-    k_approx = jnp.clip(jnp.floor(q_u), jnp.float32(0.0), n_safe)
+    k_approx = jnp.clip(jnp.floor(q_u), 0.0, n_safe)
 
     # Compute x from the bottom up if it is less than the cutoff
     x_cutoff = 10
     np_cutoff = 4.0
-    u_exact = jnp.clip(u_flipped, jnp.float32(0.0), jnp.float32(1.0))
-    k_bottom_up = _binom_bottom_up(u_exact, n_safe, p_safe, k_approx, max_k=exact_max)
+    u_exact = jnp.clip(u_flipped, 0.0, 1.0)
+    k_bottom_up = _binom_bottom_up(
+        u_exact, n_safe, p_safe, k_approx, dtype, max_k=exact_max
+    )
     k_small = k_approx < x_cutoff
     np_small = np_ < np_cutoff
     use_bottom_up = k_small | np_small
@@ -250,12 +253,12 @@ def _binominvf_scalar(
     k_flipped = cast(Array, jnp.where(flip, n_safe - k_approx, k_approx))
 
     k_result = k_flipped
-    k_result = cast(Array, jnp.where(n_is_zero, jnp.float32(0.0), k_result))
-    k_result = cast(Array, jnp.where(u_is_zero, jnp.float32(0.0), k_result))
+    k_result = cast(Array, jnp.where(n_is_zero, 0.0, k_result))
+    k_result = cast(Array, jnp.where(u_is_zero, 0.0, k_result))
     k_result = cast(Array, jnp.where(u_is_one, n_safe, k_result))
-    k_result = cast(Array, jnp.where(p_is_zero, jnp.float32(0.0), k_result))
+    k_result = cast(Array, jnp.where(p_is_zero, 0.0, k_result))
     k_result = cast(Array, jnp.where(p_is_one, n_safe, k_result))
-    k_result = cast(Array, jnp.clip(k_result, jnp.float32(0.0), n_safe))
+    k_result = cast(Array, jnp.clip(k_result, 0.0, n_safe))
     k_result = cast(Array, jnp.where(invalid, nan, k_result))
 
     return k_result
@@ -291,6 +294,7 @@ def binominvf(
         u: Probabilities (scalar or array) in the interval [0, 1].
         n: Number of trials (must be positive integer or positive float).
         p: Success probability (must be in [0, 1]).
+        dtype: Data type for computation.
         exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
 
@@ -313,7 +317,7 @@ def fast_approx_rbinom(
     p: Array,
     order: int = 2,
     exact_max: int = 5,
-    dtype: jnp.dtype = jnp.float32,
+    dtype: np.dtype | None = None,
 ) -> Array:
     """
     Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
@@ -326,19 +330,37 @@ def fast_approx_rbinom(
         p: Success probability for the binomial distribution.
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
         exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
-        dtype: Data type of the output. Default is jnp.float32. If integer, returns -1 for invalid inputs instead of nan.
+        dtype: optional, a float dtype for the returned values (default float64 if
+            jax_enable_x64 is true, otherwise float32). If integer, returns -1 for invalid inputs instead of nan.
 
     Returns:
         Binomial random variables with the same shape as n and p.
 
     References:
-        * Giles, Michael B., and Casper Beentjes. “Approximation of an Inverse of the Incomplete Beta Function.” In Mathematical Software – ICMS 2024, vol. 14749. Lecture Notes in Computer Science. Springer Nature Switzerland, 2024. https://doi.org/10.1007/978-3-031-64529-7_22.
-        * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
+        * Giles, Michael B., and Casper Beentjes. "Approximation of an Inverse of the Incomplete Beta Function." In Mathematical Software – ICMS 2024, vol. 14749. Lecture Notes in Computer Science. Springer Nature Switzerland, 2024. https://doi.org/10.1007/978-3-031-64529-7_22.
+        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    assert (
+        dtype is not None
+    )  # Type guard: check_and_canonicalize_user_dtype only returns None if input is None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `fast_approx_rbinom` must be a float or integer dtype, got {dtype}"
+        )
+
+    # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
+    dtype = _get_available_dtype(dtype)
+    assert (
+        dtype is not None
+    )  # Type guard: _get_available_dtype only returns None if input is None
+
     shape = jnp.broadcast_shapes(n.shape, p.shape)
 
     u = jax.random.uniform(key, shape)
-    x = binominvf(u, n, p, order=order, exact_max=exact_max)
+    x = binominvf(u, n, p, exact_max, order=order)
 
     if jnp.issubdtype(dtype, jnp.integer):
         x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)
@@ -348,7 +370,7 @@ def fast_approx_rbinom(
 
 @partial(jax.jit, static_argnames=["dtype"])
 def fast_approx_rmultinom(
-    key: Array, n: Array, p: Array, dtype: jnp.dtype = jnp.float32
+    key: Array, n: Array, p: Array, dtype: np.dtype | None = None
 ) -> Array:
     """
     Generate multinomial random variables using the inverse CDF method with fast_approx_rbinom.
@@ -358,10 +380,18 @@ def fast_approx_rmultinom(
         n: Number of trials for the multinomial distribution. Shape: (...,)
         p: Probabilities for each category. Shape: (..., k), where k = num categories.
            Probabilities along the last axis must sum to 1.
-        dtype: Data type of the output. Default is jnp.float32. If integer, returns -1 for invalid inputs instead of nan.
+        dtype: optional, a float dtype for the returned values (default float64 if
+            jax_enable_x64 is true, otherwise float32). If integer, returns -1 for invalid inputs instead of nan.
     Returns:
-        Multinomial counts. Same shape as p, but dtype = n.dtype.
+        Multinomial counts. Same shape as p, but with specified dtype.
     """
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `fast_approx_rmultinom` must be a float or integer dtype, got {dtype}"
+        )
     # Flatten inputs for broadcasting convenience
     n = jnp.asarray(n)
     p = jnp.asarray(p)

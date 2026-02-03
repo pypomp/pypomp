@@ -24,6 +24,7 @@ def _jgrad_dpop(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> jax.Array:
     """
@@ -48,6 +49,7 @@ def _jgrad_dpop(
         covars_extended=covars_extended,
         alpha=alpha,
         process_weight_index=process_weight_index,
+        ntimes=ntimes,
         key=key,
     )
 
@@ -67,6 +69,7 @@ def _jvg_dpop(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """
@@ -94,10 +97,23 @@ def _jvg_dpop(
         covars_extended=covars_extended,
         alpha=alpha,
         process_weight_index=process_weight_index,
+        ntimes=ntimes,
         key=key,
     )
 
 
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "process_weight_index",
+        "ntimes",
+        "M",
+    ),
+)
 def dpop_sgd_decay(
     theta_init: jax.Array,
     ys: jax.Array,
@@ -105,16 +121,17 @@ def dpop_sgd_decay(
     nstep_array: jax.Array,
     t0: float,
     times: jax.Array,
-    J: int,
-    rinitializer: Callable,
-    rprocess_interp: Callable,
-    dmeasure: Callable,
+    J: int,  # static
+    rinitializer: Callable,  # static
+    rprocess_interp: Callable,  # static
+    dmeasure: Callable,  # static
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     alpha: float,
-    process_weight_index: int | None,
+    process_weight_index: int | None,  # static
+    ntimes: int,  # static
     key: jax.Array,
-    M: int = 40,
+    M: int = 40,  # static
     eta0: float = 0.01,
     decay: float = 0.1,
 ) -> tuple[jax.Array, jax.Array]:
@@ -134,7 +151,7 @@ def dpop_sgd_decay(
         Observations passed to the DPOP objective.
     dt_array_extended, nstep_array, t0, times, J,
     rinitializer, rprocess_interp, dmeasure, accumvars, covars_extended,
-    alpha, process_weight_index, key :
+    alpha, process_weight_index, ntimes, key :
         Exactly the same meaning as in `_dpop_internal_mean`.
     M : int, default 40
         Number of optimization iterations.
@@ -154,20 +171,21 @@ def dpop_sgd_decay(
         The mean negative log-likelihood per observation at each iteration
         (as returned by `_dpop_internal_mean`).
     """
-    theta = theta_init
-    n_obs = ys.shape[0]
+    # Initialize arrays for storing results
+    theta_history = jnp.zeros((M + 1, theta_init.shape[0]))
+    nll_history = jnp.zeros(M + 1)
 
-    theta_history = []
-    nll_history = []
+    # Set initial values
+    theta_history = theta_history.at[0].set(theta_init)
 
-    for m in range(M + 1):
-        # Record current parameters
-        theta_history.append(theta)
+    # Create the step function for fori_loop
+    def train_step(m, carry):
+        theta, key, theta_history, nll_history = carry
 
         # Compute mean NLL and its gradient at the current theta
         key, subkey = jax.random.split(key)
-        nll_mean, grad = _jvg_dpop(
-            theta_ests=theta,
+        nll_mean, grad = jax.value_and_grad(_dpop_internal_mean)(
+            theta,
             ys=ys,
             dt_array_extended=dt_array_extended,
             nstep_array=nstep_array,
@@ -175,30 +193,60 @@ def dpop_sgd_decay(
             times=times,
             J=J,
             rinitializer=rinitializer,
-            rprocess=rprocess_interp,
+            rprocess_interp=rprocess_interp,
             dmeasure=dmeasure,
             accumvars=accumvars,
             covars_extended=covars_extended,
             alpha=alpha,
             process_weight_index=process_weight_index,
+            ntimes=ntimes,
             key=subkey,
         )
 
-        nll_history.append(nll_mean)
-
-        # Last iteration: do not update further
-        if m == M:
-            break
+        # Record NLL
+        nll_history = nll_history.at[m].set(nll_mean)
 
         # Decayed learning rate: eta_m = eta0 / (1 + decay * m)
-        m_f = float(m)
+        m_f = m.astype(jnp.float32)
         lr = eta0 / (1.0 + decay * m_f)
 
-        # Gradient step
+        # Gradient step with NaN protection
         grad_safe = jnp.where(jnp.isnan(grad), 0.0, grad)
-        theta = theta - lr * grad_safe
+        theta_new = theta - lr * grad_safe
 
-    theta_history = jnp.stack(theta_history, axis=0)
-    nll_history = jnp.stack(nll_history, axis=0)
+        # Record new theta for next iteration
+        theta_history = theta_history.at[m + 1].set(theta_new)
+
+        return (theta_new, key, theta_history, nll_history)
+
+    # Run the optimization loop
+    theta_final, key_final, theta_history, nll_history = jax.lax.fori_loop(
+        0,
+        M,
+        train_step,
+        (theta_init, key, theta_history, nll_history),
+    )
+
+    # Compute final NLL (at iteration M)
+    key_final, subkey = jax.random.split(key_final)
+    final_nll = _dpop_internal_mean(
+        theta_final,
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess_interp=rprocess_interp,
+        dmeasure=dmeasure,
+        accumvars=accumvars,
+        covars_extended=covars_extended,
+        alpha=alpha,
+        process_weight_index=process_weight_index,
+        ntimes=ntimes,
+        key=subkey,
+    )
+    nll_history = nll_history.at[M].set(final_nll)
 
     return theta_history, nll_history

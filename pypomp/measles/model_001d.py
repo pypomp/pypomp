@@ -1,32 +1,103 @@
-"""He10 model without alpha or mu parameters"""
+"""He10 model without alpha or mu parameters - DPOP enabled with gradient-stable dmeas
+
+Gradient stability fixes:
+1. rproc: Use jax.random.gamma instead of fast_approx_rgamma (stable reparameterization)
+2. rproc: Use sample_and_log_prob instead of rmultinomial + deulermultinom (unified gradient path)
+3. dmeas: Use custom JVP for log_cdf_diff (prevents 0 * inf = NaN in extreme z regions)
+4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
+"""
 
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.random.poissoninvf import rpoisson
-from pypomp.random.binominvf import rmultinomial
-from pypomp.random.gammainvf import rgamma
-from pypomp.ctmc_multinom import deulermultinom  
+from jax.scipy.special import log_ndtr
+from pypomp.ctmc_multinom import sample_and_log_prob
 
 
+# =========================================================================
+# Custom JVP log_cdf_diff for gradient stability
+# =========================================================================
+LOG_SQRT_2PI = 0.5 * jnp.log(2.0 * jnp.pi)
+
+
+def _log_phi(z):
+    """log φ(z) for standard normal density"""
+    return -0.5 * z * z - LOG_SQRT_2PI
+
+
+def _log_sub_exp_stable(a, b):
+    """Stable log(exp(a) - exp(b)) assuming a >= b"""
+    return a + jnp.log1p(-jnp.exp(b - a))
+
+
+@jax.custom_jvp
+def log_cdf_diff(zh, zl):
+    """log(Φ(zh) - Φ(zl)) with custom JVP for gradient stability"""
+    a = log_ndtr(zh)
+    b = log_ndtr(zl)
+    hi = jnp.maximum(a, b)
+    lo = jnp.minimum(a, b)
+    return _log_sub_exp_stable(hi, lo)
+
+
+@log_cdf_diff.defjvp
+def _log_cdf_diff_jvp(primals, tangents):
+    zh, zl = primals
+    tzh, tzl = tangents
+    y = log_cdf_diff(zh, zl)
+    lphi_h = _log_phi(zh)
+    lphi_l = _log_phi(zl)
+    
+    LOG_MAX = jnp.log(jnp.finfo(zh.dtype).max)
+    
+    # 计算 log-space 梯度
+    diff_h = lphi_h - y
+    diff_l = lphi_l - y
+    
+    # 处理 y=-inf 退化情况（当 zh≈zl 时）
+    # diff = lphi - (-inf) = +inf，需要映射到 -LOG_MAX 使 exp() → 0
+    safe_diff_h = jnp.where(jnp.isfinite(diff_h),
+                            jnp.clip(diff_h, -LOG_MAX, LOG_MAX),
+                            -LOG_MAX)
+    safe_diff_l = jnp.where(jnp.isfinite(diff_l),
+                            jnp.clip(diff_l, -LOG_MAX, LOG_MAX),
+                            -LOG_MAX)
+    
+    r_hi = jnp.exp(safe_diff_h)
+    r_lo = jnp.exp(safe_diff_l)
+    dy = r_hi * tzh - r_lo * tzl
+    return y, dy
+
+
+def log_cdf_single(z):
+    """log Φ(z)，使用相同的 stable JVP 路径"""
+    return log_cdf_diff(z, -jnp.inf)
+
+
+# =========================================================================
+# Model definition
+# =========================================================================
 param_names = (
-    "R0",  # 0
-    "sigma",  # 1
-    "gamma",  # 2
-    "iota",  # 3
-    "rho",  # 4
-    "sigmaSE",  # 5
-    "psi",  # 6
-    "cohort",  # 7
-    "amplitude",  # 8
-    "S_0",  # 9
-    "E_0",  # 10
-    "I_0",  # 11
-    "R_0",  # 12
+    "R0",       # 0 - basic reproduction number
+    "sigma",    # 1 - 1/latent period
+    "gamma",    # 2 - 1/infectious period
+    "iota",     # 3 - imported infections
+    "rho",      # 4 - reporting rate
+    "sigmaSE",  # 5 - extra-demographic stochasticity
+    "psi",      # 6 - overdispersion in measurement
+    "cohort",   # 7 - cohort effect
+    "amplitude",# 8 - seasonal amplitude
+    "S_0",      # 9 - initial susceptible fraction
+    "E_0",      # 10 - initial exposed fraction
+    "I_0",      # 11 - initial infected fraction
+    "R_0",      # 12 - initial recovered fraction
 )
 
-# ADD: extra state "logw" for process log-density
+# State includes "logw" for DPOP process log-density
 statenames = ["S", "E", "I", "R", "W", "C", "logw"]
+
+# accumvars are reset each observation interval
+accumvars = ("W", "C", "logw")
 
 
 def rinit(theta_, key, covars, t0=None):
@@ -40,22 +111,16 @@ def rinit(theta_, key, covars, t0=None):
     E = jnp.round(m * E_0)
     I = jnp.round(m * I_0)
     R = jnp.round(m * R_0)
-    W = 0
-    C = 0
-    logw = 0.0  # NEW: initial process log-weight
+    W = 0.0
+    C = 0.0
+    logw = 0.0
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
 
 
 def rproc(X_, theta_, key, covars, t, dt):
-    # ADD logw in state unpacking
     S, E, I, R, W, C, logw = (
-        X_["S"],
-        X_["E"],
-        X_["I"],
-        X_["R"],
-        X_["W"],
-        X_["C"],
-        X_["logw"],
+        X_["S"], X_["E"], X_["I"], X_["R"],
+        X_["W"], X_["C"], X_["logw"],
     )
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
@@ -68,6 +133,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     birthrate = covars["birthrate"]
     mu = 0.02
 
+    # Cohort effect timing
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
     br = jnp.where(
@@ -76,7 +142,7 @@ def rproc(X_, theta_, key, covars, t, dt):
         (1 - cohort) * birthrate,
     )
 
-    # term-time seasonality
+    # Term-time seasonality
     t_days = t_mod * 365.25
     in_term_time = (
         ((t_days >= 7) & (t_days <= 100))
@@ -86,111 +152,89 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
     seas = jnp.where(in_term_time, 1.0 + amplitude * 0.2411 / 0.7589, 1 - amplitude)
 
-    # transmission rate
+    # Transmission rate
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
 
-    # expected force of infection
+    # Force of infection
     foi = beta * (I + iota) / pop
 
-    # white noise (extrademographic stochasticity)
+    # White noise (extrademographic stochasticity)
+    # FIX 1: Use jax.random.gamma for gradient stability
     keys = jax.random.split(key, 3)
-    # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-    # dw = fast_approx_gamma(keys[0], dt / sigmaSE**2, max_rejections=1) * sigmaSE**2
-    dw = rgamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-
-    rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
+    dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     # Poisson births
-    # births = jax.random.poisson(keys[1], br * dt)
-    # births = fast_approx_poisson(
-    #     keys[1],
-    #     br * dt,
-    #     max_rejections_ptrs=1,
-    #     max_rejections_knuth=10,
-    #     lam_cutoff=5.0,
-    # )
-    births = rpoisson(keys[1], br * dt)
+    births = jax.random.poisson(keys[1], br * dt).astype(jnp.float32)
 
-    # transitions between classes
-    rt_final = jnp.zeros((3, 3))
+    # Transition rates for Euler-multinomial steps
+    rates_S = jnp.array([foi * dw / dt, mu])
+    rates_E = jnp.array([sigma, mu])
+    rates_I = jnp.array([gamma, mu])
 
-    rate_pairs = jnp.array([[rate[0], rate[1]], [rate[2], rate[3]], [rate[4], rate[5]]])
-    populations = jnp.array([S, E, I])
+    # FIX 2: Use sample_and_log_prob for unified gradient path
+    key_proc = keys[2]
+    (StoE, StoDeath), lp_S, key_proc = sample_and_log_prob(S, rates_S, dt, key_proc)
+    (EtoI, EtoDeath), lp_E, key_proc = sample_and_log_prob(E, rates_E, dt, key_proc)
+    (ItoR, ItoDeath), lp_I, key_proc = sample_and_log_prob(I, rates_I, dt, key_proc)
 
-    rate_sums = jnp.sum(rate_pairs, axis=1)
-    p0_values = jnp.exp(-rate_sums * dt)
-
-    rt_final = (
-        rt_final.at[:, 0:2]
-        .set(jnp.einsum("ij,i,i->ij", rate_pairs, 1 / rate_sums, 1 - p0_values))
-        .at[:, 2]
-        .set(p0_values)
-    )
-
-    # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    # transitions = fast_approx_multinomial(
-    #     keys[2],
-    #     populations,
-    #     rt_final,
-    #     max_rejections_btrs=1,
-    #     max_rejections_inversion=50,
-    #     np_cutoff=5.0,
-    # )
-    transitions = rmultinomial(keys[2], populations, rt_final)
-
-    trans_S = transitions[0]
-    trans_E = transitions[1]
-    trans_I = transitions[2]
-
-    # NEW: process log-density contributions
-    # births: Poisson(br * dt)
-    # lp_births = jax.scipy.stats.poisson.logpmf(births, br * dt)
-    # S, E, I each treated as an Euler-multinomial CTMC step with rates from rate_pairs
-    lp_S = deulermultinom(trans_S[:2], populations[0], rate_pairs[0], dt)
-    lp_E = deulermultinom(trans_E[:2], populations[1], rate_pairs[1], dt)
-    lp_I = deulermultinom(trans_I[:2], populations[2], rate_pairs[2], dt)
-    # step-wise process log-density increment
-    logw_step = lp_S + lp_E + lp_I  # 
-
+    # Accumulate process log-density
+    logw_step = lp_S + lp_E + lp_I
     logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
-
     logw = logw + logw_step
 
-    S = S + births - trans_S[0] - trans_S[1]
-    E = E + trans_S[0] - trans_E[0] - trans_E[1]
-    I = I + trans_E[0] - trans_I[0] - trans_I[1]
+    # State updates
+    S = S + births - StoE - StoDeath
+    E = E + StoE - EtoI - EtoDeath
+    I = I + EtoI - ItoR - ItoDeath
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
-    C = C + trans_I[0]
+    C = C + ItoR
+    
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
+    """
+    Gradient-stable measurement density using custom JVP.
+    
+    Fixes:
+    - FIX 3: Custom JVP for log_cdf_diff handles extreme z values without 0 * inf = NaN
+    - FIX 4: Replace NaN y before computing z, preventing NaN propagation
+    """
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
-    tol = 1.0e-18
-
-    y = Y_["cases"]
-    m = rho * C
+    y_raw = Y_["cases"]
+    
+    tol = 1e-12
+    
+    # FIX 4: Replace NaN y before computing z
+    # jnp.where computes BOTH branches, so NaN in y propagates to gradient
+    # By replacing NaN with 0 first, z computation stays finite
+    y_is_nan = jnp.isnan(y_raw)
+    y = jnp.where(y_is_nan, 0.0, y_raw)
+    
+    # Mean and variance
+    Cpos = jnp.maximum(C, 0.0)
+    m = rho * Cpos
     v = m * (1.0 - rho + psi**2 * m)
-    sqrt_v_tol = jnp.sqrt(v) + tol
-
-    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
-
-    lik = (
-        jnp.where(
-            y > tol,
-            upper_cdf - lower_cdf,
-            upper_cdf,
-        )
-        + tol
-    )
-
-    lik = jnp.where(C < 0, 0.0, lik)
-    lik = jnp.where(jnp.isnan(y), 1.0, lik)
-    return jnp.log(lik)
+    v = jnp.maximum(v, tol * tol)
+    s = jnp.sqrt(v)
+    
+    # z-scores
+    z_hi = (y + 0.5 - m) / s
+    z_lo = (y - 0.5 - m) / s
+    
+    # FIX 3: Use custom JVP log_cdf_diff for gradient stability
+    ll_box = jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
+    
+    loglik = jnp.maximum(ll_box, jnp.log(tol))
+    
+    # FIX 4 continued: Zero out result for NaN y (instead of using where)
+    # Multiplying by 0 gives gradient 0, not NaN
+    loglik = loglik * (1.0 - y_is_nan.astype(loglik.dtype))
+    
+    return loglik
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
@@ -199,7 +243,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     C = X_["C"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
-    tol = 1.0e-18  # 1.0e-18 in He10 model; 0.0 is 'correct'
+    tol = 1.0e-18
     cases = jax.random.normal(key) * (jnp.sqrt(v) + tol) + m
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)
 

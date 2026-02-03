@@ -213,7 +213,7 @@ def SIS(
         par_trans=par_trans,
         nstep=None,
         dt=1.0 / 7.0,    # 7 Euler substeps per observation
-        accumvars=(2,),  # index of "logw" in STATES (per-interval accumulator)
+        accumvars=("logw",),  # name of accumulated state variable
         covars=None,
         ydim=1,
     )
@@ -243,7 +243,7 @@ def SIS(
         par_trans=par_trans,
         nstep=None,
         dt=1.0 / 7.0,
-        accumvars=(2,),   # again, mark "logw" as per-interval accumulator
+        accumvars=("logw",),  # name of accumulated state variable
         covars=None,
         ydim=1,
     )

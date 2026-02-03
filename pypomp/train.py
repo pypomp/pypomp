@@ -702,6 +702,7 @@ def _jgrad_dpop(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> jax.Array:
     """
@@ -726,6 +727,7 @@ def _jgrad_dpop(
         covars_extended=covars_extended,
         alpha=alpha,
         process_weight_index=process_weight_index,
+        ntimes=ntimes,
         key=key,
     )
 
@@ -745,6 +747,7 @@ def _jvg_dpop(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """
@@ -772,6 +775,7 @@ def _jvg_dpop(
         covars_extended=covars_extended,
         alpha=alpha,
         process_weight_index=process_weight_index,
+        ntimes=ntimes,
         key=key,
     )
 

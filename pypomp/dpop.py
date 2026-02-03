@@ -28,6 +28,7 @@ SHOULD_TRANS = True
         "rprocess_interp",
         "dmeasure",
         "process_weight_index",
+        "ntimes",
     ),
 )
 def _dpop_internal(
@@ -45,6 +46,7 @@ def _dpop_internal(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> jax.Array:
     """
@@ -95,7 +97,7 @@ def _dpop_internal(
 
     # Start from equal log-weights.
     weightsF = jnp.log(jnp.ones(J) / J)
-    counts = jnp.ones(J, dtype=jnp.int32)
+    counts = jnp.arange(J)  # Use same dtype as _resampler returns
     loglik = 0.0
 
     # Use checkpointing to keep memory usage manageable when backpropagating
@@ -120,7 +122,7 @@ def _dpop_internal(
     # Loop over observation times.
     t, particlesF, loglik, weightsF, counts, key, t_idx = jax.lax.fori_loop(
         lower=0,
-        upper=len(ys),
+        upper=ntimes,  # use static parameter instead of len(ys)
         body_fun=dpop_helper_2,
         init_val=(t0, particlesF, loglik, weightsF, counts, key, 0),
     )
@@ -238,6 +240,7 @@ def _dpop_helper(
         "rprocess_interp",
         "dmeasure",
         "process_weight_index",
+        "ntimes",
     ),
 )
 def _dpop_internal_mean(
@@ -255,6 +258,7 @@ def _dpop_internal_mean(
     covars_extended: jax.Array | None,
     alpha: float,
     process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
     key: jax.Array,
 ) -> jax.Array:
     """
@@ -279,6 +283,7 @@ def _dpop_internal_mean(
         covars_extended=covars_extended,
         alpha=alpha,
         process_weight_index=process_weight_index,
+        ntimes=ntimes,
         key=key,
     )
-    return neg_ll / ys.shape[0]
+    return neg_ll / ntimes

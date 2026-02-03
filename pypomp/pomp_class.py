@@ -457,6 +457,7 @@ class Pomp:
         keys = jax.random.split(new_key, len(theta_list_trans))
 
         results: list[jax.Array] = []
+        ntimes = len(self.ys)
         for theta_i, k in zip(theta_list_trans, keys):
             results.append(
                 -_dpop_internal(
@@ -474,6 +475,7 @@ class Pomp:
                     covars_extended=self._covars_extended,
                     alpha=alpha,
                     process_weight_index=process_weight_index,  # still an int internally
+                    ntimes=ntimes,
                     key=k,
                 )
             )
@@ -1077,6 +1079,7 @@ class Pomp:
             ) from e
 
         # 6) Call the low-level dpop_sgd_decay (returns theta_history, nll_history).
+        ntimes = len(self.ys)
         theta_hist, nll_hist = _dpop_sgd_decay(
             theta_init=theta_init,
             ys=ys_array,
@@ -1092,6 +1095,7 @@ class Pomp:
             covars_extended=covars_extended,
             alpha=alpha,
             process_weight_index=process_weight_index,
+            ntimes=ntimes,
             key=new_key,
             M=M,
             eta0=eta0,

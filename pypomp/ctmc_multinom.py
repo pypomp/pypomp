@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import gammaln
 
-from pypomp.random.binominvf import rmultinomial as fast_rmultinomial
+from pypomp.random.binominvf import fast_approx_rmultinom as fast_rmultinomial
 
 
 def _euler_multinomial_probs(

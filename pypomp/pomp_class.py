@@ -689,7 +689,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: float,
+        eta: dict[str, float],
         key: jax.Array | None = None,
         theta: dict | list[dict] | PompParameters | None = None,
         optimizer: str = "SGD",
@@ -708,7 +708,7 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (float): Learning rate.
+            eta (dict[str, float]): Learning rates per parameter as a dictionary.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
@@ -749,6 +749,15 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
+        # Validate eta dictionary keys match canonical parameter names
+        if set(eta.keys()) != set(self.canonical_param_names):
+            raise ValueError(
+                f"eta keys {set(eta.keys())} must match parameter names {set(self.canonical_param_names)}"
+            )
+
+        # Convert eta dict to JAX array in canonical order
+        eta_array = jnp.array([eta[param] for param in self.canonical_param_names])
+
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
@@ -773,7 +782,7 @@ class Pomp:
             J,
             optimizer,
             M,
-            eta,
+            eta_array,
             c,
             max_ls_itn,
             thresh,

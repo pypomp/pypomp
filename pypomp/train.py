@@ -20,7 +20,6 @@ from .mop import _mop_internal_mean
         "J",
         "optimizer",
         "M",
-        "eta",
         "c",
         "max_ls_itn",
         "thresh",
@@ -46,7 +45,7 @@ def _train_internal(
     J: int,  # static
     optimizer: str,  # static
     M: int,  # static
-    eta: float,  # static
+    eta: jax.Array,
     c: float,  # static
     max_ls_itn: int,  # static
     thresh: float,  # static
@@ -190,7 +189,7 @@ def _train_internal(
                     lambda __: -grad,
                     operand=None,
                 )
-                s_k = eta * prev_direction
+                s_k = jnp.mean(eta) * prev_direction  # Use mean for BFGS
                 y_k = grad - grads[i - 1]
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
                 sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
@@ -242,25 +241,24 @@ def _train_internal(
 
                 return jnp.squeeze(neg_loglik)
 
-            eta2 = _line_search(
+            eta_scalar = _line_search(
                 _obj_neg_loglik,
                 curr_obj=loglik,
                 pt=theta_ests,
                 grad=grad,
                 direction=direction,
                 k=i + 1,
-                eta=jnp.array(eta),
+                eta=jnp.mean(eta),  # TODO: use a better solution
                 xi=10,
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
                 stoch=False,
             )
+            theta_ests = theta_ests + eta_scalar * direction
 
         else:
-            eta2 = eta
-
-        theta_ests = theta_ests + eta2 * direction
+            theta_ests = theta_ests + eta * direction
 
         # Update carry state
         Acopies = Acopies.at[i].set(theta_ests)

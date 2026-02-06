@@ -480,7 +480,7 @@ class PompTrainResult(PompBaseResult):
     optimizer: str = "SGD"
     J: int = 0
     M: int = 0
-    eta: float = 0.0
+    eta: dict[str, float] = field(default_factory=lambda: {})
     alpha: float = 0.97
     thresh: int = 0
     ls: bool = False

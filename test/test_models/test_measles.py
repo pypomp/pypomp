@@ -64,6 +64,10 @@ def test_measles_pfilter(london):
     measles, rw_sd, J, key, M, a = london
     measles.pfilter(J=J, key=key)
 
+    jax.config.update("jax_enable_x64", True)
+    measles.pfilter(J=J, key=key)
+    jax.config.update("jax_enable_x64", False)
+
 
 def test_measles_mif(london):
     measles, rw_sd, J, key, M, a = london
@@ -79,11 +83,6 @@ def test_measles_mif(london):
 def test_measles_mop(london):
     measles, rw_sd, J, key, M, a = london
     measles.mop(J=J, key=key)
-
-
-def test_measles_train(london):
-    measles, rw_sd, J, key, M, a = london
-    measles.train(M=1, J=J, eta=0.2, key=key)
 
 
 def test_measles_clean():

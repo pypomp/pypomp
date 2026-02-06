@@ -44,11 +44,13 @@ def test_dacca_basic(simple):
 def test_dacca_nstep():
     # Check that dacca.train() runs without error when nstep is specified.
     dacca_nstep = pp.dacca(nstep=10, dt=None)
-    dacca_nstep.train(J=2, M=1, eta=0.2, key=jax.random.key(111))
+    eta = {param: 0.2 for param in dacca_nstep.canonical_param_names}
+    dacca_nstep.train(J=2, M=1, eta=eta, key=jax.random.key(111))
 
 
 def test_dacca_dt():
     # Check that dacca.train() runs without error when dt is specified and nstep
     # happens to be the same for every observation interval.
     dacca_dt = pp.dacca(nstep=None, dt=1 / 240)
-    dacca_dt.train(J=2, M=1, eta=0.2, key=jax.random.key(111))
+    eta = {param: 0.2 for param in dacca_dt.canonical_param_names}
+    dacca_dt.train(J=2, M=1, eta=eta, key=jax.random.key(111))

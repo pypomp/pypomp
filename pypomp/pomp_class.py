@@ -1243,11 +1243,16 @@ class Pomp:
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
 
-        # Remove the wrapped objects from state
+        # Store JAX key as raw bits (key is not picklable directly)
+        if self.fresh_key is not None:
+            state["_fresh_key_data"] = jax.random.key_data(self.fresh_key)
+
+        # Remove the wrapped objects and key from state
         state.pop("rinit", None)
         state.pop("rproc", None)
         state.pop("dmeas", None)
         state.pop("rmeas", None)
+        state.pop("fresh_key", None)
 
         return state
 
@@ -1258,6 +1263,12 @@ class Pomp:
         """
         # Restore basic attributes
         self.__dict__.update(state)
+
+        # Reconstruct JAX key from raw bits
+        if "_fresh_key_data" in state:
+            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+        elif "fresh_key" not in self.__dict__:
+            self.fresh_key = None
 
         # Reconstruct rinit
         if "_rinit_func_name" in state:
@@ -1359,6 +1370,7 @@ class Pomp:
             "_rmeas_func_name",
             "_rmeas_ydim",
             "_rmeas_module",
+            "_fresh_key_data",
         ]:
             if key in self.__dict__:
                 del self.__dict__[key]

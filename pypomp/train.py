@@ -65,7 +65,7 @@ def _train_internal(
         raise ValueError("Line search requires at least one monitor")
 
     def train_step(i, carry):
-        theta_ests, key, hess, Acopies, logliks, grads, hesses = carry
+        theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam = carry
 
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
@@ -209,6 +209,17 @@ def _train_internal(
 
         elif optimizer == "SGD":
             direction = -grad
+
+        elif optimizer == "Adam":
+            beta1 = 0.9
+            beta2 = 0.999
+            epsilon = 1e-8
+
+            m_adam = beta1 * m_adam + (1 - beta1) * grad
+            v_adam = beta2 * v_adam + (1 - beta2) * (grad**2)
+            m_hat = m_adam / (1 - beta1 ** (i + 1))
+            v_hat = v_adam / (1 - beta2 ** (i + 1))
+            direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported")
 
@@ -266,26 +277,39 @@ def _train_internal(
         grads = grads.at[i].set(grad)
         hesses = hesses.at[i].set(hess)
 
-        return (theta_ests, key, hess, Acopies, logliks, grads, hesses)
+        return (theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam)
 
     # Initialize arrays for storing results
     Acopies = jnp.zeros((M + 1, *theta_ests.shape))
     logliks = jnp.zeros(M + 1)
     grads = jnp.zeros((M + 1, *theta_ests.shape))
+    # TODO: stop storing entire hesses history
     hesses = jnp.zeros((M + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
 
     # Set initial values
     Acopies = Acopies.at[0].set(theta_ests)
     hess = jnp.eye(theta_ests.shape[-1])  # default one
 
+    # Initialize Adam state (momentum and variance estimates)
+    m_adam = jnp.zeros_like(theta_ests)
+    v_adam = jnp.zeros_like(theta_ests)
+
     # Run the optimization loop
-    final_theta, final_key, final_hess, Acopies, logliks, grads, hesses = (
-        jax.lax.fori_loop(
-            0,
-            M,
-            train_step,
-            (theta_ests, key, hess, Acopies, logliks, grads, hesses),
-        )
+    (
+        final_theta,
+        final_key,
+        final_hess,
+        Acopies,
+        logliks,
+        grads,
+        hesses,
+        final_m_adam,
+        final_v_adam,
+    ) = jax.lax.fori_loop(
+        0,
+        M,
+        train_step,
+        (theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam),
     )
 
     # Final evaluation

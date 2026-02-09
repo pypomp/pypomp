@@ -17,7 +17,9 @@ def simple():
     return LG, ys, covars, theta, J, key, M
 
 
-@pytest.mark.parametrize("optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS"])
+@pytest.mark.parametrize(
+    "optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS", "Adam"]
+)
 def test_train_basic(optimizer, simple):
     """Test basic train functionality with per-parameter learning rates."""
     LG, ys, covars, theta, J, key, M = simple

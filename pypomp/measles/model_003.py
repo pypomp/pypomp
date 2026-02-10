@@ -5,6 +5,7 @@ He10 model with continuous process model.
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
+from pypomp.random.gammainvf import fast_approx_rgamma
 
 param_names = (
     "R0",
@@ -62,10 +63,6 @@ def rproc(X_, theta_, key, covars, t, dt):
     pop = covars["pop"]
     birthrate = covars["birthrate"]
 
-    S_safe = jnp.maximum(S, 0.0)
-    E_safe = jnp.maximum(E, 0.0)
-    I_safe = jnp.maximum(I, 0.0)
-
     # Seasonality
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
@@ -88,39 +85,38 @@ def rproc(X_, theta_, key, covars, t, dt):
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
 
     # Expected Force of Infection
-    foi = beta * ((I_safe + iota) ** alpha) / pop
+    foi = beta * ((I + iota) ** alpha) / pop
 
-    all_noise = jax.random.normal(key, shape=(8,))
+    normal_keys, gamma_key = jax.random.split(key, 2)
+    all_noise = jax.random.normal(normal_keys, shape=(7,))
 
-    dw_noise = all_noise[0]
-    dw = dt + sigmaSE * jnp.sqrt(dt) * dw_noise
-    dw = jnp.maximum(dw, 0.0)
+    dw = fast_approx_rgamma(gamma_key, dt / sigmaSE**2) * sigmaSE**2
 
     birth_mean = br * dt
-    birth_noise = all_noise[1]
+    birth_noise = all_noise[0]
     births = jnp.maximum(birth_mean + jnp.sqrt(birth_mean) * birth_noise, 0.0)
 
     # Rates
     rate_inf = foi * (dw / dt)  # effective infection rate
 
-    flux_noises = all_noise[2:8]
+    flux_noises = all_noise[1:7]
 
     rates = jnp.array([rate_inf, mu, sigma, mu, gamma, mu])
-    states = jnp.array([S_safe, S_safe, E_safe, E_safe, I_safe, I_safe])
+    states = jnp.array([S, S, E, E, I, I])
 
     mu_fluxes = rates * states * dt
 
-    fluxes = mu_fluxes + jnp.sqrt(mu_fluxes + 1e-8) * flux_noises
+    fluxes = mu_fluxes + jnp.sqrt(mu_fluxes) * flux_noises
 
     flux_SE, flux_SD, flux_EI, flux_ED, flux_IR, flux_ID = fluxes
 
-    S_new = S + births - flux_SE - flux_SD
-    E_new = E + flux_SE - flux_EI - flux_ED
-    I_new = I + flux_EI - flux_IR - flux_ID
-    R_new = pop - S_new - E_new - I_new
+    S_new = jnp.maximum(S + births - flux_SE - flux_SD, 0.0)
+    E_new = jnp.maximum(E + flux_SE - flux_EI - flux_ED, 0.0)
+    I_new = jnp.maximum(I + flux_EI - flux_IR - flux_ID, 0.0)
+    R_new = jnp.maximum(pop - S_new - E_new - I_new, 0.0)
 
     W_new = W + (dw - dt) / sigmaSE
-    C_new = C + flux_EI
+    C_new = jnp.maximum(C + flux_EI, 0.0)
 
     return {"S": S_new, "E": E_new, "I": I_new, "R": R_new, "W": W_new, "C": C_new}
 

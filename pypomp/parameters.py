@@ -265,7 +265,7 @@ class PompParameters(ParameterSet):
             raise ValueError("n must be at least 1.")
 
         if self._logLik is None or np.all(np.isnan(self._logLik)):
-            raise ValueError("No valid log-likelihoods available to prune.")
+            raise ValueError("No valid log-likelihoods available to prune (all nan).")
 
         # Indices of top-n log-likelihoods (descending order)
         top_indices = self._logLik.argsort()[-n:][::-1]

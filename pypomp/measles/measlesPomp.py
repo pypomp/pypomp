@@ -2,9 +2,11 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import pypomp.measles.model_001 as m001
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
 import pypomp.measles.model_002 as m002
+import pypomp.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
 from pypomp.pomp_class import Pomp
 import copy
@@ -224,9 +226,11 @@ class UKMeasles:
         # ----pomp-construction-----------------------------------------------
 
         mod = {
+            "001": m001,
             "001b": m001b,
             "001c": m001c,
             "002": m002,
+            "003": m003,
         }[model]
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(

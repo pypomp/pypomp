@@ -65,7 +65,17 @@ def _train_internal(
         raise ValueError("Line search requires at least one monitor")
 
     def train_step(i, carry):
-        theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam = carry
+        (
+            theta_ests,
+            key,
+            hess,
+            Acopies,
+            logliks,
+            prev_grad,
+            prev_hess,
+            m_adam,
+            v_adam,
+        ) = carry
 
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
@@ -105,6 +115,7 @@ def _train_internal(
                 key=subkey,
             )
             if n_monitors > 0:
+                # TODO: need to handle parameter transformations correctly when n_monitors > 1; currently, pfilter will not transform the parameters back to the natural scale, so the logLiks should be incorrect.
                 key, *subkeys = jax.random.split(key, n_monitors + 1)
                 loglik = jnp.mean(
                     _vmapped_pfilter_internal(
@@ -173,7 +184,7 @@ def _train_internal(
             def dir_weighted(_):
                 i_f = i.astype(theta_ests.dtype)
                 wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
-                weighted_hess = wt * hesses[-1] + (1 - wt) * hess
+                weighted_hess = wt * prev_hess + (1 - wt) * hess
                 return -jnp.linalg.pinv(weighted_hess) @ grad
 
             direction = jax.lax.cond(
@@ -185,12 +196,12 @@ def _train_internal(
             def bfgs_true(_):
                 prev_direction = jax.lax.cond(
                     i > 0,
-                    lambda __: -grads[i - 1],
+                    lambda __: -prev_grad,
                     lambda __: -grad,
                     operand=None,
                 )
                 s_k = jnp.mean(eta) * prev_direction  # Use mean for BFGS
-                y_k = grad - grads[i - 1]
+                y_k = grad - prev_grad
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
                 sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
                 w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
@@ -272,23 +283,32 @@ def _train_internal(
             theta_ests = theta_ests + eta * direction
 
         # Update carry state
-        Acopies = Acopies.at[i].set(theta_ests)
-        logliks = logliks.at[i].set(loglik)
-        grads = grads.at[i].set(grad)
-        hesses = hesses.at[i].set(hess)
+        Acopies = Acopies.at[i + 1].set(theta_ests)
+        logliks = logliks.at[i + 1].set(loglik)
+        prev_grad = grad
+        prev_hess = hess
 
-        return (theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam)
+        return (
+            theta_ests,
+            key,
+            hess,
+            Acopies,
+            logliks,
+            prev_grad,
+            prev_hess,
+            m_adam,
+            v_adam,
+        )
 
     # Initialize arrays for storing results
-    Acopies = jnp.zeros((M + 1, *theta_ests.shape))
-    logliks = jnp.zeros(M + 1)
-    grads = jnp.zeros((M + 1, *theta_ests.shape))
-    # TODO: stop storing entire hesses history
-    hesses = jnp.zeros((M + 1, theta_ests.shape[-1], theta_ests.shape[-1]))
+    Acopies = jnp.full((M + 1, *theta_ests.shape), jnp.nan)
+    logliks = jnp.full(M + 1, jnp.nan)
 
     # Set initial values
     Acopies = Acopies.at[0].set(theta_ests)
     hess = jnp.eye(theta_ests.shape[-1])  # default one
+    prev_grad = jnp.zeros_like(theta_ests)
+    prev_hess = hess
 
     # Initialize Adam state (momentum and variance estimates)
     m_adam = jnp.zeros_like(theta_ests)
@@ -301,48 +321,16 @@ def _train_internal(
         final_hess,
         Acopies,
         logliks,
-        grads,
-        hesses,
+        prev_grad,
+        prev_hess,
         final_m_adam,
         final_v_adam,
     ) = jax.lax.fori_loop(
         0,
         M,
         train_step,
-        (theta_ests, key, hess, Acopies, logliks, grads, hesses, m_adam, v_adam),
+        (theta_ests, key, hess, Acopies, logliks, prev_grad, prev_hess, m_adam, v_adam),
     )
-
-    # Final evaluation
-    if n_monitors > 0:
-        final_key, *subkeys = jax.random.split(final_key, n_monitors + 1)
-        final_loglik = jnp.mean(
-            _vmapped_pfilter_internal(
-                final_theta,
-                dt_array_extended,
-                nstep_array,
-                t0,
-                times,
-                ys,
-                J,
-                rinitializer,
-                rprocess_interp,
-                dmeasure,
-                accumvars,
-                covars_extended,
-                0,
-                jnp.array(subkeys),
-                False,
-                False,
-                False,
-                False,
-            )["neg_loglik"]
-        )
-    else:
-        final_loglik = jnp.array(jnp.nan)
-
-    # Update final results
-    logliks = logliks.at[-1].set(final_loglik)
-    Acopies = Acopies.at[-1].set(final_theta)
 
     return logliks, Acopies
 

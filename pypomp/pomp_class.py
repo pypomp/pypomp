@@ -704,14 +704,14 @@ class Pomp:
         eta: dict[str, float],
         key: jax.Array | None = None,
         theta: dict | list[dict] | PompParameters | None = None,
-        optimizer: str = "SGD",
+        optimizer: str = "Adam",
         alpha: float = 0.97,
         thresh: int = 0,
         scale: bool = False,
         ls: bool = False,
         c: float = 0.1,
         max_ls_itn: int = 10,
-        n_monitors: int = 0,
+        n_monitors: int = 1,
         track_time: bool = True,
     ) -> None:
         """
@@ -726,7 +726,7 @@ class Pomp:
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "SGD", "Adam", "Newton", "WeightedNewton", and "BFGS".
+                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", and "BFGS".
                 Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample

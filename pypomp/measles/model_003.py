@@ -94,7 +94,9 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     birth_mean = br * dt
     birth_noise = all_noise[0]
-    births = jnp.maximum(birth_mean + jnp.sqrt(birth_mean) * birth_noise, 0.0)
+    # Use a 1e-8 floor to avoid gradient numerical instability
+    safe_birth_mean = jnp.maximum(birth_mean, 1e-8)
+    births = jnp.maximum(birth_mean + jnp.sqrt(safe_birth_mean) * birth_noise, 0.0)
 
     # Rates
     rate_inf = foi * (dw / dt)  # effective infection rate
@@ -106,7 +108,9 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     mu_fluxes = rates * states * dt
 
-    fluxes = mu_fluxes + jnp.sqrt(mu_fluxes) * flux_noises
+    # Use a 1e-8 floor to avoid gradient numerical instability
+    safe_mu_fluxes = jnp.maximum(mu_fluxes, 1e-8)
+    fluxes = mu_fluxes + jnp.sqrt(safe_mu_fluxes) * flux_noises
 
     flux_SE, flux_SD, flux_EI, flux_ED, flux_IR, flux_ID = fluxes
 

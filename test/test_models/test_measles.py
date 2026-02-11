@@ -171,35 +171,3 @@ def test_measles_clean():
         .values
     )
     assert not london_cleaned2
-
-
-def _test_measles_003_train(london_003):
-    measles = london_003
-    eta = {param: 0.1 for param in measles.canonical_param_names}
-    eta["mu"] = 0.0
-    eta["alpha"] = 0.0
-    rw_sd = pp.RWSigma(
-        sigmas={
-            "R0": 0.02,
-            "sigma": 0.02,
-            "gamma": 0.02,
-            "iota": 0.02,
-            "rho": 0.02,
-            "sigmaSE": 0.02,
-            "psi": 0.02,
-            "cohort": 0.02,
-            "amplitude": 0.02,
-            "S_0": 0.01,
-            "E_0": 0.01,
-            "I_0": 0.01,
-            "R_0": 0.01,
-            "mu": 0.0,
-            "alpha": 0.0,
-        },
-        init_names=["S_0", "E_0", "I_0", "R_0"],
-    )
-    # with jax.disable_jit():
-    # measles.mif(J=DEFAULT_J, key=DEFAULT_KEY, M=DEFAULT_M, rw_sd=rw_sd, a=DEFAULT_A)
-    measles.train(J=DEFAULT_J, key=DEFAULT_KEY, M=DEFAULT_M, eta=eta, n_monitors=0)
-    df = measles.results().drop(columns=["logLik", "se"])
-    assert not df.isnull().to_numpy().any()

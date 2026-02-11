@@ -79,6 +79,14 @@ def test_train_validation(simple):
     with pytest.raises(ValueError, match="eta keys.*must match parameter names"):
         LG.train(J=J, M=M, eta=partial_eta, key=key)
 
+    # Wrong theta keys should raise an error
+    bad_theta = {"not_a_param": 1.0}
+    with pytest.raises(
+        ValueError,
+        match="theta parameter names must match canonical_param_names up to reordering",
+    ):
+        LG.train(J=J, M=M, eta=eta_dict, key=key, theta=bad_theta)
+
 
 def test_train_param_order_invariance(simple):
     """Test that parameter order doesn't affect results."""

@@ -26,6 +26,11 @@ BASE_THETA = {
     "alpha": 1.0,
 }
 
+DEFAULT_J = 3
+DEFAULT_KEY = jax.random.key(1)
+DEFAULT_M = 2
+DEFAULT_A = 0.5
+
 
 @pytest.fixture(scope="function")
 def london():
@@ -39,6 +44,12 @@ def london():
         model="001b",
         # dt=7 / 365.25,
     )
+
+    return measles
+
+
+@pytest.fixture(scope="function")
+def default_rw_sd():
     rw_sd = pp.RWSigma(
         sigmas={
             "R0": 0.02,
@@ -57,11 +68,18 @@ def london():
         },
         init_names=["S_0", "E_0", "I_0", "R_0"],
     )
-    J = 3
-    key = jax.random.key(1)
-    M = 2
-    a = 0.5
-    return measles, rw_sd, J, key, M, a
+    return rw_sd
+
+
+@pytest.fixture(scope="function")
+def london_003():
+    theta = BASE_THETA.copy()
+    measles = pp.UKMeasles.Pomp(
+        unit=["London"],
+        theta=theta,
+        model="003",
+    )
+    return measles
 
 
 def test_other_models():
@@ -101,34 +119,34 @@ def test_other_models():
 
 
 def test_measles_sim(london):
-    measles, rw_sd, J, key, M, a = london
-    measles.simulate(key=key, nsim=1)
+    measles = london
+    measles.simulate(key=DEFAULT_KEY, nsim=1)
 
 
 def test_measles_pfilter(london):
-    measles, rw_sd, J, key, M, a = london
-    measles.pfilter(J=J, key=key)
+    measles = london
+    measles.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
 
     # Test that double precision works
     jax.config.update("jax_enable_x64", True)
-    measles.pfilter(J=J, key=key)
+    measles.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
     jax.config.update("jax_enable_x64", False)
 
 
-def test_measles_mif(london):
-    measles, rw_sd, J, key, M, a = london
+def test_measles_mif(london, default_rw_sd):
+    measles = london
     measles.mif(
-        J=J,
-        key=key,
-        M=M,
-        rw_sd=rw_sd,
-        a=a,
+        J=DEFAULT_J,
+        key=DEFAULT_KEY,
+        M=DEFAULT_M,
+        rw_sd=default_rw_sd,
+        a=DEFAULT_A,
     )
 
 
 def test_measles_mop(london):
-    measles, rw_sd, J, key, M, a = london
-    measles.mop(J=J, key=key)
+    measles = london
+    measles.mop(J=DEFAULT_J, key=DEFAULT_KEY)
 
 
 def test_measles_clean():
@@ -153,3 +171,35 @@ def test_measles_clean():
         .values
     )
     assert not london_cleaned2
+
+
+def _test_measles_003_train(london_003):
+    measles = london_003
+    eta = {param: 0.1 for param in measles.canonical_param_names}
+    eta["mu"] = 0.0
+    eta["alpha"] = 0.0
+    rw_sd = pp.RWSigma(
+        sigmas={
+            "R0": 0.02,
+            "sigma": 0.02,
+            "gamma": 0.02,
+            "iota": 0.02,
+            "rho": 0.02,
+            "sigmaSE": 0.02,
+            "psi": 0.02,
+            "cohort": 0.02,
+            "amplitude": 0.02,
+            "S_0": 0.01,
+            "E_0": 0.01,
+            "I_0": 0.01,
+            "R_0": 0.01,
+            "mu": 0.0,
+            "alpha": 0.0,
+        },
+        init_names=["S_0", "E_0", "I_0", "R_0"],
+    )
+    # with jax.disable_jit():
+    # measles.mif(J=DEFAULT_J, key=DEFAULT_KEY, M=DEFAULT_M, rw_sd=rw_sd, a=DEFAULT_A)
+    measles.train(J=DEFAULT_J, key=DEFAULT_KEY, M=DEFAULT_M, eta=eta, n_monitors=0)
+    df = measles.results().drop(columns=["logLik", "se"])
+    assert not df.isnull().to_numpy().any()

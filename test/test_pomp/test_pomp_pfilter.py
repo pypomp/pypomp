@@ -138,3 +138,15 @@ def test_diagnostics(simple):
                 assert jnp.issubdtype(prediction_mean_arr.dtype, jnp.floating)
             else:
                 assert LG.results_history[-1].prediction_mean is None
+
+
+def test_pfilter_invalid_theta_keys(simple):
+    """theta with non-canonical keys should raise an error."""
+    LG, key, J = simple
+    # Use a theta dict with the wrong keys
+    bad_theta = {"not_a_param": 1.0}
+    with pytest.raises(
+        ValueError,
+        match="theta parameter names must match canonical_param_names up to reordering",
+    ):
+        LG.pfilter(J=J, key=key, theta=bad_theta)

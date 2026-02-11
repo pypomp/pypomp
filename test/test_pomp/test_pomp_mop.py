@@ -34,3 +34,14 @@ def test_mop_param_order_invariance(simple):
     assert jnp.allclose(val1[0], val2[0], atol=1e-7), (
         f"MOP result changed after theta reordering: {val1[0]} vs {val2[0]}"
     )
+
+
+def test_mop_invalid_theta_keys(simple):
+    """theta with non-canonical keys should raise an error."""
+    LG, J, ys, theta, covars, sigmas, key = simple
+    bad_theta = {"not_a_param": 1.0}
+    with pytest.raises(
+        ValueError,
+        match="theta parameter names must match canonical_param_names up to reordering",
+    ):
+        LG.mop(J=J, key=key, theta=bad_theta)

@@ -268,13 +268,18 @@ class Pomp:
         if theta is None:
             return self.theta
         elif isinstance(theta, dict) or isinstance(theta, list):
-            return PompParameters(theta)
+            theta = PompParameters(theta)
         elif isinstance(theta, PompParameters):
-            return theta
+            pass
         else:
             raise TypeError(
                 "theta must be a dictionary, a list of dictionaries, or a PompParameters object"
             )
+        if set(theta.get_param_names()) != set(self.canonical_param_names):
+            raise ValueError(
+                "theta parameter names must match canonical_param_names up to reordering"
+            )
+        return theta
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -572,6 +577,13 @@ class Pomp:
         """
         start_time = time.time()
 
+        rw_param_names = list(rw_sd.all_names)
+        if set(rw_param_names) != set(self.canonical_param_names):
+            raise ValueError(
+                "rw_sd.sigmas keys must match canonical_param_names up to reordering. "
+                f"Got {sorted(rw_param_names)}, expected {sorted(self.canonical_param_names)}."
+            )
+
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_list_in = theta_obj_in.to_list()
         n_reps = theta_obj_in.num_replicates()
@@ -749,7 +761,6 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        # Validate eta dictionary keys match canonical parameter names
         if set(eta.keys()) != set(self.canonical_param_names):
             raise ValueError(
                 f"eta keys {set(eta.keys())} must match parameter names {set(self.canonical_param_names)}"

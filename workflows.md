@@ -41,3 +41,20 @@ To set up push permission, you need to get an API token from PyPI and add it to 
 
 Note that you can test things out on the PyPI test server, at https://test.pypi.org/
 
+## Making documentation
+
+Docs are automatically updated at
+https://pypomp.readthedocs.io
+after each push to GitHub. This required setting up the OAuth app for ReadTheDocs in GitHub.
+
+To build the docs locally,
+```
+cd ~/git/pypomp/docs
+make html
+```
+or
+```
+sphinx-build -M html "source" "build"
+```
+
+

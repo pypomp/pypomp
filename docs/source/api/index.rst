@@ -23,18 +23,18 @@ Model Components
    par_trans
    rw_sigma
 
-.. Estimation and Inference
-.. ------------------------
+Estimation and Inference
+------------------------
 
-.. .. toctree::
-..    :maxdepth: 2
+.. toctree::
+   :maxdepth: 2
 
-..    mif
-..    pfilter
-..    train
-..    mcap
-..    simulate
-..    mop
+   mif
+   pfilter
+   train
+   mcap
+   simulate
+   mop
 
 Utilities
 ---------

@@ -607,7 +607,7 @@ class Pomp:
         if len(jax.devices()) > 1:
             mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
             sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec("reps", None, None)
+                mesh, jax.sharding.PartitionSpec(None, "reps", None)
             )
             theta_tiled = jax.device_put(theta_tiled, sharding_spec)
 

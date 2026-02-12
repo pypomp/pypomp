@@ -604,6 +604,13 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
+        if len(jax.devices()) > 1:
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("particles",))
+            sharding_spec = jax.sharding.NamedSharding(
+                mesh, jax.sharding.PartitionSpec("reps", None, None)
+            )
+            theta_tiled = jax.device_put(theta_tiled, sharding_spec)
+
         nLLs, theta_ests = _jv_mif_internal(
             theta_tiled,
             jnp.array(self._dt_array_extended),

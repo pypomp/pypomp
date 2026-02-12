@@ -605,7 +605,7 @@ class Pomp:
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
         if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("particles",))
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
             sharding_spec = jax.sharding.NamedSharding(
                 mesh, jax.sharding.PartitionSpec("reps", None, None)
             )

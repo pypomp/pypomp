@@ -449,6 +449,14 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
+        if len(jax.devices()) > 1:
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
+            sharding_spec = jax.sharding.NamedSharding(
+                mesh, jax.sharding.PartitionSpec("reps", None)
+            )
+            thetas_repl = jax.device_put(thetas_repl, sharding_spec)
+            rep_keys = jax.device_put(rep_keys, sharding_spec)
+
         results = _vmapped_pfilter_internal2(
             thetas_repl,
             jnp.array(self._dt_array_extended),

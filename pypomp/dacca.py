@@ -314,7 +314,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
     y = Y_["deaths"]
-    return jax.lax.cond(
+    result = jax.lax.cond(
         jnp.logical_or(
             (1 - jnp.isfinite(v)).astype(bool), count > 0
         ),  # if Y < 0 then count violation
@@ -322,6 +322,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
         _dmeas_helper,
         *(y, deaths, v, tol, ltol),
     )
+    return jnp.reshape(result, ())
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):

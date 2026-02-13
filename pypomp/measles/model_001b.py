@@ -23,6 +23,16 @@ import jax.scipy.special as jspecial
 from pypomp.random.poissoninvf import fast_approx_rpoisson
 from pypomp.random.binominvf import fast_approx_rmultinom
 from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.types import (
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    StepSizeFloat,
+    RNGKey,
+    InitialTimeFloat,
+    ObservationDict,
+)
 
 
 param_names = (
@@ -45,7 +55,7 @@ statenames = ["S", "E", "I", "R", "W", "C"]
 accumvars = ["W", "C"]
 
 
-def rinit(theta_, key, covars, t0=None):
+def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
     S_0 = theta_["S_0"]
     E_0 = theta_["E_0"]
     I_0 = theta_["I_0"]
@@ -61,7 +71,14 @@ def rinit(theta_, key, covars, t0=None):
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def rproc(X_, theta_, key, covars, t, dt):
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     S, E, I, R, W, C = X_["S"], X_["E"], X_["I"], X_["R"], X_["W"], X_["C"]
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
@@ -138,7 +155,13 @@ def rproc(X_, theta_, key, covars, t, dt):
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def dmeas(Y_, X_, theta_, covars=None, t=None):
+def dmeas(
+    Y_: ObservationDict,
+    X_: StateDict,
+    theta_: ParamDict,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
@@ -166,7 +189,13 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     return jnp.log(lik)
 
 
-def rmeas(X_, theta_, key, covars=None, t=None):
+def rmeas(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]

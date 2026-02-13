@@ -6,6 +6,16 @@ import numpy as np
 import pandas as pd
 
 from pypomp.pomp_class import Pomp
+from pypomp.types import (
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    StepSizeFloat,
+    RNGKey,
+    ObservationDict,
+    InitialTimeFloat,
+)
 
 
 def _get_thetas(theta):
@@ -27,14 +37,26 @@ def _transform_thetas(A, C, Q, R):
 
 
 # TODO: Add custom starting position.
-def rinit(theta_, key, covars=None, t0=None):
+def rinit(
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t0: InitialTimeFloat,
+):
     """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     result = jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
     return {"X1": result[0], "X2": result[1]}
 
 
-def rproc(X_, theta_, key, covars=None, t=None, dt=None):
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     """Process simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
@@ -42,7 +64,13 @@ def rproc(X_, theta_, key, covars=None, t=None, dt=None):
     return {"X1": result[0], "X2": result[1]}
 
 
-def dmeas(Y_, X_, theta_, covars=None, t=None):
+def dmeas(
+    Y_: ObservationDict,
+    X_: StateDict,
+    theta_: ParamDict,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
@@ -50,7 +78,13 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     return jax.scipy.stats.multivariate_normal.logpdf(Y_array, X_array, R)
 
 
-def rmeas(X_, theta_, key, covars=None, t=None):
+def rmeas(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])

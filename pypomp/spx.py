@@ -6,6 +6,16 @@ import jax.random as random
 import jax
 from pypomp.pomp_class import Pomp
 from pypomp.ParTrans_class import ParTrans
+from pypomp.types import (
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    StepSizeFloat,
+    RNGKey,
+    ObservationDict,
+    InitialTimeFloat,
+)
 
 module_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(module_dir, "data")
@@ -39,13 +49,25 @@ theta = {
 statenames = ["V", "S"]
 
 
-def rinit(theta_, key, covars=None, t0=None):
+def rinit(
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t0: InitialTimeFloat,
+):
     V_0 = theta_["V_0"]
     S_0 = 1105  # Initial price
     return {"V": V_0, "S": S_0}
 
 
-def rproc(X_, theta_, key, covars, t=None, dt=None):
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     V, S = X_["V"], X_["S"]
     mu, kappa, theta_val, xi, rho = (
         theta_["mu"],
@@ -68,7 +90,13 @@ def rproc(X_, theta_, key, covars, t=None, dt=None):
     return {"V": V, "S": S}
 
 
-def dmeas(Y_, X_, theta_, covars=None, t=None):
+def dmeas(
+    Y_: ObservationDict,
+    X_: StateDict,
+    theta_: ParamDict,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     V = X_["V"]
     mu = theta_["mu"]
     y = Y_["y"]

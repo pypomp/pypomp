@@ -12,6 +12,7 @@ from pypomp.types import (
     ObservationDict,
     InitialTimeFloat,
 )
+from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 
 
 def test_RInit_value_error():
@@ -24,7 +25,7 @@ def test_RInit_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RInit(
+            RInit(
                 fn,
                 statenames=["state_0"],
                 param_names=["param_0"],
@@ -32,7 +33,7 @@ def test_RInit_value_error():
                 par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
-    pp.RInit(
+    RInit(
         lambda theta_, key, covars, t0: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
@@ -53,7 +54,7 @@ def test_RProc_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RProc(
+            RProc(
                 fn,
                 statenames=["state_0"],
                 param_names=["param_0"],
@@ -62,7 +63,7 @@ def test_RProc_value_error():
                 par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
-    pp.RProc(
+    RProc(
         lambda X_, theta_, key, covars, t, dt: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
@@ -83,7 +84,7 @@ def test_DMeas_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.DMeas(
+            DMeas(
                 fn,
                 statenames=["state_0"],
                 param_names=["param_0"],
@@ -91,7 +92,7 @@ def test_DMeas_value_error():
                 par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
-    pp.DMeas(
+    DMeas(
         lambda Y_, X_, theta_, covars, t: 0.0,
         statenames=["state_0"],
         param_names=["param_0"],
@@ -111,7 +112,7 @@ def test_RMeas_value_error():
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
-            pp.RMeas(
+            RMeas(
                 fn,
                 ydim=1,
                 statenames=["state_0"],
@@ -120,7 +121,7 @@ def test_RMeas_value_error():
                 par_trans=pp.ParTrans(),
             )
     # Test that correct arguments run without error
-    pp.RMeas(
+    RMeas(
         lambda X_, theta_, key, covars, t: jnp.array([0]),
         ydim=1,
         statenames=["state_0"],
@@ -138,7 +139,7 @@ def test_RInit_type_annotations():
     ):  # type: ignore
         return {"state_0": p["param_0"] * 2.0}  # type: ignore
 
-    rinit = pp.RInit(
+    rinit = RInit(
         custom_init,  # type: ignore
         statenames=["state_0"],
         param_names=["param_0"],
@@ -167,7 +168,7 @@ def test_RProc_type_annotations():
     ):  # type: ignore
         return {"state_0": population["state_0"] + params["param_0"] * delta_t}  # type: ignore
 
-    rproc = pp.RProc(
+    rproc = RProc(
         custom_step,  # type: ignore
         statenames=["state_0"],
         param_names=["param_0"],
@@ -197,7 +198,7 @@ def test_DMeas_type_annotations():
     ):  # type: ignore
         return -0.5 * (obs["y_0"] - x["state_0"]) ** 2  # type: ignore
 
-    dmeas = pp.DMeas(
+    dmeas = DMeas(
         custom_dmeas,  # type: ignore
         statenames=["state_0"],
         param_names=["param_0"],
@@ -226,7 +227,7 @@ def test_RMeas_type_annotations():
     ):  # type: ignore
         return jnp.array([pop["state_0"] * p["param_0"]])  # type: ignore
 
-    rmeas = pp.RMeas(
+    rmeas = RMeas(
         custom_rmeas,  # type: ignore
         ydim=1,
         statenames=["state_0"],
@@ -247,7 +248,7 @@ def test_RMeas_type_annotations():
 def test_type_annotations_backward_compatibility():
     """Test that exact names still work (backward compatibility)."""
     # These should all work without type annotations
-    rinit = pp.RInit(
+    rinit = RInit(
         lambda theta_, key, covars, t0: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
@@ -255,7 +256,7 @@ def test_type_annotations_backward_compatibility():
         par_trans=pp.ParTrans(),
     )
 
-    rproc = pp.RProc(
+    rproc = RProc(
         lambda X_, theta_, key, covars, t, dt: {"state_0": 0},
         statenames=["state_0"],
         param_names=["param_0"],
@@ -264,7 +265,7 @@ def test_type_annotations_backward_compatibility():
         par_trans=pp.ParTrans(),
     )
 
-    dmeas = pp.DMeas(
+    dmeas = DMeas(
         lambda Y_, X_, theta_, covars, t: 0.0,
         statenames=["state_0"],
         param_names=["param_0"],
@@ -272,7 +273,7 @@ def test_type_annotations_backward_compatibility():
         par_trans=pp.ParTrans(),
     )
 
-    rmeas = pp.RMeas(
+    rmeas = RMeas(
         lambda X_, theta_, key, covars, t: jnp.array([0]),
         ydim=1,
         statenames=["state_0"],
@@ -295,7 +296,7 @@ def test_type_annotations_missing_error():
         ValueError,
         match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
     ):
-        pp.RInit(
+        RInit(
             lambda wrong_name, key, covars, t0: {"state_0": 0},
             statenames=["state_0"],
             param_names=["param_0"],
@@ -316,7 +317,7 @@ def test_type_annotations_incomplete_error():
         ValueError,
         match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
     ):
-        pp.RInit(
+        RInit(
             incomplete,  # type: ignore
             statenames=["state_0"],
             param_names=["param_0"],
@@ -339,7 +340,7 @@ def test_type_annotations_ambiguous_error():
         return {"state_0": 0}
 
     with pytest.raises(ValueError, match="Multiple parameters annotated"):
-        pp.RInit(
+        RInit(
             ambiguous,  # type: ignore
             statenames=["state_0"],
             param_names=["param_0"],
@@ -360,7 +361,7 @@ def test_type_annotations_argument_order():
     ):  # type: ignore
         return {"state_0": p["param_0"]}  # type: ignore
 
-    rinit = pp.RInit(
+    rinit = RInit(
         reordered,  # type: ignore
         statenames=["state_0"],
         param_names=["param_0"],
@@ -386,7 +387,7 @@ def test_type_annotations_with_covars():
     ):  # type: ignore
         return {"state_0": p["param_0"] + weather["temp"]}  # type: ignore[attr-defined]
 
-    rinit = pp.RInit(
+    rinit = RInit(
         with_covars,  # type: ignore
         statenames=["state_0"],
         param_names=["param_0"],

@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from functools import partial
+from .ParTrans_class import ParTrans
 from typing import Annotated, Callable, get_origin, get_args, get_type_hints
 from .types import (
     StateDict,
@@ -148,13 +149,13 @@ class _ModelComponent:
 
     def __init__(
         self,
-        struct,
-        statenames,
-        param_names,
-        covar_names,
-        par_trans,
-        y_names=None,
-        validate_logic=True,
+        struct: Callable,
+        statenames: list[str],
+        param_names: list[str],
+        covar_names: list[str],
+        par_trans: ParTrans,
+        y_names: list[str] | None = None,
+        validate_logic: bool = True,
     ):
         self.statenames = statenames
         self.param_names = param_names
@@ -336,15 +337,17 @@ class RProc(_ModelComponent):
 
     def __init__(
         self,
-        struct,
-        statenames,
-        param_names,
-        covar_names,
-        par_trans,
-        nstep=None,
-        dt=None,
-        accumvars=None,
-        validate_logic=True,
+        struct: Callable,
+        statenames: list[str],
+        param_names: list[str],
+        covar_names: list[str],
+        par_trans: ParTrans,
+        nstep: int | None = None,
+        dt: float | None = None,
+        accumvars: tuple[int, ...] | None = None,
+        validate_logic: bool = True,
+        nstep_array: np.ndarray | None = None,
+        max_steps_bound: int | None = None,
     ):
         if dt is not None and nstep is not None:
             raise ValueError("Only nstep or dt can be provided, not both")
@@ -364,7 +367,29 @@ class RProc(_ModelComponent):
         self._max_steps_bound = None
 
         # Setup interpolation wrappers
-        self._build_interp(None, None)
+        if nstep_array is not None:
+            nstep_arr = np.asarray(nstep_array)
+            all_nstep_same = np.min(nstep_arr) == np.max(nstep_arr)
+            # If nstep is the same for all intervals (which can happen even if derived
+            # from dt), use it for the interpolated functions.
+            if all_nstep_same:
+                self.nstep = int(np.min(nstep_arr))
+
+        # _max_steps_bound might allow train to work if the step size is dynamic
+        # but bounded. This is not currently implemented.
+        self._max_steps_bound = int(max_steps_bound) if max_steps_bound else None
+
+        # If nstep is given, interpolated functions use it in order to have a fixed
+        # number of steps. This is necessary for train to work.
+        self.struct_interp = _time_interp(
+            self.struct, self.nstep, self._max_steps_bound
+        )
+        self.struct_pf_interp = _time_interp(
+            self.struct_pf, self.nstep, self._max_steps_bound
+        )
+        self.struct_per_interp = _time_interp(
+            self.struct_per, self.nstep, self._max_steps_bound
+        )
 
     def _validate_output(self, result):
         if not isinstance(result, dict):
@@ -397,32 +422,6 @@ class RProc(_ModelComponent):
             return jnp.array([res[n] for n in snames]).reshape(-1)
 
         return wrapped
-
-    def _build_interp(self, nstep_array, max_steps_bound):
-        """Builds interpolated functions."""
-        all_nstep_same = nstep_array is not None and np.min(nstep_array) == np.max(
-            nstep_array
-        )
-        # If nstep is the same for all intervals (which can happen even if derived
-        # from dt), use it for the interpolated functions.
-        if all_nstep_same:
-            self.nstep = int(np.min(nstep_array))
-
-        # _max_steps_bound might allow train to work if the step size is dynamic
-        # but bounded. This is not currently implemented.
-        self._max_steps_bound = int(max_steps_bound) if max_steps_bound else None
-
-        # If nstep is given, interpolated functions use it in order to have a fixed
-        # number of steps. This is necessary for train to work.
-        self.struct_interp = _time_interp(
-            self.struct, self.nstep, self._max_steps_bound
-        )
-        self.struct_pf_interp = _time_interp(
-            self.struct_pf, self.nstep, self._max_steps_bound
-        )
-        self.struct_per_interp = _time_interp(
-            self.struct_per, self.nstep, self._max_steps_bound
-        )
 
     def __eq__(self, other):
         return super().__eq__(other) and (

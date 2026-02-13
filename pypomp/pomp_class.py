@@ -221,18 +221,6 @@ class Pomp:
             validate_logic=validate_logic,
         )
 
-        self.rproc = RProc(
-            struct=rproc,
-            statenames=self.statenames,
-            param_names=self.canonical_param_names,
-            covar_names=self.covar_names,
-            par_trans=self.par_trans,
-            nstep=nstep,
-            dt=dt,
-            accumvars=self._accumvars_indices,
-            validate_logic=validate_logic,
-        )
-
         if dmeas is not None:
             self.dmeas = DMeas(
                 struct=dmeas,
@@ -274,11 +262,24 @@ class Pomp:
             times=np.array(self.ys.index),
             ctimes=np.array(self.covars.index) if self.covars is not None else None,
             covars=np.array(self.covars) if self.covars is not None else None,
-            dt=self.rproc.dt,
-            nstep=self.rproc.nstep,
+            dt=dt,
+            nstep=nstep,
             order="linear",
         )
-        self.rproc._build_interp(self._nstep_array, self._max_steps_per_interval)
+
+        self.rproc = RProc(
+            struct=rproc,
+            statenames=self.statenames,
+            param_names=self.canonical_param_names,
+            covar_names=self.covar_names,
+            par_trans=self.par_trans,
+            nstep=nstep,
+            dt=dt,
+            accumvars=self._accumvars_indices,
+            validate_logic=validate_logic,
+            nstep_array=self._nstep_array,
+            max_steps_bound=self._max_steps_per_interval,
+        )
 
     @property
     def theta(self) -> PompParameters:

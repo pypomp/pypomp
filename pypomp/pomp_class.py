@@ -487,8 +487,12 @@ class Pomp:
             sharding_spec = jax.sharding.NamedSharding(
                 mesh, jax.sharding.PartitionSpec("reps", None)
             )
+            rep_keys_sharding_spec = jax.sharding.NamedSharding(
+                mesh,
+                jax.sharding.PartitionSpec("reps"),
+            )
             thetas_repl = jax.device_put(thetas_repl, sharding_spec)
-            rep_keys = jax.device_put(rep_keys, sharding_spec)
+            rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
 
         results = _vmapped_pfilter_internal2(
             thetas_repl,

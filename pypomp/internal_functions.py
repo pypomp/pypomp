@@ -255,23 +255,26 @@ def _interp_covars(
     covars: np.ndarray | None,
     order: str = "linear",
 ) -> np.ndarray | None:
-    """
-    Interpolate covariates with numpy.
-    """
+    """Interpolate covariates with numpy."""
     # TODO: Add constant interpolation
-    if (covars is None) | (ctimes is None):
+    if covars is None or ctimes is None:
         return None
-    else:
-        assert ctimes is not None
-        assert covars is not None
-        upper_index = np.searchsorted(ctimes, t, side="left")
-        lower_index = upper_index - 1
-        return (
-            covars[lower_index]
-            + (covars[upper_index] - covars[lower_index])
-            * (t - ctimes[lower_index])
-            / (ctimes[upper_index] - ctimes[lower_index])
-        ).ravel()
+
+    is_scalar = np.isscalar(t)
+    t_arr = np.atleast_1d(t)
+
+    upper_idx = np.searchsorted(ctimes, t_arr, side="left")
+    upper_idx = np.clip(upper_idx, 1, len(ctimes) - 1)
+    lower_idx = upper_idx - 1
+
+    t_diff = (t_arr - ctimes[lower_idx]) / (ctimes[upper_idx] - ctimes[lower_idx])
+
+    if covars.ndim > 1:
+        t_diff = t_diff[:, None]
+
+    interpolated = covars[lower_idx] + (covars[upper_idx] - covars[lower_idx]) * t_diff
+
+    return interpolated.ravel() if is_scalar else interpolated
 
 
 def _calc_interp_covars(
@@ -283,72 +286,40 @@ def _calc_interp_covars(
     nintervals: int,
     order: str = "linear",
 ) -> np.ndarray | None:
-    """
-    Precompute the interpolated covariates for a given set of time points.
-
-    Returns:
-        np.ndarray | None: The interpolated covariates for a given set of time points.
-            Shape is (times, max_nstep, ncovars). Returns None if covars or ctimes is
-            None.
-    """
+    """Precompute the interpolated covariates for a given set of time points."""
     if covars is None or ctimes is None:
         return None
 
-    # TODO: optimize this function
-    total_steps = np.sum(nstep_array)
-    interp_covars_array = np.full(
-        (total_steps + 1, covars.shape[1]),
-        fill_value=np.nan,
-    )
-    idx = 0
-    for i in range(nintervals):
-        for j in range(nstep_array[i]):
-            interp_covars_array[idx, :] = _interp_covars(
-                times0[i] + j * dt_array[i],
-                ctimes,
-                covars,
-                order,
-            )
-            idx += 1
-    interp_covars_array[idx, :] = _interp_covars(times0[-1], ctimes, covars, order)
-    return interp_covars_array
+    time_steps = [
+        times0[i] + np.arange(nstep_array[i]) * dt_array[i] for i in range(nintervals)
+    ]
+
+    all_times = np.concatenate(time_steps + [[times0[-1]]])
+
+    return _interp_covars(all_times, ctimes, covars, order)
 
 
 def _calc_ys_covars(
     t0: float,
     times: np.ndarray,
-    ys: np.ndarray,
     ctimes: np.ndarray | None,
     covars: np.ndarray | None,
     dt: float | None,
     nstep: int | None,
     order: str = "linear",
 ) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, int]:
-    """
-    Construct extended ys and covars arrays.
-    """
-    times0 = np.concatenate((np.array([t0]), times))
+    """Construct extended dt and covars arrays."""
+    times0 = np.concatenate(([t0], times))
     nstep_array, dt_array = _calc_steps(times0, dt, nstep)
-    nintervals = len(nstep_array)
 
-    interp_covars_array = _calc_interp_covars(
-        times0, ctimes, covars, nstep_array, dt_array, nintervals, order
+    interp_covars = _calc_interp_covars(
+        times0, ctimes, covars, nstep_array, dt_array, len(nstep_array), order
     )
 
-    # Deprecated: ys_extended and ys_observed computation removed
+    dt_extended = np.repeat(dt_array, nstep_array)
+    max_nstep = int(nstep_array.max()) if nstep_array.size else 0
 
-    dt_array_extended = np.repeat(dt_array, nstep_array)
-
-    if covars is not None and ctimes is not None:
-        assert interp_covars_array is not None
-        assert interp_covars_array.shape[0] == dt_array_extended.shape[0] + 1
-
-    return (
-        None if interp_covars_array is None else np.array(interp_covars_array),
-        np.array(dt_array_extended),
-        np.array(nstep_array),
-        int(nstep_array.max() if nstep_array.size > 0 else 0),
-    )
+    return interp_covars, dt_extended, nstep_array, max_nstep
 
 
 def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:

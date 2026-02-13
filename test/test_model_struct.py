@@ -291,7 +291,10 @@ def test_type_annotations_backward_compatibility():
 def test_type_annotations_missing_error():
     """Test that missing type annotations with wrong names raises error."""
     # Function with wrong names and no annotations should fail
-    with pytest.raises(ValueError, match="Argument 1 of struct must be 'theta_'"):
+    with pytest.raises(
+        ValueError,
+        match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
+    ):
         pp.RInit(
             lambda wrong_name, key, covars, t0: {"state_0": 0},
             statenames=["state_0"],
@@ -305,11 +308,14 @@ def test_type_annotations_incomplete_error():
     """Test that incomplete type annotations raise error."""
 
     # Function with some but not all annotations should fail
-    # Falls back to exact name matching which fails
-    def incomplete(p: ParamDict, key, covars, t0):  # type: ignore
+    # p: ParamDict maps to theta_, but wrong_key, wrong_covars, wrong_t0 don't match
+    def incomplete(p: ParamDict, wrong_key, wrong_covars, wrong_t0):  # type: ignore
         return {"state_0": 0}
 
-    with pytest.raises(ValueError, match="Argument 1 of struct must be 'theta_'"):
+    with pytest.raises(
+        ValueError,
+        match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
+    ):
         pp.RInit(
             incomplete,  # type: ignore
             statenames=["state_0"],

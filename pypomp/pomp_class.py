@@ -32,6 +32,8 @@ from .parameters import PompParameters
 from .util import logmeanexp
 
 
+# TODO: use just one doc link for each model component class
+# currently need one for VSCode and one for Sphinx
 class Pomp:
     """
     A class representing a Partially Observed Markov Process (POMP) model.
@@ -52,6 +54,17 @@ class Pomp:
     - Iterated filtering
 
     - Model training using a differentiable particle filter
+
+    ⚠️ IMPORTANT: Defining Model Components
+        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
+        functions. **You MUST read the documentation for each respective component
+        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+        adhere to the specifications.
+
+        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
+        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
+        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
 
     Attributes:
         ys (pd.DataFrame): The measurement data frame with observation times as index
@@ -107,32 +120,48 @@ class Pomp:
         ydim: int | None = None,
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
+        validate_logic: bool = True,
     ):
         """
-        Initializes the necessary components for a specific POMP model.
+        Initializes and coordinates the components for a specific POMP model.
+
+        ⚠️ IMPORTANT: Defining Model Components
+        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
+        functions. **You MUST read the documentation for each respective component
+        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+        adhere to the specifications.
+
+        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
+        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
+        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
 
         Args:
-            ys (pd.DataFrame): The measurement data frame. The row index must contain the observation times.
-            theta (dict or list[dict]): Parameters involved in the POMP model. Each
-                value should be a float. Can be a single dict or a list of dicts.
-            statenames (list[str]): List of state variable names.
-            t0 (float): The initial time for the model.
-            rinit (Callable): Initial state simulator function.
-            rproc (Callable): Process simulator function.
-            dmeas (Callable, optional): Measurement density function.
-            rmeas (Callable, optional): Measurement simulator function.
-            par_trans (ParTrans, optional): Parameter transformation object.
-                If provided, the parameters will be transformed to and from the estimation parameter space. Defaults to the identity transformation.
-            covars (pd.DataFrame, optional): Covariates or None if not applicable.
-                The row index must contain the covariate times.
-            nstep (int, optional): The number of steps to take for the fixedstep method.
-                Must be None if dt is provided.
-            dt (float, optional): The time step to use for the time_helper method.
-                Must be None if nstep is provided.
-            ydim (int, optional): The dimension of the measurement vector. Only
-                required if rmeas is provided.
-            accumvars (tuple[int, ...], optional): The indices of accumulator state
-                variables. These are reset to 0 at the beginning of each observation interval.
+            ys (pd.DataFrame): The measurement data frame. The row index must contain
+                the observation times.
+            theta (dict | list[dict]): Parameters involved in the POMP model. Can be a
+                single dictionary or a list of dictionaries. If a list, particle filtering methods will be run for each set of parameters.
+            statenames (list[str]): List of all latent state variable names.
+            t0 (float): The initial time for the model (typically before the first observation).
+            rinit (Callable): Initial state simulator function. Automatically wrapped into an [RInit](RInit) object.
+            rproc (Callable): Process simulator function (defining a single time step).
+                Automatically wrapped into an [RProc](RProc) object.
+            dmeas (Callable, optional): Measurement density function (log-likelihood).
+                Automatically wrapped into a [DMeas](DMeas) object.
+            rmeas (Callable, optional): Measurement simulator function. Automatically wrapped into an [RMeas](RMeas) object.
+            par_trans (ParTrans, optional): Parameter transformation object used to move parameters
+                between the natural space and the estimation space. Defaults to the identity transformation.
+            covars (pd.DataFrame, optional): Time-varying covariates. The row index must
+                contain the covariate times.
+            nstep (int, optional): The number of integration steps to take between observations.
+                Passed automatically to the `RProc` component. Must be None if `dt` is provided.
+            dt (float, optional): Fixed time step size for the process model.
+                Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
+            ydim (int, optional): The dimension of the measurement vector (number of observed variables).
+                Only required if `rmeas` is provided. Passed automatically to the `RMeas` component.
+            accumvars (tuple[int, ...], optional): Indices of accumulator state variables (e.g.,
+                incidence tracking). These are reset to 0 at the start of each observation interval.
+            validate_logic (bool, optional): Whether to validate the logic of the model components.
         """
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -189,6 +218,7 @@ class Pomp:
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
             par_trans=self.par_trans,
+            validate_logic=validate_logic,
         )
 
         self.rproc = RProc(
@@ -200,6 +230,7 @@ class Pomp:
             nstep=nstep,
             dt=dt,
             accumvars=self._accumvars_indices,
+            validate_logic=validate_logic,
         )
 
         if dmeas is not None:
@@ -210,6 +241,7 @@ class Pomp:
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
                 y_names=list(self.ys.columns),
+                validate_logic=validate_logic,
             )
         else:
             self.dmeas = None
@@ -224,6 +256,7 @@ class Pomp:
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
+                validate_logic=validate_logic,
             )
         else:
             self.rmeas = None
@@ -239,14 +272,13 @@ class Pomp:
         ) = _calc_ys_covars(
             t0=self.t0,
             times=np.array(self.ys.index),
-            ys=np.array(self.ys),
             ctimes=np.array(self.covars.index) if self.covars is not None else None,
             covars=np.array(self.covars) if self.covars is not None else None,
             dt=self.rproc.dt,
             nstep=self.rproc.nstep,
             order="linear",
         )
-        self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
+        self.rproc._build_interp(self._nstep_array, self._max_steps_per_interval)
 
     @property
     def theta(self) -> PompParameters:

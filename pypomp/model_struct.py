@@ -1,6 +1,5 @@
 """
 This file contains the classes for components that define the model structure.
-Refactored for simplicity via inheritance.
 """
 
 import inspect
@@ -8,8 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from functools import partial
-from typing import Annotated, Callable, Literal, get_origin, get_args, get_type_hints
-from .ParTrans_class import ParTrans
+from typing import Annotated, Callable, get_origin, get_args, get_type_hints
 from .types import (
     StateDict,
     ParamDict,
@@ -54,7 +52,7 @@ _TAG_TO_INTERNAL = {
 def _align_by_type(user_func: Callable, internal_order: list[str]) -> dict[str, str]:
     """Map internal parameter names to user parameter names via type annotations."""
     try:
-        type_hints = get_type_hints(user_func)
+        type_hints = get_type_hints(user_func, include_extras=True)
     except Exception:
         sig = inspect.signature(user_func)
         type_hints = {
@@ -149,7 +147,14 @@ class _ModelComponent:
     vmap_axes_per: tuple
 
     def __init__(
-        self, struct, statenames, param_names, covar_names, par_trans, y_names=None
+        self,
+        struct,
+        statenames,
+        param_names,
+        covar_names,
+        par_trans,
+        y_names=None,
+        validate_logic=True,
     ):
         self.statenames = statenames
         self.param_names = param_names
@@ -167,8 +172,9 @@ class _ModelComponent:
         self.name_mapping = _align_by_type(struct, self.internal_names)
 
         # 3. Validate Logic (Dry Run)
-        dummies = _get_dummies(statenames, param_names, covar_names, y_names)
-        _validate_call(struct, self.name_mapping, dummies, self._validate_output)
+        if validate_logic:
+            dummies = _get_dummies(statenames, param_names, covar_names, y_names)
+            _validate_call(struct, self.name_mapping, dummies, self._validate_output)
 
         # 4. Create Wrappers
         self.struct = self._make_wrapper(struct)
@@ -182,7 +188,7 @@ class _ModelComponent:
         raise NotImplementedError
 
     def __eq__(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         return (
             self.statenames == other.statenames
@@ -212,6 +218,7 @@ class RInit(_ModelComponent):
 
     **Argument Binding:**
     You can define the function arguments in two ways:
+
     1. **By Name:** Use the exact names `theta_`, `key`, `covars`, and `t0`.
     2. **By Type:** Use the type hints from `pypomp.types` (recommended).
 
@@ -291,7 +298,8 @@ class RProc(_ModelComponent):
     The `struct` function performs a **single Euler step**. It receives the current state,
     parameters, PRNG key, covariates, current time, and step size.
 
-    **Argument Binding:**
+    **Argument Binding:** You can define the function arguments in two ways:
+
     1. **By Name:** `X_`, `theta_`, `key`, `covars`, `t`, `dt`.
     2. **By Type:** `StateDict`, `ParamDict`, `RNGKey`, `CovarDict`, `TimeFloat`, `StepSizeFloat`.
 
@@ -336,11 +344,19 @@ class RProc(_ModelComponent):
         nstep=None,
         dt=None,
         accumvars=None,
+        validate_logic=True,
     ):
         if dt is not None and nstep is not None:
             raise ValueError("Only nstep or dt can be provided, not both")
 
-        super().__init__(struct, statenames, param_names, covar_names, par_trans)
+        super().__init__(
+            struct,
+            statenames,
+            param_names,
+            covar_names,
+            par_trans,
+            validate_logic=validate_logic,
+        )
 
         self.nstep = int(nstep) if nstep is not None else None
         self.dt = float(dt) if dt is not None else None
@@ -348,7 +364,7 @@ class RProc(_ModelComponent):
         self._max_steps_bound = None
 
         # Setup interpolation wrappers
-        self.rebuild_interp(None, None)
+        self._build_interp(None, None)
 
     def _validate_output(self, result):
         if not isinstance(result, dict):
@@ -382,13 +398,22 @@ class RProc(_ModelComponent):
 
         return wrapped
 
-    def rebuild_interp(self, nstep_array, max_steps_bound):
-        """Rebuilds interpolator functions."""
-        if nstep_array is not None and np.min(nstep_array) == np.max(nstep_array):
+    def _build_interp(self, nstep_array, max_steps_bound):
+        """Builds interpolated functions."""
+        all_nstep_same = nstep_array is not None and np.min(nstep_array) == np.max(
+            nstep_array
+        )
+        # If nstep is the same for all intervals (which can happen even if derived
+        # from dt), use it for the interpolated functions.
+        if all_nstep_same:
             self.nstep = int(np.min(nstep_array))
+
+        # _max_steps_bound might allow train to work if the step size is dynamic
+        # but bounded. This is not currently implemented.
         self._max_steps_bound = int(max_steps_bound) if max_steps_bound else None
 
-        # Helper to create interp (logic from _time_interp, condensed)
+        # If nstep is given, interpolated functions use it in order to have a fixed
+        # number of steps. This is necessary for train to work.
         self.struct_interp = _time_interp(
             self.struct, self.nstep, self._max_steps_bound
         )
@@ -424,7 +449,8 @@ class DMeas(_ModelComponent):
     The `struct` function calculates the log-likelihood of the data given the state.
     **Output:** Must return a **scalar** (float or 0-d JAX array).
 
-    **Argument Binding:**
+    **Argument Binding:** You can define the function arguments in two ways:
+
     1. **By Name:** `Y_`, `X_`, `theta_`, `covars`, `t`.
     2. **By Type:** `ObservationDict`, `StateDict`, `ParamDict`, `CovarDict`, `TimeFloat`.
 
@@ -515,7 +541,8 @@ class RMeas(_ModelComponent):
     The `struct` function simulates a single observation vector from the current state.
     **Output:** Must return a 1D **JAX Array** (not a dictionary).
 
-    **Argument Binding:**
+    **Argument Binding:** You can define the function arguments in two ways:
+
     1. **By Name:** `X_`, `theta_`, `key`, `covars`, `t`.
     2. **By Type:** `StateDict`, `ParamDict`, `RNGKey`, `CovarDict`, `TimeFloat`.
 

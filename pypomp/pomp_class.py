@@ -66,43 +66,67 @@ class Pomp:
         - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
         - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
 
-    Attributes:
-        ys (pd.DataFrame): The measurement data frame with observation times as index
-        theta (dict): Model parameters, where each value is a float
-        rinit (RInit): Simulator for the initial state distribution
-        rproc (RProc): Simulator for the process model
-        dmeas (DMeas | None): Density evaluation for the measurement model
-        rmeas (RMeas | None): Measurement simulator
-        par_trans (ParTrans | None): Parameter transformation object
-        covars (pd.DataFrame | None): Covariates for the model if applicable
-        results_history (ResultsHistory | None): History of the results for the pfilter, mif, and train
-            methods run on the object. This includes the algorithmic parameters used.
-        fresh_key (jax.Array | None): Running a method that takes a key argument will
-            store a fresh, unused key in this attribute. Subsequent calls to a method
-            that requires a key will use this key unless a new key is provided as an
-            argument.
     """
 
     ys: pd.DataFrame
+    """The measurement data frame with observation times as the index."""
+
     _theta: PompParameters
+    """Internal storage for model parameters in canonical order."""
+
     canonical_param_names: list[str]
+    """Ordered list of parameter names used throughout the model."""
+
     statenames: list[str]
+    """Names of all latent state variables in the process model."""
+
     t0: float
+    """Initial time for the model (typically before the first observation)."""
+
     rinit: RInit
+    """Simulator for the initial state distribution."""
+
     rproc: RProc
+    """Process model simulator handling state transitions between observation times."""
+
     dmeas: DMeas | None
+    """Measurement density used to evaluate the likelihood of observations."""
+
     rmeas: RMeas | None
+    """Measurement simulator used to generate synthetic observations."""
+
     par_trans: ParTrans
+    """Parameter transformation object mapping between natural and estimation spaces."""
+
     covars: pd.DataFrame | None
+    """Time-varying covariates for the model, if applicable."""
+
     _covars_extended: np.ndarray | None
+    """Internal covariate array interpolated/aligned to the integration grid."""
+
     _nstep_array: np.ndarray
+    """Number of integration steps between successive observation times."""
+
     _dt_array_extended: np.ndarray
+    """Time step sizes for each integration step over the full time grid."""
+
     _max_steps_per_interval: int
+    """Maximum number of integration steps between any two observation times."""
+
     ydim: int | None
+    """Dimension of the observation vector when an observation simulator is provided."""
+
     accumvars: list[str] | None
+    """Names of accumulator state variables that are reset at each observation time."""
+
     _accumvars_indices: tuple[int, ...] | None
+    """Indices of accumulator state variables within the full state vector."""
+
     results_history: ResultsHistory
+    """History of results from `pfilter`, `mif`, and `train` calls."""
+
     fresh_key: jax.Array | None
+    """Running a method that takes a key will store a fresh, unused key here."""
 
     def __init__(
         self,

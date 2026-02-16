@@ -1,10 +1,11 @@
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 [![codecov](https://codecov.io/gh/pypomp/pypomp/graph/badge.svg?token=8TA2X3DRML)](https://codecov.io/gh/pypomp/pypomp)
+[![Documentation Status](https://app.readthedocs.org/projects/pypomp/badge/?version=latest)](https://pypomp.readthedocs.io/en/latest/?badge=latest)
 
 # pypomp
 
 Python code for modeling and inference using partially observed Markov process (POMP) models.
-See the [tutorials](https://pypomp.github.io/tutorials) for user-friendly guides, and the [quantitative tests](https://pypomp.github.io/quant) for additional technical examples.
+See the [tutorials](https://pypomp.github.io/tutorials) for user-friendly guides, the [quantitative tests](https://pypomp.github.io/quant) for additional technical examples, and [readthedocs](https://pypomp.readthedocs.io/) for documentation.
 
 ### Expected package users
 
@@ -18,9 +19,9 @@ See the [tutorials](https://pypomp.github.io/tutorials) for user-friendly guides
  
 ### Key features 
 
-* Estimation, filtering, and inference for highly nonlinear, non-Gaussian state space models via the particle filter.
+* Estimation, filtering, and inference for highly nonlinear, non-Gaussian POMP models via the particle filter.
 
-* New algorithms for model-fitting. Gradient descent using a new [gradient estimate](https://arxiv.org/abs/2407.03085) initialized with a [warm-start](https://www.pnas.org/doi/full/10.1073/pnas.1410597112) allows for improved maximum-likelihood inference in even highly challenging epidemiological models, while the gradient estimate can readily be plugged into a sampler from [Tensorflow Probability](https://www.tensorflow.org/probability/api_docs/python/tfp/mcmc/NoUTurnSampler) to facilitate more efficient Bayesian inference. 
+* New algorithms for model-fitting. Gradient descent using a new [gradient estimate](https://arxiv.org/abs/2407.03085) initialized with a [warm-start](https://www.pnas.org/doi/full/10.1073/pnas.1410597112) allows for improved maximum-likelihood inference in even highly challenging epidemiological models, while the gradient estimate can readily be plugged into a Hamiltonian Markov chain Monte Carlo sampler to facilitate efficient Bayesian inference. 
 
 * This package leverages JAX for GPU support and just-in-time compilation, enabling a speedup of up to 16x when compared to the **pomp** R package.
 

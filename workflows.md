@@ -1,4 +1,18 @@
 
+## Python environment
+
+A basic environment for developing pypomp, supposing that the package from https://github.com/pypomp/pypomp is cloned at ~/git/pypomp
+
+```
+cd ~/git/pypomp
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# for documentation
+pip install sphinx
+
 
 ## Formatting and linting
 
@@ -40,4 +54,21 @@ python -m twine upload --repository pypi dist/*
 To set up push permission, you need to get an API token from PyPI and add it to `$HOME/.pypirc`.
 
 Note that you can test things out on the PyPI test server, at https://test.pypi.org/
+
+## Making documentation
+
+Docs are automatically updated at
+https://pypomp.readthedocs.io
+after each push to GitHub. This required setting up the OAuth app for ReadTheDocs in GitHub.
+
+To build the docs locally,
+```
+cd ~/git/pypomp/docs
+make html
+```
+or
+```
+sphinx-build -M html "source" "build"
+```
+
 

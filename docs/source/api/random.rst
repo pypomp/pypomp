@@ -1,5 +1,5 @@
 Fast Random Number Generation on GPUs
-========================
+======================================
 
 The simulators included in the JAX package often suffer from warp divergence due to using rejection sampling. For the user's convenience, we have included a few replacement functions that use Inverse Transform Sampling to generate random variables. These functions use JAX under the hood, so they can be used in a JIT-compiled context. While the following functions include some branching in order to handle edge cases, the performance loss from warp divergence is minimal. 
 

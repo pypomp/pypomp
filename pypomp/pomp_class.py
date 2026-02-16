@@ -1031,7 +1031,8 @@ class Pomp:
     def traces(self) -> pd.DataFrame:
         """
         Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
-        Columns:
+        Columns\:
+        
             - replicate: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'

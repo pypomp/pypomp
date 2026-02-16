@@ -8,7 +8,6 @@ scratch.py
 test/test_scratch
 .cursor
 scratch/
-makefile
 .claude
 
 

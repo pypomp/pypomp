@@ -360,8 +360,7 @@ class PompParameters(ParameterSet):
         """
         Merge replications from an arbitrary number of PompParameters objects into a single PompParameters object.
         All objects must have the same canonical parameter names and estimation scale.
-        Usage:
-            merged = PompParameters.merge(p1, p2, p3, ...)
+        Usage\: `merged = PompParameters.merge(p1, p2, p3, ...)`
         """
         if len(param_objs) == 0:
             raise ValueError("At least one PompParameters object must be provided.")
@@ -921,8 +920,7 @@ class PanelParameters(ParameterSet):
         """
         Merge replications from an arbitrary number of PanelParameters objects into a single PanelParameters object.
         All objects must have the same canonical parameter names, unit names, and estimation scale.
-        Usage:
-            merged = PanelParameters.merge(p1, p2, p3, ...)
+        Usage\: `merged = PanelParameters.merge(p1, p2, p3, ...)`
         """
         if len(param_objs) == 0:
             raise ValueError("At least one PanelParameters object must be provided.")

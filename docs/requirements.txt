@@ -1,5 +1,6 @@
 # packages needed specifically for the documentation
 sphinx
+furo
 # packages needed for pypomp, copied from pypomp/requirements.txt
 jax>=0.5.3
 tqdm>=4.66.4

@@ -11,7 +11,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # for documentation
-pip install sphinx
+pip install sphinx furo
 
 
 ## Formatting and linting

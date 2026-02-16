@@ -15,9 +15,6 @@ class ParTrans:
         from_est: Function that transforms the parameters from the estimation parameter space to the natural parameter space.
     """
 
-    to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
-    from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]]
-
     def __init__(
         self,
         to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,

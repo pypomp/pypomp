@@ -518,19 +518,19 @@ class Pomp:
             thetas_repl = jax.device_put(thetas_repl, sharding_spec)
             rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
 
-        results = _vmapped_pfilter_internal2(
+        results_jax = _vmapped_pfilter_internal2(
             thetas_repl,
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
+            np.asarray(self._dt_array_extended),
+            np.asarray(self._nstep_array),
             self.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            np.asarray(self.ys.index),
+            np.asarray(self.ys),
             J,
             self.rinit.struct_pf,
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            jnp.array(self._covars_extended)
+            np.asarray(self._covars_extended)
             if self._covars_extended is not None
             else None,
             thresh,
@@ -541,7 +541,10 @@ class Pomp:
             prediction_mean,
         )
 
-        # any_diagnostics = CLL or ESS or filter_mean or prediction_mean
+        results = jax.device_get(results_jax)
+
+        del results_jax
+
         neg_logliks = results["neg_loglik"]
 
         logLik_da = xr.DataArray(
@@ -549,12 +552,10 @@ class Pomp:
         )
 
         if track_time is True:
-            neg_logliks.block_until_ready()
             execution_time = time.time() - start_time
         else:
             execution_time = None
 
-        # obtain diagnostics using names
         CLL_da = None
         ESS_da = None
         filter_mean_da = None
@@ -589,6 +590,8 @@ class Pomp:
                 ),
                 dims=["theta", "replicate", "time", "state"],
             )
+
+        del results
 
         logLik_estimates = np.apply_along_axis(
             logmeanexp, -1, (-neg_logliks).reshape(n_theta_reps, reps), ignore_nan=False
@@ -680,20 +683,20 @@ class Pomp:
             )
             theta_tiled = jax.device_put(theta_tiled, sharding_spec)
 
-        nLLs, theta_ests = _jv_mif_internal(
+        nLLs_jax, theta_ests_jax = _jv_mif_internal(
             theta_tiled,
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
+            np.asarray(self._dt_array_extended),
+            np.asarray(self._nstep_array),
             self.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            np.asarray(self.ys.index),
+            np.asarray(self.ys),
             self.rinit.struct_per,
             self.rproc.struct_per_interp,
             self.dmeas.struct_per,
             sigmas_array,
             sigmas_init_array,
             self.rproc.accumvars,
-            jnp.array(self._covars_extended)
+            np.asarray(self._covars_extended)
             if self._covars_extended is not None
             else None,
             M,
@@ -702,6 +705,11 @@ class Pomp:
             thresh,
             keys,
         )
+
+        nLLs = jax.device_get(nLLs_jax)
+        theta_ests = jax.device_get(theta_ests_jax)
+
+        del nLLs_jax, theta_ests_jax
 
         final_theta_ests = []
         param_names = self.canonical_param_names
@@ -752,8 +760,9 @@ class Pomp:
         logLik_estimates = -nLLs
         self.theta = PompParameters(theta, logLik=logLik_estimates)
 
+        del final_theta_ests
+
         if track_time is True:
-            nLLs.block_until_ready()
             execution_time = time.time() - start_time
         else:
             execution_time = None
@@ -1032,7 +1041,7 @@ class Pomp:
         """
         Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
         Columns are
-        
+
             - replicate: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'

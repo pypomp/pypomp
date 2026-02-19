@@ -17,8 +17,6 @@ param_names = (
     "psi",
     "cohort",
     "amplitude",
-    "mu",
-    "alpha",
     "S_0",
     "E_0",
     "I_0",
@@ -58,10 +56,9 @@ def rproc(X_, theta_, key, covars, t, dt):
     sigmaSE = theta_["sigmaSE"]
     cohort = theta_["cohort"]
     amplitude = theta_["amplitude"]
-    mu = theta_["mu"]
-    alpha = theta_["alpha"]
     pop = covars["pop"]
     birthrate = covars["birthrate"]
+    mu = 0.02
 
     # Seasonality
     t_mod = t - jnp.floor(t)
@@ -85,7 +82,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
 
     # Expected Force of Infection
-    foi = beta * ((I + iota) ** alpha) / pop
+    foi = beta * (I + iota) / pop
 
     normal_keys, gamma_key = jax.random.split(key, 2)
     all_noise = jax.random.normal(normal_keys, shape=(7,))
@@ -168,8 +165,6 @@ def to_est(theta):
         "cohort": jspecial.logit(theta["cohort"]),
         "amplitude": jspecial.logit(theta["amplitude"]),
         "rho": jspecial.logit(theta["rho"]),
-        "mu": jnp.log(theta["mu"]),
-        "alpha": jnp.log(theta["alpha"]),
         "S_0": S_0,
         "E_0": E_0,
         "I_0": I_0,
@@ -192,8 +187,6 @@ def from_est(theta):
         "cohort": jspecial.expit(theta["cohort"]),
         "amplitude": jspecial.expit(theta["amplitude"]),
         "rho": jspecial.expit(theta["rho"]),
-        "mu": jnp.exp(theta["mu"]),
-        "alpha": jnp.exp(theta["alpha"]),
         "S_0": S_0,
         "E_0": E_0,
         "I_0": I_0,

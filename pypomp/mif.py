@@ -304,26 +304,33 @@ def _panel_mif_internal(
 
         sum_loglik_iter = 0.0
 
-        def unit_body(u: int, inner_carry):
+        def unit_scan_fn(inner_carry, scan_inputs):
             (
                 shared_array_u,
-                unit_array_u,
                 sum_loglik_u,
-                unit_traces_u,
                 key_u,
             ) = inner_carry
 
+            (
+                unit_array_u_m_single,  # (n_spec, J)
+                unit_param_perm_u,
+                ys_u,
+                covars_u_dummy,
+                u_idx,
+            ) = scan_inputs
+
+            covars_u = None if covars_per_unit is None else covars_u_dummy
+
             # Build per-unit thetas: (J, n_params) in unit's canonical order
-            thetas_u_panel_order = (
-                jnp.concatenate([shared_array_u.T, unit_array_u[:, :, u].T], axis=1)
-                if (n_shared + n_spec) > 0
-                else jnp.zeros((J, 0))
-            )
-            thetas_u = thetas_u_panel_order[:, unit_param_permutations[u]]
+            if (n_shared + n_spec) > 0:
+                thetas_u_panel_order = jnp.concatenate(
+                    [shared_array_u.T, unit_array_u_m_single.T], axis=1
+                )
+            else:
+                thetas_u_panel_order = jnp.zeros((J, 0))
+            thetas_u = thetas_u_panel_order[:, unit_param_perm_u]
 
             key_u, subkey = jax.random.split(key_u)
-
-            covars_u = None if covars_per_unit is None else covars_per_unit[u]
 
             sigmas_init_cooled = (
                 _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
@@ -338,7 +345,7 @@ def _panel_mif_internal(
                 nstep_array,
                 t0,
                 times,
-                ys_per_unit[u],
+                ys_u,
                 rinitializers,
                 rprocesses_interp,
                 dmeasures,
@@ -354,65 +361,74 @@ def _panel_mif_internal(
             )
             nLL_u = nLL_u[0]
             # skips initial parameters from output:
-            updated_thetas_u = updated_thetas_u[1]
+            updated_thetas_u = updated_thetas_u[1]  # (J, n_params)
 
             # Split back into shared and specific
-            def update_shared(ppm, ut):
-                return ut[:, :n_shared].T
+            if n_shared > 0:
+                new_shared_array = updated_thetas_u[:, :n_shared].T
+            else:
+                new_shared_array = shared_array_u
 
-            def keep_shared(ppm, ut):
-                return ppm
-
-            def update_spec(ppa, ut):
-                return ut[:, n_shared:].T
-
-            def keep_spec(ppa, ut):
-                return ppa[:, :, u]
-
-            new_shared_array = jax.lax.cond(
-                n_shared > 0,
-                update_shared,
-                keep_shared,
-                *(shared_array_u, updated_thetas_u),
-            )
-            updated_spec_u = jax.lax.cond(
-                n_spec > 0,
-                update_spec,
-                keep_spec,
-                *(unit_array_u, updated_thetas_u),
-            )
-            unit_array_u = unit_array_u.at[:, :, u].set(updated_spec_u)
-            shared_array_u = new_shared_array
+            if n_spec > 0:
+                updated_spec_u = updated_thetas_u[:, n_shared:].T
+            else:
+                updated_spec_u = unit_array_u_m_single
 
             loglik_u = -nLL_u
             sum_loglik_u = sum_loglik_u + loglik_u
-            unit_traces_u = unit_traces_u.at[m + 1, 0, u].set(loglik_u)
+            
+            unit_traces_u_m_local = jnp.zeros(n_spec + 1)
+            unit_traces_u_m_local = unit_traces_u_m_local.at[0].set(loglik_u)
+            if n_spec > 0:
+                unit_traces_u_m_local = unit_traces_u_m_local.at[1:].set(
+                    jnp.mean(updated_spec_u, axis=1)
+                )
 
-            return (
-                shared_array_u,
-                unit_array_u,
+            new_inner_carry = (
+                new_shared_array,
                 sum_loglik_u,
-                unit_traces_u,
                 key_u,
             )
+            
+            scan_outputs = (updated_spec_u, unit_traces_u_m_local)
+
+            return new_inner_carry, scan_outputs
+
+        # unit_array_m: (n_spec, J, U) -> we want to scan over U
+        # jnp.moveaxis(unit_array_m, 2, 0) -> (U, n_spec, J)
+        unit_scan_seq = (
+            jnp.moveaxis(unit_array_m, 2, 0) if n_spec > 0 else jnp.zeros((U, 0, J)),
+            unit_param_permutations,
+            ys_per_unit,
+            covars_per_unit if covars_per_unit is not None else jnp.zeros((U, 0)), # dummy
+            jnp.arange(U)
+        )
+
+        initial_inner_carry = (
+            shared_array_m,
+            sum_loglik_iter,
+            key_m,
+        )
+
+        final_inner_carry, (unit_array_m_new_seq, unit_traces_m_new_seq) = jax.lax.scan(
+            f=unit_scan_fn,
+            init=initial_inner_carry,
+            xs=unit_scan_seq,
+        )
 
         (
             shared_array_m,
-            unit_array_m,
             sum_loglik_iter,
-            unit_traces_m,
             key_m,
-        ) = jax.lax.fori_loop(
-            lower=0,
-            upper=U,
-            body_fun=unit_body,
-            init_val=(
-                shared_array_m,
-                unit_array_m,
-                sum_loglik_iter,
-                unit_traces_m,
-                key_m,
-            ),
+        ) = final_inner_carry
+
+        # unit_array_m_new_seq: (U, n_spec, J) -> move back to (n_spec, J, U)
+        if n_spec > 0:
+            unit_array_m = jnp.moveaxis(unit_array_m_new_seq, 0, 2)
+        
+        # unit_traces_m_new_seq: (U, n_spec + 1) -> move back to (n_spec + 1, U)
+        unit_traces_m = unit_traces_m.at[m + 1, :, :].set(
+            jnp.moveaxis(unit_traces_m_new_seq, 0, 1)
         )
 
         shared_means = jnp.where(

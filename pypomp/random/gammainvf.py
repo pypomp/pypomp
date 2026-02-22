@@ -13,25 +13,32 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 from jax.scipy.special import ndtri
+import numpy as np
+from jax._src import dtypes
+
+from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
 
 
-def _gammainvf_scalar(u: Array, alpha: Array) -> Array:
+def _gammainvf_scalar(u: Array, alpha: Array, dtype) -> Array:
     """
     Scalar inverse Gamma CDF using the Temme (1992) asymptotic inversion method.
 
     Args:
         u: Probability in the interval [0, 1].
         alpha: Shape parameter for the Gamma(alpha, 1) distribution, must be positive.
+        dtype: Data type for computation.
 
     Returns:
         Inverse CDF value.
     """
-    dtype = jnp.float32
     u = jnp.asarray(u, dtype=dtype)
     alpha = jnp.asarray(alpha, dtype=dtype)
 
-    alpha_invalid = alpha <= jnp.float32(0.0)
-    alpha_safe = cast(Array, jnp.where(alpha_invalid, jnp.float32(1.0), alpha))
+    zero = jnp.array(0.0, dtype=dtype)
+    one = jnp.array(1.0, dtype=dtype)
+
+    alpha_invalid = alpha <= zero
+    alpha_safe = cast(Array, jnp.where(alpha_invalid, one, alpha))
 
     # 1. Calculate eta_0 (The starting approximation)
     # Eq (3.2) implies eta_0 is related to the inverse error function.
@@ -42,7 +49,7 @@ def _gammainvf_scalar(u: Array, alpha: Array) -> Array:
 
     # 2. Calculate the perturbation epsilon(eta)
     # Using the polynomial expansions from Section 5.
-    eps = _compute_epsilon(eta_0)
+    eps = _compute_epsilon(eta_0, dtype)
 
     # 3. Calculate the refined eta
     # Eq (3.3): eta = eta_0 + epsilon
@@ -62,33 +69,34 @@ def _gammainvf_scalar(u: Array, alpha: Array) -> Array:
     # 4. Convert eta back to lambda (where x = alpha * lambda)
     # We need to invert the relation: 1/2 * eta^2 = lambda - 1 - ln(lambda)
     # with the condition sign(eta) == sign(lambda - 1).
-    lam = _solve_lambda_from_eta(eta)
+    lam = _solve_lambda_from_eta(eta, dtype)
 
     x = alpha_safe * lam
 
     nan = jnp.array(jnp.nan, dtype=dtype)
     inf = jnp.array(jnp.inf, dtype=dtype)
 
-    x = cast(Array, jnp.where(u < jnp.float32(0.0), nan, x))
-    x = cast(Array, jnp.where(u == jnp.float32(0.0), jnp.float32(0.0), x))
-    x = cast(Array, jnp.where(u == jnp.float32(1.0), inf, x))
-    x = cast(Array, jnp.where(u > jnp.float32(1.0), nan, x))
+    x = cast(Array, jnp.where(u < zero, nan, x))
+    x = cast(Array, jnp.where(u == zero, zero, x))
+    x = cast(Array, jnp.where(u == one, inf, x))
+    x = cast(Array, jnp.where(u > one, nan, x))
     x = cast(Array, jnp.where(alpha_invalid, nan, x))
-    x = cast(Array, jnp.where(x < 0.0, jnp.float32(0.0), x))
+    x = cast(Array, jnp.where(x < zero, zero, x))
     return x
 
 
-_gammainvf_vmap = jax.vmap(_gammainvf_scalar)
+_gammainvf_vmap = jax.vmap(_gammainvf_scalar, in_axes=(0, 0, None))
 
 
-@jax.jit
-def gammainvf(u: Array, alpha: Array) -> Array:
+@partial(jax.jit, static_argnames=["dtype"])
+def gammainvf(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
     """
     Vectorized inverse Gamma CDF approximation using JAX primitives.
 
     Args:
         u: Probabilities (scalar or array) in the interval [0, 1].
         alpha: Corresponding Gamma shape parameter(s), must be positive.
+        dtype: Data type for computation (default float32).
 
     Returns:
         DeviceArray with the same broadcast shape as `u` and `alpha`.
@@ -96,13 +104,16 @@ def gammainvf(u: Array, alpha: Array) -> Array:
     u_arr, alpha_arr = jnp.broadcast_arrays(u, alpha)
     flat_u = u_arr.reshape(-1)
     flat_alpha = alpha_arr.reshape(-1)
-    flat_res = _gammainvf_vmap(flat_u, flat_alpha)
+    flat_res = _gammainvf_vmap(flat_u, flat_alpha, dtype)
     return flat_res.reshape(u_arr.shape)
 
 
-@partial(jax.jit, static_argnames=["adjustment_size"])
+@partial(jax.jit, static_argnames=["adjustment_size", "dtype"])
 def fast_approx_rgamma(
-    key: jax.Array, alpha: jax.Array, adjustment_size: int = 3
+    key: jax.Array,
+    alpha: jax.Array,
+    adjustment_size: int = 3,
+    dtype: np.dtype | None = None,
 ) -> jax.Array:
     """
     Generate a Gamma random variable with given shape parameter.
@@ -116,47 +127,61 @@ def fast_approx_rgamma(
             The function generates Gamma(alpha + adjustment_size) and reduces
             it to Gamma(alpha) using adjustment_size uniform adjustments. The larger the value, the more accurate the approximation at low alpha values (e.g.,
             alpha < 2).
+        dtype: optional, a float dtype for the returned values (default float64 if
+            jax_enable_x64 is true, otherwise float32).
 
     Returns:
         A jax.Array with the same shape as alpha.
 
     References:
-        * Temme, N. M. “Asymptotic Inversion of Incomplete Gamma Functions.” Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
+        * Temme, N. M. "Asymptotic Inversion of Incomplete Gamma Functions." Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
     """
+    dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
+    assert dtype is not None
+
+    if not dtypes.issubdtype(dtype, np.floating):
+        raise ValueError(
+            f"dtype argument to `fast_approx_rgamma` must be a float dtype, got {dtype}"
+        )
+
+    # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
+    dtype = _get_available_dtype(dtype)
+    assert dtype is not None
+
     shape = alpha.shape
-    alpha_orig_dtype = alpha.dtype
-    alpha_f32 = jnp.asarray(alpha, dtype=jnp.float32)
+    alpha_dtype = jnp.asarray(alpha, dtype=dtype)
 
     key_base, key_adj = jax.random.split(key)
 
     # Apply the multi-step Gamma(alpha + adjustment_size) trick for better accuracy
-    alpha_base = alpha_f32 + jnp.full(shape, adjustment_size, dtype=jnp.float32)
+    alpha_base = alpha_dtype + jnp.full(shape, adjustment_size, dtype=dtype)
 
-    u_base = jax.random.uniform(key_base, shape)
-    x = gammainvf(u_base, alpha_base)
+    u_base = jax.random.uniform(key_base, shape, dtype=dtype)
+    x = gammainvf(u_base, alpha_base, dtype=dtype)
 
-    u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape)
+    u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape, dtype=dtype)
 
-    adjustment_indices = jnp.arange(adjustment_size - 1, -1, -1, dtype=jnp.float32)
+    adjustment_indices = jnp.arange(adjustment_size - 1, -1, -1, dtype=dtype)
 
     adjustment_indices = adjustment_indices.reshape(
         (adjustment_size,) + (1,) * len(shape)
     )
-    adjustment_powers = 1.0 / (alpha_f32 + adjustment_indices)
+    adjustment_powers = jnp.array(1.0, dtype=dtype) / (alpha_dtype + adjustment_indices)
     adjustments = jnp.power(u_adj, adjustment_powers)
 
     # Multiply all adjustments together
     x = x * jnp.prod(adjustments, axis=0)
 
-    return x.astype(alpha_orig_dtype)
+    return x.astype(dtype)
 
 
-def _compute_epsilon(eta):
+def _compute_epsilon(eta, dtype):
     """
     Computes epsilon_1 through epsilon_4 using the Taylor expansions
     provided in Section 5 of Temme (1992).
     """
     # Coefficients extracted from Section 5 text
+    # Cast coefficients to the appropriate dtype
 
     (
         eta2,
@@ -239,13 +264,18 @@ def _compute_epsilon(eta):
     return e1, e2, e3, e4
 
 
-def _solve_lambda_from_eta(eta):
+def _solve_lambda_from_eta(eta, dtype):
     """
     Inverts the relation 1/2 * eta^2 = lambda - 1 - ln(lambda).
 
     Uses the series expansion from Section 6 as an initial guess,
     followed by Newton-Raphson iterations as suggested in the paper.
     """
+    # Constants in the appropriate dtype
+    zero = jnp.array(0.0, dtype=dtype)
+    one = jnp.array(1.0, dtype=dtype)
+    half = jnp.array(0.5, dtype=dtype)
+
     # Series approximation from Section 6
     # lambda = 1 + eta + 1/3 eta^2 + 1/36 eta^3 - 1/270 eta^4 + ...
     eta2 = eta**2
@@ -253,14 +283,20 @@ def _solve_lambda_from_eta(eta):
     eta4 = eta**4
 
     lam_guess = (
-        1.0 + eta + (1.0 / 3.0) * eta2 + (1.0 / 36.0) * eta3 - (1.0 / 270.0) * eta4
+        one
+        + eta
+        + (one / jnp.array(3.0, dtype=dtype)) * eta2
+        + (one / jnp.array(36.0, dtype=dtype)) * eta3
+        - (one / jnp.array(270.0, dtype=dtype)) * eta4
     )
 
     # For very large negative eta (left tail), the series might be unstable (lambda < 0).
     # Since lambda must be > 0, we clamp the guess.
     # For eta << -1, lambda is small, dominated by -ln(lambda) ~ eta^2/2 -> lambda ~ exp(-eta^2/2)
     # This prevents NaN in the log step of Newton-Raphson.
-    safe_guess = jnp.where(lam_guess <= 0.01, jnp.exp(-0.5 * eta2), lam_guess)
+    safe_guess = jnp.where(
+        lam_guess <= jnp.array(0.01, dtype=dtype), jnp.exp(-half * eta2), lam_guess
+    )
 
     # Newton-Raphson refinement
     # f(lambda) = lambda - 1 - ln(lambda) - eta^2/2
@@ -270,20 +306,18 @@ def _solve_lambda_from_eta(eta):
     #      = lambda * (lambda - 1 - ln(lambda) - eta^2/2) / (lambda - 1)
 
     def newton_step(lam_curr):
-        val = lam_curr - 1.0 - jnp.log(lam_curr) - 0.5 * eta2
-        grad = 1.0 - 1.0 / lam_curr
+        val = lam_curr - one - jnp.log(lam_curr) - half * eta2
+        grad = one - one / lam_curr
         # Avoid division by zero at lambda=1 (eta=0)
         # At lambda=1, the limit of val/grad is 0, so update should be 0.
-        safe_grad = jnp.where(jnp.abs(grad) < 1e-6, 1.0, grad)
+        safe_grad = jnp.where(jnp.abs(grad) < jnp.array(1e-6, dtype=dtype), one, grad)
         step = val / safe_grad
         # Mask the step if we are at the singularity to avoid instability
-        step = jnp.where(jnp.abs(grad) < 1e-6, 0.0, step)
+        step = jnp.where(jnp.abs(grad) < jnp.array(1e-6, dtype=dtype), zero, step)
         lam_new = lam_curr - step
         # Ensure lambda stays positive to avoid NaN in log
         # Use a small positive epsilon to prevent numerical issues
-        # This should be relevant only very rarely
-        # TODO: implement a better solution
-        lam_new = jnp.maximum(lam_new, jnp.float32(1e-10))
+        lam_new = jnp.maximum(lam_new, jnp.array(1e-10, dtype=dtype))
         return lam_new
 
     # 3 iterations is usually sufficient for double precision with this good initial guess

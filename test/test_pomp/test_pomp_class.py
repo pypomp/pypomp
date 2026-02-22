@@ -74,7 +74,8 @@ def neapolitan_setup():
         a=a,
         key=key,
     )
-    LG.train(J=J, M=1, eta=0.2, key=key)
+    eta = {param: 0.2 for param in LG.canonical_param_names}
+    LG.train(J=J, M=1, eta=eta, key=key)
     results_history = LG.results_history
     theta = LG.theta
     fresh_key = LG.fresh_key
@@ -190,7 +191,7 @@ def test_theta_carryover_train(simple):
     LG.train(
         J=J,
         M=1,
-        eta=0.2,
+        eta={param: 0.2 for param in LG.canonical_param_names},
         key=key,
     )
     assert theta_order == list(LG.theta[0].keys())
@@ -263,7 +264,7 @@ def test_prune(simple):
         t0=LG.t0,
         nstep=LG.rproc.nstep,
         ydim=LG.rmeas.ydim,
-        statenames=["state_0", "state_1"],
+        statenames=["X1", "X2"],
     )
     with pytest.raises(ValueError):
         LG2.prune(n=1)
@@ -294,11 +295,13 @@ def test_merge(simple_setup):
 
     LG1.pfilter(theta=theta, J=J, reps=1, key=key1)
     LG1.mif(J=J, M=M, rw_sd=rw_sd, a=a)
-    LG1.train(J=J, M=1, eta=0.2)
+    eta = {param: 0.2 for param in LG1.canonical_param_names}
+    LG1.train(J=J, M=1, eta=eta)
 
     LG2.pfilter(theta=theta, J=J, reps=1, key=key2)
     LG2.mif(J=J, M=M, rw_sd=rw_sd, a=a)
-    LG2.train(J=J, M=1, eta=0.2)
+    eta = {param: 0.2 for param in LG2.canonical_param_names}
+    LG2.train(J=J, M=1, eta=eta)
 
     n_reps1 = len(LG1.theta)
     n_reps2 = len(LG2.theta)
@@ -328,7 +331,7 @@ def test_merge(simple_setup):
             assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
         elif merged_result.method == "train":
             assert merged_result.M == result1.M == result2.M == 1
-            assert merged_result.eta == result1.eta == result2.eta == 0.2
+            assert merged_result.eta == result1.eta == result2.eta == eta
             assert merged_result.optimizer == result1.optimizer == result2.optimizer
 
         if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:

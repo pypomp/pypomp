@@ -118,7 +118,7 @@ def gammainvf_performance():
     # Warmup to trigger JITs
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
+    _ = ppr.fast_approx_rgamma(key1, alpha_samples).block_until_ready()
     t1 = time.time()
     print(f"Warmup ppr.rgamma: {t1 - t0:.4f} seconds")
 
@@ -132,7 +132,7 @@ def gammainvf_performance():
     for i in range(reps):
         key1, _ = jax.random.split(key1)
         t0 = time.time()
-        _ = ppr.rgamma(key1, alpha_samples).block_until_ready()
+        _ = ppr.fast_approx_rgamma(key1, alpha_samples).block_until_ready()
         t1 = time.time()
         t_pp_total += t1 - t0
     avg_t_pp = t_pp_total / reps
@@ -431,7 +431,7 @@ def compare_rgamma_and_jax_gamma(
         alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
         # Use a new PRNG split for each
         key_rgamma, key = jax.random.split(key)
-        rgamma_samples = ppr.rgamma(key_rgamma, alpha_arr)
+        rgamma_samples = ppr.fast_approx_rgamma(key_rgamma, alpha_arr)
         key_jax, key = jax.random.split(key)
         jax_gamma_samples = jax.random.gamma(key_jax, alpha_arr)
 
@@ -647,7 +647,7 @@ def rgamma_goodness_of_fit():
     for alpha_val in alpha:
         key = jax.random.key(int(alpha_val * 1000) % 2**31)
         alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
-        samples = np.array(ppr.rgamma(key, alpha_arr))
+        samples = np.array(ppr.fast_approx_rgamma(key, alpha_arr))
 
         # Perform Kolmogorov-Smirnov test
         # Gamma distribution with shape=alpha, scale=1 (rate=1)

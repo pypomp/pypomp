@@ -211,3 +211,24 @@ def test_invalid_mif_input(simple):
             J=-1,
             key=key,
         )
+
+
+def test_mif_invalid_theta_and_rw_sd_keys(simple):
+    """theta or rw_sd with non-canonical keys should raise an error."""
+    LG, rw_sd, J, key, a, M = simple
+
+    # Bad theta: wrong parameter names
+    bad_theta = {"not_a_param": 1.0}
+    with pytest.raises(
+        ValueError,
+        match="theta parameter names must match canonical_param_names up to reordering",
+    ):
+        LG.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key, theta=bad_theta)
+
+    # Bad rw_sd: sigmas keys not matching canonical_param_names
+    bad_rw_sd = pp.RWSigma(sigmas={"not_a_param": 0.1}, init_names=[])
+    with pytest.raises(
+        ValueError,
+        match="rw_sd.sigmas keys must match canonical_param_names up to reordering.* ",
+    ):
+        LG.mif(J=J, M=M, rw_sd=bad_rw_sd, a=a, key=key)

@@ -3,11 +3,6 @@ import jax.numpy as jnp
 
 
 class RWSigma:
-    sigmas: dict[str, float]
-    init_names: list[str]
-    not_init_names: list[str]
-    all_names: list[str]
-
     """
     Class for representing the random walk sigma parameters for the iterated filtering (IF2) algorithm.
 

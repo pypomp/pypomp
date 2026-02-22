@@ -11,11 +11,17 @@ small.
 from __future__ import annotations
 
 from typing import Tuple, cast
+from functools import partial
 
 import jax
 from jax import Array, lax
 import jax.numpy as jnp
 from jax.scipy import special as jsp_special
+import numpy as np
+from jax._src import dtypes
+
+from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
+
 
 _RM_COEFFS: Tuple[float, ...] = (
     2.82298751e-07,
@@ -63,27 +69,30 @@ _X_COEFFS: Tuple[float, ...] = (
     -1.98011178e-02,
 )
 
-_SQRT2 = jnp.sqrt(jnp.float32(2.0))
-
+# These coefficient arrays are kept at float32 for efficiency
+# They will be cast to the appropriate dtype during computation
 _RM_COEFFS_ARR = jnp.array(_RM_COEFFS, dtype=jnp.float32)
 _T_COEFFS_ARR = jnp.array(_T_COEFFS, dtype=jnp.float32)
 _X_COEFFS_ARR = jnp.array(_X_COEFFS, dtype=jnp.float32)
 
 
-def _central_region(s: Array, lam: Array) -> Array:
-    rm = jnp.polyval(_RM_COEFFS_ARR, s)
+def _central_region(s: Array, lam: Array, dtype) -> Array:
+    # Cast coefficients to the working dtype
+    rm_coeffs = _RM_COEFFS_ARR.astype(dtype)
+    t_coeffs = _T_COEFFS_ARR.astype(dtype)
+    x_coeffs = _X_COEFFS_ARR.astype(dtype)
+
+    rm = jnp.polyval(rm_coeffs, s)
     rm = s + s * (rm * s)
 
-    t = jnp.polyval(_T_COEFFS_ARR, rm)
-    x = jnp.polyval(_X_COEFFS_ARR, rm) / lam
+    t = jnp.polyval(t_coeffs, rm)
+    x = jnp.polyval(x_coeffs, rm) / lam
 
     total = lam + (x + t) + lam * rm
     return jnp.floor(total)
 
 
-def _newton_region(s: Array, lam: Array) -> Array:
-    dtype = s.dtype
-
+def _newton_region(s: Array, lam: Array, dtype) -> Array:
     MAX_LOOPS = 5
     r = jnp.maximum(0.1, 1.0 + s)
     r_prev = r
@@ -120,7 +129,7 @@ def _newton_region(s: Array, lam: Array) -> Array:
     return jnp.floor(x)
 
 
-def _bottom_up(u: Array, lam: Array) -> Array:
+def _bottom_up(u: Array, lam: Array, dtype) -> Array:
     lami = 1.0 / lam
 
     t0 = jnp.exp(0.5 * lam)
@@ -132,7 +141,9 @@ def _bottom_up(u: Array, lam: Array) -> Array:
 
         # Initialize state
         x, s, delta = x_init, s0, del0
-        t = jnp.float32(0.0)
+        t = jnp.array(0.0, dtype=dtype)
+        zero = jnp.array(0.0, dtype=dtype)
+        one = jnp.array(1.0, dtype=dtype)
 
         # Track if we are still running (equivalent to cond1)
         active = jnp.array(True)
@@ -140,17 +151,17 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         # JAX will unroll this loop during compilation
         for _ in range(MAX_LOOPS):
             # Check condition: s < 0.0
-            current_cond = s < jnp.float32(0.0)
+            current_cond = s < zero
 
             # Determine if we should update in this step
             # We continue only if we were already active AND the condition holds
             keep_going = jnp.logical_and(active, current_cond)
 
             # Calculate candidates for next step
-            x_next = x + jnp.float32(1.0)
+            x_next = x + one
             t_next = x_next * lami
             delta_next = t_next * delta
-            s_next = t_next * s + jnp.float32(1.0)
+            s_next = t_next * s + one
 
             # Apply updates only if keep_going is True
             x = jnp.where(keep_going, x_next, x)
@@ -168,10 +179,13 @@ def _bottom_up(u: Array, lam: Array) -> Array:
 
     def top_down_branch(state):
         x_val, delta_val = state
+        one = jnp.array(1.0, dtype=dtype)
+        zero = jnp.array(0.0, dtype=dtype)
+
         # Setup
-        delta_scaled = 1e6 * delta_val
-        t_thresh = 1e7 * delta_scaled
-        delta_scaled = (1.0 - u) * delta_scaled
+        delta_scaled = jnp.array(1e6, dtype=dtype) * delta_val
+        t_thresh = jnp.array(1e7, dtype=dtype) * delta_scaled
+        delta_scaled = (one - u) * delta_scaled
 
         # Unrolled first loop (finding x_hi, delta_hi)
         MAX_LOOPS_2 = 20
@@ -179,7 +193,7 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         delta_hi = delta_scaled
         for _ in range(MAX_LOOPS_2):
             cond = delta_hi < t_thresh
-            x_next = x_hi + 1.0
+            x_next = x_hi + one
             delta_next = delta_hi * (x_next * lami)
             x_hi = jnp.where(cond, x_next, x_hi)
             delta_hi = jnp.where(cond, delta_next, delta_hi)
@@ -188,106 +202,105 @@ def _bottom_up(u: Array, lam: Array) -> Array:
         MAX_LOOPS_3 = 20
         x_lo = x_hi
         s_lo = delta_hi
-        t_lo = jnp.float32(1.0)
+        t_lo = one
         for _ in range(MAX_LOOPS_3):
-            cond = s_lo > 0.0
-            t_next = t_lo * (x_lo * lami)
-            s_next = s_lo - t_next
-            x_next = x_lo - 1.0
-            x_lo = jnp.where(cond, x_next, x_lo)
-            s_lo = jnp.where(cond, s_next, s_lo)
-            t_lo = jnp.where(cond, t_next, t_lo)
+            cond = s_lo > zero
+            t_next = cast(Array, t_lo * (x_lo * lami))
+            s_next = cast(Array, s_lo - t_next)
+            x_next = cast(Array, x_lo - one)
+            x_lo = cast(Array, jnp.where(cond, x_next, x_lo))
+            s_lo = cast(Array, jnp.where(cond, s_next, s_lo))
+            t_lo = cast(Array, jnp.where(cond, t_next, t_lo))
         return x_lo
 
+    two = jnp.array(2.0, dtype=dtype)
     return lax.cond(
-        s < jnp.float32(2.0) * delta,
+        s < two * delta,
         top_down_branch,
         lambda state: state[0],
         operand=(x, delta),
     )
 
 
-def _poissinvf_scalar(u: Array, lam: Array) -> Array:
-    dtype = jnp.float32
+def _poissinvf_scalar(u: Array, lam: Array, dtype) -> Array:
     u = jnp.asarray(u, dtype=dtype)
     lam = jnp.asarray(lam, dtype=dtype)
 
-    x0 = 0.0
+    zero = jnp.array(0.0, dtype=dtype)
+    one = jnp.array(1.0, dtype=dtype)
+    x0 = zero
+    sqrt2 = jnp.sqrt(jnp.array(2.0, dtype=dtype))
 
-    lam_invalid = lam <= 0.0
-    lam_safe = cast(Array, jnp.where(lam_invalid, 1.0, lam))
+    lam_invalid = lam <= zero
+    lam_safe = cast(Array, jnp.where(lam_invalid, one, lam))
 
     def large_lambda_case(_):
         s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
 
         def central(_):
-            return _central_region(s, lam_safe)
+            return _central_region(s, lam_safe, dtype)
 
         def non_central(_):
             return lax.cond(
-                s > -_SQRT2,
-                lambda __: _newton_region(s, lam_safe),
+                s > -sqrt2,
+                lambda __: _newton_region(s, lam_safe, dtype),
                 lambda __: x0,
-                operand=0.0,
+                operand=zero,
             )
 
         return lax.cond(
-            jnp.logical_and(s > -0.6833501, s < 1.777993),
+            jnp.logical_and(
+                s > jnp.array(-0.6833501, dtype=dtype),
+                s < jnp.array(1.777993, dtype=dtype),
+            ),
             central,
             non_central,
-            operand=0.0,
+            operand=zero,
         )
 
-    large_lambda = lam_safe > 4.0
+    large_lambda = lam_safe > jnp.array(4.0, dtype=dtype)
     x_large = lax.cond(
         large_lambda,
         large_lambda_case,
         lambda _: x0,
-        operand=0.0,
+        operand=zero,
     )
 
     def bottom_up_branch(_):
-        return _bottom_up(u, lam_safe)
+        return _bottom_up(u, lam_safe, dtype)
 
-    bottom_up = x_large <= 10.0
-    # not_large_bottom_up = jnp.logical_and(jnp.logical_not(large_lambda), bottom_up)
-    # x = x_large
-    # x = lax.cond(
-    #     not_large_bottom_up,
-    #     bottom_up_branch,
-    #     lambda _: x_large,
-    #     operand=jnp.float32(0.0),
-    # )
+    bottom_up = x_large <= jnp.array(10.0, dtype=dtype)
     x = lax.cond(
         bottom_up,
         bottom_up_branch,
         lambda _: x_large,
-        operand=0.0,
+        operand=zero,
     )
 
     nan = jnp.array(jnp.nan, dtype=dtype)
     inf = jnp.array(jnp.inf, dtype=dtype)
 
-    x = cast(Array, jnp.where(u < 0.0, nan, x))
-    x = cast(Array, jnp.where(u == 0.0, 0.0, x))
-    x = cast(Array, jnp.where(u == 1.0, inf, x))
-    x = cast(Array, jnp.where(u > 1.0, nan, x))
+    x = cast(Array, jnp.where(u < zero, nan, x))
+    x = cast(Array, jnp.where(u == zero, zero, x))
+    x = cast(Array, jnp.where(u == one, inf, x))
+    x = cast(Array, jnp.where(u > one, nan, x))
     x = cast(Array, jnp.where(lam_invalid, nan, x))
-    x = cast(Array, jnp.where(x < 0.0, 0.0, x))
+    x = cast(Array, jnp.where(x < zero, zero, x))
     return x
 
 
-_poissinvf_vmap = jax.vmap(_poissinvf_scalar)
+_poissinvf_vmap = jax.vmap(_poissinvf_scalar, in_axes=(0, 0, None))
 
 
-@jax.jit
-def poissinvf(u: Array, lam: Array) -> Array:
+@partial(jax.jit, static_argnames=["dtype"])
+def poissinvf(u: Array, lam: Array, dtype=jnp.float32) -> Array:
     """
     Vectorized inverse Poisson CDF approximation using JAX primitives.
 
     Args:
         u: Probabilities (scalar or array) in the interval [0, 1].
         lam: Corresponding Poisson rate(s), must be positive.
+        dtype: Data type for the computation (default float32).
 
     Returns:
         DeviceArray with the same broadcast shape as `u` and `lam`.
@@ -296,12 +309,13 @@ def poissinvf(u: Array, lam: Array) -> Array:
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
     flat_u = u_arr.reshape(-1)
     flat_lam = lam_arr.reshape(-1)
-    flat_res = _poissinvf_vmap(flat_u, flat_lam)
+    flat_res = _poissinvf_vmap(flat_u, flat_lam, dtype)
     return flat_res.reshape(u_arr.shape)
 
 
-@jax.jit
-def fast_approx_rpoisson(key: Array, lam: Array) -> Array:
+def fast_approx_rpoisson(
+    key: Array, lam: Array, dtype: np.dtype | None = None
+) -> Array:
     """
     Generate a Poisson random variable with given rate parameter.
 
@@ -310,21 +324,50 @@ def fast_approx_rpoisson(key: Array, lam: Array) -> Array:
     Args:
         key: a PRNG key used as the random key.
         lam: rate parameters for the Poisson distribution.
+        dtype: optional, an integer dtype for the returned values (default int64 if
+            jax_enable_x64 is true, otherwise int32).
 
     Returns:
         A Poisson random variable.
 
     References:
-        * Giles, Michael B. “Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function.” ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
+        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
     """
+    dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
+    assert dtype is not None
+    if not dtypes.issubdtype(dtype, np.integer):
+        raise ValueError(
+            f"dtype argument to `fast_approx_rpoisson` must be an integer dtype, got {dtype}"
+        )
+
+    # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
+    dtype = _get_available_dtype(dtype)
+    assert dtype is not None
+
+    # Determine the appropriate float dtype for internal computations
+    # Use float64 if the integer dtype is 64-bit, otherwise float32
+    if dtypes.issubdtype(dtype, np.int64):
+        float_dtype = jnp.float64
+    else:
+        float_dtype = jnp.float32
+
+    # Get the float dtype that JAX actually uses
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
+
     shape = lam.shape
-    u = jax.random.uniform(key, shape)
+    u = jax.random.uniform(key, shape, dtype=float_dtype)
     # Clamp u to be slightly less than 1.0 to avoid inf output
     # Use nextafter to get the largest float < 1.0
-    u_max = jnp.nextafter(jnp.array(1.0, dtype=u.dtype), jnp.array(0.0, dtype=u.dtype))
+    u_max = jnp.nextafter(
+        jnp.array(1.0, dtype=float_dtype), jnp.array(0.0, dtype=float_dtype)
+    )
     u = jnp.minimum(u, u_max)
-    x = poissinvf(u, lam)
+    lam_float = lam.astype(float_dtype)
+    x = poissinvf(u, lam_float, dtype=float_dtype)
     # Cap the output to a reasonable maximum to prevent overflow
-    max_val = lam + 10.0 * jnp.sqrt(jnp.maximum(lam, 1.0))
+    max_val = lam_float + jnp.array(10.0, dtype=float_dtype) * jnp.sqrt(
+        jnp.maximum(lam_float, jnp.array(1.0, dtype=float_dtype))
+    )
     x = jnp.minimum(x, max_val)
-    return x.astype(lam.dtype)
+    return x.astype(dtype)

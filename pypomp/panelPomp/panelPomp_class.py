@@ -181,6 +181,11 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         state = self.__dict__.copy()
 
+        # Store JAX key as raw bits (key is not picklable directly)
+        if self.fresh_key is not None:
+            state["_fresh_key_data"] = jax.random.key_data(self.fresh_key)
+        state.pop("fresh_key", None)
+
         # Handle unit_objects by storing their state information
         if hasattr(self, "unit_objects") and self.unit_objects is not None:
             unit_objects_state = {}
@@ -200,6 +205,13 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         # Restore basic attributes
         self.__dict__.update(state)
+
+        # Reconstruct JAX key from raw bits
+        if "_fresh_key_data" in state:
+            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+        elif "fresh_key" not in self.__dict__:
+            self.fresh_key = None
+        self.__dict__.pop("_fresh_key_data", None)
 
         # Reconstruct unit_objects
         if "_unit_objects_state" in state:

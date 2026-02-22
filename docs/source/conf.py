@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "pypomp"
 copyright = "2025, pypomp team"
 author = "pypomp team"
-release = "0.4.2"
+release = "0.4.3"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -64,16 +64,15 @@ intersphinx_mapping = {
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "alabaster"
+html_theme = "furo"
 html_static_path = ["_static"]
 
 # Theme options
 html_theme_options = {
-    "description": "Modeling and inference using partially observed Markov process (POMP) models",
-    "github_user": "pypomp",
-    "github_repo": "pypomp",
-    "github_button": True,
-    "github_type": "star",
-    "github_banner": True,
-    "show_powered_by": False,
+    "source_repository": "https://github.com/pypomp/pypomp",
+    "source_branch": "main",
+    "source_directory": "docs/source/",
+    "navigation_with_keys": True,
 }
+
+html_title = "pypomp"

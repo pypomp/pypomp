@@ -7,6 +7,16 @@ from pypomp.pomp_class import Pomp
 import jax.scipy.special as jspecial
 import numpy as np
 from pypomp.ParTrans_class import ParTrans
+from pypomp.types import (
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    StepSizeFloat,
+    InitialTimeFloat,
+    RNGKey,
+    ObservationDict,
+)
 
 theta = {
     "gamma": 20.8,  # recovery rate
@@ -95,7 +105,7 @@ statenames = ["S", "I", "Y", "Mn", "R1", "R2", "R3", "count"]
 accumvars = ["Mn"]
 
 
-def rinit(theta_, key, covars, t0=None):
+def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
     S_0 = 0.621
     I_0 = 0.378
     Y_0 = 0
@@ -123,7 +133,14 @@ def rinit(theta_, key, covars, t0=None):
     }
 
 
-def rproc(X_, theta_, key, covars, t, dt):
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     S = X_["S"]
     I = X_["I"]
     Y = X_["Y"]
@@ -203,7 +220,14 @@ def rproc(X_, theta_, key, covars, t, dt):
     }
 
 
-def rproc_gamma(X_, theta_, key, covars, t, dt):
+def rproc_gamma(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     S = X_["S"]
     I = X_["I"]
     Y = X_["Y"]
@@ -305,7 +329,13 @@ def _dmeas_helper_tol(y, deaths, v, tol, ltol):
     return jnp.array([ltol])
 
 
-def dmeas(Y_, X_, theta_, covars=None, t=None):
+def dmeas(
+    Y_: ObservationDict,
+    X_: StateDict,
+    theta_: ParamDict,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     deaths = X_["Mn"]
     count = X_["count"]
     tol = 1.0e-18
@@ -314,7 +344,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     v = tau * deaths
     # return jax.scipy.stats.norm.logpdf(y, loc=deaths, scale=v)
     y = Y_["deaths"]
-    return jax.lax.cond(
+    result = jax.lax.cond(
         jnp.logical_or(
             (1 - jnp.isfinite(v)).astype(bool), count > 0
         ),  # if Y < 0 then count violation
@@ -322,9 +352,16 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
         _dmeas_helper,
         *(y, deaths, v, tol, ltol),
     )
+    return jnp.reshape(result, ())
 
 
-def rmeas(X_, theta_, key, covars=None, t=None):
+def rmeas(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+):
     deaths = X_["Mn"]
     tau = theta_["tau"]
     v = tau * deaths

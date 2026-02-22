@@ -10,8 +10,16 @@ def test_rpoisson():
     lam = jnp.array([1.0, 2.0, 3.0])
     x = ppr.fast_approx_rpoisson(key, lam)
     assert x.shape == (3,)
-    assert x.dtype == jnp.float32
+    assert x.dtype == jnp.int32  # Default is int32 when jax_enable_x64 is false
     assert x.min() >= 0
+
+    x_int32 = ppr.fast_approx_rpoisson(key, lam, dtype=jnp.int32)
+    assert x_int32.dtype == jnp.int32
+
+    jax.config.update("jax_enable_x64", True)
+    x_int64 = ppr.fast_approx_rpoisson(key, lam, dtype=jnp.int64)
+    assert x_int64.dtype == jnp.int64
+    jax.config.update("jax_enable_x64", False)
 
 
 def test_rbinom():
@@ -25,6 +33,11 @@ def test_rbinom():
 
     x = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int32)
     assert x.dtype == jnp.int32
+
+    jax.config.update("jax_enable_x64", True)
+    x_int64 = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int64)
+    assert x_int64.dtype == jnp.int64
+    jax.config.update("jax_enable_x64", False)
 
 
 def test_rbinom_invalid_and_edges():
@@ -148,6 +161,14 @@ def test_rgamma():
     assert x.shape == (3,)
     assert x.dtype == jnp.float32
     assert x.min() >= 0
+
+    x_float32 = ppr.fast_approx_rgamma(key, alpha, dtype=jnp.float32)
+    assert x_float32.dtype == jnp.float32
+
+    jax.config.update("jax_enable_x64", True)
+    x_float64 = ppr.fast_approx_rgamma(key, alpha, dtype=jnp.float64)
+    assert x_float64.dtype == jnp.float64
+    jax.config.update("jax_enable_x64", False)
 
 
 def test_rpoisson_moments(n_moments=3):

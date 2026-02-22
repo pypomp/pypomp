@@ -38,3 +38,16 @@ def test_simulate_param_order_invariance(simple):
     X2, Y2 = LG.simulate(nsim=nsim, key=key, theta=permuted_theta)
     pd.testing.assert_frame_equal(X_sims, X2)
     pd.testing.assert_frame_equal(Y_sims, Y2)
+
+
+def test_simulate_invalid_theta_keys(simple):
+    """theta with non-canonical keys should raise an error."""
+    LG = simple
+    key = jax.random.key(111)
+    bad_theta = {"not_a_param": 1.0}
+
+    with pytest.raises(
+        ValueError,
+        match="theta parameter names must match canonical_param_names up to reordering",
+    ):
+        LG.simulate(nsim=1, key=key, theta=bad_theta)

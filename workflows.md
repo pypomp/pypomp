@@ -1,4 +1,18 @@
 
+## Python environment
+
+A basic environment for developing pypomp, supposing that the package from https://github.com/pypomp/pypomp is cloned at ~/git/pypomp
+
+```
+cd ~/git/pypomp
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# for documentation
+pip install sphinx furo
+
 
 ## Formatting and linting
 

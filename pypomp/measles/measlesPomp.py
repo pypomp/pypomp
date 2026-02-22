@@ -2,10 +2,12 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import pypomp.measles.model_001 as m001
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
 import pypomp.measles.model_001d as m001d  # FIX: added import for DPOP model
 import pypomp.measles.model_002 as m002
+import pypomp.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
 from pypomp.pomp_class import Pomp
 import copy
@@ -226,10 +228,12 @@ class UKMeasles:
 
         # FIX: added "001d" to model dispatch dict
         mod = {
+            "001": m001,
             "001b": m001b,
             "001c": m001c,
             "001d": m001d,
             "002": m002,
+            "003": m003,
         }[model]
 
         # FIX: use mod.accumvars consistently (each model module defines its own)

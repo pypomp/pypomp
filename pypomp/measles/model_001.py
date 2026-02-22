@@ -1,5 +1,5 @@
 """
-He10 model without alpha or mu parameters.
+He10 model.
 
 Parameters:
 - R0: Basic reproduction number
@@ -11,6 +11,8 @@ Parameters:
 - amplitude: Seasonality amplitude
 - rho: Reporting probability
 - psi: Reporting error over-dispersion
+- mu: Death rate.
+- alpha: Mixing parameter.
 - S_0: Initial susceptible population proportion
 - E_0: Initial exposed population proportion
 - I_0: Initial infectious population proportion
@@ -23,16 +25,6 @@ import jax.scipy.special as jspecial
 from pypomp.random.poissoninvf import fast_approx_rpoisson
 from pypomp.random.binominvf import fast_approx_rmultinom
 from pypomp.random.gammainvf import fast_approx_rgamma
-from pypomp.types import (
-    StateDict,
-    ParamDict,
-    CovarDict,
-    TimeFloat,
-    StepSizeFloat,
-    RNGKey,
-    InitialTimeFloat,
-    ObservationDict,
-)
 
 
 param_names = (
@@ -45,17 +37,19 @@ param_names = (
     "psi",  # 6
     "cohort",  # 7
     "amplitude",  # 8
-    "S_0",  # 9
-    "E_0",  # 10
-    "I_0",  # 11
-    "R_0",  # 12
+    "mu",  # 9
+    "alpha",  # 10
+    "S_0",  # 11
+    "E_0",  # 12
+    "I_0",  # 13
+    "R_0",  # 14
 )
 
 statenames = ["S", "E", "I", "R", "W", "C"]
 accumvars = ["W", "C"]
 
 
-def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
+def rinit(theta_, key, covars, t0=None):
     S_0 = theta_["S_0"]
     E_0 = theta_["E_0"]
     I_0 = theta_["I_0"]
@@ -71,14 +65,7 @@ def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloa
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def rproc(
-    X_: StateDict,
-    theta_: ParamDict,
-    key: RNGKey,
-    covars: CovarDict,
-    t: TimeFloat,
-    dt: StepSizeFloat,
-):
+def rproc(X_, theta_, key, covars, t, dt):
     S, E, I, R, W, C = X_["S"], X_["E"], X_["I"], X_["R"], X_["W"], X_["C"]
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
@@ -87,9 +74,10 @@ def rproc(
     sigmaSE = theta_["sigmaSE"]
     cohort = theta_["cohort"]
     amplitude = theta_["amplitude"]
+    mu = theta_["mu"]
+    alpha = theta_["alpha"]
     pop = covars["pop"]
     birthrate = covars["birthrate"]
-    mu = 0.02
 
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt
@@ -113,7 +101,7 @@ def rproc(
     beta = R0 * seas * (1.0 - jnp.exp(-(gamma + mu) * dt)) / dt
 
     # expected force of infection
-    foi = beta * (I + iota) / pop
+    foi = beta * (I + iota) ** alpha / pop
 
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
@@ -155,13 +143,7 @@ def rproc(
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def dmeas(
-    Y_: ObservationDict,
-    X_: StateDict,
-    theta_: ParamDict,
-    covars: CovarDict,
-    t: TimeFloat,
-):
+def dmeas(Y_, X_, theta_, covars=None, t=None):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
@@ -189,13 +171,7 @@ def dmeas(
     return jnp.log(lik)
 
 
-def rmeas(
-    X_: StateDict,
-    theta_: ParamDict,
-    key: RNGKey,
-    covars: CovarDict,
-    t: TimeFloat,
-):
+def rmeas(X_, theta_, key, covars=None, t=None):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
@@ -219,6 +195,8 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "cohort": jspecial.logit(theta["cohort"]),
         "amplitude": jspecial.logit(theta["amplitude"]),
         "rho": jspecial.logit(theta["rho"]),
+        "mu": jnp.log(theta["mu"]),
+        "alpha": jnp.log(theta["alpha"]),
         "S_0": S_0,
         "E_0": E_0,
         "I_0": I_0,
@@ -241,6 +219,8 @@ def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "cohort": jspecial.expit(theta["cohort"]),
         "amplitude": jspecial.expit(theta["amplitude"]),
         "rho": jspecial.expit(theta["rho"]),
+        "mu": jnp.exp(theta["mu"]),
+        "alpha": jnp.exp(theta["alpha"]),
         "S_0": S_0,
         "E_0": E_0,
         "I_0": I_0,

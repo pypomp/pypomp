@@ -34,6 +34,8 @@ from .parameters import PompParameters
 from .util import logmeanexp
 
 
+# TODO: use just one doc link for each model component class
+# currently need one for VSCode and one for Sphinx
 class Pomp:
     """
     A class representing a Partially Observed Markov Process (POMP) model.
@@ -55,43 +57,78 @@ class Pomp:
 
     - Model training using a differentiable particle filter
 
-    Attributes:
-        ys (pd.DataFrame): The measurement data frame with observation times as index
-        theta (dict): Model parameters, where each value is a float
-        rinit (RInit): Simulator for the initial state distribution
-        rproc (RProc): Simulator for the process model
-        dmeas (DMeas | None): Density evaluation for the measurement model
-        rmeas (RMeas | None): Measurement simulator
-        par_trans (ParTrans | None): Parameter transformation object
-        covars (pd.DataFrame | None): Covariates for the model if applicable
-        results_history (ResultsHistory | None): History of the results for the pfilter, mif, and train
-            methods run on the object. This includes the algorithmic parameters used.
-        fresh_key (jax.Array | None): Running a method that takes a key argument will
-            store a fresh, unused key in this attribute. Subsequent calls to a method
-            that requires a key will use this key unless a new key is provided as an
-            argument.
+    ⚠️ IMPORTANT: Defining Model Components
+        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
+        functions. **You MUST read the documentation for each respective component
+        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+        adhere to the specifications.
+
+        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
+        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
+        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
+
     """
 
     ys: pd.DataFrame
+    """The measurement data frame with observation times as the index."""
+
     _theta: PompParameters
+    """Internal storage for model parameters in canonical order."""
+
     canonical_param_names: list[str]
+    """Ordered list of parameter names used throughout the model."""
+
     statenames: list[str]
+    """Names of all latent state variables in the process model."""
+
     t0: float
+    """Initial time for the model (typically before the first observation)."""
+
     rinit: RInit
+    """Simulator for the initial state distribution."""
+
     rproc: RProc
+    """Process model simulator handling state transitions between observation times."""
+
     dmeas: DMeas | None
+    """Measurement density used to evaluate the likelihood of observations."""
+
     rmeas: RMeas | None
+    """Measurement simulator used to generate synthetic observations."""
+
     par_trans: ParTrans
+    """Parameter transformation object mapping between natural and estimation spaces."""
+
     covars: pd.DataFrame | None
+    """Time-varying covariates for the model, if applicable."""
+
     _covars_extended: np.ndarray | None
+    """Internal covariate array interpolated/aligned to the integration grid."""
+
     _nstep_array: np.ndarray
+    """Number of integration steps between successive observation times."""
+
     _dt_array_extended: np.ndarray
+    """Time step sizes for each integration step over the full time grid."""
+
     _max_steps_per_interval: int
+    """Maximum number of integration steps between any two observation times."""
+
     ydim: int | None
+    """Dimension of the observation vector when an observation simulator is provided."""
+
     accumvars: list[str] | None
+    """Names of accumulator state variables that are reset at each observation time."""
+
     _accumvars_indices: tuple[int, ...] | None
+    """Indices of accumulator state variables within the full state vector."""
+
     results_history: ResultsHistory
+    """History of results from `pfilter`, `mif`, and `train` calls."""
+
     fresh_key: jax.Array | None
+    """Running a method that takes a key will store a fresh, unused key here."""
 
     def __init__(
         self,
@@ -109,32 +146,48 @@ class Pomp:
         ydim: int | None = None,
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
+        validate_logic: bool = True,
     ):
         """
-        Initializes the necessary components for a specific POMP model.
+        Initializes and coordinates the components for a specific POMP model.
+
+        ⚠️ IMPORTANT: Defining Model Components
+        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
+        functions. **You MUST read the documentation for each respective component
+        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+        adhere to the specifications.
+
+        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
+        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
+        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
 
         Args:
-            ys (pd.DataFrame): The measurement data frame. The row index must contain the observation times.
-            theta (dict or list[dict]): Parameters involved in the POMP model. Each
-                value should be a float. Can be a single dict or a list of dicts.
-            statenames (list[str]): List of state variable names.
-            t0 (float): The initial time for the model.
-            rinit (Callable): Initial state simulator function.
-            rproc (Callable): Process simulator function.
-            dmeas (Callable, optional): Measurement density function.
-            rmeas (Callable, optional): Measurement simulator function.
-            par_trans (ParTrans, optional): Parameter transformation object.
-                If provided, the parameters will be transformed to and from the estimation parameter space. Defaults to the identity transformation.
-            covars (pd.DataFrame, optional): Covariates or None if not applicable.
-                The row index must contain the covariate times.
-            nstep (int, optional): The number of steps to take for the fixedstep method.
-                Must be None if dt is provided.
-            dt (float, optional): The time step to use for the time_helper method.
-                Must be None if nstep is provided.
-            ydim (int, optional): The dimension of the measurement vector. Only
-                required if rmeas is provided.
-            accumvars (tuple[int, ...], optional): The indices of accumulator state
-                variables. These are reset to 0 at the beginning of each observation interval.
+            ys (pd.DataFrame): The measurement data frame. The row index must contain
+                the observation times.
+            theta (dict | list[dict]): Parameters involved in the POMP model. Can be a
+                single dictionary or a list of dictionaries. If a list, particle filtering methods will be run for each set of parameters.
+            statenames (list[str]): List of all latent state variable names.
+            t0 (float): The initial time for the model (typically before the first observation).
+            rinit (Callable): Initial state simulator function. Automatically wrapped into an [RInit](RInit) object.
+            rproc (Callable): Process simulator function (defining a single time step).
+                Automatically wrapped into an [RProc](RProc) object.
+            dmeas (Callable, optional): Measurement density function (log-likelihood).
+                Automatically wrapped into a [DMeas](DMeas) object.
+            rmeas (Callable, optional): Measurement simulator function. Automatically wrapped into an [RMeas](RMeas) object.
+            par_trans (ParTrans, optional): Parameter transformation object used to move parameters
+                between the natural space and the estimation space. Defaults to the identity transformation.
+            covars (pd.DataFrame, optional): Time-varying covariates. The row index must
+                contain the covariate times.
+            nstep (int, optional): The number of integration steps to take between observations.
+                Passed automatically to the `RProc` component. Must be None if `dt` is provided.
+            dt (float, optional): Fixed time step size for the process model.
+                Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
+            ydim (int, optional): The dimension of the measurement vector (number of observed variables).
+                Only required if `rmeas` is provided. Passed automatically to the `RMeas` component.
+            accumvars (tuple[int, ...], optional): Indices of accumulator state variables (e.g.,
+                incidence tracking). These are reset to 0 at the start of each observation interval.
+            validate_logic (bool, optional): Whether to validate the logic of the model components.
         """
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -191,17 +244,7 @@ class Pomp:
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
             par_trans=self.par_trans,
-        )
-
-        self.rproc = RProc(
-            struct=rproc,
-            statenames=self.statenames,
-            param_names=self.canonical_param_names,
-            covar_names=self.covar_names,
-            par_trans=self.par_trans,
-            nstep=nstep,
-            dt=dt,
-            accumvars=self._accumvars_indices,
+            validate_logic=validate_logic,
         )
 
         if dmeas is not None:
@@ -212,6 +255,7 @@ class Pomp:
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
                 y_names=list(self.ys.columns),
+                validate_logic=validate_logic,
             )
         else:
             self.dmeas = None
@@ -226,6 +270,7 @@ class Pomp:
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
+                validate_logic=validate_logic,
             )
         else:
             self.rmeas = None
@@ -241,14 +286,26 @@ class Pomp:
         ) = _calc_ys_covars(
             t0=self.t0,
             times=np.array(self.ys.index),
-            ys=np.array(self.ys),
             ctimes=np.array(self.covars.index) if self.covars is not None else None,
             covars=np.array(self.covars) if self.covars is not None else None,
-            dt=self.rproc.dt,
-            nstep=self.rproc.nstep,
+            dt=dt,
+            nstep=nstep,
             order="linear",
         )
-        self.rproc.rebuild_interp(self._nstep_array, self._max_steps_per_interval)
+
+        self.rproc = RProc(
+            struct=rproc,
+            statenames=self.statenames,
+            param_names=self.canonical_param_names,
+            covar_names=self.covar_names,
+            par_trans=self.par_trans,
+            nstep=nstep,
+            dt=dt,
+            accumvars=self._accumvars_indices,
+            validate_logic=validate_logic,
+            nstep_array=self._nstep_array,
+            max_steps_bound=self._max_steps_per_interval,
+        )
 
     @property
     def theta(self) -> PompParameters:
@@ -270,13 +327,18 @@ class Pomp:
         if theta is None:
             return self.theta
         elif isinstance(theta, dict) or isinstance(theta, list):
-            return PompParameters(theta)
+            theta = PompParameters(theta)
         elif isinstance(theta, PompParameters):
-            return theta
+            pass
         else:
             raise TypeError(
                 "theta must be a dictionary, a list of dictionaries, or a PompParameters object"
             )
+        if set(theta.get_param_names()) != set(self.canonical_param_names):
+            raise ValueError(
+                "theta parameter names must match canonical_param_names up to reordering"
+            )
+        return theta
 
     def _update_fresh_key(
         self, key: jax.Array | None = None
@@ -545,19 +607,31 @@ class Pomp:
 
         rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
 
-        results = _vmapped_pfilter_internal2(
+        if len(jax.devices()) > 1:
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
+            sharding_spec = jax.sharding.NamedSharding(
+                mesh, jax.sharding.PartitionSpec("reps", None)
+            )
+            rep_keys_sharding_spec = jax.sharding.NamedSharding(
+                mesh,
+                jax.sharding.PartitionSpec("reps"),
+            )
+            thetas_repl = jax.device_put(thetas_repl, sharding_spec)
+            rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
+
+        results_jax = _vmapped_pfilter_internal2(
             thetas_repl,
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
+            np.asarray(self._dt_array_extended),
+            np.asarray(self._nstep_array),
             self.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            np.asarray(self.ys.index),
+            np.asarray(self.ys),
             J,
             self.rinit.struct_pf,
             self.rproc.struct_pf_interp,
             self.dmeas.struct_pf,
             self.rproc.accumvars,
-            jnp.array(self._covars_extended)
+            np.asarray(self._covars_extended)
             if self._covars_extended is not None
             else None,
             thresh,
@@ -568,7 +642,10 @@ class Pomp:
             prediction_mean,
         )
 
-        # any_diagnostics = CLL or ESS or filter_mean or prediction_mean
+        results = jax.device_get(results_jax)
+
+        del results_jax
+
         neg_logliks = results["neg_loglik"]
 
         logLik_da = xr.DataArray(
@@ -576,12 +653,10 @@ class Pomp:
         )
 
         if track_time is True:
-            neg_logliks.block_until_ready()
             execution_time = time.time() - start_time
         else:
             execution_time = None
 
-        # obtain diagnostics using names
         CLL_da = None
         ESS_da = None
         filter_mean_da = None
@@ -616,6 +691,8 @@ class Pomp:
                 ),
                 dims=["theta", "replicate", "time", "state"],
             )
+
+        del results
 
         logLik_estimates = np.apply_along_axis(
             logmeanexp, -1, (-neg_logliks).reshape(n_theta_reps, reps), ignore_nan=False
@@ -673,6 +750,13 @@ class Pomp:
         """
         start_time = time.time()
 
+        rw_param_names = list(rw_sd.all_names)
+        if set(rw_param_names) != set(self.canonical_param_names):
+            raise ValueError(
+                "rw_sd.sigmas keys must match canonical_param_names up to reordering. "
+                f"Got {sorted(rw_param_names)}, expected {sorted(self.canonical_param_names)}."
+            )
+
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_list_in = theta_obj_in.to_list()
         n_reps = theta_obj_in.num_replicates()
@@ -693,20 +777,27 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        nLLs, theta_ests = _jv_mif_internal(
+        if len(jax.devices()) > 1:
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
+            sharding_spec = jax.sharding.NamedSharding(
+                mesh, jax.sharding.PartitionSpec(None, "reps", None)
+            )
+            theta_tiled = jax.device_put(theta_tiled, sharding_spec)
+
+        nLLs_jax, theta_ests_jax = _jv_mif_internal(
             theta_tiled,
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
+            np.asarray(self._dt_array_extended),
+            np.asarray(self._nstep_array),
             self.t0,
-            jnp.array(self.ys.index),
-            jnp.array(self.ys),
+            np.asarray(self.ys.index),
+            np.asarray(self.ys),
             self.rinit.struct_per,
             self.rproc.struct_per_interp,
             self.dmeas.struct_per,
             sigmas_array,
             sigmas_init_array,
             self.rproc.accumvars,
-            jnp.array(self._covars_extended)
+            np.asarray(self._covars_extended)
             if self._covars_extended is not None
             else None,
             M,
@@ -715,6 +806,11 @@ class Pomp:
             thresh,
             keys,
         )
+
+        nLLs = jax.device_get(nLLs_jax)
+        theta_ests = jax.device_get(theta_ests_jax)
+
+        del nLLs_jax, theta_ests_jax
 
         final_theta_ests = []
         param_names = self.canonical_param_names
@@ -765,8 +861,9 @@ class Pomp:
         logLik_estimates = -nLLs
         self.theta = PompParameters(theta, logLik=logLik_estimates)
 
+        del final_theta_ests
+
         if track_time is True:
-            nLLs.block_until_ready()
             execution_time = time.time() - start_time
         else:
             execution_time = None
@@ -790,17 +887,17 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: float,
+        eta: dict[str, float],
         key: jax.Array | None = None,
         theta: dict | list[dict] | PompParameters | None = None,
-        optimizer: str = "SGD",
+        optimizer: str = "Adam",
         alpha: float = 0.97,
         thresh: int = 0,
         scale: bool = False,
         ls: bool = False,
         c: float = 0.1,
         max_ls_itn: int = 10,
-        n_monitors: int = 0,
+        n_monitors: int = 1,
         track_time: bool = True,
     ) -> None:
         """
@@ -809,13 +906,13 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (float): Learning rate.
+            eta (dict[str, float]): Learning rates per parameter as a dictionary.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "SGD", "Newton", "WeightedNewton", and "BFGS".
+                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", and "BFGS".
                 Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
@@ -850,6 +947,14 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
+        if set(eta.keys()) != set(self.canonical_param_names):
+            raise ValueError(
+                f"eta keys {set(eta.keys())} must match parameter names {set(self.canonical_param_names)}"
+            )
+
+        # Convert eta dict to JAX array in canonical order
+        eta_array = jnp.array([eta[param] for param in self.canonical_param_names])
+
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
@@ -874,7 +979,7 @@ class Pomp:
             J,
             optimizer,
             M,
-            eta,
+            eta_array,
             c,
             max_ls_itn,
             thresh,
@@ -1193,7 +1298,8 @@ class Pomp:
     def traces(self) -> pd.DataFrame:
         """
         Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
-        Columns:
+        Columns are
+
             - replicate: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'
@@ -1492,11 +1598,16 @@ class Pomp:
             state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
 
-        # Remove the wrapped objects from state
+        # Store JAX key as raw bits (key is not picklable directly)
+        if self.fresh_key is not None:
+            state["_fresh_key_data"] = jax.random.key_data(self.fresh_key)
+
+        # Remove the wrapped objects and key from state
         state.pop("rinit", None)
         state.pop("rproc", None)
         state.pop("dmeas", None)
         state.pop("rmeas", None)
+        state.pop("fresh_key", None)
 
         return state
 
@@ -1507,6 +1618,12 @@ class Pomp:
         """
         # Restore basic attributes
         self.__dict__.update(state)
+
+        # Reconstruct JAX key from raw bits
+        if "_fresh_key_data" in state:
+            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+        elif "fresh_key" not in self.__dict__:
+            self.fresh_key = None
 
         # Reconstruct rinit
         if "_rinit_func_name" in state:
@@ -1608,6 +1725,7 @@ class Pomp:
             "_rmeas_func_name",
             "_rmeas_ydim",
             "_rmeas_module",
+            "_fresh_key_data",
         ]:
             if key in self.__dict__:
                 del self.__dict__[key]

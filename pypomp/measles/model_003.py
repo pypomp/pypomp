@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.types import ObservationDict, StateDict, ParamDict, CovarDict, TimeFloat
 
 param_names = (
     "R0",
@@ -122,7 +123,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     return {"S": S_new, "E": E_new, "I": I_new, "R": R_new, "W": W_new, "C": C_new}
 
 
-def dmeas(Y_, X_, theta_, covars=None, t=None):
+def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
@@ -130,13 +131,47 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     y = Y_["cases"]
     m = rho * C
     v = m * (1.0 - rho + psi**2 * m)
-    tol = 1.0e-18
+    tol = 1.0e-3
     scale = jnp.sqrt(jnp.maximum(v, tol))
     loglik = jax.scipy.stats.norm.logpdf(y, loc=m, scale=scale)
     loglik = jnp.where(jnp.isnan(y), 0.0, loglik)
     loglik = jnp.where(C < 0, -jnp.inf, loglik)
 
     return loglik
+
+
+def dmeas(
+    Y_: ObservationDict,
+    X_: StateDict,
+    theta_: ParamDict,
+    covars: CovarDict,
+    t: TimeFloat,
+):
+    rho = theta_["rho"]
+    psi = theta_["psi"]
+    C = X_["C"]
+    tol = 1.0e-3
+
+    y = Y_["cases"]
+    m = rho * C
+    v = m * (1.0 - rho + psi**2 * m)
+    sqrt_v_tol = jnp.sqrt(v) + tol
+
+    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
+    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
+
+    lik = (
+        jnp.where(
+            y > tol,
+            upper_cdf - lower_cdf,
+            upper_cdf,
+        )
+        + tol
+    )
+
+    lik = jnp.where(C < 0, 0.0, lik)
+    lik = jnp.where(jnp.isnan(y), 1.0, lik)
+    return jnp.log(lik)
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):

@@ -1,4 +1,3 @@
-from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -178,10 +177,6 @@ def _perfilter_internal(
     )
 
     return thetas_Jd, -loglik, key
-
-    logliks_M = logliks_M.at[m].set(-loglik)
-    thetas_MJd = thetas_MJd.at[m + 1].set(thetas_Jd)
-    return thetas_MJd, logliks_M, key
 
 
 def _perfilter_helper(
@@ -475,7 +470,7 @@ def _panel_mif_internal(
         unit_means = jnp.where(
             n_spec > 0, jnp.mean(unit_array_m, axis=1), jnp.zeros((n_spec, U))
         )
-        
+
         shared_traces_m_row = jnp.zeros(n_shared + 1)
         shared_traces_m_row = shared_traces_m_row.at[0].set(sum_loglik_iter)
         if n_shared > 0:
@@ -503,7 +498,7 @@ def _panel_mif_internal(
     unit_traces = jnp.concatenate(
         [unit_traces.at[0:1].get(), unit_traces_history], axis=0
     )
-    
+
     return (shared_array, unit_array, shared_traces, unit_traces)
 
     return (shared_array, unit_array, shared_traces, unit_traces)

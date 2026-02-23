@@ -140,11 +140,187 @@ _vmapped_pfilter_internal = jax.vmap(
     in_axes=(None,) * 13 + (0,) + (None,) * 4,
 )
 
-# Map over theta and key
-_vmapped_pfilter_internal2 = jax.vmap(
+
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "CLL",
+        "ESS",
+        "filter_mean",
+        "prediction_mean",
+    ),
+)
+def _mapped_pfilter_internal_reps(
+    theta: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
+    thresh: float,
+    keys: jax.Array,
+    CLL: bool = False,
+    ESS: bool = False,
+    filter_mean: bool = False,
+    prediction_mean: bool = False,
+) -> dict[str, jax.Array]:
+    def body(key):
+        return _pfilter_internal(
+            theta,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            J,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            accumvars,
+            covars_extended,
+            thresh,
+            key,
+            CLL,
+            ESS,
+            filter_mean,
+            prediction_mean,
+        )
+
+    return jax.lax.map(body, keys)
+
+
+# Map over key
+_vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
+    in_axes=(None,) * 13 + (0,) + (None,) * 4,
+)
+
+# Map over theta and lax.map over key
+_vmapped_pfilter_internal2 = jax.vmap(
+    _mapped_pfilter_internal_reps,
     in_axes=(0,) + (None,) * 12 + (0,) + (None,) * 4,
 )
+
+_panel_pfilter_vmap = jax.vmap(
+    _pfilter_internal,
+    in_axes=(
+        0,  # theta
+        None,  # dt_array_extended
+        None,  # nstep_array
+        None,  # t0
+        None,  # times
+        0,  # ys
+        None,  # J
+        None,  # rinitializer
+        None,  # rprocess_interp
+        None,  # dmeasure
+        None,  # accumvars
+        0,  # covars_extended
+        None,  # thresh
+        0,  # key
+        None,  # CLL
+        None,  # ESS
+        None,  # filter_mean
+        None,  # prediction_mean
+    ),
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "chunk_size",
+        "CLL",
+        "ESS",
+        "filter_mean",
+        "prediction_mean",
+    ),
+)
+def _chunked_panel_pfilter_internal(
+    thetas: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    covars_extended: jax.Array | None,
+    keys: jax.Array,
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    accumvars: tuple[int, ...] | None,
+    thresh: float,
+    chunk_size: int,
+    CLL: bool = False,
+    ESS: bool = False,
+    filter_mean: bool = False,
+    prediction_mean: bool = False,
+):
+    n_reps, U, n_params = thetas.shape
+    n_chunks = U // chunk_size
+
+    thetas_c = thetas.reshape((n_reps, n_chunks, chunk_size, n_params))
+    ys_c = ys.reshape((n_chunks, chunk_size) + ys.shape[1:])
+    covars_c = (
+        None
+        if covars_extended is None
+        else covars_extended.reshape((n_chunks, chunk_size) + covars_extended.shape[1:])
+    )
+    keys_c = keys.reshape((n_reps, n_chunks, chunk_size) + keys.shape[2:])
+
+    def process_rep(theta_r, key_r):
+        def scan_fn(carry, chunk_idx):
+            theta_chunk = theta_r[chunk_idx]
+            ys_chunk = ys_c[chunk_idx]
+            covars_chunk = None if covars_c is None else covars_c[chunk_idx]
+            key_chunk = key_r[chunk_idx]
+
+            res = _panel_pfilter_vmap(
+                theta_chunk,
+                dt_array_extended,
+                nstep_array,
+                t0,
+                times,
+                ys_chunk,
+                J,
+                rinitializer,
+                rprocess_interp,
+                dmeasure,
+                accumvars,
+                covars_chunk,
+                thresh,
+                key_chunk,
+                CLL,
+                ESS,
+                filter_mean,
+                prediction_mean,
+            )
+            return carry, res
+
+        _, res_chunks = jax.lax.scan(scan_fn, None, jnp.arange(n_chunks))
+
+        def reshape_back(arr):
+            return arr.reshape((U,) + arr.shape[2:])
+
+        return jax.tree_util.tree_map(reshape_back, res_chunks)
+
+    return jax.vmap(process_rep)(thetas_c, keys_c)
 
 
 @partial(jit, static_argnums=(5, 6, 7, 8, 9))

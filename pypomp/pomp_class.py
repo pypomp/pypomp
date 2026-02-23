@@ -683,7 +683,7 @@ class Pomp:
             )
             theta_tiled = jax.device_put(theta_tiled, sharding_spec)
 
-        nLLs_jax, theta_ests_jax = _jv_mif_internal(
+        nLLs_jax, theta_ests_jax, _ = _jv_mif_internal(
             theta_tiled,
             np.asarray(self._dt_array_extended),
             np.asarray(self._nstep_array),

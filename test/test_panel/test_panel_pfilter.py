@@ -3,41 +3,40 @@ import numpy as np
 from copy import deepcopy
 
 
+def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
+    """Helper to verify common pfilter result attributes."""
+    n_theta = theta_orig.num_replicates()
+    n_units = len(result.logLiks.coords["unit"])
+    assert isinstance(result.logLiks, xr.DataArray)
+    assert result.logLiks.dims == ("theta", "unit", "replicate")
+    assert result.logLiks.shape == (n_theta, n_units, reps)
+    assert result.theta == theta_orig
+    assert result.J == J
+    assert result.reps == reps
+    assert result.thresh == thresh
+    if key is not None:
+        assert result.key == key
+    assert hasattr(result, "execution_time")
+
+
 def test_pfilter_basic(measles_panel_setup_some_shared):
     """Test basic pfilter functionality with some shared parameters."""
     panel, rw_sd, key = measles_panel_setup_some_shared
     theta_orig = deepcopy(panel.theta)
-    panel.pfilter(J=2, key=key)
+    J = 2
+    panel.pfilter(J=J, key=key)
 
-    # Check results structure
-    result = panel.results_history[-1]
-    assert isinstance(result.logLiks, xr.DataArray)
-    assert result.logLiks.dims == ("theta", "unit", "replicate")
-    assert result.logLiks.shape == (2, 2, 1)
-    assert result.theta == theta_orig
-    assert result.J == 2
-    assert result.reps == 1
-    assert result.thresh == 0
-    assert result.key == key
-    assert hasattr(result, "execution_time")
+    check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)
 
 
 def test_pfilter_unit_specific_only(measles_panel_setup_specific_only):
     """Test pfilter with unit-specific parameters only."""
     panel, rw_sd, key = measles_panel_setup_specific_only
     theta_orig = deepcopy(panel.theta)
-    panel.pfilter(J=2, key=key)
+    J = 2
+    panel.pfilter(J=J, key=key)
 
-    result = panel.results_history[-1]
-    assert isinstance(result.logLiks, xr.DataArray)
-    assert result.logLiks.dims == ("theta", "unit", "replicate")
-    assert result.logLiks.shape == (2, 2, 1)
-    assert result.theta == theta_orig
-    assert result.J == 2
-    assert result.reps == 1
-    assert result.thresh == 0
-    assert result.key == key
-    assert hasattr(result, "execution_time")
+    check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)
 
 
 def test_pfilter_diagnostics(measles_panel_setup_some_shared):

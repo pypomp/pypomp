@@ -245,108 +245,79 @@ def test_RMeas_type_annotations():
     assert result[0] == 6.0
 
 
-def test_type_annotations_backward_compatibility():
+# Define lambda patterns for the 4 component types
+COMPONENT_SPECS = [
+    (RInit, lambda theta_, key, covars, t0: {"state_0": theta_["param_0"]}),
+    (RProc, lambda X_, theta_, key, covars, t, dt: {"state_0": X_["state_0"]}),
+    (DMeas, lambda Y_, X_, theta_, covars, t: 0.0),
+    (RMeas, lambda X_, theta_, key, covars, t: jnp.array([0])),
+]
+
+
+def make_component(comp_class, func):
+    kwargs = {
+        "statenames": ["state_0"],
+        "param_names": ["param_0"],
+        "covar_names": [],
+        "par_trans": pp.ParTrans(),
+    }
+    if comp_class == RProc:
+        kwargs["nstep"] = 1
+    elif comp_class == RMeas:
+        kwargs["ydim"] = 1
+    elif comp_class == DMeas:
+        pass
+
+    return comp_class(func, **kwargs)
+
+
+@pytest.mark.parametrize("comp_class, backward_func", COMPONENT_SPECS)
+def test_type_annotations_backward_compatibility(comp_class, backward_func):
     """Test that exact names still work (backward compatibility)."""
-    # These should all work without type annotations
-    rinit = RInit(
-        lambda theta_, key, covars, t0: {"state_0": 0},
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        par_trans=pp.ParTrans(),
-    )
-
-    rproc = RProc(
-        lambda X_, theta_, key, covars, t, dt: {"state_0": 0},
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        nstep=1,
-        par_trans=pp.ParTrans(),
-    )
-
-    dmeas = DMeas(
-        lambda Y_, X_, theta_, covars, t: 0.0,
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        par_trans=pp.ParTrans(),
-    )
-
-    rmeas = RMeas(
-        lambda X_, theta_, key, covars, t: jnp.array([0]),
-        ydim=1,
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        par_trans=pp.ParTrans(),
-    )
-
-    # Just verify they were created successfully
-    assert rinit is not None
-    assert rproc is not None
-    assert dmeas is not None
-    assert rmeas is not None
+    comp = make_component(comp_class, backward_func)
+    assert comp is not None
 
 
-def test_type_annotations_missing_error():
+@pytest.mark.parametrize("comp_class, _", COMPONENT_SPECS)
+def test_type_annotations_missing_error(comp_class, _):
     """Test that missing type annotations with wrong names raises error."""
-    # Function with wrong names and no annotations should fail
     with pytest.raises(
         ValueError,
         match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
     ):
-        RInit(
-            lambda wrong_name, key, covars, t0: {"state_0": 0},
-            statenames=["state_0"],
-            param_names=["param_0"],
-            covar_names=[],
-            par_trans=pp.ParTrans(),
-        )
+        make_component(comp_class, lambda wrong_name, k, c, t, *args: {"state_0": 0})
 
 
-def test_type_annotations_incomplete_error():
+@pytest.mark.parametrize("comp_class, _", COMPONENT_SPECS)
+def test_type_annotations_incomplete_error(comp_class, _):
     """Test that incomplete type annotations raise error."""
 
-    # Function with some but not all annotations should fail
-    # p: ParamDict maps to theta_, but wrong_key, wrong_covars, wrong_t0 don't match
-    def incomplete(p: ParamDict, wrong_key, wrong_covars, wrong_t0):  # type: ignore
+    def incomplete(p: ParamDict, wrong_key, wrong_covars, wrong_t0, *args):  # type: ignore
         return {"state_0": 0}
 
     with pytest.raises(
         ValueError,
         match=r"Could not map arguments for:.*Use pypomp\.types or exact names\.",
     ):
-        RInit(
-            incomplete,  # type: ignore
-            statenames=["state_0"],
-            param_names=["param_0"],
-            covar_names=[],
-            par_trans=pp.ParTrans(),
-        )
+        make_component(comp_class, incomplete)
 
 
-def test_type_annotations_ambiguous_error():
+@pytest.mark.parametrize("comp_class, _", COMPONENT_SPECS)
+def test_type_annotations_ambiguous_error(comp_class, _):
     """Test that multiple parameters with same type annotation raises error."""
 
-    # Function with two Params should fail
     def ambiguous(
         p1: ParamDict,
         p2: ParamDict,
         key: RNGKey,
         covars: CovarDict,
         t0: InitialTimeFloat,
+        *args,
     ):  # type: ignore
         return {"state_0": 0}
 
     with pytest.raises(ValueError, match="Multiple parameters annotated"):
-        RInit(
-            ambiguous,  # type: ignore
-            statenames=["state_0"],
-            param_names=["param_0"],
-            covar_names=[],
-            par_trans=pp.ParTrans(),
-        )
+        make_component(comp_class, ambiguous)
 
 
 def test_type_annotations_argument_order():

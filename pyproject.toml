@@ -28,6 +28,9 @@ dependencies = [
     "loess"
 ]
 
+[project.optional-dependencies]
+benchmarks = ["statsmodels"]
+
 
 [project.urls]
 Homepage = "https://github.com/pypomp/pypomp"

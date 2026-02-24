@@ -1,4 +1,3 @@
-import gc
 import jax
 import jax.numpy as jnp
 import pandas as pd
@@ -8,11 +7,16 @@ import time
 from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast
 
+from ..pfilter import _chunked_panel_pfilter_internal
 from ..mif import _jv_panel_mif_internal
 from ..RWSigma_class import RWSigma
-from ..results import PanelPompPFilterResult, PanelPompMIFResult, ResultsHistory
+from ..results import PanelPompPFilterResult, PanelPompMIFResult
 from ..parameters import PanelParameters
 from ..util import logmeanexp
+from ..benchmarks import (
+    arma_benchmark as _arma_benchmark,
+    negbin_benchmark as _negbin_benchmark,
+)
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -195,6 +199,7 @@ class PanelEstimationMixin(Base):
         ] = None,
         thresh: float = 0.0,
         reps: int = 1,
+        chunk_size: Union[int, str] = 1,
         CLL: bool = False,
         ESS: bool = False,
         filter_mean: bool = False,
@@ -203,110 +208,184 @@ class PanelEstimationMixin(Base):
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
 
-        key, old_key = self._update_fresh_key(key)
+        new_key, old_key = self._update_fresh_key(key)
 
         n_theta_reps = theta_obj_in.num_replicates()
         unit_names = list(self.unit_objects.keys())
-        n_units = len(unit_names)
+        U = len(unit_names)
+        rep_unit = self.unit_objects[unit_names[0]]
 
-        results = xr.DataArray(
-            np.zeros((n_theta_reps, n_units, reps)),
-            dims=["theta", "unit", "replicate"],
-            coords={"unit": unit_names, "replicate": range(reps)},
+        if rep_unit.dmeas is None:
+            raise ValueError("dmeas cannot be None in PanelPomp units")
+
+        if chunk_size == "auto":
+            try:
+                import psutil
+
+                bytes_per_unit = (
+                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
+                )  # rough estimate
+                mem = psutil.virtual_memory()
+                avail = mem.available * 0.4
+                max_units = max(1, int(avail / bytes_per_unit))
+                chunk_size = min(U, max_units)
+                try:
+                    device = jax.devices()[0]
+                    if device.platform == "gpu":
+                        avail = (
+                            device.memory_stats()["bytes_limit"]
+                            - device.memory_stats()["bytes_in_use"]
+                        )
+                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
+                        chunk_size = min(U, max_units)
+                except Exception:
+                    pass
+            except Exception:
+                chunk_size = max(1, U // 4)
+        else:
+            chunk_size = int(chunk_size)
+
+        if chunk_size < 1:
+            chunk_size = 1
+
+        ys_per_unit = jnp.stack(
+            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        )
+        has_covars = [
+            self.unit_objects[u]._covars_extended is not None for u in unit_names
+        ]
+        if all(has_covars):
+            covars_per_unit = jnp.stack(
+                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
+                axis=0,
+            )
+        elif any(has_covars):
+            raise NotImplementedError(
+                "Some units have covariates, but not all units have covariates. This is not supported yet."
+            )
+        else:
+            covars_per_unit = None
+
+        thetas_per_unit = []
+        for unit in unit_names:
+            theta_list = self.get_unit_parameters(unit, theta=theta_obj_in)
+            obj = self.unit_objects[unit]
+            unit_arr = jnp.array(
+                [[t[name] for name in obj.canonical_param_names] for t in theta_list]
+            )
+            thetas_per_unit.append(unit_arr)
+
+        thetas_panel = jnp.stack(thetas_per_unit, axis=1)  # (n_theta_reps, U, n_params)
+        thetas_panel_repl = jnp.repeat(
+            thetas_panel, reps, axis=0
+        )  # (n_theta_reps * reps, U, n_params)
+
+        rep_unit_keys = jax.random.split(new_key, n_theta_reps * reps * U)
+        rep_unit_keys = rep_unit_keys.reshape(
+            (n_theta_reps * reps, U) + rep_unit_keys.shape[1:]
         )
 
-        CLL_list = []
-        ESS_list = []
-        filter_mean_list = []
-        prediction_mean_list = []
+        padding = (chunk_size - (U % chunk_size)) % chunk_size
 
-        for unit, obj in self.unit_objects.items():
-            theta_list = self.get_unit_parameters(unit, theta=theta_obj_in)
-            key, subkey = jax.random.split(key)  # pyright: ignore[reportArgumentType]
-            obj.pfilter(
-                J=J,
-                key=subkey,
-                theta=theta_list,
-                thresh=thresh,
-                reps=reps,
-                CLL=CLL,
-                ESS=ESS,
-                filter_mean=filter_mean,
-                prediction_mean=prediction_mean,
+        if padding > 0:
+            thetas_panel_repl = jnp.pad(
+                thetas_panel_repl, ((0, 0), (0, padding), (0, 0))
+            )
+            ys_per_unit = jnp.pad(ys_per_unit, ((0, padding), (0, 0), (0, 0)))
+            if covars_per_unit is not None:
+                covars_per_unit = jnp.pad(
+                    covars_per_unit, ((0, padding), (0, 0), (0, 0))
+                )
+            rep_unit_keys = jnp.pad(
+                rep_unit_keys,
+                ((0, 0), (0, padding)) + ((0, 0),) * (rep_unit_keys.ndim - 2),
             )
 
-            # Clear JAX caches and collect garbage to avoid memory leaks.
-            # Each time pfilter is run for a different unit, compiled code is cached and accumulated.
-            # This happens even if rproc, dmeas, etc. are functionally the same for all units, because the current implementation of this stuff causes JAX to treat the code as being different for each unit.
-            # Clearing the caches is a bandaid, but also helpful when the functions really are different.
-            # The runtime cost of clearing the caches is negligible, and recompilation times shouldn't be too much of an issue either.
-            # There are probably better ways to deal with this which could be explored in the future, but this is a simple workaround for now.
-            jax.clear_caches()
-            gc.collect()
+        results_jax = _chunked_panel_pfilter_internal(
+            thetas_panel_repl,
+            rep_unit._dt_array_extended,
+            rep_unit._nstep_array,
+            rep_unit.t0,
+            jnp.array(rep_unit.ys.index),
+            ys_per_unit,
+            covars_per_unit,
+            rep_unit_keys,
+            J,
+            rep_unit.rinit.struct_pf,
+            rep_unit.rproc.struct_pf_interp,
+            rep_unit.dmeas.struct_pf,
+            rep_unit.rproc.accumvars,
+            thresh,
+            chunk_size,
+            CLL,
+            ESS,
+            filter_mean,
+            prediction_mean,
+        )
 
-            unit_result = obj.results_history[-1]
-            results.loc[:, unit, :] = unit_result.logLiks
+        results = jax.device_get(results_jax)
+        del results_jax
 
-            if CLL and unit_result.CLL is not None:
-                CLL_list.append(unit_result.CLL)
-            if ESS and unit_result.ESS is not None:
-                ESS_list.append(unit_result.ESS)
-            if filter_mean and unit_result.filter_mean is not None:
-                filter_mean_list.append(unit_result.filter_mean)
-            if prediction_mean and unit_result.prediction_mean is not None:
-                prediction_mean_list.append(unit_result.prediction_mean)
+        neg_logliks = results["neg_loglik"][:, :U]  # shape: (n_theta_reps * reps, U)
+        neg_logliks = neg_logliks.reshape(n_theta_reps, reps, U)
 
-            obj.results_history = ResultsHistory()
+        results_da = xr.DataArray(
+            (-neg_logliks),
+            dims=["theta", "replicate", "unit"],
+            coords={"unit": unit_names, "replicate": range(reps)},
+        ).transpose("theta", "unit", "replicate")
 
-        # results has shape (n_theta_reps, len(self.unit_objects), reps)
-        results_np = np.array(results.values)
+        results_np = np.array(results_da.values)
         logLik_unit = np.apply_along_axis(
             logmeanexp, -1, results_np, ignore_nan=False
         )  # shape: (n_theta_reps, len(self.unit_objects))
 
         self.theta.logLik_unit = logLik_unit
 
-        def _stack_diagnostics(diag_list, dims, coord_names):
-            """Stack unit diagnostics and create DataArray with unit dimension."""
-            if not diag_list:
+        def _reshape_and_stack_diagnostics(arr, dims, coord_names):
+            if arr is None or arr.size == 0:
                 return None
-            arrays = [np.array(arr.values) for arr in diag_list]
-            stacked = np.stack(arrays, axis=1)
+            arr = arr[:, :U]
+            arr = arr.reshape((n_theta_reps, reps, U) + arr.shape[2:])
+            arr = np.moveaxis(arr, 1, 2)
             coords = {"unit": unit_names, "replicate": range(reps)}
             for i, coord_name in enumerate(coord_names):
                 coord_idx = -(len(coord_names) - i)
-                if coord_name in diag_list[0].coords:
-                    coords[coord_name] = diag_list[0].coords[coord_name]
+                if coord_name == "time":
+                    coords[coord_name] = rep_unit.ys.index
                 else:
-                    coords[coord_name] = range(stacked.shape[coord_idx])
-            return xr.DataArray(stacked, dims=dims, coords=coords)
+                    coords[coord_name] = range(arr.shape[coord_idx])
+            return xr.DataArray(arr, dims=dims, coords=coords)
 
         CLL_da = (
-            _stack_diagnostics(
-                CLL_list, ["theta", "unit", "replicate", "time"], ["time"]
+            _reshape_and_stack_diagnostics(
+                results.get("CLL"), ["theta", "unit", "replicate", "time"], ["time"]
             )
             if CLL
             else None
         )
+
         ESS_da = (
-            _stack_diagnostics(
-                ESS_list, ["theta", "unit", "replicate", "time"], ["time"]
+            _reshape_and_stack_diagnostics(
+                results.get("ESS"), ["theta", "unit", "replicate", "time"], ["time"]
             )
             if ESS
             else None
         )
+
         filter_mean_da = (
-            _stack_diagnostics(
-                filter_mean_list,
+            _reshape_and_stack_diagnostics(
+                results.get("filter_mean"),
                 ["theta", "unit", "replicate", "time", "state"],
                 ["time", "state"],
             )
             if filter_mean
             else None
         )
+
         prediction_mean_da = (
-            _stack_diagnostics(
-                prediction_mean_list,
+            _reshape_and_stack_diagnostics(
+                results.get("prediction_mean"),
                 ["theta", "unit", "replicate", "time", "state"],
                 ["time", "state"],
             )
@@ -321,7 +400,7 @@ class PanelEstimationMixin(Base):
             execution_time=execution_time,
             key=old_key,
             theta=theta_obj_in,
-            logLiks=results,
+            logLiks=results_da,
             J=J,
             reps=reps,
             thresh=thresh,
@@ -639,3 +718,36 @@ class PanelEstimationMixin(Base):
         )
 
         self.results_history.add(result)
+
+    def arma_benchmark(self, order: tuple[int, int, int] = (1, 0, 1)) -> float:
+        """
+        Fits an independent ARIMA model to the observation data for each unit and returns
+        the sum of the estimated log-likelihoods across all units.
+
+        This is a wrapper around `pypomp.benchmarks.arma_benchmark`.
+
+        Args:
+            order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
+
+        Returns:
+            float: The overall sum of the log-likelihoods.
+        """
+        total_llf = 0.0
+        for unit in self.unit_objects.values():
+            total_llf += _arma_benchmark(unit.ys, order=order)
+        return float(total_llf)
+
+    def negbin_benchmark(self) -> float:
+        """
+        Fits an independent Negative Binomial model to the observation data for each unit and
+        returns the sum of the log-likelihoods across all units.
+
+        This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
+
+        Returns:
+            float: The overall sum of the log-likelihoods.
+        """
+        total_llf = 0.0
+        for unit in self.unit_objects.values():
+            total_llf += _negbin_benchmark(unit.ys)
+        return float(total_llf)

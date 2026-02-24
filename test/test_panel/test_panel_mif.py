@@ -1,32 +1,28 @@
 import xarray as xr
 import jax.numpy as jnp
+import jax
+import pandas as pd
+import pypomp as pp
 from copy import deepcopy
 
 
-def test_mif(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
-    J = 2
-    M = 2
-    a = 0.5
-    theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
-    result = panel.results_history[-1]
-
+def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
+    """Helper to verify common mif result attributes."""
     assert result.method == "mif"
     assert hasattr(result, "shared_traces")
     assert hasattr(result, "unit_traces")
     assert hasattr(result, "logLiks")
+
     theta_list1, theta_list2 = result.theta.to_list(), theta_orig.to_list()
-    assert len(theta_list1) == len(theta_list2) and all(
-        (d1.get(k) is None and d2.get(k) is None)
-        or (
-            d1.get(k) is not None
-            and d2.get(k) is not None
-            and d1.get(k).equals(d2.get(k))
-        )
-        for d1, d2 in zip(theta_list1, theta_list2)
-        for k in ["shared", "unit_specific"]
-    )
+    assert len(theta_list1) == len(theta_list2)
+    for d1, d2 in zip(theta_list1, theta_list2):
+        for k in ["shared", "unit_specific"]:
+            v1, v2 = d1.get(k), d2.get(k)
+            if v1 is None or v2 is None:
+                assert v1 is v2
+            else:
+                pd.testing.assert_frame_equal(v1, v2)
+
     assert result.J == J
     assert result.M == M
     assert result.a == a
@@ -46,6 +42,15 @@ def test_mif(measles_panel_setup_some_shared):
     )
 
 
+def test_mif(measles_panel_setup_some_shared):
+    panel, rw_sd, key = measles_panel_setup_some_shared
+    J, M, a = 2, 2, 0.5
+    theta_orig = deepcopy(panel.theta)
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+
+    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+
+
 def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
     """
     Test that MIF produces consistent results regardless of parameter order in parameter dataframes.
@@ -59,6 +64,12 @@ def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
     original_theta = deepcopy(panel.theta)
     reordered_theta = deepcopy(panel.theta)
     reordered_theta.theta = list(reversed(reordered_theta.theta))
+    
+    for t_dict in reordered_theta.theta:
+        if t_dict["shared"] is not None:
+            t_dict["shared"] = t_dict["shared"].iloc[::-1]
+        if t_dict["unit_specific"] is not None:
+            t_dict["unit_specific"] = t_dict["unit_specific"].iloc[::-1, ::-1]
 
     panel.mif(
         J=J,
@@ -126,4 +137,83 @@ def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
             f"Log-likelihoods differed after reordering parameter columns:\n"
             f"original: {logliks_orig.values}\n"
             f"reordered: {logliks_reordered.values}"
+        )
+
+
+def test_mif_shared_vs_unit_specific_single_unit_consistency(measles_panel_setup_pomps_module, measles_rw_sd):
+    """
+    Test that MIF produces equivalent results for a single-unit panel whether
+    parameters are marked as shared or unit-specific.
+    """
+    london, _, AK_mles = measles_panel_setup_pomps_module
+    
+    # Force London to have a different canonical parameter order from the panel
+    # by re-initializing its parameters with reversed key order
+    london_params_orig = AK_mles["London"].to_dict()
+    reversed_london_params = {k: london_params_orig[k] for k in reversed(list(london_params_orig.keys()))}
+    london.theta = reversed_london_params
+    
+    # Define some parameters to toggle between shared and unit-specific
+    toggled_params = ["gamma", "cohort"]
+    
+    # Use original order for Panel DataFrames to ensure mismatch with London
+    london_params = london_params_orig
+    shared_df = pd.DataFrame(
+        {p: [london_params[p]] for p in toggled_params},
+        index=pd.Index(toggled_params),
+        columns=pd.Index(["shared"])
+    )
+    specific_params = [p for p in london_params if p not in toggled_params]
+    specific_df = pd.DataFrame(
+        {p: [london_params[p]] for p in specific_params},
+        index=pd.Index(specific_params),
+        columns=pd.Index(["London"])
+    )
+    
+    panel_shared = pp.PanelPomp(
+        Pomp_dict={"London": london},
+        theta={"shared": shared_df, "unit_specific": specific_df}
+    )
+    
+    # 2. Setup Panel with toggled parameters as UNIT-SPECIFIC
+    all_specific_df = pd.DataFrame(
+        {p: [london_params[p]] for p in london_params},
+        index=pd.Index(list(london_params.keys())),
+        columns=pd.Index(["London"])
+    )
+    
+    panel_specific = pp.PanelPomp(
+        Pomp_dict={"London": london},
+        theta={"shared": None, "unit_specific": all_specific_df}
+    )
+    
+    J, M, a = 2, 3, 0.5
+    key = jax.random.key(42)
+    
+    # Run MIF on both
+    panel_shared.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
+    res_shared = panel_shared.results_history[-1]
+    
+    panel_specific.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
+    res_specific = panel_specific.results_history[-1]
+    
+    # Verify log-likelihoods match
+    assert jnp.allclose(res_shared.logLiks.values, res_specific.logLiks.values), (
+        f"Log-likelihoods differed:\n"
+        f"shared: {res_shared.logLiks.values}\n"
+        f"specific: {res_specific.logLiks.values}"
+    )
+    
+    # Verify traces match for toggled parameters
+    # In res_shared, they are in shared_traces
+    # In res_specific, they are in unit_traces
+    
+    for p in toggled_params:
+        trace_shared = res_shared.shared_traces.sel(variable=p).values
+        trace_specific = res_specific.unit_traces.sel(variable=p, unit="London").values
+        
+        assert jnp.allclose(trace_shared, trace_specific, equal_nan=True), (
+            f"Traces for parameter '{p}' differed:\n"
+            f"shared_traces version: {trace_shared}\n"
+            f"unit_traces version: {trace_specific}"
         )

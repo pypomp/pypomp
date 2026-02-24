@@ -65,4 +65,4 @@ class PanelValidationMixin(Base):
             raise ValueError(
                 "The canonical parameter names must match the canonical parameter names in the unit objects (up to reordering)."
             )
-        self.canonical_param_names = first_unit_canonical_param_names
+        self.canonical_param_names = self.canonical_shared_param_names + self.canonical_unit_param_names

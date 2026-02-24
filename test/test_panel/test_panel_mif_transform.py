@@ -13,7 +13,7 @@ from typing import cast
 
 @pytest.fixture
 def panel_pomp_with_transform():
-    """Create a simple PanelPomp model with parameter transformation."""
+    """Create a simple PanelPomp model with custom ParTrans."""
     # Create two simple LG models for the panel
     LG1 = pp.LG()
     LG2 = pp.LG()

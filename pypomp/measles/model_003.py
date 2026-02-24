@@ -129,11 +129,14 @@ def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
     C = X_["C"]
 
     y = Y_["cases"]
-    m = rho * C
+    safe_y = jnp.nan_to_num(y, nan=0.0)
+    safe_C = jnp.maximum(C, 0.0)
+
+    m = rho * safe_C
     v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-3
     scale = jnp.sqrt(jnp.maximum(v, tol))
-    loglik = jax.scipy.stats.norm.logpdf(y, loc=m, scale=scale)
+    loglik = jax.scipy.stats.norm.logpdf(safe_y, loc=m, scale=scale)
     loglik = jnp.where(jnp.isnan(y), 0.0, loglik)
     loglik = jnp.where(C < 0, -jnp.inf, loglik)
 
@@ -153,32 +156,39 @@ def dmeas(
     tol = 1.0e-3
 
     y = Y_["cases"]
-    m = rho * C
-    v = m * (1.0 - rho + psi**2 * m)
-    sqrt_v_tol = jnp.sqrt(v) + tol
+    safe_y = jnp.nan_to_num(y, nan=0.0)
+    safe_C = jnp.maximum(C, 0.0)
 
-    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
+    m = rho * safe_C
+    v = m * (1.0 - rho + psi**2 * m)
+    sqrt_v_tol = jnp.sqrt(jnp.maximum(v, 1e-12)) + tol
+
+    upper_cdf = jax.scipy.stats.norm.cdf(safe_y + 0.5, m, sqrt_v_tol)
+    lower_cdf = jax.scipy.stats.norm.cdf(safe_y - 0.5, m, sqrt_v_tol)
 
     lik = (
         jnp.where(
-            y > tol,
+            safe_y > tol,
             upper_cdf - lower_cdf,
             upper_cdf,
         )
         + tol
     )
 
-    lik = jnp.where(C < 0, 0.0, lik)
-    lik = jnp.where(jnp.isnan(y), 1.0, lik)
-    return jnp.log(lik)
+    loglik = jnp.log(lik)
+    loglik = jnp.where(C < 0, -jnp.inf, loglik)
+    loglik = jnp.where(jnp.isnan(y), 0.0, loglik)
+
+    return loglik
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
-    m = rho * C
+    safe_C = jnp.maximum(C, 0.0)
+
+    m = rho * safe_C
     v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-18
 

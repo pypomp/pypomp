@@ -157,9 +157,13 @@ def fast_approx_rgamma(
     alpha_base = alpha_dtype + jnp.full(shape, adjustment_size, dtype=dtype)
 
     u_base = jax.random.uniform(key_base, shape, dtype=dtype)
+    # Guard against edge case numerical issues.
+    # Especially necessary for gradient calculations.
+    u_base = jnp.clip(u_base, 1e-7, 1.0 - 1e-7)
     x = gammainvf(u_base, alpha_base, dtype=dtype)
 
     u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape, dtype=dtype)
+    u_adj = jnp.clip(u_adj, 1e-7, 1.0 - 1e-7)
 
     adjustment_indices = jnp.arange(adjustment_size - 1, -1, -1, dtype=dtype)
 

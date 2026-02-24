@@ -1492,18 +1492,26 @@ class Pomp:
             self.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
         )
 
-    def negbin_benchmark(self, suppress_warnings: bool = True) -> float:
+    def negbin_benchmark(
+        self, autoregressive: bool = False, suppress_warnings: bool = True
+    ) -> float:
         """
-        Fits an independent Negative Binomial model to the observation data and returns
+        Fits a Negative Binomial model to the observation data and returns
         the log-likelihood.
 
         This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
 
         Args:
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+            autoregressive (bool, optional): If True, fits an AR(1) model.
+                Defaults to False (iid).
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
                 and issues a summary warning instead. Defaults to True.
 
         Returns:
             float: The sum of the log-likelihoods.
         """
-        return _negbin_benchmark(self.ys, suppress_warnings=suppress_warnings)
+        return _negbin_benchmark(
+            self.ys,
+            autoregressive=autoregressive,
+            suppress_warnings=suppress_warnings,
+        )

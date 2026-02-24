@@ -1,7 +1,5 @@
 import pandas as pd
 import numpy as np
-
-
 import importlib.util
 
 
@@ -43,90 +41,119 @@ def arma_benchmark(
 
     total_llf = 0.0
 
-    with warnings.catch_warnings(record=True) as w:
-        if suppress_warnings:
-            warnings.simplefilter("always")
-
+    def fit_all():
+        nonlocal total_llf
         for col in ys.columns:
             data = ys[col].dropna()
             if len(data) > 0:
                 if log_ys:
                     data = np.log(data + 1)
                 model = ARIMA(data, order=order)
-                # method="innovations_mle" can be faster or we can use default
                 res = model.fit()
                 total_llf += res.llf
 
-    if suppress_warnings and len(w) > 0:
-        warnings.warn(
-            f"arma_benchmark: {len(w)} warnings were produced by statsmodels. "
-            "Set suppress_warnings=False to see the raw output.",
-            UserWarning,
-            stacklevel=2,
-        )
-    elif not suppress_warnings:
-        # Re-issue caught warnings
-        for warning in w:
-            warnings.warn_explicit(
-                message=warning.message,
-                category=warning.category,
-                filename=warning.filename,
-                lineno=warning.lineno,
-                source=warning.source,
+    if not suppress_warnings:
+        fit_all()
+    else:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fit_all()
+
+        if len(w) > 0:
+            warnings.warn(
+                f"arma_benchmark: {len(w)} warnings were produced by statsmodels. "
+                "Set suppress_warnings=False to see the raw output.",
+                UserWarning,
+                stacklevel=2,
             )
 
     return float(total_llf)
 
 
-def negbin_benchmark(ys: pd.DataFrame, suppress_warnings: bool = True) -> float:
+def negbin_benchmark(
+    ys: pd.DataFrame, autoregressive: bool = False, suppress_warnings: bool = True
+) -> float:
     """
-    Fits an independent Negative Binomial model to the data and returns the log-likelihood.
+    Fits a Negative Binomial model to the data and returns the log-likelihood.
 
     If 'ys' contains multiple columns, it fits independent models to each
     column and returns the sum of the log likelihoods.
 
     Args:
         ys (pd.DataFrame): The observed data.
-        suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+        autoregressive (bool, optional): If True, fits an AR(1) model where
+            Y_n | Y_{n-1} ~ NB(a + b*Y_{n-1}, size). If False (default),
+            fits an iid Negative Binomial model.
+        suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
             and issues a summary warning instead. Defaults to True.
 
     Returns:
         float: The sum of the log-likelihoods from the fitted models.
     """
     _check_statsmodels()
-    import statsmodels.api as sm
     import warnings
 
     total_llf = 0.0
 
-    with warnings.catch_warnings(record=True) as w:
-        if suppress_warnings:
-            warnings.simplefilter("always")
-
+    def fit_all():
+        nonlocal total_llf
         for col in ys.columns:
             data = ys[col].dropna()
-            if len(data) > 0:
-                # Add a constant (intercept) for the mean
+            if len(data) == 0:
+                continue
+
+            if not autoregressive:
+                import statsmodels.api as sm
+
                 exog = np.ones_like(data)
                 model = sm.NegativeBinomial(data, exog)
                 res = model.fit(disp=0)
                 total_llf += res.llf
+            else:
+                # AR(1) Case: Y_n | Y_{n-1} ~ NB(a + b*Y_{n-1}, size)
+                from scipy.optimize import minimize
+                from scipy.stats import nbinom
 
-    if suppress_warnings and len(w) > 0:
-        warnings.warn(
-            f"negbin_benchmark: {len(w)} warnings were produced by statsmodels. "
-            "Set suppress_warnings=False to see the raw output.",
-            UserWarning,
-            stacklevel=2,
-        )
-    elif not suppress_warnings:
-        for warning in w:
-            warnings.warn_explicit(
-                message=warning.message,
-                category=warning.category,
-                filename=warning.filename,
-                lineno=warning.lineno,
-                source=warning.source,
+                y = data.values
+                if len(y) < 2:
+                    continue
+                y_past = y[:-1]
+                y_curr = y[1:]
+
+                def neg_log_lik(params):
+                    a, b, size = params
+                    mu = a + b * y_past
+                    if np.any(mu <= 0) or size <= 0:
+                        return 1e10
+                    # scipy nbinom p = size / (size + mu)
+                    p = size / (size + mu)
+                    ll_obs = nbinom.logpmf(y_curr, size, p)
+                    return -float(np.sum(ll_obs))
+
+                # Use iid NB estimates for starting values
+                y_float = y.astype(float)
+                mean_y = float(np.mean(y_float))
+                var_y = float(max(float(np.var(y_float)), mean_y + 1e-6))
+                start_size = mean_y**2 / (var_y - mean_y)
+                start = [mean_y * 0.5, 0.5, start_size]
+                bounds = [(1e-6, None), (0, None), (1e-6, None)]
+
+                res = minimize(neg_log_lik, start, bounds=bounds, method="L-BFGS-B")
+                total_llf += -float(res.fun)
+
+    if not suppress_warnings:
+        fit_all()
+    else:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fit_all()
+
+        if len(w) > 0:
+            warnings.warn(
+                f"negbin_benchmark: {len(w)} warnings were produced by statsmodels. "
+                "Set suppress_warnings=False to see the raw output.",
+                UserWarning,
+                stacklevel=2,
             )
 
     return float(total_llf)

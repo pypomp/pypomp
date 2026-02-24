@@ -48,13 +48,24 @@ def test_arma_benchmark_function(dummy_data):
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
 def test_negbin_benchmark_function(dummy_data):
-    llf1 = negbin_benchmark(dummy_data[["y1"]])
+    # Test iid
+    llf1 = negbin_benchmark(dummy_data[["y1"]], autoregressive=False)
     assert isinstance(llf1, float)
 
-    llf_both = negbin_benchmark(dummy_data)
-    llf2 = negbin_benchmark(dummy_data[["y2"]])
+    llf_both = negbin_benchmark(dummy_data, autoregressive=False)
+    llf2 = negbin_benchmark(dummy_data[["y2"]], autoregressive=False)
 
     assert np.isclose(llf_both, llf1 + llf2)
+
+    # Test AR(1)
+    llf_ar1 = negbin_benchmark(dummy_data[["y1"]], autoregressive=True)
+    assert isinstance(llf_ar1, float)
+    # Typically AR(1) likelihood should be different from iid
+    assert not np.isclose(llf_ar1, llf1)
+
+    llf_both_ar = negbin_benchmark(dummy_data, autoregressive=True)
+    llf2_ar = negbin_benchmark(dummy_data[["y2"]], autoregressive=True)
+    assert np.isclose(llf_both_ar, llf_ar1 + llf2_ar)
 
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
@@ -182,5 +193,73 @@ def test_benchmark_warning_suppression(dummy_data):
                 for warn in w_list
                 if "negbin_benchmark: 1 warnings were produced by statsmodels"
                 in str(warn.message)
+            ]
+            assert len(summary_warnings) == 1
+
+
+@pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
+def test_panel_benchmark_warning_suppression(dummy_data):
+    from unittest.mock import patch, MagicMock
+    import warnings
+
+    unit1 = MagicMock()
+    unit1.ys = dummy_data[["y1"]]
+    unit2 = MagicMock()
+    unit2.ys = dummy_data[["y2"]]
+
+    panel = MagicMock(spec=PanelEstimationMixin)
+    panel.unit_objects = {"u1": unit1, "u2": unit2}
+    panel.arma_benchmark = PanelEstimationMixin.arma_benchmark.__get__(panel)
+    panel.negbin_benchmark = PanelEstimationMixin.negbin_benchmark.__get__(panel)
+
+    # Patch ARIMA class in the statsmodels module
+    with patch("statsmodels.tsa.arima.model.ARIMA") as mock_arima_cls:
+        mock_model = mock_arima_cls.return_value
+        mock_res = MagicMock()
+        mock_res.llf = 1.0
+        mock_model.fit.return_value = mock_res
+
+        def side_effect(*args, **kwargs):
+            warnings.warn("Fake statsmodels warning", RuntimeWarning)
+            return mock_res
+
+        mock_model.fit.side_effect = side_effect
+
+        with warnings.catch_warnings(record=True) as w_list:
+            warnings.simplefilter("always")
+            panel.arma_benchmark(suppress_warnings=True)
+
+            # Each unit (u1, u2) produced a warning.
+            # Total 2 warnings captured and summarized into ONE warning by PanelPomp
+            summary_pattern = (
+                "arma_benchmark: 2 warnings were produced by statsmodels across units"
+            )
+            summary_warnings = [
+                warn for warn in w_list if summary_pattern in str(warn.message)
+            ]
+            assert len(summary_warnings) == 1
+
+    # Patch NegativeBinomial class in statsmodels.api
+    with patch("statsmodels.api.NegativeBinomial") as mock_nb_cls:
+        mock_model = mock_nb_cls.return_value
+        mock_res = MagicMock()
+        mock_res.llf = 1.0
+        mock_model.fit.return_value = mock_res
+
+        def side_effect_nb(*args, **kwargs):
+            warnings.warn("Fake NB warning", RuntimeWarning)
+            return mock_res
+
+        mock_model.fit.side_effect = side_effect_nb
+
+        with warnings.catch_warnings(record=True) as w_list:
+            warnings.simplefilter("always")
+            panel.negbin_benchmark(suppress_warnings=True)
+
+            summary_pattern = (
+                "negbin_benchmark: 2 warnings were produced by statsmodels across units"
+            )
+            summary_warnings = [
+                warn for warn in w_list if summary_pattern in str(warn.message)
             ]
             assert len(summary_warnings) == 1

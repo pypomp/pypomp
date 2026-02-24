@@ -742,40 +742,86 @@ class PanelEstimationMixin(Base):
             pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
                 and their sum (labeled as '[[TOTAL]]' in the first row).
         """
+        import warnings
+
         results = []
         total_llf = 0.0
-        for name, unit in self.unit_objects.items():
-            llf = _arma_benchmark(
-                unit.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
-            )
-            results.append({"unit": name, "logLik": llf})
-            total_llf += llf
+
+        if suppress_warnings:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                for name, unit in self.unit_objects.items():
+                    llf = _arma_benchmark(
+                        unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
+                    )
+                    results.append({"unit": name, "logLik": llf})
+                    total_llf += llf
+
+            if len(w) > 0:
+                warnings.warn(
+                    f"arma_benchmark: {len(w)} warnings were produced by statsmodels across units. "
+                    "Set suppress_warnings=False to see the raw output.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        else:
+            for name, unit in self.unit_objects.items():
+                llf = _arma_benchmark(
+                    unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
+                )
+                results.append({"unit": name, "logLik": llf})
+                total_llf += llf
 
         # Insert total at the beginning
         results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})
         return pd.DataFrame(results)
 
-    def negbin_benchmark(self, suppress_warnings: bool = True) -> pd.DataFrame:
+    def negbin_benchmark(
+        self, autoregressive: bool = False, suppress_warnings: bool = True
+    ) -> pd.DataFrame:
         """
-        Fits an independent Negative Binomial model to the observation data for each unit and
+        Fits a Negative Binomial model to the observation data for each unit and
         returns a DataFrame with the estimated log-likelihoods for each unit and the total.
 
-        This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
-
         Args:
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+            autoregressive (bool, optional): If True, fits an AR(1) model.
+                Defaults to False (iid).
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
                 and issues a summary warning instead. Defaults to True.
 
         Returns:
             pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
                 and their sum (labeled as '[[TOTAL]]' in the first row).
         """
+        import warnings
+
         results = []
         total_llf = 0.0
-        for name, unit in self.unit_objects.items():
-            llf = _negbin_benchmark(unit.ys, suppress_warnings=suppress_warnings)
-            results.append({"unit": name, "logLik": llf})
-            total_llf += llf
+
+        if suppress_warnings:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                for name, unit in self.unit_objects.items():
+                    llf = _negbin_benchmark(
+                        unit.ys, autoregressive=autoregressive, suppress_warnings=False
+                    )
+                    results.append({"unit": name, "logLik": llf})
+                    total_llf += llf
+
+            if len(w) > 0:
+                warnings.warn(
+                    f"negbin_benchmark: {len(w)} warnings were produced by statsmodels across units. "
+                    "Set suppress_warnings=False to see the raw output.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        else:
+            for name, unit in self.unit_objects.items():
+                llf = _negbin_benchmark(
+                    unit.ys, autoregressive=autoregressive, suppress_warnings=False
+                )
+                results.append({"unit": name, "logLik": llf})
+                total_llf += llf
 
         # Insert total at the beginning
         results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})

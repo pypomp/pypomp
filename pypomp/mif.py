@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
+from functools import partial
 from .internal_functions import _normalize_weights
 from .internal_functions import _keys_helper
 from .internal_functions import _resampler_thetas
@@ -23,7 +24,7 @@ def _mif_internal(
     dmeasures: Callable,  # static
     sigmas: float | jax.Array,
     sigmas_init: float | jax.Array,
-    accumvars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     M: int,  # static
     a: float,
@@ -86,6 +87,87 @@ _vmapped_mif_internal = jax.vmap(
 _jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
 
 
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "M",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "chunk_size",
+    ),
+)
+def _chunked_mif_internal(
+    theta_tiled: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    sigmas: jax.Array,
+    sigmas_init: jax.Array,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
+    M: int,
+    a: float,
+    J: int,
+    thresh: float,
+    keys: jax.Array,
+    chunk_size: int,
+) -> tuple[jax.Array, jax.Array]:
+    n_reps = theta_tiled.shape[1]
+    n_chunks = n_reps // chunk_size
+
+    theta_tiled_c = theta_tiled.reshape(
+        (theta_tiled.shape[0], n_chunks, chunk_size) + theta_tiled.shape[2:]
+    )
+    keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
+
+    def scan_fn(carry, chunk_idx):
+        theta_chunk = theta_tiled_c[:, chunk_idx, :]
+        key_chunk = keys_c[chunk_idx]
+
+        nll_chunk, thetas_chunk = _vmapped_mif_internal(
+            theta_chunk,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            sigmas,
+            sigmas_init,
+            accumvars,
+            covars_extended,
+            M,
+            a,
+            J,
+            thresh,
+            key_chunk,
+        )
+        return carry, (nll_chunk, thetas_chunk)
+
+    _, (res_nll, res_thetas) = jax.lax.scan(scan_fn, None, jnp.arange(n_chunks))
+
+    def reshape_back_nll(arr):
+        return arr.reshape((n_reps,) + arr.shape[2:])
+
+    def reshape_back_thetas(arr):
+        return arr.reshape((n_reps,) + arr.shape[2:])
+
+    nLLs = reshape_back_nll(res_nll)
+    theta_ests = reshape_back_thetas(res_thetas)
+
+    return nLLs, theta_ests
+
+
 def _perfilter_internal(
     m: int,
     thetas_Jd: jax.Array,
@@ -101,7 +183,7 @@ def _perfilter_internal(
     rinitializers: Callable,
     rprocesses_interp: Callable,
     dmeasures: Callable,
-    accumvars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     thresh: float,
     a: float,
@@ -195,7 +277,7 @@ def _perfilter_helper(
     rprocesses_interp: Callable,
     dmeasures: Callable,
     sigmas: float | jax.Array,
-    accumvars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     dt_array_extended: jax.Array,
     thresh: float,
@@ -280,7 +362,7 @@ def _panel_mif_internal(
     dmeasures: Callable,
     sigmas: jax.Array,
     sigmas_init: jax.Array,
-    accumvars: jax.Array | None,
+    accumvars: tuple[int, ...] | None,
     covars_per_unit: jax.Array | None,  # (U, ...) or None
     unit_param_permutations: jax.Array,  # (U, n_params)
     M: int,

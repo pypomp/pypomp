@@ -251,6 +251,82 @@ _panel_pfilter_vmap = jax.vmap(
         "prediction_mean",
     ),
 )
+def _chunked_pfilter_internal(
+    thetas: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
+    thresh: float,
+    keys: jax.Array,
+    chunk_size: int,
+    CLL: bool = False,
+    ESS: bool = False,
+    filter_mean: bool = False,
+    prediction_mean: bool = False,
+) -> dict[str, jax.Array]:
+    n_theta_reps = thetas.shape[0]
+    n_chunks = n_theta_reps // chunk_size
+
+    thetas_c = thetas.reshape((n_chunks, chunk_size) + thetas.shape[1:])
+    keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
+
+    def scan_fn(carry, chunk_idx):
+        theta_chunk = thetas_c[chunk_idx]
+        key_chunk = keys_c[chunk_idx]
+
+        res = _vmapped_pfilter_internal2(
+            theta_chunk,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            J,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            accumvars,
+            covars_extended,
+            thresh,
+            key_chunk,
+            CLL,
+            ESS,
+            filter_mean,
+            prediction_mean,
+        )
+        return carry, res
+
+    _, res_chunks = jax.lax.scan(scan_fn, None, jnp.arange(n_chunks))
+
+    def reshape_back(arr):
+        return arr.reshape((n_theta_reps,) + arr.shape[2:])
+
+    return jax.tree_util.tree_map(reshape_back, res_chunks)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "chunk_size",
+        "CLL",
+        "ESS",
+        "filter_mean",
+        "prediction_mean",
+    ),
+)
 def _chunked_panel_pfilter_internal(
     thetas: jax.Array,
     dt_array_extended: jax.Array,

@@ -13,12 +13,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
-from .mif import _jv_mif_internal
+from .mif import _chunked_mif_internal
 from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
-from .pfilter import _vmapped_pfilter_internal2
+from .pfilter import _chunked_pfilter_internal
 from .internal_functions import _calc_ys_covars
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
@@ -509,19 +509,19 @@ class Pomp:
             n_theta_reps, reps, *new_key.shape
         )
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("theta_reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec("theta_reps", None)
-            )
-            rep_keys_sharding_spec = jax.sharding.NamedSharding(
-                mesh,
-                jax.sharding.PartitionSpec("theta_reps", None, None),
-            )
-            thetas_array = jax.device_put(thetas_array, sharding_spec)
-            rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
+        n_devices = jax.local_device_count()
+        chunk_size = n_devices if n_devices > 1 else n_theta_reps
+        padding = (chunk_size - (n_theta_reps % chunk_size)) % chunk_size
 
-        results_jax = _vmapped_pfilter_internal2(
+        if padding > 0:
+            thetas_array = jnp.pad(
+                thetas_array, ((0, padding),) + ((0, 0),) * (thetas_array.ndim - 1)
+            )
+            rep_keys = jnp.pad(
+                rep_keys, ((0, padding),) + ((0, 0),) * (rep_keys.ndim - 1), mode="wrap"
+            )
+
+        res_jax = _chunked_pfilter_internal(
             thetas_array,
             np.asarray(self._dt_array_extended),
             np.asarray(self._nstep_array),
@@ -538,15 +538,19 @@ class Pomp:
             else None,
             thresh,
             rep_keys,
+            chunk_size,
             CLL,
             ESS,
             filter_mean,
             prediction_mean,
         )
 
-        results = jax.device_get(results_jax)
+        results = jax.device_get(res_jax)
+        del res_jax
 
-        del results_jax
+        # slice off padding
+        if padding > 0:
+            results = jax.tree_util.tree_map(lambda x: x[:n_theta_reps], results)
 
         neg_logliks = results["neg_loglik"]
 
@@ -671,14 +675,17 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec(None, "reps", None)
-            )
-            theta_tiled = jax.device_put(theta_tiled, sharding_spec)
+        n_devices = jax.local_device_count()
+        chunk_size = n_devices if n_devices > 1 else n_reps
+        padding = (chunk_size - (n_reps % chunk_size)) % chunk_size
 
-        nLLs_jax, theta_ests_jax = _jv_mif_internal(
+        if padding > 0:
+            theta_tiled = jnp.pad(theta_tiled, ((0, 0), (0, padding), (0, 0)))
+            keys = jnp.pad(
+                keys, ((0, padding),) + ((0, 0),) * (keys.ndim - 1), mode="wrap"
+            )
+
+        nLLs_jax_chunk, theta_ests_jax_chunk = _chunked_mif_internal(
             theta_tiled,
             np.asarray(self._dt_array_extended),
             np.asarray(self._nstep_array),
@@ -699,12 +706,15 @@ class Pomp:
             J,
             thresh,
             keys,
+            chunk_size,
         )
 
-        nLLs = jax.device_get(nLLs_jax)
-        theta_ests = jax.device_get(theta_ests_jax)
+        nLLs = jax.device_get(nLLs_jax_chunk)
+        theta_ests = jax.device_get(theta_ests_jax_chunk)
 
-        del nLLs_jax, theta_ests_jax
+        if padding > 0:
+            nLLs = nLLs[:n_reps]
+            theta_ests = theta_ests[:n_reps]
 
         final_theta_ests = []
         param_names = self.canonical_param_names

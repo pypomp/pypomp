@@ -31,58 +31,38 @@ def test_val():
     assert np.round(lme_se, 2) == 0.75
 
 
-def test_nan():
-    x = np.array([100.0, 101.0, 102.0, 103.0, 104.0])
-    assert np.isnan(pp.logmeanexp_se(x[:1]))
+@pytest.mark.parametrize(
+    "arr, expect_lme_nan, expect_se_nan",
+    [
+        (
+            np.array([100.0, 101.0, 102.0, 103.0, 104.0][:1]),
+            False,
+            True,
+        ),  # from test_nan
+        (np.array([]), True, True),  # from test_empty_array
+        (np.array([np.nan, np.nan]), True, True),  # from test_all_nan
+        (np.array([100, 101, -np.inf]), False, False),  # from test_inf_values
+        (np.array([1, np.nan, -np.inf]), True, True),  # from test_mixed_nan_inf
+        (np.array([42.0]), False, True),  # from test_single_value
+    ],
+)
+def test_logmeanexp_edge_cases(arr, expect_lme_nan, expect_se_nan):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        lme = pp.logmeanexp(arr)
+        lme_se = pp.logmeanexp_se(arr)
 
+    if expect_lme_nan:
+        assert np.isnan(lme)
+    else:
+        assert not np.isnan(lme)
+        assert not np.isinf(lme)
 
-def test_empty_array():
-    # logmeanexp and logmeanexp_se should return nan for empty input
-    empty = np.array([])
-    with pytest.warns(UserWarning):
-        lme = pp.logmeanexp(empty)
-    lme_se = pp.logmeanexp_se(empty)
-    assert np.isnan(lme)
-    assert np.isnan(lme_se)
-
-
-def test_all_nan():
-    # All NaN input should return nan
-    arr = np.array([np.nan, np.nan])
-    lme = pp.logmeanexp(arr)
-    lme_se = pp.logmeanexp_se(arr)
-    assert np.isnan(lme)
-    assert np.isnan(lme_se)
-
-
-def test_inf_values():
-    # Array with finite values and -inf
-    arr = np.array([100, 101, -np.inf])
-    lme = pp.logmeanexp(arr)
-    lme_se = pp.logmeanexp_se(arr)
-    # Both should be finite, non nan
-    assert not np.isnan(lme)
-    assert not np.isinf(lme)
-    assert not np.isnan(lme_se)
-    assert not np.isinf(lme_se)
-
-
-def test_mixed_nan_inf():
-    # Array with finite, nan, and -inf
-    arr = np.array([1, np.nan, -np.inf])
-    lme = pp.logmeanexp(arr)
-    lme_se = pp.logmeanexp_se(arr)
-    assert np.isnan(lme)
-    assert np.isnan(lme_se)
-
-
-def test_single_value():
-    # Single value: logmeanexp should be the value, se should be nan
-    arr = np.array([42.0])
-    lme = pp.logmeanexp(arr)
-    lme_se = pp.logmeanexp_se(arr)
-    assert lme == 42.0
-    assert np.isnan(lme_se)
+    if expect_se_nan:
+        assert np.isnan(lme_se)
+    else:
+        assert not np.isnan(lme_se)
+        assert not np.isinf(lme_se)
 
 
 def test_large_values():
@@ -116,22 +96,24 @@ def test_speed():
     assert duration < 2
 
 
-def test_ignore_nan_true():
-    # Array with some nans: ignore_nan=True should drop them
-    arr = np.array([1.0, np.nan, 2.0, 3.0])
-    lme = pp.logmeanexp(arr, ignore_nan=True)
-    lme_se = pp.logmeanexp_se(arr, ignore_nan=True)
-    # Should be equal to logmeanexp([1,2,3])
-    arr_no_nan = np.array([1.0, 2.0, 3.0])
-    expected_lme = pp.logmeanexp(arr_no_nan)
-    expected_lme_se = pp.logmeanexp_se(arr_no_nan)
-    assert np.isclose(lme, expected_lme, atol=1e-7)
-    assert np.isclose(lme_se, expected_lme_se, atol=1e-7)
+@pytest.mark.parametrize(
+    "arr, expected_arr, expect_nan",
+    [
+        (np.array([1.0, np.nan, 2.0, 3.0]), np.array([1.0, 2.0, 3.0]), False),
+        (np.array([np.nan, np.nan]), None, True),
+    ],
+)
+def test_ignore_nan(arr, expected_arr, expect_nan):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        lme = pp.logmeanexp(arr, ignore_nan=True)
+        lme_se = pp.logmeanexp_se(arr, ignore_nan=True)
 
-    # If all values are nan, should return nan
-    arr_all_nan = np.array([np.nan, np.nan])
-    with warnings.catch_warnings(record=True) as w:
-        lme_nan = pp.logmeanexp(arr_all_nan, ignore_nan=True)
-        lme_se_nan = pp.logmeanexp_se(arr_all_nan, ignore_nan=True)
-    assert np.isnan(lme_nan)
-    assert np.isnan(lme_se_nan)
+    if expect_nan:
+        assert np.isnan(lme)
+        assert np.isnan(lme_se)
+    else:
+        expected_lme = pp.logmeanexp(expected_arr)
+        expected_lme_se = pp.logmeanexp_se(expected_arr)
+        assert np.isclose(lme, expected_lme, atol=1e-7)
+        assert np.isclose(lme_se, expected_lme_se, atol=1e-7)

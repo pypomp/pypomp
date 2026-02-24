@@ -218,6 +218,7 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
+        # "auto" is experimental and should maybe be deleted
         if chunk_size == "auto":
             try:
                 import psutil

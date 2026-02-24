@@ -720,35 +720,63 @@ class PanelEstimationMixin(Base):
 
         self.results_history.add(result)
 
-    def arma_benchmark(self, order: tuple[int, int, int] = (1, 0, 1)) -> float:
+    def arma_benchmark(
+        self,
+        order: tuple[int, int, int] = (1, 0, 1),
+        log_ys: bool = False,
+        suppress_warnings: bool = True,
+    ) -> pd.DataFrame:
         """
         Fits an independent ARIMA model to the observation data for each unit and returns
-        the sum of the estimated log-likelihoods across all units.
+        a DataFrame with the estimated log-likelihoods for each unit and the total.
 
         This is a wrapper around `pypomp.benchmarks.arma_benchmark`.
 
         Args:
             order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
+            log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+                and issues a summary warning instead. Defaults to True.
 
         Returns:
-            float: The overall sum of the log-likelihoods.
+            pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
+                and their sum (labeled as '[[TOTAL]]' in the first row).
         """
+        results = []
         total_llf = 0.0
-        for unit in self.unit_objects.values():
-            total_llf += _arma_benchmark(unit.ys, order=order)
-        return float(total_llf)
+        for name, unit in self.unit_objects.items():
+            llf = _arma_benchmark(
+                unit.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
+            )
+            results.append({"unit": name, "logLik": llf})
+            total_llf += llf
 
-    def negbin_benchmark(self) -> float:
+        # Insert total at the beginning
+        results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})
+        return pd.DataFrame(results)
+
+    def negbin_benchmark(self, suppress_warnings: bool = True) -> pd.DataFrame:
         """
         Fits an independent Negative Binomial model to the observation data for each unit and
-        returns the sum of the log-likelihoods across all units.
+        returns a DataFrame with the estimated log-likelihoods for each unit and the total.
 
         This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
 
+        Args:
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+                and issues a summary warning instead. Defaults to True.
+
         Returns:
-            float: The overall sum of the log-likelihoods.
+            pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
+                and their sum (labeled as '[[TOTAL]]' in the first row).
         """
+        results = []
         total_llf = 0.0
-        for unit in self.unit_objects.values():
-            total_llf += _negbin_benchmark(unit.ys)
-        return float(total_llf)
+        for name, unit in self.unit_objects.items():
+            llf = _negbin_benchmark(unit.ys, suppress_warnings=suppress_warnings)
+            results.append({"unit": name, "logLik": llf})
+            total_llf += llf
+
+        # Insert total at the beginning
+        results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})
+        return pd.DataFrame(results)

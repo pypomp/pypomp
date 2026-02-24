@@ -1467,7 +1467,12 @@ class Pomp:
             if key in self.__dict__:
                 del self.__dict__[key]
 
-    def arma_benchmark(self, order: tuple[int, int, int] = (1, 0, 1)) -> float:
+    def arma_benchmark(
+        self,
+        order: tuple[int, int, int] = (1, 0, 1),
+        log_ys: bool = False,
+        suppress_warnings: bool = True,
+    ) -> float:
         """
         Fits an independent ARIMA model to the observation data and returns the estimated
         log-likelihood.
@@ -1476,20 +1481,29 @@ class Pomp:
 
         Args:
             order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
+            log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+                and issues a summary warning instead. Defaults to True.
 
         Returns:
             float: The sum of the log-likelihoods.
         """
-        return _arma_benchmark(self.ys, order=order)
+        return _arma_benchmark(
+            self.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
+        )
 
-    def negbin_benchmark(self) -> float:
+    def negbin_benchmark(self, suppress_warnings: bool = True) -> float:
         """
         Fits an independent Negative Binomial model to the observation data and returns
         the log-likelihood.
 
         This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
 
+        Args:
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+                and issues a summary warning instead. Defaults to True.
+
         Returns:
             float: The sum of the log-likelihoods.
         """
-        return _negbin_benchmark(self.ys)
+        return _negbin_benchmark(self.ys, suppress_warnings=suppress_warnings)

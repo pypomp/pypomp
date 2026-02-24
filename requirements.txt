@@ -12,3 +12,4 @@ seaborn
 matplotlib
 loess
 pyarrow  # For efficient save_results() function
+statsmodels

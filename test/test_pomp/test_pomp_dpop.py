@@ -1,5 +1,3 @@
-# test_sis_dpop.py
-
 import jax
 import jax.numpy as jnp
 import pytest
@@ -7,14 +5,14 @@ import pypomp as pp
 
 
 @pytest.fixture(scope="function")
-def simple_sis():
+def simple_sir():
     """
-    Build a simple SIS Pomp model for testing DPOP.
+    Build a simple SIR Pomp model for testing DPOP.
 
     Returns
     -------
-    model : pp.SIS
-        SIS Pomp object with internally simulated data.
+    model : Pomp
+        SIR Pomp object with internally simulated data.
     J : int
         Number of particles (small here for speed).
     ys : pandas.DataFrame
@@ -22,14 +20,11 @@ def simple_sis():
     theta : list[dict]
         Model parameters (natural space) as stored in model.theta.
     covars : pandas.DataFrame | None
-        Covariates used by the model (None for this SIS).
+        Covariates used by the model.
     key : jax.random.PRNGKey
         Base random key for tests.
     """
-    # Use a fixed key so tests are reproducible
-    key_model = jax.random.key(2025)
-    # Construct the SIS Pomp model with internally simulated data
-    model = pp.SIS(T=50, key=key_model)
+    model = pp.sir()
 
     # Keep J small so tests run fast
     J = 2
@@ -41,14 +36,14 @@ def simple_sis():
     return model, J, ys, theta, covars, key
 
 
-def test_dpop_basic(simple_sis):
+def test_dpop_basic(simple_sir):
     """
-    Basic sanity check for DPOP on the SIS model.
+    Basic sanity check for DPOP on the SIR model.
 
     - dpop() should return a finite scalar negative log-likelihood
       (per replicate) of floating dtype.
     """
-    model, J, ys, theta, covars, key = simple_sis
+    model, J, ys, theta, covars, key = simple_sir
 
     # Call DPOP with a moderate cooling factor alpha
     vals = model.dpop(
@@ -67,7 +62,7 @@ def test_dpop_basic(simple_sis):
     assert jnp.issubdtype(nll0.dtype, jnp.floating)
 
 
-def test_dpop_param_order_invariance(simple_sis):
+def test_dpop_param_order_invariance(simple_sir):
     """
     Check that DPOP result does not depend on the order of parameter
     dictionary keys.
@@ -76,7 +71,7 @@ def test_dpop_param_order_invariance(simple_sis):
     the DPOP negative log-likelihood should remain the same (up to
     numerical tolerance).
     """
-    model, J, ys, theta, covars, key = simple_sis
+    model, J, ys, theta, covars, key = simple_sir
 
     # Baseline DPOP value with original theta ordering
     val1 = model.dpop(
@@ -110,12 +105,12 @@ def test_dpop_param_order_invariance(simple_sis):
     )
 
 
-def test_dpop_explicit_process_weight_state_is_deterministic(simple_sis):
+def test_dpop_explicit_process_weight_state_is_deterministic(simple_sir):
     """
     Calling dpop() with the same process_weight_state ('logw') and the
     same random seed should give identical results.
     """
-    model, J, ys, theta, covars, _ = simple_sis
+    model, J, ys, theta, covars, _ = simple_sir
 
     # Use the same base seed for both calls so the random stream matches.
     key1 = jax.random.key(999)

@@ -3,39 +3,117 @@ import pytest
 import numpy as np
 import pypomp as pp
 import jax.numpy as jnp
-from pypomp.train_dpop import dpop_sgd_decay  # still imported, though not used directly
 
 
 @pytest.fixture(scope="function")
-def simple_sis_for_dpop():
+def simple_sir_for_dpop():
     """
-    Build a small SIS Pomp model for testing the DPOP SGD-with-decay optimizer.
-
-    We keep T and J small so that the test is fast.
+    Build a small SIR Pomp model for testing the DPOP optimizers.
     """
-    key_model = jax.random.key(2025)
-    # This assumes you have pp.SIS exposed in pypomp.__init__
-    model = pp.SIS(T=50, key=key_model)
+    model = pp.sir()
     return model
 
 
-def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
+def test_dpop_train_adam(simple_sir_for_dpop):
     """
-    Check that Pomp.dpop_sgd_decay is invariant to the ordering of
+    Test dpop_train with Adam optimizer.
+    """
+    model = simple_sir_for_dpop
+    eta = {name: 0.01 for name in model.canonical_param_names}
+    nll, theta_hist = model.dpop_train(
+        J=50,
+        M=4,
+        eta=eta,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(42),
+    )
+    assert nll.shape == (5,)  # M+1
+    assert theta_hist.shape[0] == 5
+    assert jnp.all(jnp.isfinite(nll))
+
+
+def test_dpop_train_sgd(simple_sir_for_dpop):
+    """
+    Test dpop_train with SGD optimizer and decay.
+    """
+    model = simple_sir_for_dpop
+    eta = {name: 0.01 for name in model.canonical_param_names}
+    nll, theta_hist = model.dpop_train(
+        J=50,
+        M=4,
+        eta=eta,
+        optimizer="SGD",
+        alpha=0.8,
+        decay=0.1,
+        process_weight_state="logw",
+        key=jax.random.key(42),
+    )
+    assert nll.shape == (5,)
+    assert theta_hist.shape[0] == 5
+    assert jnp.all(jnp.isfinite(nll))
+
+
+def test_dpop_train_adam_with_decay(simple_sir_for_dpop):
+    """
+    Test dpop_train with Adam optimizer and LR decay.
+    """
+    model = simple_sir_for_dpop
+    eta = {name: 0.01 for name in model.canonical_param_names}
+    nll, theta_hist = model.dpop_train(
+        J=50,
+        M=4,
+        eta=eta,
+        optimizer="Adam",
+        alpha=0.8,
+        decay=0.1,
+        process_weight_state="logw",
+        key=jax.random.key(42),
+    )
+    assert nll.shape == (5,)
+    assert theta_hist.shape[0] == 5
+    assert jnp.all(jnp.isfinite(nll))
+
+
+def test_dpop_train_scalar_eta(simple_sir_for_dpop):
+    """
+    Test dpop_train with a scalar eta (uniform LR for all params).
+    """
+    model = simple_sir_for_dpop
+    nll, theta_hist = model.dpop_train(
+        J=50,
+        M=4,
+        eta=0.01,
+        optimizer="SGD",
+        alpha=0.8,
+        decay=0.1,
+        process_weight_state="logw",
+        key=jax.random.key(42),
+    )
+    assert nll.shape == (5,)
+    assert theta_hist.shape[0] == 5
+    assert jnp.all(jnp.isfinite(nll))
+
+
+def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
+    """
+    Check that dpop_train is invariant to the ordering of
     parameter dictionary keys (in natural space).
     """
-    model = simple_sis_for_dpop
+    model = simple_sir_for_dpop
 
-    # Use small J, M so the test is fast, but keep them identical across runs.
     J = 50
     M = 4
+    eta = {name: 0.01 for name in model.canonical_param_names}
 
     # First run: default theta ordering
     key1 = jax.random.key(123)
-    nll1, theta_hist1 = model.dpop_sgd_decay(
+    nll1, theta_hist1 = model.dpop_train(
         J=J,
         M=M,
-        eta0=0.01,
+        eta=eta,
+        optimizer="SGD",
         decay=0.1,
         alpha=0.8,
         key=key1,
@@ -50,10 +128,11 @@ def test_pomp_dpop_sgd_decay_param_order_invariance(simple_sis_for_dpop):
 
     # Second run: same random key & hyper-parameters, but permuted theta
     key2 = jax.random.key(123)
-    nll2, theta_hist2 = model.dpop_sgd_decay(
+    nll2, theta_hist2 = model.dpop_train(
         J=J,
         M=M,
-        eta0=0.01,
+        eta=eta,
+        optimizer="SGD",
         decay=0.1,
         alpha=0.8,
         key=key2,

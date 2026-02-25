@@ -610,13 +610,15 @@ class RMeas(_ModelComponent):
 def _time_interp(rproc, nstep_fixed, max_steps_bound):
     vsplit = jax.vmap(jax.random.split, (0, None))
 
-    def _interp_body(i, inputs, covars_extended, dt_array_extended, should_trans):
-        X_, theta_, keys, t, t_idx = inputs
+    def _interp_body(
+        i, inputs, theta_, covars_extended, dt_array_extended, should_trans
+    ):
+        X_, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         vkeys = vsplit(keys, 2)
         X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt, should_trans)
-        return (X_, theta_, vkeys[:, 1], t + dt, t_idx + 1)
+        return (X_, vkeys[:, 1], t + dt, t_idx + 1)
 
     def _rproc_interp(
         X_,
@@ -630,7 +632,7 @@ def _time_interp(rproc, nstep_fixed, max_steps_bound):
         accumvars,
         should_trans,
     ):
-        if accumvars is not None:
+        if accumvars is not None and len(accumvars) > 0:
             X_ = X_.at[:, accumvars].set(0)
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
 
@@ -639,12 +641,13 @@ def _time_interp(rproc, nstep_fixed, max_steps_bound):
             nstep,
             partial(
                 _interp_body,
+                theta_=theta_,
                 covars_extended=covars_extended,
                 dt_array_extended=dt_array_extended,
                 should_trans=should_trans,
             ),
-            (X_, theta_, keys, t, t_idx),
+            (X_, keys, t, t_idx),
         )
-        return final[0], final[4]  # Return X_ and new t_idx
+        return final[0], final[3]  # Return X_ and new t_idx
 
     return _rproc_interp

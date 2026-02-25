@@ -31,6 +31,10 @@ from .results import (
 )
 from .parameters import PompParameters
 from .util import logmeanexp
+from .benchmarks import (
+    arma_benchmark as _arma_benchmark,
+    negbin_benchmark as _negbin_benchmark,
+)
 
 
 # TODO: use just one doc link for each model component class
@@ -600,26 +604,25 @@ class Pomp:
             raise ValueError("J should be greater than 0.")
 
         thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
-        thetas_repl = jnp.vstack(
-            [jnp.tile(thetas_array[i], (reps, 1)) for i in range(n_theta_reps)]
+
+        rep_keys = jax.random.split(new_key, n_theta_reps * reps).reshape(
+            n_theta_reps, reps, *new_key.shape
         )
 
-        rep_keys = jax.random.split(new_key, thetas_repl.shape[0])
-
         if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
+            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("theta_reps",))
             sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec("reps", None)
+                mesh, jax.sharding.PartitionSpec("theta_reps", None)
             )
             rep_keys_sharding_spec = jax.sharding.NamedSharding(
                 mesh,
-                jax.sharding.PartitionSpec("reps"),
+                jax.sharding.PartitionSpec("theta_reps", None, None),
             )
-            thetas_repl = jax.device_put(thetas_repl, sharding_spec)
+            thetas_array = jax.device_put(thetas_array, sharding_spec)
             rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
 
         results_jax = _vmapped_pfilter_internal2(
-            thetas_repl,
+            thetas_array,
             np.asarray(self._dt_array_extended),
             np.asarray(self._nstep_array),
             self.t0,
@@ -647,9 +650,7 @@ class Pomp:
 
         neg_logliks = results["neg_loglik"]
 
-        logLik_da = xr.DataArray(
-            (-neg_logliks).reshape(n_theta_reps, reps), dims=["theta", "replicate"]
-        )
+        logLik_da = xr.DataArray(-neg_logliks, dims=["theta", "replicate"])
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -662,39 +663,33 @@ class Pomp:
         prediction_mean_da = None
 
         if CLL and "CLL" in results:
-            CLL_arr = results["CLL"]
             CLL_da = xr.DataArray(
-                CLL_arr.reshape(n_theta_reps, reps, -1),
+                results["CLL"],
                 dims=["theta", "replicate", "time"],
             )
 
         if ESS and "ESS" in results:
-            ESS_arr = results["ESS"]
             ESS_da = xr.DataArray(
-                ESS_arr.reshape(n_theta_reps, reps, -1),
+                results["ESS"],
                 dims=["theta", "replicate", "time"],
             )
 
         if filter_mean and "filter_mean" in results:
-            filter_mean_arr = results["filter_mean"]
             filter_mean_da = xr.DataArray(
-                filter_mean_arr.reshape(n_theta_reps, reps, *filter_mean_arr.shape[1:]),
+                results["filter_mean"],
                 dims=["theta", "replicate", "time", "state"],
             )
 
         if prediction_mean and "prediction_mean" in results:
-            prediction_mean_arr = results["prediction_mean"]
             prediction_mean_da = xr.DataArray(
-                prediction_mean_arr.reshape(
-                    n_theta_reps, reps, *prediction_mean_arr.shape[1:]
-                ),
+                results["prediction_mean"],
                 dims=["theta", "replicate", "time", "state"],
             )
 
         del results
 
         logLik_estimates = np.apply_along_axis(
-            logmeanexp, -1, (-neg_logliks).reshape(n_theta_reps, reps), ignore_nan=False
+            logmeanexp, -1, -neg_logliks, ignore_nan=False
         )
         theta_obj_in.logLik = logLik_estimates
         self.theta = theta_obj_in
@@ -1723,3 +1718,52 @@ class Pomp:
         ]:
             if key in self.__dict__:
                 del self.__dict__[key]
+
+    def arma_benchmark(
+        self,
+        order: tuple[int, int, int] = (1, 0, 1),
+        log_ys: bool = False,
+        suppress_warnings: bool = True,
+    ) -> float:
+        """
+        Fits an independent ARIMA model to the observation data and returns the estimated
+        log-likelihood.
+
+        This is a wrapper around `pypomp.benchmarks.arma_benchmark`.
+
+        Args:
+            order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
+            log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
+                and issues a summary warning instead. Defaults to True.
+
+        Returns:
+            float: The sum of the log-likelihoods.
+        """
+        return _arma_benchmark(
+            self.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
+        )
+
+    def negbin_benchmark(
+        self, autoregressive: bool = False, suppress_warnings: bool = True
+    ) -> float:
+        """
+        Fits a Negative Binomial model to the observation data and returns
+        the log-likelihood.
+
+        This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
+
+        Args:
+            autoregressive (bool, optional): If True, fits an AR(1) model.
+                Defaults to False (iid).
+            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
+                and issues a summary warning instead. Defaults to True.
+
+        Returns:
+            float: The sum of the log-likelihoods.
+        """
+        return _negbin_benchmark(
+            self.ys,
+            autoregressive=autoregressive,
+            suppress_warnings=suppress_warnings,
+        )

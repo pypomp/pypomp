@@ -1,4 +1,3 @@
-from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -33,38 +32,49 @@ def _mif_internal(
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     times = times.astype(float)
-    n_theta = theta_Jd.shape[-1]
-    logliks_M = jnp.zeros(M)
-    thetas_MJd = jnp.zeros((M, J, n_theta))
-    thetas_MJd = jnp.concatenate(
-        [theta_Jd.reshape((1, J, n_theta)), thetas_MJd], axis=0
+    all_keys = jax.random.split(key, num=M + 1)
+    m_keys = all_keys[1:]
+
+    def mif_scan_body(carry, scan_inputs):
+        current_theta_Jd = carry
+        m, iter_key = scan_inputs
+
+        next_theta_Jd, loglik_m = _perfilter_internal(
+            m,
+            current_theta_Jd,
+            iter_key,
+            dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
+            t0=t0,
+            times=times,
+            ys=ys,
+            J=J,
+            sigmas=sigmas,
+            sigmas_init=sigmas_init,
+            rinitializers=rinitializers,
+            rprocesses_interp=rprocesses_interp,
+            dmeasures=dmeasures,
+            accumvars=accumvars,
+            covars_extended=covars_extended,
+            thresh=thresh,
+            a=a,
+        )
+        return next_theta_Jd, (next_theta_Jd, loglik_m)
+
+    init_carry = theta_Jd
+    scan_xs = (jnp.arange(M), m_keys)
+
+    final_state, (thetas_history, logliks_history) = jax.lax.scan(
+        f=mif_scan_body,
+        init=init_carry,
+        xs=scan_xs,
     )
 
-    _perfilter_internal_2 = partial(
-        _perfilter_internal,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys=ys,
-        J=J,
-        sigmas=sigmas,
-        sigmas_init=sigmas_init,
-        rinitializers=rinitializers,
-        rprocesses_interp=rprocesses_interp,
-        dmeasures=dmeasures,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        a=a,
-    )
+    # thetas_MJd: (M+1, J, n_theta)
+    thetas_MJd = jnp.concatenate([theta_Jd[None, :, :], thetas_history], axis=0)
+    # logliks_M: (M,)
+    logliks_M = logliks_history
 
-    (thetas_MJd, logliks_M, key) = jax.lax.fori_loop(
-        lower=0,
-        upper=M,
-        body_fun=_perfilter_internal_2,
-        init_val=(thetas_MJd, logliks_M, key),
-    )
     return logliks_M, thetas_MJd
 
 
@@ -78,7 +88,8 @@ _jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
 
 def _perfilter_internal(
     m: int,
-    inputs: tuple[jax.Array, jax.Array, jax.Array],
+    thetas_Jd: jax.Array,
+    key: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     t0: float,
@@ -94,14 +105,11 @@ def _perfilter_internal(
     covars_extended: jax.Array | None,
     thresh: float,
     a: float,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array]:
     """
-    Internal function for the perturbed particle filtering algorithm, which calls
-    function 'perfilter_helper' iteratively.
+    Internal function for one iteration of the perturbed particle filtering algorithm.
     """
-    (thetas_MJd, logliks_M, key) = inputs
-    thetas_Jd = thetas_MJd[m]
-    loglik = 0.0
+    loglik = jnp.array(0.0)
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
         _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
@@ -114,51 +122,61 @@ def _perfilter_internal(
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF_Jx = rinitializers(thetas_Jd, keys, covars0, t0, SHOULD_TRANS)
 
-    norm_weights = jnp.log(jnp.ones(J) / J)
-    counts = jnp.ones(J).astype(int)
+    norm_weights = jnp.full(J, -jnp.log(J))
+    counts = jnp.ones(J, dtype=int)
 
-    perfilter_helper_2 = partial(
-        _perfilter_helper,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        times=times,
-        ys=ys,
-        rprocesses_interp=rprocesses_interp,
-        dmeasures=dmeasures,
-        sigmas=sigmas,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        m=m,
-        a=a,
+    time_indices = jnp.arange(len(ys))
+    cooling_factors = jax.vmap(
+        lambda i: _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a)
+    )(time_indices)
+
+    all_keys = jax.random.split(key, num=len(ys) + 1)
+    step_keys_raw = all_keys[1:]
+
+    perfilter_scan_xs = (
+        ys,
+        times,
+        nstep_array,
+        cooling_factors,
+        step_keys_raw,
     )
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, key, t_idx) = (
-        jax.lax.fori_loop(
-            lower=0,
-            upper=len(ys),
-            body_fun=perfilter_helper_2,
-            init_val=(
-                t0,
-                particlesF_Jx,
-                thetas_Jd,
-                loglik,
-                norm_weights,
-                counts,
-                key,
-                0,
-            ),
+
+    init_state = (
+        t0,
+        particlesF_Jx,
+        thetas_Jd,
+        loglik,
+        norm_weights,
+        counts,
+        0,
+    )
+
+    def scan_body(carry, xs):
+        return _perfilter_helper(
+            carry,
+            xs,
+            rprocesses_interp=rprocesses_interp,
+            dmeasures=dmeasures,
+            sigmas=sigmas,
+            accumvars=accumvars,
+            covars_extended=covars_extended,
+            dt_array_extended=dt_array_extended,
+            thresh=thresh,
+        )
+
+    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx), _ = (
+        jax.lax.scan(
+            f=scan_body,
+            init=init_state,
+            xs=perfilter_scan_xs,
         )
     )
 
-    logliks_M = logliks_M.at[m].set(-loglik)
-    thetas_MJd = thetas_MJd.at[m + 1].set(thetas_Jd)
-    return thetas_MJd, logliks_M, key
+    return thetas_Jd, -loglik
 
 
 def _perfilter_helper(
-    i: int,
-    inputs: tuple[
-        jax.Array,
+    carry: tuple[
         jax.Array,
         jax.Array,
         jax.Array,
@@ -167,43 +185,49 @@ def _perfilter_helper(
         jax.Array,
         int,
     ],
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    times: jax.Array,
-    ys: jax.Array,
+    xs: tuple[
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+    ],
     rprocesses_interp: Callable,
     dmeasures: Callable,
     sigmas: float | jax.Array,
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
+    dt_array_extended: jax.Array,
     thresh: float,
-    m: int,
-    a: float,
 ) -> tuple[
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    int,
+    tuple[
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        int,
+    ],
+    None,
 ]:
     """
     Runs one iteration of the perturbed particle filtering algorithm.
     """
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, key, t_idx) = inputs
+    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx) = carry
+    (y, time, nstep, cooling_factor, step_key) = xs
     J = len(particlesF_Jx)
 
-    sigmas_cooled = _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a) * sigmas
-    key, subkey = jax.random.split(key)
-    thetas_Jd = thetas_Jd + sigmas_cooled * jnp.array(
-        jax.random.normal(shape=thetas_Jd.shape, key=subkey)
+    key_perturb, key_process, key_resample = jax.random.split(step_key, 3)
+
+    sigmas_cooled = cooling_factor * sigmas
+    thetas_Jd = thetas_Jd + sigmas_cooled * jax.random.normal(
+        shape=thetas_Jd.shape, key=key_perturb
     )
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    _, keys = _keys_helper(key=key_process, J=J, covars=covars_extended)
 
-    nstep = nstep_array[i].astype(int)
+    nstep = nstep.astype(int)
 
     particlesP_Jx, t_idx = rprocesses_interp(
         particlesF_Jx,
@@ -217,12 +241,12 @@ def _perfilter_helper(
         accumvars,
         SHOULD_TRANS,
     )
-    t = times[i]
+    t = time
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
 
     measurements = jnp.nan_to_num(
-        dmeasures(ys[i], particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
+        dmeasures(y, particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
         nan=jnp.log(1e-18),
     )
     if len(measurements.shape) > 1:
@@ -233,15 +257,14 @@ def _perfilter_helper(
     loglik = loglik + loglik_t
 
     oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-    key, subkey = jax.random.split(key)
     counts, particlesF_Jx, norm_weights, thetas_Jd = jax.lax.cond(
         oddr > thresh,
         _resampler_thetas,
         _no_resampler_thetas,
-        *(counts, particlesP_Jx, norm_weights, thetas_Jd, subkey),
+        *(counts, particlesP_Jx, norm_weights, thetas_Jd, key_resample),
     )
 
-    return (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, key, t_idx)
+    return (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx), None
 
 
 def _panel_mif_internal(
@@ -279,36 +302,30 @@ def _panel_mif_internal(
     n_shared = shared_array.shape[0]
     n_spec = unit_array.shape[0]
 
-    shared_traces = jnp.zeros((M + 1, n_shared + 1))
-    unit_traces = jnp.zeros((M + 1, n_spec + 1, U))
+    shared_means0 = jnp.mean(shared_array, axis=1) if n_shared > 0 else jnp.zeros((0,))
+    unit_means0 = jnp.mean(unit_array, axis=1) if n_spec > 0 else jnp.zeros((0, U))
 
-    shared_means0 = jnp.where(
-        n_shared > 0, jnp.mean(shared_array, axis=1), jnp.zeros((n_shared,))
-    )
-    unit_means0 = jnp.where(
-        n_spec > 0, jnp.mean(unit_array, axis=1), jnp.zeros((n_spec, U))
-    )
-    shared_traces = shared_traces.at[0, 1:].set(shared_means0)
-    shared_traces = shared_traces.at[0, 0].set(jnp.nan)
-    unit_traces = unit_traces.at[0, 1:, :].set(unit_means0)
-    unit_traces = unit_traces.at[0, 0, :].set(jnp.nan)
+    shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
+    unit_trace_0 = jnp.concatenate(
+        [jnp.array([jnp.nan] * U)[None, :], unit_means0], axis=0
+    )[None, :, :]
 
-    def iter_body(m: int, carry):
+    all_keys = jax.random.split(key, num=M + 1)
+    m_keys = all_keys[1:]
+
+    def iter_body(carry, scan_inputs):
         (
             shared_array_m,
             unit_array_m,
-            shared_traces_m,
-            unit_traces_m,
-            key_m,
         ) = carry
+        m, iter_key = scan_inputs
 
         sum_loglik_iter = 0.0
 
-        def unit_scan_fn(inner_carry, scan_inputs):
+        def unit_scan_fn(inner_carry, unit_inputs):
             (
                 shared_array_u,
                 sum_loglik_u,
-                key_u,
             ) = inner_carry
 
             (
@@ -317,7 +334,8 @@ def _panel_mif_internal(
                 ys_u,
                 covars_u_dummy,
                 u_idx,
-            ) = scan_inputs
+                unit_key,
+            ) = unit_inputs
 
             covars_u = None if covars_per_unit is None else covars_u_dummy
 
@@ -330,7 +348,7 @@ def _panel_mif_internal(
                 thetas_u_panel_order = jnp.zeros((J, 0))
             thetas_u = thetas_u_panel_order[:, unit_param_perm_u]
 
-            key_u, subkey = jax.random.split(key_u)
+            subkey = unit_key
 
             sigmas_u = sigmas[unit_param_perm_u]
             sigmas_init_u = sigmas_init[unit_param_perm_u]
@@ -382,25 +400,25 @@ def _panel_mif_internal(
             loglik_u = -nLL_u
             sum_loglik_u = sum_loglik_u + loglik_u
 
-            unit_traces_u_m_local = jnp.zeros(n_spec + 1)
-            unit_traces_u_m_local = unit_traces_u_m_local.at[0].set(loglik_u)
             if n_spec > 0:
-                unit_traces_u_m_local = unit_traces_u_m_local.at[1:].set(
-                    jnp.mean(updated_spec_u, axis=1)
+                unit_traces_u_m_local = jnp.concatenate(
+                    [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=1)]
                 )
+            else:
+                unit_traces_u_m_local = jnp.array([loglik_u])
 
             new_inner_carry = (
                 new_shared_array,
                 sum_loglik_u,
-                key_u,
             )
 
             scan_outputs = (updated_spec_u, unit_traces_u_m_local)
 
             return new_inner_carry, scan_outputs
 
+        unit_keys = jax.random.split(iter_key, num=U)
+
         # unit_array_m: (n_spec, J, U) -> we want to scan over U
-        # jnp.moveaxis(unit_array_m, 2, 0) -> (U, n_spec, J)
         unit_scan_seq = (
             jnp.moveaxis(unit_array_m, 2, 0) if n_spec > 0 else jnp.zeros((U, 0, J)),
             unit_param_permutations,
@@ -409,12 +427,12 @@ def _panel_mif_internal(
             if covars_per_unit is not None
             else jnp.zeros((U, 0)),  # dummy
             jnp.arange(U),
+            unit_keys,
         )
 
         initial_inner_carry = (
             shared_array_m,
             sum_loglik_iter,
-            key_m,
         )
 
         final_inner_carry, (unit_array_m_new_seq, unit_traces_m_new_seq) = jax.lax.scan(
@@ -426,48 +444,41 @@ def _panel_mif_internal(
         (
             shared_array_m,
             sum_loglik_iter,
-            key_m,
         ) = final_inner_carry
 
         # unit_array_m_new_seq: (U, n_spec, J) -> move back to (n_spec, J, U)
         if n_spec > 0:
             unit_array_m = jnp.moveaxis(unit_array_m_new_seq, 0, 2)
 
-        # unit_traces_m_new_seq: (U, n_spec + 1) -> move back to (n_spec + 1, U)
-        unit_traces_m = unit_traces_m.at[m + 1, :, :].set(
-            jnp.moveaxis(unit_traces_m_new_seq, 0, 1)
-        )
+        # unit_traces_m_new_seq: (U, n_spec + 1) -> (n_spec + 1, U)
+        unit_traces_m_row = jnp.moveaxis(unit_traces_m_new_seq, 0, 1)
 
-        shared_means = jnp.where(
-            n_shared > 0, jnp.mean(shared_array_m, axis=1), jnp.zeros((n_shared,))
-        )
-        unit_means = jnp.where(
-            n_spec > 0, jnp.mean(unit_array_m, axis=1), jnp.zeros((n_spec, U))
-        )
-        shared_traces_m = shared_traces_m.at[m + 1, 1:].set(shared_means)
-        shared_traces_m = shared_traces_m.at[m + 1, 0].set(sum_loglik_iter)
-        unit_traces_m = unit_traces_m.at[m + 1, 1:, :].set(unit_means)
+        if n_shared > 0:
+            shared_means = jnp.mean(shared_array_m, axis=1)
+            shared_traces_m_row = jnp.concatenate(
+                [jnp.array([sum_loglik_iter]), shared_means]
+            )
+        else:
+            shared_traces_m_row = jnp.array([sum_loglik_iter])
 
         return (
-            shared_array_m,
-            unit_array_m,
-            shared_traces_m,
-            unit_traces_m,
-            key_m,
+            (shared_array_m, unit_array_m),
+            (shared_traces_m_row, unit_traces_m_row),
         )
 
-    (
-        shared_array,
-        unit_array,
-        shared_traces,
-        unit_traces,
-        key,
-    ) = jax.lax.fori_loop(
-        0,
-        M,
-        iter_body,
-        (shared_array, unit_array, shared_traces, unit_traces, key),
+    initial_iter_carry = (shared_array, unit_array)
+    iter_scan_xs = (jnp.arange(M), m_keys)
+
+    (final_iter_state, (shared_traces_history, unit_traces_history)) = jax.lax.scan(
+        f=iter_body,
+        init=initial_iter_carry,
+        xs=iter_scan_xs,
     )
+
+    (shared_array, unit_array) = final_iter_state
+
+    shared_traces = jnp.concatenate([shared_trace_0, shared_traces_history], axis=0)
+    unit_traces = jnp.concatenate([unit_trace_0, unit_traces_history], axis=0)
 
     return (shared_array, unit_array, shared_traces, unit_traces)
 

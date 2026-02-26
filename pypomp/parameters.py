@@ -675,31 +675,44 @@ class PanelParameters(ParameterSet):
         else:
             specific_keys = set()
 
+        shared_idx = []
+        shared_names_list = []
+        specific_idx = []
+        specific_names_list = []
+
+        for p_idx, p_name in enumerate(param_names):
+            if p_name in specific_keys:
+                specific_idx.append(p_idx)
+                specific_names_list.append(p_name)
+            elif p_name in shared_keys:
+                shared_idx.append(p_idx)
+                shared_names_list.append(p_name)
+            else:
+                raise KeyError(f"Parameter '{p_name}' not found.")
+
         full_array = np.zeros((reps, n_units, n_params))
+        s_col = ref["shared"].columns[0] if ref["shared"] is not None else None
 
         for j, t in enumerate(self._theta):
-            if t["shared"] is not None:
-                s_df = t["shared"]
-            else:
-                s_df = pd.DataFrame()
-            if t["unit_specific"] is not None:
-                u_df = t["unit_specific"]
-            else:
-                u_df = pd.DataFrame()
-
-            for p_idx, p_name in enumerate(param_names):
-                if p_name in specific_keys:
-                    # u_df cannot be empty if p_name is in specific_keys
-                    try:
-                        full_array[j, :, p_idx] = u_df.loc[p_name, unit_names].values
-                    except KeyError:
-                        raise KeyError(f"Unit mismatch for parameter {p_name}")
-                elif p_name in shared_keys:
-                    # s_df cannot be empty if p_name is in shared_keys
-                    val = s_df.loc[p_name].iloc[0]
-                    full_array[j, :, p_idx] = val
-                else:
-                    raise KeyError(f"Parameter '{p_name}' not found.")
+            if specific_names_list and t["unit_specific"] is not None:
+                try:
+                    values = (
+                        t["unit_specific"].loc[specific_names_list, unit_names].values
+                    )
+                    full_array[j][:, specific_idx] = values.T
+                except KeyError as e:
+                    missing = [
+                        p
+                        for p in specific_names_list
+                        if p not in t["unit_specific"].index
+                    ]
+                    if missing:
+                        raise KeyError(f"Unit mismatch for parameter {missing[0]}")
+                    else:
+                        raise e
+            if shared_names_list and t["shared"] is not None:
+                values = t["shared"].loc[shared_names_list, s_col].values
+                full_array[j][:, shared_idx] = values
 
         return jnp.array(full_array)
 
@@ -721,22 +734,22 @@ class PanelParameters(ParameterSet):
             self.estimation_scale = not self.estimation_scale
 
     def prune(self, n: int = 1, refill: bool = True) -> None:
-        if not self.theta:
+        if not self._theta:
             return
 
         # Sort by total log likelihood
         top_indices = self._logLik.argsort()[-n:][::-1]
 
-        top_theta = [self.theta[i] for i in top_indices]
+        top_theta = [self._theta[i] for i in top_indices]
         top_ll_unit = self._logLik_unit[top_indices]
 
         if refill:
-            n_reps = len(self.theta)
+            n_reps = len(self._theta)
             repeats = (n_reps + n - 1) // n
-            self.theta = (top_theta * repeats)[:n_reps]
+            self._theta = (top_theta * repeats)[:n_reps]
             self._logLik_unit = np.tile(top_ll_unit, (repeats, 1))[:n_reps]
         else:
-            self.theta = top_theta
+            self._theta = top_theta
             self._logLik_unit = top_ll_unit
 
         self._logLik = self._logLik_unit.sum(axis=1)
@@ -746,7 +759,7 @@ class PanelParameters(ParameterSet):
         Sorts unit-specific parameters and shared parameters in descending order of unit log-likelihood and shared log-likelihood, respectively, then combines them to form new parameter sets. The nth best parameter for a given unit or for the shared parameters is placed in the nth parameter set.
         """
         unit_names = self.get_unit_names()
-        if not self.theta:
+        if not self._theta:
             return
 
         # Rank by shared logLik (total)
@@ -760,12 +773,12 @@ class PanelParameters(ParameterSet):
         new_theta = []
         new_ll_unit = np.zeros_like(self._logLik_unit)
 
-        for i in range(len(self.theta)):
+        for i in range(len(self._theta)):
             # 1. Best shared params for this position
             s_idx = shared_ranks[i]
             best_shared = (
-                self.theta[s_idx]["shared"].copy()
-                if self.theta[s_idx]["shared"] is not None
+                self._theta[s_idx]["shared"].copy()
+                if self._theta[s_idx]["shared"] is not None
                 else None
             )
 
@@ -778,7 +791,7 @@ class PanelParameters(ParameterSet):
                 new_ll_unit[i, u_idx] = self._logLik_unit[u_best_idx, u_idx]
 
                 # Extract the unit specific column
-                src_df = self.theta[u_best_idx]["unit_specific"]
+                src_df = self._theta[u_best_idx]["unit_specific"]
                 if src_df is not None and not src_df.empty and unit in src_df.columns:
                     new_u_data[unit] = src_df[unit].copy()
 

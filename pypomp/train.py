@@ -9,6 +9,8 @@ from .pfilter import (
     _pfilter_internal_mean,
 )
 from .mop import _mop_internal_mean
+from .dpop import _dpop_internal_mean  # DPOP mean negative log-likelihood per observation
+
 
 
 _grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
@@ -691,3 +693,102 @@ def _jhess_mop(
         alpha=alpha,
         key=key,
     )
+
+# ----------------------------------------------------------------------
+# DPOP gradient helpers and a simple SGD-with-decay optimizer
+# ----------------------------------------------------------------------
+
+def _jgrad_dpop(
+    theta_ests: jax.Array,
+    ys: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    J: int,  # static conceptually (number of particles)
+    rinitializer: Callable,  # static conceptually
+    rprocess: Callable,      # static conceptually
+    dmeasure: Callable,      # static conceptually
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
+    alpha: float,
+    process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
+    key: jax.Array,
+) -> jax.Array:
+    """
+    Gradient of the DPOP mean negative log-likelihood with respect to theta_ests.
+
+    This wraps `_dpop_internal_mean` with `jax.grad`. The objective is the mean
+    negative log-likelihood per observation, so the gradient is scaled
+    accordingly (which is fine for optimization).
+    """
+    return jax.grad(_dpop_internal_mean)(
+        theta_ests,
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess_interp=rprocess,
+        dmeasure=dmeasure,
+        accumvars=accumvars,
+        covars_extended=covars_extended,
+        alpha=alpha,
+        process_weight_index=process_weight_index,
+        ntimes=ntimes,
+        key=key,
+    )
+
+
+def _jvg_dpop(
+    theta_ests: jax.Array,
+    ys: jax.Array,
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    J: int,  # static conceptually (number of particles)
+    rinitializer: Callable,  # static conceptually
+    rprocess: Callable,      # static conceptually
+    dmeasure: Callable,      # static conceptually
+    accumvars: tuple[int, ...] | None,
+    covars_extended: jax.Array | None,
+    alpha: float,
+    process_weight_index: int | None,
+    ntimes: int,  # static - number of observation times
+    key: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Value and gradient of the DPOP mean negative log-likelihood.
+
+    Returns
+    -------
+    value : scalar jax.Array
+        Mean negative log-likelihood per observation under DPOP.
+    grad : jax.Array, same shape as theta_ests
+        Gradient of the objective with respect to theta_ests.
+    """
+    return jax.value_and_grad(_dpop_internal_mean)(
+        theta_ests,
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess_interp=rprocess,
+        dmeasure=dmeasure,
+        accumvars=accumvars,
+        covars_extended=covars_extended,
+        alpha=alpha,
+        process_weight_index=process_weight_index,
+        ntimes=ntimes,
+        key=key,
+    )
+
+
+

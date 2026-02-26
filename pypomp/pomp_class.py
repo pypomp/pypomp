@@ -13,6 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from .mop import _mop_internal
+from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
 from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
@@ -448,6 +449,105 @@ class Pomp:
                 )
             )
         return results
+
+    def dpop(
+        self,
+        J: int,
+        key: jax.Array | None = None,
+        theta: dict | list[dict] | None = None,
+        alpha: float = 0.97,
+        process_weight_state: str | None = None,  # use state *name* here
+    ) -> list[jax.Array]:
+        """
+        Runs the DPOP (dynamics-penalized) differentiable particle filter.
+
+        This method is analogous to :meth:`mop`, but additionally
+        incorporates a per-interval transition log-weight that is
+        assumed to be stored in one of the state components.
+
+        The process log-weight is expected to be accumulated over a
+        single observation interval by the user-specified process
+        model. At the beginning of each interval, the corresponding
+        state component should be reset to zero (this is naturally
+        handled by ``accumvars`` in :class:`RProc`).
+
+        Args:
+            J: Number of particles.
+            key: Optional random key. If None, ``self.fresh_key`` is
+                used and updated internally.
+            theta: Optional parameter dictionary or list of dictionaries.
+                If None, ``self.theta`` is used.
+            alpha: Cooling factor for the particle weights.
+            process_weight_state: Name of the state component that
+                stores the accumulated transition log-weight over a
+                single observation interval (for example ``"logw"``).
+
+        Returns:
+            list[jax.Array]: A list of negative DPOP log-likelihood
+            estimates, one for each parameter vector in ``theta``.
+        """
+        theta = theta or self.theta
+        theta_list = self._prepare_theta_input(theta).to_list()
+        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
+
+        if self.dmeas is None:
+            raise ValueError("self.dmeas cannot be None")
+
+        if J < 1:
+            raise ValueError("J should be greater than 0")
+
+        # ------------------------------------------------------------------
+        # No default: user must be explicit.
+        # ------------------------------------------------------------------
+        if process_weight_state is None:
+            raise ValueError(
+                "dpop requires a process-weight state. "
+                "Please provide `process_weight_state` as the name of the state "
+                "variable that accumulates the transition log-weight "
+                "(e.g. 'logw')."
+            )
+
+        try:
+            process_weight_index = int(self.statenames.index(process_weight_state))
+        except ValueError as exc:
+            raise ValueError(
+                f"Unknown process_weight_state '{process_weight_state}'. "
+                f"Available statenames are: {self.statenames}"
+            ) from exc
+
+        # ------------------------------------------------------------------
+        # Run DPOP for each theta
+        # ------------------------------------------------------------------
+        new_key, _ = self._update_fresh_key(key)
+        keys = jax.random.split(new_key, len(theta_list_trans))
+
+        results: list[jax.Array] = []
+        ntimes = len(self.ys)
+        for theta_i, k in zip(theta_list_trans, keys):
+            results.append(
+                -_dpop_internal(
+                    theta=jnp.array([theta_i[name] for name in self.canonical_param_names]),
+                    ys=jnp.array(self.ys),
+                    dt_array_extended=self._dt_array_extended,
+                    nstep_array=self._nstep_array,
+                    t0=self.t0,
+                    times=jnp.array(self.ys.index),
+                    J=J,
+                    rinitializer=self.rinit.struct_pf,
+                    rprocess_interp=self.rproc.struct_pf_interp,
+                    dmeasure=self.dmeas.struct_pf,
+                    accumvars=self.rproc.accumvars,
+                    covars_extended=self._covars_extended,
+                    alpha=alpha,
+                    process_weight_index=process_weight_index,  # still an int internally
+                    ntimes=ntimes,
+                    key=k,
+                )
+            )
+        return results
+
+
+
 
     def pfilter(
         self,
@@ -947,6 +1047,158 @@ class Pomp:
         )
 
         self.results_history.add(result)
+    
+    def dpop_train(
+        self,
+        J: int,
+        M: int,
+        eta: dict[str, float] | float,
+        optimizer: str = "Adam",
+        alpha: float = 0.8,
+        decay: float = 0.0,
+        process_weight_state: str | None = None,
+        key: jax.Array | None = None,
+        theta: dict | list[dict] | None = None,
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Train on the DPOP objective using Adam or SGD with optional LR decay.
+
+        Parameters
+        ----------
+        J : int
+            Number of particles.
+        M : int
+            Number of gradient steps.
+        eta : dict[str, float] or float
+            Learning rates. Either a dict of per-parameter learning rates
+            keyed by parameter name, or a scalar float applied uniformly
+            to all parameters.
+        optimizer : str, default "Adam"
+            Optimizer to use: "Adam" or "SGD".
+        alpha : float, default 0.8
+            DPOP discount / cooling factor.
+        decay : float, default 0.0
+            Learning-rate decay coefficient. At iteration m, the effective
+            learning rate is ``eta / (1 + decay * m)``.
+        process_weight_state : str or None, default None
+            Name of the state component that stores the accumulated
+            process log-weight (e.g. ``"logw"``).
+        key : jax.Array or None, default None
+            Random key. If None, uses ``self.fresh_key``.
+        theta : dict or list[dict] or None, default None
+            Optional initial parameter(s) in natural space. If None, uses
+            ``self.theta``. Only the first element is used.
+
+        Returns
+        -------
+        nll_history : jax.Array, shape (M+1,)
+            Mean DPOP negative log-likelihood per observation at each step.
+        theta_history : jax.Array, shape (M+1, p)
+            Parameter vector (estimation space) at each step.
+        """
+        from .train_dpop import dpop_train as _dpop_train
+
+        # 1) Update fresh_key.
+        new_key, _ = self._update_fresh_key(key)
+
+        # 2) Decide which theta to use as initial point.
+        if theta is None:
+            theta_list_raw = self.theta
+        else:
+            if isinstance(theta, dict):
+                theta_list_raw = [theta]
+            elif isinstance(theta, list):
+                theta_list_raw = theta
+            else:
+                raise TypeError("theta must be a dict or a list of dicts")
+
+            def _to_float_dict(d: dict) -> dict:
+                return {k: float(v) for k, v in d.items()}
+
+            theta_list_raw = [_to_float_dict(d) for d in theta_list_raw]
+
+        theta_list = self._prepare_theta_input(theta_list_raw).to_list()
+        theta_nat = theta_list[0]
+
+        # 3) Map initial theta to estimation space in canonical order.
+        param_names = self.canonical_param_names
+        theta_est_dict = self.par_trans.to_est(theta_nat)
+        theta_init = jnp.array([theta_est_dict[name] for name in param_names])
+
+        # 4) Convert eta to JAX array in canonical order.
+        if isinstance(eta, (int, float)):
+            eta_array = jnp.full(len(param_names), float(eta))
+        else:
+            if set(eta.keys()) != set(param_names):
+                raise ValueError(
+                    f"eta keys {set(eta.keys())} must match parameter names "
+                    f"{set(param_names)}"
+                )
+            eta_array = jnp.array([eta[name] for name in param_names])
+
+        # 5) Extract internal quantities from the Pomp object.
+        ys_array = jnp.array(self.ys.values)
+        dt_array_extended = self._dt_array_extended
+        nstep_array = self._nstep_array
+        t0 = self.t0
+        times_array = jnp.array(self.ys.index.values)
+
+        rinitializer = self.rinit.struct_pf
+        rprocess_interp = self.rproc.struct_pf_interp
+
+        if self.dmeas is None:
+            raise ValueError("dpop_train requires self.dmeas to be not None.")
+        dmeasure = self.dmeas.struct_pf
+
+        accumvars = self.rproc.accumvars
+        covars_extended = self._covars_extended
+
+        # 6) Determine process_weight_index.
+        if process_weight_state is None:
+            raise ValueError(
+                "dpop_train requires a process-weight state. "
+                "Please provide `process_weight_state` as the name of the "
+                "state variable that accumulates the transition log-weight "
+                "(e.g. 'logw')."
+            )
+
+        try:
+            process_weight_index = int(
+                self.statenames.index(process_weight_state)
+            )
+        except ValueError as e:
+            raise ValueError(
+                f"State '{process_weight_state}' not found in statenames "
+                f"{self.statenames}"
+            ) from e
+
+        # 7) Call the low-level dpop_train.
+        ntimes = len(self.ys)
+        theta_hist, nll_hist = _dpop_train(
+            theta_init=theta_init,
+            ys=ys_array,
+            dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
+            t0=t0,
+            times=times_array,
+            J=J,
+            rinitializer=rinitializer,
+            rprocess_interp=rprocess_interp,
+            dmeasure=dmeasure,
+            accumvars=accumvars,
+            covars_extended=covars_extended,
+            alpha=alpha,
+            process_weight_index=process_weight_index,
+            ntimes=ntimes,
+            key=new_key,
+            M=M,
+            eta=eta_array,
+            optimizer=optimizer,
+            decay=decay,
+        )
+
+        # 8) Return in user-friendly order: first NLL, then parameter trajectory.
+        return nll_hist, theta_hist
 
     def simulate(
         self,

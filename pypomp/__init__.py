@@ -8,6 +8,7 @@ from .panelPomp.panelPomp_class import PanelPomp
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
 from .mcap import mcap
+from .SIR import sir
 from .parameters import PompParameters, PanelParameters
 from .types import (
     StateDict,

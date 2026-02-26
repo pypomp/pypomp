@@ -5,6 +5,7 @@ import pickle
 import pypomp.measles.model_001 as m001
 import pypomp.measles.model_001b as m001b
 import pypomp.measles.model_001c as m001c
+import pypomp.measles.model_001d as m001d  # FIX: added import for DPOP model
 import pypomp.measles.model_002 as m002
 import pypomp.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
@@ -166,7 +167,7 @@ class UKMeasles:
         theta : dict | list[dict]
             Parameters for the model. Can be a single dict or a list of dicts.
         model : str
-            The model to use. Can be "001b" or "001c", currently.
+            The model to use. Can be "001b", "001c", "001d" or "002".
         interp_method : str
             The method to use to interpolate the covariates. Can be "shifted_splines" or "linear".
         first_year : int
@@ -225,13 +226,20 @@ class UKMeasles:
 
         # ----pomp-construction-----------------------------------------------
 
+        # FIX: added "001d" to model dispatch dict
         mod = {
             "001": m001,
             "001b": m001b,
             "001c": m001c,
+            "001d": m001d,
             "002": m002,
             "003": m003,
         }[model]
+
+        # FIX: use mod.accumvars consistently (each model module defines its own)
+        # model_001d.accumvars = ("W", "C", "logw") for DPOP support
+        # model_001b/001c.accumvars = ("W", "C") for standard models
+
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(
             ys=dat_filtered,

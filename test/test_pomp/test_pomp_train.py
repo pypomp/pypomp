@@ -2,6 +2,7 @@ import jax
 import pytest
 import numpy as np
 import pypomp as pp
+import jax.numpy as jnp
 
 
 @pytest.fixture(scope="function")
@@ -113,7 +114,6 @@ def test_train_param_order_invariance(simple):
         theta=permuted_theta,
     )
     out2 = LG.results_history[-1].traces_da.values
-
     np.testing.assert_allclose(out1, out2, atol=1e-7)
 
 

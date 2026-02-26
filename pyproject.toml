@@ -42,3 +42,11 @@ build-backend = "hatchling.build"
 
 [tool.ruff.lint]
 ignore = ["E741"]
+
+[tool.pyright]
+include = ["."]
+exclude = ["**/.venv"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

@@ -590,7 +590,7 @@ class Pomp:
 
         logLik_estimates = np.apply_along_axis(
             logmeanexp, -1, -neg_logliks, ignore_nan=False
-        )
+        )  # type: ignore
         theta_obj_in.logLik = logLik_estimates
         self.theta = theta_obj_in
 

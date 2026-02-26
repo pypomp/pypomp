@@ -337,9 +337,7 @@ class PanelEstimationMixin(Base):
         ).transpose("theta", "unit", "replicate")
 
         results_np = np.array(results_da.values)
-        logLik_unit = np.apply_along_axis(
-            logmeanexp, -1, results_np, ignore_nan=False
-        )  # shape: (n_theta_reps, len(self.unit_objects))
+        logLik_unit = np.apply_along_axis(logmeanexp, -1, results_np, ignore_nan=False)  # type: ignore # shape: (n_theta_reps, len(self.unit_objects))
 
         self.theta.logLik_unit = logLik_unit
 

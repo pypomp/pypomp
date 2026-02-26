@@ -200,12 +200,12 @@ class PompPFilterResult(PompBaseResult):
 
         logLik = np.apply_along_axis(
             logmeanexp, -1, logLik_arr_np, ignore_nan=ignore_nan
-        )
+        )  # type: ignore
 
         if logLik_arr_np.shape[-1] > 1:
             se = np.apply_along_axis(
                 logmeanexp_se, -1, logLik_arr_np, ignore_nan=ignore_nan
-            )
+            )  # type: ignore
         else:
             se = np.full_like(logLik, np.nan, dtype=float)
 
@@ -229,7 +229,7 @@ class PompPFilterResult(PompBaseResult):
 
         arr = getattr(self.logLiks, "values", self.logLiks)
         logLik_arr_np = np.asarray(arr)
-        logliks = np.apply_along_axis(logmeanexp, -1, logLik_arr_np)
+        logliks = np.apply_along_axis(logmeanexp, -1, logLik_arr_np)  # type: ignore
 
         n_reps = len(self.theta)
 
@@ -717,7 +717,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         """Convert panel pfilter result to DataFrame."""
         ll = np.apply_along_axis(
             logmeanexp, -1, self.logLiks.values, ignore_nan=ignore_nan
-        )
+        )  # type: ignore
         df = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
             .assign(
@@ -765,7 +765,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
     def traces(self) -> pd.DataFrame:
         """Return pfilter results formatted as traces (long format)."""
-        ll = np.apply_along_axis(logmeanexp, -1, self.logLiks.values)
+        ll = np.apply_along_axis(logmeanexp, -1, self.logLiks.values)  # type: ignore
         reps = np.arange(len(ll))
 
         df_s = pd.DataFrame(

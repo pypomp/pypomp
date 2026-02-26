@@ -11,6 +11,14 @@ from .pfilter import (
 from .mop import _mop_internal_mean
 
 
+_grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
+_vg_pfilter_internal_mean = jax.value_and_grad(_pfilter_internal_mean)
+_hess_pfilter_internal_mean = jax.hessian(_pfilter_internal_mean)
+_grad_mop_internal_mean = jax.grad(_mop_internal_mean)
+_vg_mop_internal_mean = jax.value_and_grad(_mop_internal_mean)
+_hess_mop_internal_mean = jax.hessian(_mop_internal_mean)
+
+
 @partial(
     jit,
     static_argnames=(
@@ -64,13 +72,11 @@ def _train_internal(
     if n_monitors < 1 and ls:
         raise ValueError("Line search requires at least one monitor")
 
-    def train_step(i, carry):
+    def scan_step(carry, i):
         (
             theta_ests,
             key,
             hess,
-            Acopies,
-            logliks,
             prev_grad,
             prev_hess,
             m_adam,
@@ -160,7 +166,7 @@ def _train_internal(
                 alpha=alpha,
                 key=subkey,
             )
-            direction = -jnp.linalg.pinv(hess) @ grad
+            direction = -jnp.linalg.pinv(hess, hermitian=True) @ grad
 
         elif optimizer == "WeightedNewton":
             key, subkey = jax.random.split(key)
@@ -185,10 +191,13 @@ def _train_internal(
                 i_f = i.astype(theta_ests.dtype)
                 wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
                 weighted_hess = wt * prev_hess + (1 - wt) * hess
-                return -jnp.linalg.pinv(weighted_hess) @ grad
+                return -jnp.linalg.pinv(weighted_hess, hermitian=True) @ grad
 
             direction = jax.lax.cond(
-                i == 0, lambda _: -jnp.linalg.pinv(hess) @ grad, dir_weighted, None
+                i == 0,
+                lambda _: -jnp.linalg.pinv(hess, hermitian=True) @ grad,
+                dir_weighted,
+                None,
             )
 
         elif optimizer == "BFGS":
@@ -203,12 +212,14 @@ def _train_internal(
                 s_k = jnp.mean(eta) * prev_direction  # Use mean for BFGS
                 y_k = grad - prev_grad
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
-                sy_k = s_k[:, jnp.newaxis] * y_k[jnp.newaxis, :]
-                w = jnp.eye(theta_ests.shape[-1], dtype=rho_k.dtype) - rho_k * sy_k
-                new_hess = (
-                    jnp.einsum("ij,jk,lk", w, hess, w)
-                    + rho_k * s_k[:, jnp.newaxis] * s_k[jnp.newaxis, :]
-                )
+
+                Hy = hess @ y_k
+                yHy = jnp.dot(y_k, Hy)
+                term1 = rho_k * jnp.outer(s_k, Hy)
+                term2 = rho_k * jnp.outer(Hy, s_k)
+                term3 = rho_k * (rho_k * yHy + 1.0) * jnp.outer(s_k, s_k)
+
+                new_hess = hess - term1 - term2 + term3
                 new_hess = jnp.where(jnp.isfinite(rho_k), new_hess, hess)
                 new_direction = -new_hess @ grad
                 return new_hess, new_direction
@@ -282,55 +293,45 @@ def _train_internal(
         else:
             theta_ests = theta_ests + eta * direction
 
-        # Update carry state
-        Acopies = Acopies.at[i + 1].set(theta_ests)
-        logliks = logliks.at[i + 1].set(loglik)
         prev_grad = grad
         prev_hess = hess
 
-        return (
+        new_carry = (
             theta_ests,
             key,
             hess,
-            Acopies,
-            logliks,
             prev_grad,
             prev_hess,
             m_adam,
             v_adam,
         )
 
-    # Initialize arrays for storing results
-    Acopies = jnp.full((M + 1, *theta_ests.shape), jnp.nan)
-    logliks = jnp.full(M + 1, jnp.nan)
+        return new_carry, (loglik, theta_ests)
 
-    # Set initial values
-    Acopies = Acopies.at[0].set(theta_ests)
     hess = jnp.eye(theta_ests.shape[-1])  # default one
     prev_grad = jnp.zeros_like(theta_ests)
     prev_hess = hess
-
-    # Initialize Adam state (momentum and variance estimates)
     m_adam = jnp.zeros_like(theta_ests)
     v_adam = jnp.zeros_like(theta_ests)
 
-    # Run the optimization loop
-    (
-        final_theta,
-        final_key,
-        final_hess,
-        Acopies,
-        logliks,
+    initial_carry = (
+        theta_ests,
+        key,
+        hess,
         prev_grad,
         prev_hess,
-        final_m_adam,
-        final_v_adam,
-    ) = jax.lax.fori_loop(
-        0,
-        M,
-        train_step,
-        (theta_ests, key, hess, Acopies, logliks, prev_grad, prev_hess, m_adam, v_adam),
+        m_adam,
+        v_adam,
     )
+
+    _, (logliks_history, Acopies_history) = jax.lax.scan(
+        scan_step,
+        initial_carry,
+        jnp.arange(M),
+    )
+
+    logliks = jnp.concatenate((jnp.array([jnp.nan]), logliks_history))
+    Acopies = jnp.concatenate((theta_ests[jnp.newaxis, ...], Acopies_history))
 
     return logliks, Acopies
 
@@ -430,7 +431,7 @@ def _jgrad(
         array-like: the gradient of the pfilter_internal_mean function w.r.t.
             theta_ests.
     """
-    return jax.grad(_pfilter_internal_mean)(
+    return _grad_pfilter_internal_mean(
         theta_ests,  # for some reason this needs to be given as a positional argument
         dt_array_extended=dt_array_extended,
         nstep_array=nstep_array,
@@ -492,7 +493,7 @@ def _jvg(
         - The gradient of the function pfilter_internal_mean function w.r.t.
             theta_ests.
     """
-    return jax.value_and_grad(_pfilter_internal_mean)(
+    return _vg_pfilter_internal_mean(
         theta_ests,
         dt_array_extended=dt_array_extended,
         nstep_array=nstep_array,
@@ -537,7 +538,7 @@ def _jgrad_mop(
         array-like: the gradient of the mop_internal_mean function w.r.t.
             theta_ests.
     """
-    return jax.grad(_mop_internal_mean)(
+    return _grad_mop_internal_mean(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,
@@ -583,7 +584,7 @@ def _jvg_mop(
         - The gradient of the function mop_internal_mean function w.r.t.
             theta_ests.
     """
-    return jax.value_and_grad(_mop_internal_mean)(
+    return _vg_mop_internal_mean(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,
@@ -628,7 +629,7 @@ def _jhess(
         array-like: the Hessian matrix of the pfilter_internal_mean function
             w.r.t. theta_ests.
     """
-    return jax.hessian(_pfilter_internal_mean)(
+    return _hess_pfilter_internal_mean(
         theta_ests,
         dt_array_extended=dt_array_extended,
         nstep_array=nstep_array,
@@ -674,7 +675,7 @@ def _jhess_mop(
         array-like: the Hessian matrix of the mop_internal_mean function w.r.t.
             theta_ests.
     """
-    return jax.hessian(_mop_internal_mean)(
+    return _hess_mop_internal_mean(
         theta_ests,
         ys=ys,
         dt_array_extended=dt_array_extended,

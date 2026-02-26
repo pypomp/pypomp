@@ -4,6 +4,9 @@ import numpy as np
 import pypomp as pp
 import jax.numpy as jnp
 
+J_DEFAULT = 2
+M_DEFAULT = 2
+
 
 @pytest.fixture(scope="function")
 def simple_sir_for_dpop():
@@ -21,16 +24,16 @@ def test_dpop_train_adam(simple_sir_for_dpop):
     model = simple_sir_for_dpop
     eta = {name: 0.01 for name in model.canonical_param_names}
     nll, theta_hist = model.dpop_train(
-        J=50,
-        M=4,
+        J=J_DEFAULT,
+        M=M_DEFAULT,
         eta=eta,
         optimizer="Adam",
         alpha=0.8,
         process_weight_state="logw",
         key=jax.random.key(42),
     )
-    assert nll.shape == (5,)  # M+1
-    assert theta_hist.shape[0] == 5
+    assert nll.shape == (M_DEFAULT + 1,)
+    assert theta_hist.shape[0] == M_DEFAULT + 1
     assert jnp.all(jnp.isfinite(nll))
 
 
@@ -41,8 +44,8 @@ def test_dpop_train_sgd(simple_sir_for_dpop):
     model = simple_sir_for_dpop
     eta = {name: 0.01 for name in model.canonical_param_names}
     nll, theta_hist = model.dpop_train(
-        J=50,
-        M=4,
+        J=J_DEFAULT,
+        M=M_DEFAULT,
         eta=eta,
         optimizer="SGD",
         alpha=0.8,
@@ -50,8 +53,8 @@ def test_dpop_train_sgd(simple_sir_for_dpop):
         process_weight_state="logw",
         key=jax.random.key(42),
     )
-    assert nll.shape == (5,)
-    assert theta_hist.shape[0] == 5
+    assert nll.shape == (M_DEFAULT + 1,)
+    assert theta_hist.shape[0] == M_DEFAULT + 1
     assert jnp.all(jnp.isfinite(nll))
 
 
@@ -62,8 +65,8 @@ def test_dpop_train_adam_with_decay(simple_sir_for_dpop):
     model = simple_sir_for_dpop
     eta = {name: 0.01 for name in model.canonical_param_names}
     nll, theta_hist = model.dpop_train(
-        J=50,
-        M=4,
+        J=J_DEFAULT,
+        M=M_DEFAULT,
         eta=eta,
         optimizer="Adam",
         alpha=0.8,
@@ -71,8 +74,8 @@ def test_dpop_train_adam_with_decay(simple_sir_for_dpop):
         process_weight_state="logw",
         key=jax.random.key(42),
     )
-    assert nll.shape == (5,)
-    assert theta_hist.shape[0] == 5
+    assert nll.shape == (M_DEFAULT + 1,)
+    assert theta_hist.shape[0] == M_DEFAULT + 1
     assert jnp.all(jnp.isfinite(nll))
 
 
@@ -82,8 +85,8 @@ def test_dpop_train_scalar_eta(simple_sir_for_dpop):
     """
     model = simple_sir_for_dpop
     nll, theta_hist = model.dpop_train(
-        J=50,
-        M=4,
+        J=J_DEFAULT,
+        M=M_DEFAULT,
         eta=0.01,
         optimizer="SGD",
         alpha=0.8,
@@ -91,8 +94,8 @@ def test_dpop_train_scalar_eta(simple_sir_for_dpop):
         process_weight_state="logw",
         key=jax.random.key(42),
     )
-    assert nll.shape == (5,)
-    assert theta_hist.shape[0] == 5
+    assert nll.shape == (M_DEFAULT + 1,)
+    assert theta_hist.shape[0] == M_DEFAULT + 1
     assert jnp.all(jnp.isfinite(nll))
 
 
@@ -103,8 +106,8 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     """
     model = simple_sir_for_dpop
 
-    J = 50
-    M = 4
+    J = J_DEFAULT
+    M = M_DEFAULT
     eta = {name: 0.01 for name in model.canonical_param_names}
 
     # First run: default theta ordering

@@ -21,7 +21,7 @@ def simple_sir():
         Model parameters (natural space) as stored in model.theta.
     covars : pandas.DataFrame | None
         Covariates used by the model.
-    key : jax.random.PRNGKey
+    key : jax.random.key
         Base random key for tests.
     """
     model = pp.sir()

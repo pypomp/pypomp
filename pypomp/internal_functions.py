@@ -33,7 +33,7 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     Args:
         norm_weights (array-like): The array containing the logarithm of
             normalized weights.
-        subkey (jax.random.PRNGKey): The random key for sampling.
+        subkey: The random key for sampling.
 
     Returns:
         array-like: An array containing the resampled indices from the
@@ -87,7 +87,7 @@ def _resampler(
         particlesP (array-like): The original particles before resampling
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
-        subkey (jax.random.PRNGKey): The random key for sampling.
+        subkey: The random key for sampling.
 
     Returns:
         tuple: A tuple containing:
@@ -134,7 +134,7 @@ def _resampler_thetas(
             generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
         thetas (array-like): Perturbed parameters associated with the particles.
-        subkey (jax.random.PRNGKey): The random key for sampling.
+        subkey: The random key for sampling.
 
     Returns:
         tuple: A tuple containing:

@@ -136,7 +136,7 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
     del0 = jnp.where(u > 0.5, t0 * (1e-6 * t0), 0.0)
     s0 = 1.0 - t0 * (u * t0) + del0
 
-    def unrolled_computation(x_init, s0, del0, lami):
+    def unrolled_computation(x_init, s0, del0, lami) -> Tuple[Array, Array, Array]:
         MAX_LOOPS = 20
 
         # Initialize state
@@ -176,6 +176,9 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
 
     x_init = 0.0
     x, s, delta = unrolled_computation(x_init, s0, del0, lami)
+    x = cast(Array, x)
+    s = cast(Array, s)
+    delta = cast(Array, delta)
 
     def top_down_branch(state):
         x_val, delta_val = state
@@ -355,6 +358,7 @@ def fast_approx_rpoisson(
     float_dtype = _get_available_dtype(float_dtype)
     assert float_dtype is not None
 
+    lam = jnp.asarray(lam)
     shape = lam.shape
     u = jax.random.uniform(key, shape, dtype=float_dtype)
     # Clamp u to be slightly less than 1.0 to avoid inf output

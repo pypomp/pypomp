@@ -19,7 +19,7 @@ BASE_THETA_001D = {
     "R_0": 9.70e-01,
 }
 
-DEFAULT_J = 3
+DEFAULT_J = 2
 DEFAULT_KEY = jax.random.key(1)
 
 

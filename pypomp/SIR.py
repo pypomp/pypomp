@@ -13,6 +13,9 @@ import pandas as pd
 from pypomp.pomp_class import Pomp
 from pypomp.ParTrans_class import ParTrans
 from pypomp.ctmc_multinom import sample_and_log_prob
+from pypomp.random.poissoninvf import fast_approx_rpoisson
+from pypomp.random.binominvf import fast_approx_rmultinom
+from pypomp.random.gammainvf import fast_approx_rgamma
 
 # ---------------------------------------------------------------------
 # State names and default parameters
@@ -41,6 +44,7 @@ DEFAULT_THETA = {
 # Periodic B-spline basis (from pomp's C implementation)
 # ---------------------------------------------------------------------
 
+
 def _bspline_eval(x, knots, i, degree, deriv=0):
     if deriv > degree:
         return 0.0
@@ -63,9 +67,7 @@ def _bspline_eval(x, knots, i, degree, deriv=0):
             y2 = _bspline_eval(x, knots, i2, p2, 0)
             denom1 = knots[i + degree] - knots[i]
             denom2 = knots[i2 + degree] - knots[i2]
-            a = jnp.where(
-                jnp.abs(denom1) > 1e-10, (x - knots[i]) / denom1, 0.0
-            )
+            a = jnp.where(jnp.abs(denom1) > 1e-10, (x - knots[i]) / denom1, 0.0)
             b = jnp.where(
                 jnp.abs(denom2) > 1e-10,
                 (knots[i2 + degree] - x) / denom2,
@@ -73,30 +75,21 @@ def _bspline_eval(x, knots, i, degree, deriv=0):
             )
             return a * y1 + b * y2
         else:
-            return jnp.where(
-                (knots[i] <= x) & (x < knots[i + 1]), 1.0, 0.0
-            )
+            return jnp.where((knots[i] <= x) & (x < knots[i + 1]), 1.0, 0.0)
 
 
 def periodic_bspline_basis_eval(x, period, degree, nbasis, deriv=0):
     nknots = nbasis + 2 * degree + 1
     shift = (degree - 1) // 2
     dx = period / nbasis
-    knots = jnp.array(
-        [(k) * dx for k in range(-degree, nbasis + degree + 2)]
-    )
+    knots = jnp.array([(k) * dx for k in range(-degree, nbasis + degree + 2)])
     x_wrapped = x % period
     x_wrapped = jnp.where(x_wrapped < 0, x_wrapped + period, x_wrapped)
     yy = jnp.array(
-        [
-            _bspline_eval(x_wrapped, knots, k, degree, deriv)
-            for k in range(nknots)
-        ]
+        [_bspline_eval(x_wrapped, knots, k, degree, deriv) for k in range(nknots)]
     )
     yy_adjusted = yy.at[:degree].add(yy[nbasis : nbasis + degree])
-    y = jnp.array(
-        [yy_adjusted[(shift + k) % nbasis] for k in range(nbasis)]
-    )
+    y = jnp.array([yy_adjusted[(shift + k) % nbasis] for k in range(nbasis)])
     return y
 
 
@@ -104,19 +97,18 @@ def precompute_bspline_covars(times, t0, period=1.0, nbasis=3, degree=3):
     t_min = t0
     t_max = max(times) + 0.2
     t_grid = np.arange(t_min, t_max + 0.01, 0.01)
-    basis_data = {f"seas_{i+1}": [] for i in range(nbasis)}
+    basis_data = {f"seas_{i + 1}": [] for i in range(nbasis)}
     for t in t_grid:
-        basis = periodic_bspline_basis_eval(
-            t, period, degree, nbasis, deriv=0
-        )
+        basis = periodic_bspline_basis_eval(t, period, degree, nbasis, deriv=0)
         for i in range(nbasis):
-            basis_data[f"seas_{i+1}"].append(float(basis[i]))
+            basis_data[f"seas_{i + 1}"].append(float(basis[i]))
     return pd.DataFrame(basis_data, index=pd.Index(t_grid, name="time"))
 
 
 # ---------------------------------------------------------------------
 # Parameter transformations
 # ---------------------------------------------------------------------
+
 
 def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     SIR_0 = jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]])
@@ -140,9 +132,7 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
 
 
 def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-    SIR_0 = jnp.exp(
-        jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]])
-    )
+    SIR_0 = jnp.exp(jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]]))
     SIR_0 = SIR_0 / jnp.sum(SIR_0)
     return {
         "gamma": jnp.exp(theta["gamma"]),
@@ -164,6 +154,7 @@ def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
 # ---------------------------------------------------------------------
 # Model components: rinit, rproc, dmeas, rmeas
 # ---------------------------------------------------------------------
+
 
 def rinit(theta_, key, covars=None, t0=None):
     pop = theta_["pop"]
@@ -201,7 +192,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # Gamma white noise
     key, subkey = jax.random.split(key)
     shape = dt / (beta_sd**2 + 1e-10)
-    dW = jax.random.gamma(subkey, shape) * (beta_sd**2)
+    dW = fast_approx_rgamma(subkey, shape) * (beta_sd**2)
 
     # Transition rates
     rate_foi = (iota + beta * I * dW / dt) / pop
@@ -210,7 +201,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     key, k1, k2, k3, k4 = jax.random.split(key, 5)
 
     # Births: Poisson
-    births = jax.random.poisson(k1, mu * pop * dt)
+    births = fast_approx_rpoisson(k1, mu * pop * dt)
 
     # S transitions
     S_int = jnp.maximum(jnp.round(S), 0.0)
@@ -287,6 +278,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
 # Constructor function
 # ---------------------------------------------------------------------
 
+
 def sir(
     gamma: float = 26.0,
     mu: float = 0.02,
@@ -333,9 +325,7 @@ def sir(
 
     covars = precompute_bspline_covars(times, t0)
     par_trans = ParTrans(to_est=to_est, from_est=from_est)
-    ys_dummy = pd.DataFrame(
-        {"reports": np.zeros(len(times))}, index=pd.Index(times)
-    )
+    ys_dummy = pd.DataFrame({"reports": np.zeros(len(times))}, index=pd.Index(times))
 
     accumvars = ("cases", "logw")
 
@@ -356,7 +346,7 @@ def sir(
     )
 
     # Simulate data
-    key = jax.random.PRNGKey(seed)
+    key = jax.random.key(seed)
     X_long, Y_long = sir_temp.simulate(key=key, nsim=1)
     y_sims = (
         Y_long.loc[(Y_long["replicate"] == 0) & (Y_long["sim"] == 0)]

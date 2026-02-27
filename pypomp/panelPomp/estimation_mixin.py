@@ -206,6 +206,26 @@ class PanelEstimationMixin(Base):
         filter_mean: bool = False,
         prediction_mean: bool = False,
     ) -> None:
+        """
+        Run the particle filter (SMC) algorithm on the PanelPomp model.
+
+        Args:
+            J (int): Number of particles per unit.
+            key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
+            theta (PanelParameters | dict | list, optional): Parameter sets to use.
+                If None, uses `self.theta`.
+            thresh (float, optional): Resampling threshold. If 0.0, always resample.
+            reps (int, optional): Number of replicates per parameter set.
+            chunk_size (Union[int, str], optional): Number of units to process
+                per batch. 'auto' will attempt to estimate based on memory.
+            CLL (bool, optional): Whether to compute conditional log-likelihoods.
+            ESS (bool, optional): Whether to compute effective sample sizes.
+            filter_mean (bool, optional): Whether to compute filtering means.
+            prediction_mean (bool, optional): Whether to compute prediction means.
+
+        Returns:
+            None: Updates `self.theta.logLik_unit` and adds result to `self.results_history`.
+        """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
 
@@ -428,6 +448,23 @@ class PanelEstimationMixin(Base):
         thresh: float = 0,
         block: bool = True,
     ) -> None:
+        """
+        Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for PanelPomp.
+
+        Args:
+            J (int): Number of particles per unit.
+            M (int): Number of iterations (cooling cycles).
+            rw_sd (RWSigma): Random walk standard deviations for parameter perturbations.
+            a (float): Cooling factor (perturbation variance reduction per unit time).
+            key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
+            theta (PanelParameters | dict | list, optional): Initial parameter estimates.
+                If None, uses `self.theta`.
+            thresh (float, optional): Resampling threshold for the particle filter.
+            block (bool, optional): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF) (currently only block=True is supported).
+
+        Returns:
+            None: Updates `self.theta` with final estimates and adds result to `self.results_history`.
+        """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         if theta_obj_in is None:

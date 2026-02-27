@@ -393,7 +393,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         alpha: float = 0.97,
     ) -> list[jax.Array]:
         """
@@ -454,7 +454,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
         alpha: float = 0.97,
         process_weight_state: str | None = None,  # use state *name* here
     ) -> list[jax.Array]:
@@ -486,8 +486,8 @@ class Pomp:
             list[jax.Array]: A list of negative DPOP log-likelihood
             estimates, one for each parameter vector in ``theta``.
         """
-        theta = theta or self.theta
-        theta_list = self._prepare_theta_input(theta).to_list()
+        theta_obj = self._prepare_theta_input(theta)
+        theta_list = theta_obj.to_list()
         theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
 
         if self.dmeas is None:
@@ -526,7 +526,9 @@ class Pomp:
         for theta_i, k in zip(theta_list_trans, keys):
             results.append(
                 -_dpop_internal(
-                    theta=jnp.array([theta_i[name] for name in self.canonical_param_names]),
+                    theta=jnp.array(
+                        [theta_i[name] for name in self.canonical_param_names]
+                    ),
                     ys=jnp.array(self.ys),
                     dt_array_extended=self._dt_array_extended,
                     nstep_array=self._nstep_array,
@@ -545,9 +547,6 @@ class Pomp:
                 )
             )
         return results
-
-
-
 
     def pfilter(
         self,
@@ -1047,7 +1046,7 @@ class Pomp:
         )
 
         self.results_history.add(result)
-    
+
     def dpop_train(
         self,
         J: int,
@@ -1058,7 +1057,7 @@ class Pomp:
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | None = None,
+        theta: dict | list[dict] | PompParameters | None = None,
     ) -> tuple[jax.Array, jax.Array]:
         """
         Train on the DPOP objective using Adam or SGD with optional LR decay.
@@ -1104,21 +1103,25 @@ class Pomp:
         # 2) Decide which theta to use as initial point.
         if theta is None:
             theta_list_raw = self.theta
+        elif isinstance(theta, PompParameters):
+            theta_list_raw = theta
         else:
             if isinstance(theta, dict):
                 theta_list_raw = [theta]
             elif isinstance(theta, list):
                 theta_list_raw = theta
             else:
-                raise TypeError("theta must be a dict or a list of dicts")
+                raise TypeError(
+                    "theta must be a dict, a list of dicts, or a PompParameters object"
+                )
 
             def _to_float_dict(d: dict) -> dict:
                 return {k: float(v) for k, v in d.items()}
 
             theta_list_raw = [_to_float_dict(d) for d in theta_list_raw]
 
-        theta_list = self._prepare_theta_input(theta_list_raw).to_list()
-        theta_nat = theta_list[0]
+        theta_obj = self._prepare_theta_input(theta_list_raw)
+        theta_nat = theta_obj.to_list()[0]
 
         # 3) Map initial theta to estimation space in canonical order.
         param_names = self.canonical_param_names
@@ -1163,9 +1166,7 @@ class Pomp:
             )
 
         try:
-            process_weight_index = int(
-                self.statenames.index(process_weight_state)
-            )
+            process_weight_index = int(self.statenames.index(process_weight_state))
         except ValueError as e:
             raise ValueError(
                 f"State '{process_weight_state}' not found in statenames "

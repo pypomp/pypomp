@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Union, cast
 
 from ..pfilter import _chunked_panel_pfilter_internal
 from ..mif import _jv_panel_mif_internal
+from ..train import _vmapped_panel_train_internal
 from ..RWSigma_class import RWSigma
-from ..results import PanelPompPFilterResult, PanelPompMIFResult
+from ..results import PanelPompPFilterResult, PanelPompMIFResult, PanelPompTrainResult
 from ..parameters import PanelParameters
 from ..util import logmeanexp
 from ..benchmarks import (
@@ -714,6 +715,364 @@ class PanelEstimationMixin(Base):
             a=a,
             thresh=thresh,
             block=block,
+        )
+
+        self.results_history.add(result)
+
+    def train(
+        self,
+        J: int,
+        M: int,
+        eta: dict[str, float] | float,
+        chunk_size: Union[int, str] = 1,
+        optimizer: str = "Adam",
+        alpha: float = 0.97,
+        key: jax.Array | None = None,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ] = None,
+    ):
+        """
+        Estimate parameters using chunked gradient-descent optimization (SGD/Adam).
+
+        This method performs stochastic gradient descent (or Adam) iterations over
+        the likelihood of the panel POMP. It operates by drawing particles for a
+        subset of units (defined by `chunk_size`), calculating gradients for both
+        shared and unit-specific parameters, and updating estimates.
+
+        Args:
+            J (int): Number of particles per unit.
+            M (int): Number of training iterations.
+            eta (dict[str, float] | float): Learning rate(s). Can be a float for a
+                global learning rate or a dictionary mapping parameter names to rates.
+            chunk_size (Union[int, str], optional): Number of units to process
+                per gradient calculation step. 'auto' will attempt to estimate
+                concurrency based on hardware.
+            optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD'.
+            alpha (float, optional): Learning rate decay factor per iteration.
+            key (jax.Array, optional): JAX PRNG key. If None, uses the
+                `fresh_key` attribute.
+            theta (PanelParameters, optional): Initial parameter estimates.
+                If None, uses the current `theta` attribute.
+
+        Returns:
+            None: Updates `self.theta` and appends result to `self.results_history`.
+        """
+        start_time = time.time()
+        theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
+        if theta_obj_in is None:
+            raise ValueError("theta must be provided or self.theta must exist")
+
+        key, old_key = self._update_fresh_key(key)
+        if J < 1:
+            raise ValueError("J should be greater than 0.")
+        if M < 1:
+            raise ValueError("M should be greater than 0.")
+
+        unit_names = self.get_unit_names()
+        U = len(unit_names)
+        rep_unit = self.unit_objects[unit_names[0]]
+
+        if rep_unit.dmeas is None:
+            raise ValueError("dmeas cannot be None in PanelPomp units")
+
+        # Determine chunk size similar to pfilter
+        # This is experimental and should maybe be removed
+        if chunk_size == "auto":
+            try:
+                import psutil
+
+                bytes_per_unit = (
+                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
+                )  # rough estimate
+                mem = psutil.virtual_memory()
+                avail = mem.available * 0.4
+                max_units = max(1, int(avail / bytes_per_unit))
+                chunk_size = min(U, max_units)
+                try:
+                    device = jax.devices()[0]
+                    if device.platform == "gpu":
+                        avail = (
+                            device.memory_stats()["bytes_limit"]
+                            - device.memory_stats()["bytes_in_use"]
+                        )
+                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
+                        chunk_size = min(U, max_units)
+                except Exception:
+                    pass
+            except Exception:
+                chunk_size = max(1, U // 4)
+        else:
+            chunk_size = int(chunk_size)
+
+        if chunk_size < 1:
+            chunk_size = 1
+
+        unit_param_permutations = jnp.stack(
+            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
+        )
+
+        dt_array_extended = rep_unit._dt_array_extended
+        nstep_array = rep_unit._nstep_array
+        t0 = rep_unit.t0
+        times = jnp.array(rep_unit.ys.index)
+
+        rinitializers = rep_unit.rinit.struct_pf
+        rprocesses_interp = rep_unit.rproc.struct_pf_interp
+        dmeasures = rep_unit.dmeas.struct_pf
+        accumvars = rep_unit.rproc.accumvars
+
+        has_covars = [
+            self.unit_objects[u]._covars_extended is not None for u in unit_names
+        ]
+        if all(has_covars):
+            covars_per_unit = jnp.stack(
+                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
+                axis=0,
+            )
+        elif any(has_covars):
+            raise NotImplementedError(
+                "Some units have covariates, but not all units have covariates. This is not supported yet."
+            )
+        else:
+            covars_per_unit = None
+
+        n_reps = theta_obj_in.num_replicates()
+
+        theta_list = theta_obj_in.theta
+        if not theta_obj_in.estimation_scale:
+            theta_list = [
+                {
+                    "shared": t["shared"].copy() if t["shared"] is not None else None,
+                    "unit_specific": (
+                        t["unit_specific"].copy()
+                        if t["unit_specific"] is not None
+                        else None
+                    ),
+                }
+                for t in theta_list
+            ]
+            theta_trans_list = rep_unit.par_trans.panel_transform_list(
+                theta_list, direction="to_est"
+            )
+        else:
+            theta_trans_list = theta_list
+
+        shared_trans_list = [t.get("shared") for t in theta_trans_list]
+        spec_trans_list = [t.get("unit_specific") for t in theta_trans_list]
+
+        shared = [t.get("shared") for t in theta_list]
+        unit_specific = [t.get("unit_specific") for t in theta_list]
+
+        if all(df is None for df in shared_trans_list):
+            shared_array = jnp.zeros((n_reps, 0))
+            shared_index: list[str] = []
+        else:
+            shared_index = self.canonical_shared_param_names
+            shared_trans_list_nonnull = cast(list[pd.DataFrame], shared_trans_list)
+            shared_array = jnp.stack(
+                [
+                    self._dataframe_to_array_canonical(
+                        df, self.canonical_shared_param_names, "shared"
+                    )
+                    for df in shared_trans_list_nonnull
+                ],
+                axis=0,
+            )
+
+        if all(df is None for df in spec_trans_list):
+            unit_array = jnp.zeros((n_reps, 0, U))
+            spec_index: list[str] = []
+        else:
+            spec_index = self.canonical_unit_param_names
+            spec_trans_list_nonnull = cast(list[pd.DataFrame], spec_trans_list)
+            unit_array = jnp.stack(
+                [
+                    jnp.stack(
+                        [
+                            self._dataframe_to_array_canonical(
+                                df, self.canonical_unit_param_names, unit
+                            )
+                            for unit in unit_names
+                        ],
+                        axis=1,
+                    )
+                    for df in spec_trans_list_nonnull
+                ],
+                axis=0,
+            )
+
+        eta_dict = (
+            eta
+            if isinstance(eta, dict)
+            else {p: eta for p in self.canonical_param_names}
+        )
+        eta_shared = jnp.array(
+            [eta_dict.get(p, 0.0) for p in shared_index], dtype=float
+        )
+        eta_spec = jnp.array([eta_dict.get(p, 0.0) for p in spec_index], dtype=float)
+
+        ys_per_unit = jnp.stack(
+            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        )
+        n_obs = ys_per_unit.shape[1]
+
+        keys = jax.random.split(key, n_reps * M * U)
+        keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
+
+        (
+            logliks_history,
+            shared_history,
+            unit_history,
+        ) = _vmapped_panel_train_internal(
+            shared_array,
+            unit_array,
+            unit_param_permutations,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys_per_unit,
+            covars_per_unit,
+            keys,
+            J,
+            rinitializers,
+            rprocesses_interp,
+            dmeasures,
+            accumvars,
+            chunk_size,
+            optimizer,
+            M,
+            eta_shared,
+            eta_spec,
+            alpha,
+            n_obs,
+            U,
+        )
+
+        shared_traces_in = None
+        unit_traces_in = None
+
+        if len(shared_index) > 0:
+            shared_ll_expanded = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_traces_in = np.concatenate(
+                [shared_ll_expanded, np.array(shared_history)], axis=-1
+            )
+
+        if len(spec_index) > 0:
+            nan_ll = np.full((n_reps, M + 1, 1, U), np.nan, dtype=float)
+            unit_traces_in = np.concatenate([nan_ll, np.array(unit_history)], axis=-2)
+
+        shared_traces, unit_traces = rep_unit.par_trans.transform_panel_traces(
+            shared_traces=shared_traces_in,
+            unit_traces=unit_traces_in,
+            shared_param_names=shared_index,
+            unit_param_names=spec_index,
+            unit_names=unit_names,
+            direction="from_est",
+        )
+
+        if shared_traces is None:
+            if unit_traces is None:
+                raise ValueError(
+                    "Both shared_traces and unit_traces are None; cannot build traces."
+                )
+            n_reps = unit_traces.shape[0]
+            shared_ll = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_traces = shared_ll
+            shared_index = []
+
+        if unit_traces is None:
+            n_reps = shared_traces.shape[0]
+            unit_ll = np.zeros((n_reps, M + 1, 1, U), dtype=float)
+            unit_traces = unit_ll
+
+        shared_vars = ["logLik"] + shared_index
+        unit_vars = ["unitLogLik"] + spec_index
+
+        shared_da = xr.DataArray(
+            shared_traces,
+            dims=["replicate", "iteration", "variable"],
+            coords={
+                "replicate": jnp.arange(shared_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": shared_vars,
+            },
+        )
+        unit_da = xr.DataArray(
+            unit_traces,
+            dims=["replicate", "iteration", "variable", "unit"],
+            coords={
+                "replicate": jnp.arange(unit_traces.shape[0]),
+                "iteration": jnp.arange(M + 1),
+                "variable": unit_vars,
+                "unit": unit_names,
+            },
+        )
+
+        if shared and shared[0] is not None:
+            shared_list_out = [
+                pd.DataFrame(
+                    shared_traces[rep, -1, 1:].reshape(-1, 1),
+                    index=pd.Index(shared_index),
+                    columns=pd.Index(["shared"]),
+                )
+                for rep in range(shared_traces.shape[0])
+            ]
+        else:
+            shared_list_out = None
+
+        if unit_specific and unit_specific[0] is not None:
+            specific_list_out = [
+                pd.DataFrame(
+                    unit_traces[rep, -1, 1:, :],
+                    index=pd.Index(spec_index),
+                    columns=pd.Index(unit_names),
+                )
+                for rep in range(unit_traces.shape[0])
+            ]
+        else:
+            specific_list_out = None
+
+        theta_list_out = [
+            {
+                "shared": shared_list_out[rep] if shared_list_out else None,
+                "unit_specific": specific_list_out[rep] if specific_list_out else None,
+            }
+            for rep in range(n_reps)
+        ]
+
+        logLik_unit_out = np.full((n_reps, U), np.nan)
+
+        self.theta.theta = theta_list_out
+        self.theta.logLik_unit = logLik_unit_out
+        self.theta.estimation_scale = False
+
+        execution_time = time.time() - start_time
+
+        result = PanelPompTrainResult(
+            method="train",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_obj_in,
+            shared_traces=shared_da,
+            unit_traces=unit_da,
+            logLiks=xr.DataArray(  # Placeholder as we don't have unit logliks separated
+                np.full((n_reps, U + 1), np.nan),
+                dims=["replicate", "unit"],
+                coords={
+                    "replicate": jnp.arange(n_reps),
+                    "unit": ["shared"] + unit_names,
+                },
+            ),
+            J=J,
+            M=M,
+            eta=eta,
+            optimizer=optimizer,
+            alpha=alpha,
         )
 
         self.results_history.add(result)

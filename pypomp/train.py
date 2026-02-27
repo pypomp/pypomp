@@ -8,7 +8,7 @@ from .pfilter import (
     _vmapped_pfilter_internal,
     _pfilter_internal_mean,
 )
-from .mop import _mop_internal_mean
+from .mop import _mop_internal_mean, _mop_internal
 from .dpop import (
     _dpop_internal_mean,
 )  # DPOP mean negative log-likelihood per observation
@@ -20,6 +20,278 @@ _hess_pfilter_internal_mean = jax.hessian(_pfilter_internal_mean)
 _grad_mop_internal_mean = jax.grad(_mop_internal_mean)
 _vg_mop_internal_mean = jax.value_and_grad(_mop_internal_mean)
 _hess_mop_internal_mean = jax.hessian(_mop_internal_mean)
+
+
+_panel_mop_internal_vmap = jax.vmap(
+    _mop_internal,
+    in_axes=(
+        0,  # theta
+        0,  # ys
+        None,  # dt_array_extended
+        None,  # nstep_array
+        None,  # t0
+        None,  # times
+        None,  # J
+        None,  # rinitializer
+        None,  # rprocess_interp
+        None,  # dmeasure
+        None,  # accumvars
+        0,  # covars_extended
+        None,  # alpha
+        0,  # key
+    ),
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "chunk_size",
+    ),
+)
+def _chunked_panel_mop_internal(
+    shared_array: jax.Array,  # (n_shared,)
+    unit_array: jax.Array,  # (n_spec, U)
+    unit_param_permutations: jax.Array,  # (U, n_params)
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    covars_extended: jax.Array | None,
+    keys: jax.Array,
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    accumvars: tuple[int, ...] | None,
+    chunk_size: int,
+    alpha: float,
+):
+    U = unit_array.shape[1]
+    n_params = unit_param_permutations.shape[1]
+    n_chunks = U // chunk_size
+
+    ys_c = ys.reshape((n_chunks, chunk_size) + ys.shape[1:])
+    covars_c = (
+        None
+        if covars_extended is None
+        else covars_extended.reshape((n_chunks, chunk_size) + covars_extended.shape[1:])
+    )
+    keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
+
+    # unit_array: (n_spec, U) -> (n_chunks, chunk_size, n_spec)
+    unit_array_c = unit_array.T.reshape((n_chunks, chunk_size, -1))
+
+    # unit_param_permutations: (U, n_params) -> (n_chunks, chunk_size, n_params)
+    unit_param_permutations_c = unit_param_permutations.reshape(
+        (n_chunks, chunk_size, n_params)
+    )
+
+    shared_tiled = jnp.tile(shared_array, (chunk_size, 1))
+
+    def scan_fn(carry, chunk_idx):
+        unit_array_chunk = unit_array_c[chunk_idx]  # (chunk_size, n_spec)
+        unit_param_perm_chunk = unit_param_permutations_c[
+            chunk_idx
+        ]  # (chunk_size, n_params)
+
+        theta_chunk_unordered = jnp.concatenate(
+            [shared_tiled, unit_array_chunk], axis=1
+        )
+
+        def apply_perm(theta, perm):
+            return theta[perm]
+
+        theta_chunk = jax.vmap(apply_perm)(theta_chunk_unordered, unit_param_perm_chunk)
+
+        ys_chunk = ys_c[chunk_idx]
+        covars_chunk = None if covars_c is None else covars_c[chunk_idx]
+        key_chunk = keys_c[chunk_idx]
+
+        res = _panel_mop_internal_vmap(
+            theta_chunk,
+            ys_chunk,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            J,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            accumvars,
+            covars_chunk,
+            alpha,
+            key_chunk,
+        )
+        return carry + jnp.sum(res), None
+
+    total_neg_loglik, _ = jax.lax.scan(scan_fn, 0.0, jnp.arange(n_chunks))
+
+    return total_neg_loglik / (U * ys.shape[1])
+
+
+_vg_chunked_panel_mop_internal = jax.value_and_grad(
+    _chunked_panel_mop_internal, argnums=(0, 1)
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "chunk_size",
+        "optimizer",
+        "M",
+        "n_obs",
+        "U",
+    ),
+)
+def _panel_train_internal(
+    shared_array: jax.Array,  # (n_shared,)
+    unit_array: jax.Array,  # (n_spec, U)
+    unit_param_permutations: jax.Array,  # (U, n_params)
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys: jax.Array,
+    covars_extended: jax.Array | None,
+    keys: jax.Array,  # (M, U, ...)
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
+    accumvars: tuple[int, ...] | None,
+    chunk_size: int,
+    optimizer: str,
+    M: int,
+    eta_shared: jax.Array,
+    eta_spec: jax.Array,
+    alpha: float,
+    n_obs: int,  # ys.shape[1]
+    U: int,  # ys.shape[0]
+):
+    times = times.astype(float)
+    ylen = n_obs * U
+
+    def scan_step(carry, i):
+        (
+            shared_ests,
+            unit_ests,
+            m_adam_shared,
+            v_adam_shared,
+            m_adam_unit,
+            v_adam_unit,
+        ) = carry
+
+        iter_keys = keys[i]  # (U, ...)
+
+        loglik, (grad_shared, grad_unit) = _vg_chunked_panel_mop_internal(
+            shared_ests,
+            unit_ests,
+            unit_param_permutations,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            ys,
+            covars_extended,
+            iter_keys,
+            J,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            accumvars,
+            chunk_size,
+            alpha,
+        )
+
+        loglik *= ylen
+
+        if optimizer == "SGD":
+            direction_shared = -grad_shared
+            direction_unit = -grad_unit
+
+        elif optimizer == "Adam":
+            beta1 = 0.9
+            beta2 = 0.999
+            epsilon = 1e-8
+
+            m_adam_shared = beta1 * m_adam_shared + (1 - beta1) * grad_shared
+            v_adam_shared = beta2 * v_adam_shared + (1 - beta2) * (grad_shared**2)
+            m_hat_shared = m_adam_shared / (1 - beta1 ** (i + 1))
+            v_hat_shared = v_adam_shared / (1 - beta2 ** (i + 1))
+            direction_shared = -m_hat_shared / (jnp.sqrt(v_hat_shared) + epsilon)
+
+            m_adam_unit = beta1 * m_adam_unit + (1 - beta1) * grad_unit
+            v_adam_unit = beta2 * v_adam_unit + (1 - beta2) * (grad_unit**2)
+            m_hat_unit = m_adam_unit / (1 - beta1 ** (i + 1))
+            v_hat_unit = v_adam_unit / (1 - beta2 ** (i + 1))
+            direction_unit = -m_hat_unit / (jnp.sqrt(v_hat_unit) + epsilon)
+        else:
+            raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
+
+        shared_ests = shared_ests + eta_shared * direction_shared
+
+        # unit_ests: (n_spec, U)
+        # direction_unit: (n_spec, U)
+        # eta_spec: (n_spec,) -> expand dims to (n_spec, 1)
+        unit_ests = unit_ests + eta_spec[:, None] * direction_unit
+
+        new_carry = (
+            shared_ests,
+            unit_ests,
+            m_adam_shared,
+            v_adam_shared,
+            m_adam_unit,
+            v_adam_unit,
+        )
+
+        return new_carry, (loglik, shared_ests, unit_ests)
+
+    initial_carry = (
+        shared_array,
+        unit_array,
+        jnp.zeros_like(shared_array),
+        jnp.zeros_like(shared_array),
+        jnp.zeros_like(unit_array),
+        jnp.zeros_like(unit_array),
+    )
+
+    _, (logliks_history, shared_history, unit_history) = jax.lax.scan(
+        scan_step,
+        initial_carry,
+        jnp.arange(M),
+    )
+
+    logliks = jnp.concatenate((jnp.array([jnp.nan]), logliks_history))
+
+    # shared_history: (M, n_shared)
+    # shared_array: (n_shared,) -> prepend to shared_history -> (M+1, n_shared)
+    shared_copies = jnp.concatenate((shared_array[jnp.newaxis, ...], shared_history))
+
+    # unit_history: (M, n_spec, U) -> (M, (n_spec * U))? No, keep it (M, n_spec, U).
+    # unit_array: (n_spec, U) -> prepend to unit_history -> (M+1, n_spec, U)
+    unit_copies = jnp.concatenate((unit_array[jnp.newaxis, ...], unit_history))
+
+    return logliks, shared_copies, unit_copies
+
+
+_vmapped_panel_train_internal = jax.vmap(
+    _panel_train_internal,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 13,
+)
 
 
 @partial(

@@ -120,7 +120,7 @@ class UKMeasles:
             }
 
     @staticmethod
-    def AK_mles():
+    def AK_mles() -> pd.DataFrame:
         """
         MLEs from https://kingaa.github.io/sbied/measles/index.html
         """
@@ -226,7 +226,6 @@ class UKMeasles:
 
         # ----pomp-construction-----------------------------------------------
 
-        # FIX: added "001d" to model dispatch dict
         mod = {
             "001": m001,
             "001b": m001b,
@@ -235,10 +234,6 @@ class UKMeasles:
             "002": m002,
             "003": m003,
         }[model]
-
-        # FIX: use mod.accumvars consistently (each model module defines its own)
-        # model_001d.accumvars = ("W", "C", "logw") for DPOP support
-        # model_001b/001c.accumvars = ("W", "C") for standard models
 
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(

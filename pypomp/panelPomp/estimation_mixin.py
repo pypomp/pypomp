@@ -11,7 +11,11 @@ from ..pfilter import _chunked_panel_pfilter_internal
 from ..mif import _jv_panel_mif_internal
 from ..train import _vmapped_panel_train_internal
 from ..RWSigma_class import RWSigma
-from ..results import PanelPompPFilterResult, PanelPompMIFResult, PanelPompTrainResult
+from ..results import (
+    PanelPompPFilterResult,
+    PanelPompMIFResult,
+    PanelPompTrainResult,
+)
 from ..parameters import PanelParameters
 from ..util import logmeanexp
 from ..benchmarks import (

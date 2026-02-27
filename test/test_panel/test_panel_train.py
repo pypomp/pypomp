@@ -1,8 +1,10 @@
 from copy import deepcopy
 import jax
 import pandas as pd
+import pytest
 from typing import cast
 import pypomp as pp
+from pypomp.results import PanelPompTrainResult
 
 
 def _get_measles_003_panel():
@@ -39,29 +41,26 @@ def _get_measles_003_panel():
     return panel
 
 
-def test_panel_train():
+@pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])
+def test_panel_train(chunk_size):
     panel = _get_measles_003_panel()
-
-    J = 2
-    M = 2
-
-    theta = deepcopy(panel.theta)
-
-    panel.train(J=J, M=M, eta=0.01, theta=theta, chunk_size=1, key=jax.random.key(0))
+    J, M = 2, 2
+    panel.train(
+        J=J,
+        M=M,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=chunk_size,
+        key=jax.random.key(0),
+    )
 
     res = panel.results_history[-1]
-
-    from pypomp.results import PanelPompTrainResult
-
     assert isinstance(res, PanelPompTrainResult)
-
     assert res.shared_traces.shape[0] == 1  # n_reps
     assert res.shared_traces.shape[1] == M + 1
-
     assert res.unit_traces.shape[0] == 1  # n_reps
     assert res.unit_traces.shape[1] == M + 1
     assert res.unit_traces.shape[3] == len(panel.get_unit_names())  # U
-
     df = res.to_dataframe()
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns

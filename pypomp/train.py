@@ -9,10 +9,6 @@ from .pfilter import (
     _pfilter_internal_mean,
 )
 from .mop import _mop_internal_mean, _mop_internal
-from .dpop import (
-    _dpop_internal_mean,
-)  # DPOP mean negative log-likelihood per observation
-
 
 _grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
 _vg_pfilter_internal_mean = jax.value_and_grad(_pfilter_internal_mean)
@@ -184,22 +180,123 @@ def _panel_train_internal(
 ):
     times = times.astype(float)
     ylen = n_obs * U
+    n_chunks = (U + chunk_size - 1) // chunk_size
 
-    def scan_step(carry, i):
+    ys_c = ys.reshape((n_chunks, chunk_size, n_obs, -1))
+    covars_c = (
+        None
+        if covars_extended is None
+        else covars_extended.reshape((n_chunks, chunk_size) + covars_extended.shape[1:])
+    )
+    unit_array_c = unit_array.T.reshape((n_chunks, chunk_size, -1))
+    unit_param_permutations_c = unit_param_permutations.reshape(
+        (n_chunks, chunk_size, -1)
+    )
+
+    def _adam_step(m, v, grad, step):
+        beta1, beta2, eps = 0.9, 0.999, 1e-8
+        m = beta1 * m + (1 - beta1) * grad
+        v = beta2 * v + (1 - beta2) * (grad**2)
+        m_hat = m / (1 - beta1**step)
+        v_hat = v / (1 - beta2**step)
+        return -m_hat / (jnp.sqrt(v_hat) + eps), m, v
+
+    def _compute_direction(grad, m, v, step):
+        if optimizer == "SGD":
+            return -grad, m, v
+        elif optimizer == "Adam":
+            return _adam_step(m, v, grad, step)
+        else:
+            raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
+
+    def _chunk_obj(s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, keys_chunk):
+        shared_tiled = jnp.tile(s_ests, (chunk_size, 1))
+        theta_unordered = jnp.concatenate([shared_tiled, u_ests], axis=1)
+        theta_chunk = jax.vmap(lambda t, p: t[p])(theta_unordered, perm_chunk)
+        res = _panel_mop_internal_vmap(
+            theta_chunk,
+            ys_chunk,
+            dt_array_extended,
+            nstep_array,
+            t0,
+            times,
+            J,
+            rinitializer,
+            rprocess_interp,
+            dmeasure,
+            accumvars,
+            covars_chunk,
+            alpha,
+            keys_chunk,
+        )
+        return jnp.sum(res) / (chunk_size * n_obs)
+
+    def iteration_scan_step(carry, i):
+        (shared_ests, unit_ests_c, m_s, v_s, m_u_c, v_u_c, global_step) = carry
+        iter_keys_c = keys[i].reshape((n_chunks, chunk_size) + keys.shape[2:])
+
+        def chunk_scan_step(chunk_carry, chunk_idx):
+            c_s, c_m_s, c_v_s, c_step = chunk_carry
+            c_u = unit_ests_c[chunk_idx]
+            c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
+
+            covars_chunk = None if covars_c is None else covars_c[chunk_idx]
+            loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
+                c_s,
+                c_u,
+                unit_param_permutations_c[chunk_idx],
+                ys_c[chunk_idx],
+                covars_chunk,
+                iter_keys_c[chunk_idx],
+            )
+            loglik *= ylen
+
+            dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
+            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, c_step + 1)
+
+            c_s = c_s + eta_shared * dir_s
+            c_u = c_u + eta_spec * dir_u
+            return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
+
         (
-            shared_ests,
-            unit_ests,
-            m_adam_shared,
-            v_adam_shared,
-            m_adam_unit,
-            v_adam_unit,
-        ) = carry
+            (final_s, final_m_s, final_v_s, final_step),
+            (chunk_lls, new_u_c, new_m_u_c, new_v_u_c),
+        ) = jax.lax.scan(
+            chunk_scan_step,
+            (shared_ests, m_s, v_s, global_step),
+            jnp.arange(n_chunks),
+        )
 
-        iter_keys = keys[i]  # (U, ...)
+        new_carry = (
+            final_s,
+            new_u_c,
+            final_m_s,
+            final_v_s,
+            new_m_u_c,
+            new_v_u_c,
+            final_step,
+        )
+        unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
+        return new_carry, (jnp.mean(chunk_lls), final_s, unit_flat)
 
-        loglik, (grad_shared, grad_unit) = _vg_chunked_panel_mop_internal(
-            shared_ests,
-            unit_ests,
+    initial_carry = (
+        shared_array,
+        unit_array_c,
+        jnp.zeros_like(shared_array),
+        jnp.zeros_like(shared_array),
+        jnp.zeros_like(unit_array_c),
+        jnp.zeros_like(unit_array_c),
+        0,
+    )
+
+    _, (logliks, shared_copies, unit_copies) = jax.lax.scan(
+        iteration_scan_step, initial_carry, jnp.arange(M)
+    )
+
+    loglik_init = (
+        _chunked_panel_mop_internal(
+            shared_array,
+            unit_array,
             unit_param_permutations,
             dt_array_extended,
             nstep_array,
@@ -207,7 +304,7 @@ def _panel_train_internal(
             times,
             ys,
             covars_extended,
-            iter_keys,
+            keys[0],
             J,
             rinitializer,
             rprocess_interp,
@@ -216,74 +313,12 @@ def _panel_train_internal(
             chunk_size,
             alpha,
         )
-
-        loglik *= ylen
-
-        if optimizer == "SGD":
-            direction_shared = -grad_shared
-            direction_unit = -grad_unit
-
-        elif optimizer == "Adam":
-            beta1 = 0.9
-            beta2 = 0.999
-            epsilon = 1e-8
-
-            m_adam_shared = beta1 * m_adam_shared + (1 - beta1) * grad_shared
-            v_adam_shared = beta2 * v_adam_shared + (1 - beta2) * (grad_shared**2)
-            m_hat_shared = m_adam_shared / (1 - beta1 ** (i + 1))
-            v_hat_shared = v_adam_shared / (1 - beta2 ** (i + 1))
-            direction_shared = -m_hat_shared / (jnp.sqrt(v_hat_shared) + epsilon)
-
-            m_adam_unit = beta1 * m_adam_unit + (1 - beta1) * grad_unit
-            v_adam_unit = beta2 * v_adam_unit + (1 - beta2) * (grad_unit**2)
-            m_hat_unit = m_adam_unit / (1 - beta1 ** (i + 1))
-            v_hat_unit = v_adam_unit / (1 - beta2 ** (i + 1))
-            direction_unit = -m_hat_unit / (jnp.sqrt(v_hat_unit) + epsilon)
-        else:
-            raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
-
-        shared_ests = shared_ests + eta_shared * direction_shared
-
-        # unit_ests: (n_spec, U)
-        # direction_unit: (n_spec, U)
-        # eta_spec: (n_spec,) -> expand dims to (n_spec, 1)
-        unit_ests = unit_ests + eta_spec[:, None] * direction_unit
-
-        new_carry = (
-            shared_ests,
-            unit_ests,
-            m_adam_shared,
-            v_adam_shared,
-            m_adam_unit,
-            v_adam_unit,
-        )
-
-        return new_carry, (loglik, shared_ests, unit_ests)
-
-    initial_carry = (
-        shared_array,
-        unit_array,
-        jnp.zeros_like(shared_array),
-        jnp.zeros_like(shared_array),
-        jnp.zeros_like(unit_array),
-        jnp.zeros_like(unit_array),
+        * ylen
     )
 
-    _, (logliks_history, shared_history, unit_history) = jax.lax.scan(
-        scan_step,
-        initial_carry,
-        jnp.arange(M),
-    )
-
-    logliks = jnp.concatenate((jnp.array([jnp.nan]), logliks_history))
-
-    # shared_history: (M, n_shared)
-    # shared_array: (n_shared,) -> prepend to shared_history -> (M+1, n_shared)
-    shared_copies = jnp.concatenate((shared_array[jnp.newaxis, ...], shared_history))
-
-    # unit_history: (M, n_spec, U) -> (M, (n_spec * U))? No, keep it (M, n_spec, U).
-    # unit_array: (n_spec, U) -> prepend to unit_history -> (M+1, n_spec, U)
-    unit_copies = jnp.concatenate((unit_array[jnp.newaxis, ...], unit_history))
+    logliks = jnp.concatenate((jnp.array([loglik_init]), logliks))
+    shared_copies = jnp.concatenate((shared_array[None, :], shared_copies), axis=0)
+    unit_copies = jnp.concatenate((unit_array[None, :, :], unit_copies), axis=0)
 
     return logliks, shared_copies, unit_copies
 

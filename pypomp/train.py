@@ -197,17 +197,38 @@ def _panel_train_internal(
 
     def _adam_step(m, v, grad, step):
         beta1, beta2, eps = 0.9, 0.999, 1e-8
-        m = beta1 * m + (1 - beta1) * grad
-        v = beta2 * v + (1 - beta2) * (grad**2)
-        m_hat = m / (1 - beta1**step)
-        v_hat = v / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + eps), m, v
+        m_new = beta1 * m + (1 - beta1) * grad
+        v_new = beta2 * v + (1 - beta2) * (grad**2)
+        m_hat = m_new / (1 - beta1**step)
+        v_hat = v_new / (1 - beta2**step)
+        return -m_hat / (jnp.sqrt(v_hat) + eps), m_new, v_new
+
+    def _full_matrix_adam_step_single(m, v, grad, step):
+        beta1, beta2, eps = 0.9, 0.999, 1e-4
+
+        m_new = beta1 * m + (1 - beta1) * grad
+        m_hat = m_new / (1 - beta1**step)
+
+        F_t = beta2 * v + (1 - beta2) * jnp.outer(grad, grad)
+        F_hat = F_t / (1 - beta2**step)
+
+        F_reg = F_hat + eps * jnp.eye(grad.shape[-1])
+        direction = -jnp.linalg.solve(F_reg, m_hat)
+
+        return direction, m_new, F_t
 
     def _compute_direction(grad, m, v, step):
         if optimizer == "SGD":
             return -grad, m, v
         elif optimizer == "Adam":
             return _adam_step(m, v, grad, step)
+        elif optimizer == "FullMatrixAdam":
+            if grad.ndim == 1:
+                return _full_matrix_adam_step_single(m, v, grad, step)
+            else:
+                return jax.vmap(_full_matrix_adam_step_single, in_axes=(0, 0, 0, None))(
+                    m, v, grad, step
+                )
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
 
@@ -285,13 +306,20 @@ def _panel_train_internal(
         unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
         return new_carry, (jnp.mean(chunk_lls), final_s, unit_flat)
 
+    if optimizer == "FullMatrixAdam":
+        init_v_s = jnp.zeros((shared_array.shape[-1], shared_array.shape[-1]))
+        init_v_u_c = jnp.zeros(unit_array_c.shape + (unit_array_c.shape[-1],))
+    else:
+        init_v_s = jnp.zeros_like(shared_array)
+        init_v_u_c = jnp.zeros_like(unit_array_c)
+
     initial_carry = (
         shared_array,
         unit_array_c,
         jnp.zeros_like(shared_array),
-        jnp.zeros_like(shared_array),
+        init_v_s,
         jnp.zeros_like(unit_array_c),
-        jnp.zeros_like(unit_array_c),
+        init_v_u_c,
         0,
     )
 

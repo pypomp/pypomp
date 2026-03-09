@@ -43,7 +43,8 @@ def _get_measles_003_panel():
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])
-def test_panel_train(chunk_size):
+@pytest.mark.parametrize("optimizer", ["Adam", "FullMatrixAdam"])
+def test_panel_train(chunk_size, optimizer):
     panel = _get_measles_003_panel()
     J, M = 2, 2
     panel.train(
@@ -52,6 +53,7 @@ def test_panel_train(chunk_size):
         eta=0.01,
         theta=deepcopy(panel.theta),
         chunk_size=chunk_size,
+        optimizer=optimizer,
         key=jax.random.key(0),
     )
 

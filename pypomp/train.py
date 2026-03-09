@@ -213,7 +213,7 @@ def _panel_train_internal(
         F_hat = F_t / (1 - beta2**step)
 
         eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-        inv_sqrt_evals = 1.0 / (jnp.sqrt(jnp.maximum(eigenvalues, 0.0)) + eps)
+        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + eps)
         F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
 
         direction = -F_inv_sqrt @ m_hat
@@ -614,7 +614,7 @@ def _train_internal(
             F_hat = F_t / (1 - beta2 ** (i + 1))
 
             eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-            inv_sqrt_evals = 1.0 / (jnp.sqrt(jnp.maximum(eigenvalues, 0.0)) + epsilon)
+            inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
             F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
 
             direction = -F_inv_sqrt @ m_hat

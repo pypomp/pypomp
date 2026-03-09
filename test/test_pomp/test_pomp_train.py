@@ -2,7 +2,6 @@ import jax
 import pytest
 import numpy as np
 import pypomp as pp
-import jax.numpy as jnp
 
 
 @pytest.fixture(scope="function")
@@ -137,3 +136,33 @@ def test_different_learning_rates(simple):
 
     # Results should differ
     assert not np.allclose(out_uniform, out_varied, atol=1e-10)
+
+
+def test_train_clipping(simple):
+    """Test that gradient clipping correctly limits parameter updates."""
+    LG, _, _, theta, J, key, _ = simple
+    M = 1
+    eta = {param: 10.0 for param in LG.canonical_param_names}  # Large learning rate
+
+    LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=None)
+    p0 = (
+        LG.results_history[-1]
+        .traces_da.sel(replicate=0, iteration=0, variable=LG.canonical_param_names)
+        .values
+    )
+    p1_no_clip = (
+        LG.results_history[-1]
+        .traces_da.sel(replicate=0, iteration=1, variable=LG.canonical_param_names)
+        .values
+    )
+    diff_no_clip = np.linalg.norm(p1_no_clip - p0)
+
+    LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=1e-5)
+    p1_clip = (
+        LG.results_history[-1]
+        .traces_da.sel(replicate=0, iteration=1, variable=LG.canonical_param_names)
+        .values
+    )
+    diff_clip = np.linalg.norm(p1_clip - p0)
+
+    assert diff_clip < diff_no_clip

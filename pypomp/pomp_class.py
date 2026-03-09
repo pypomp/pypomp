@@ -906,8 +906,8 @@ class Pomp:
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", and "BFGS".
-                Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
+                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", "BFGS", and "FullMatrixAdam".
+                Note: options other than "Adam" and "SGD" might be quite slow. The "Adam" option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.

@@ -18,7 +18,7 @@ def simple():
 
 
 @pytest.mark.parametrize(
-    "optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS", "Adam"]
+    "optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS", "Adam", "FullMatrixAdam"]
 )
 def test_train_basic(optimizer, simple):
     """Test basic train functionality with per-parameter learning rates."""

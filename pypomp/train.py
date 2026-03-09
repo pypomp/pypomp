@@ -563,6 +563,29 @@ def _train_internal(
             m_hat = m_adam / (1 - beta1 ** (i + 1))
             v_hat = v_adam / (1 - beta2 ** (i + 1))
             direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
+
+        elif optimizer == "FullMatrixAdam":
+            beta1 = 0.9
+            beta2 = 0.999
+            epsilon = 1e-4
+
+            m_adam = beta1 * m_adam + (1 - beta1) * grad
+            m_hat = m_adam / (1 - beta1 ** (i + 1))
+
+            curr_hess = jax.lax.cond(
+                i == 0,
+                lambda _: jnp.zeros_like(hess),
+                lambda _: hess,
+                operand=None,
+            )
+
+            F_t = beta2 * curr_hess + (1 - beta2) * jnp.outer(grad, grad)
+            F_hat = F_t / (1 - beta2 ** (i + 1))
+
+            F_reg = F_hat + epsilon * jnp.eye(theta_ests.shape[-1])
+            direction = -jnp.linalg.solve(F_reg, m_hat)
+
+            hess = F_t
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported")
 

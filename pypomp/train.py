@@ -212,8 +212,11 @@ def _panel_train_internal(
         F_t = beta2 * v + (1 - beta2) * jnp.outer(grad, grad)
         F_hat = F_t / (1 - beta2**step)
 
-        F_reg = F_hat + eps * jnp.eye(grad.shape[-1])
-        direction = -jnp.linalg.solve(F_reg, m_hat)
+        eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
+        inv_sqrt_evals = 1.0 / (jnp.sqrt(jnp.maximum(eigenvalues, 0.0)) + eps)
+        F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
+
+        direction = -F_inv_sqrt @ m_hat
 
         return direction, m_new, F_t
 
@@ -610,8 +613,11 @@ def _train_internal(
             F_t = beta2 * curr_hess + (1 - beta2) * jnp.outer(grad, grad)
             F_hat = F_t / (1 - beta2 ** (i + 1))
 
-            F_reg = F_hat + epsilon * jnp.eye(theta_ests.shape[-1])
-            direction = -jnp.linalg.solve(F_reg, m_hat)
+            eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
+            inv_sqrt_evals = 1.0 / (jnp.sqrt(jnp.maximum(eigenvalues, 0.0)) + epsilon)
+            F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
+
+            direction = -F_inv_sqrt @ m_hat
 
             hess = F_t
         else:

@@ -277,14 +277,17 @@ def _panel_train_internal(
             )
             loglik *= ylen
 
+            # Adjusts for jnp.sum(res) / (chunk_size * n_obs) in _chunk_obj()
+            g_u = g_u * chunk_size
+
             if clip_norm is not None:
                 g_s = jnp.clip(g_s, -clip_norm, clip_norm)
                 g_u = jnp.clip(g_u, -clip_norm, clip_norm)
 
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
-            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, c_step + 1)
+            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
-            c_s = c_s + eta_shared * dir_s
+            c_s = c_s + (eta_shared / n_chunks) * dir_s
             c_u = c_u + eta_spec * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
 

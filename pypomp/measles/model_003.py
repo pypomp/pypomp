@@ -166,13 +166,14 @@ def dmeas(
     upper_cdf = jax.scipy.stats.norm.cdf(safe_y + 0.5, m, sqrt_v_tol)
     lower_cdf = jax.scipy.stats.norm.cdf(safe_y - 0.5, m, sqrt_v_tol)
 
+    tol2 = 1.0e-18
     lik = (
         jnp.where(
-            safe_y > tol,
+            safe_y > tol2,
             upper_cdf - lower_cdf,
             upper_cdf,
         )
-        + tol
+        + tol2
     )
 
     loglik = jnp.log(lik)

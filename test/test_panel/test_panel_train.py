@@ -77,7 +77,15 @@ def test_panel_train_clipping():
     key = jax.random.key(0)
     theta_init = deepcopy(panel.theta)
 
-    panel.train(J=J, M=M, eta=eta, key=key, theta=deepcopy(theta_init), clip_norm=None)
+    panel.train(
+        J=J,
+        M=M,
+        eta=eta,
+        key=key,
+        theta=deepcopy(theta_init),
+        clip_norm=None,
+        optimizer="SGD",
+    )
     res_no_clip = panel.results_history[-1]
     shared_vars = panel.canonical_shared_param_names
     p0 = res_no_clip.shared_traces.sel(
@@ -88,7 +96,15 @@ def test_panel_train_clipping():
     ).values
     diff_no_clip = np.linalg.norm(p1_no_clip - p0)
 
-    panel.train(J=J, M=M, eta=eta, key=key, theta=deepcopy(theta_init), clip_norm=1e-5)
+    panel.train(
+        J=J,
+        M=M,
+        eta=eta,
+        key=key,
+        theta=deepcopy(theta_init),
+        clip_norm=1e-5,
+        optimizer="SGD",
+    )
     res_clip = panel.results_history[-1]
     p1_clip = res_clip.shared_traces.sel(
         replicate=0, iteration=1, variable=shared_vars

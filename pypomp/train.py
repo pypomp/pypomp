@@ -151,6 +151,7 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "M",
         "n_obs",
         "U",
+        "clip_norm",
     ),
 )
 def _panel_train_internal(
@@ -177,6 +178,7 @@ def _panel_train_internal(
     alpha: float,
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
+    clip_norm: float | None = None,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -195,17 +197,41 @@ def _panel_train_internal(
 
     def _adam_step(m, v, grad, step):
         beta1, beta2, eps = 0.9, 0.999, 1e-8
-        m = beta1 * m + (1 - beta1) * grad
-        v = beta2 * v + (1 - beta2) * (grad**2)
-        m_hat = m / (1 - beta1**step)
-        v_hat = v / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + eps), m, v
+        m_new = beta1 * m + (1 - beta1) * grad
+        v_new = beta2 * v + (1 - beta2) * (grad**2)
+        m_hat = m_new / (1 - beta1**step)
+        v_hat = v_new / (1 - beta2**step)
+        return -m_hat / (jnp.sqrt(v_hat) + eps), m_new, v_new
+
+    def _full_matrix_adam_step_single(m, v, grad, step):
+        beta1, beta2, eps = 0.9, 0.999, 1e-4
+
+        m_new = beta1 * m + (1 - beta1) * grad
+        m_hat = m_new / (1 - beta1**step)
+
+        F_t = beta2 * v + (1 - beta2) * jnp.outer(grad, grad)
+        F_hat = F_t / (1 - beta2**step)
+
+        eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
+        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + eps)
+        F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
+
+        direction = -F_inv_sqrt @ m_hat
+
+        return direction, m_new, F_t
 
     def _compute_direction(grad, m, v, step):
         if optimizer == "SGD":
             return -grad, m, v
         elif optimizer == "Adam":
             return _adam_step(m, v, grad, step)
+        elif optimizer == "FullMatrixAdam":
+            if grad.ndim == 1:
+                return _full_matrix_adam_step_single(m, v, grad, step)
+            else:
+                return jax.vmap(_full_matrix_adam_step_single, in_axes=(0, 0, 0, None))(
+                    m, v, grad, step
+                )
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
 
@@ -251,6 +277,10 @@ def _panel_train_internal(
             )
             loglik *= ylen
 
+            if clip_norm is not None:
+                g_s = jnp.clip(g_s, -clip_norm, clip_norm)
+                g_u = jnp.clip(g_u, -clip_norm, clip_norm)
+
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, c_step + 1)
 
@@ -279,13 +309,20 @@ def _panel_train_internal(
         unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
         return new_carry, (jnp.mean(chunk_lls), final_s, unit_flat)
 
+    if optimizer == "FullMatrixAdam":
+        init_v_s = jnp.zeros((shared_array.shape[-1], shared_array.shape[-1]))
+        init_v_u_c = jnp.zeros(unit_array_c.shape + (unit_array_c.shape[-1],))
+    else:
+        init_v_s = jnp.zeros_like(shared_array)
+        init_v_u_c = jnp.zeros_like(unit_array_c)
+
     initial_carry = (
         shared_array,
         unit_array_c,
         jnp.zeros_like(shared_array),
-        jnp.zeros_like(shared_array),
+        init_v_s,
         jnp.zeros_like(unit_array_c),
-        jnp.zeros_like(unit_array_c),
+        init_v_u_c,
         0,
     )
 
@@ -325,7 +362,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 13,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 14,
 )
 
 
@@ -346,6 +383,7 @@ _vmapped_panel_train_internal = jax.vmap(
         "alpha",
         "n_monitors",
         "n_obs",
+        "clip_norm",
     ),
 )
 def _train_internal(
@@ -373,6 +411,7 @@ def _train_internal(
     key: jax.Array,
     n_monitors: int,  # static
     n_obs: int,  # static
+    clip_norm: float | None = None,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -457,6 +496,9 @@ def _train_internal(
                 )
             else:
                 loglik = jnp.array(jnp.nan)
+
+        if clip_norm is not None:
+            grad = jnp.clip(grad, -clip_norm, clip_norm)
 
         if optimizer == "Newton":
             key, subkey = jax.random.split(key)
@@ -552,6 +594,32 @@ def _train_internal(
             m_hat = m_adam / (1 - beta1 ** (i + 1))
             v_hat = v_adam / (1 - beta2 ** (i + 1))
             direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
+
+        elif optimizer == "FullMatrixAdam":
+            beta1 = 0.9
+            beta2 = 0.999
+            epsilon = 1e-4
+
+            m_adam = beta1 * m_adam + (1 - beta1) * grad
+            m_hat = m_adam / (1 - beta1 ** (i + 1))
+
+            curr_hess = jax.lax.cond(
+                i == 0,
+                lambda _: jnp.zeros_like(hess),
+                lambda _: hess,
+                operand=None,
+            )
+
+            F_t = beta2 * curr_hess + (1 - beta2) * jnp.outer(grad, grad)
+            F_hat = F_t / (1 - beta2 ** (i + 1))
+
+            eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
+            inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
+            F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
+
+            direction = -F_inv_sqrt @ m_hat
+
+            hess = F_t
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported")
 
@@ -649,7 +717,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 2,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
 )
 
 

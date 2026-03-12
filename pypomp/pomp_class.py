@@ -892,6 +892,7 @@ class Pomp:
         max_ls_itn: int = 10,
         n_monitors: int = 1,
         track_time: bool = True,
+        clip_norm: float | None = None,
     ) -> None:
         """
         Instance method for conducting the MOP gradient-based iterative optimization method.
@@ -905,8 +906,8 @@ class Pomp:
             theta (dict, optional): Parameters involved in the POMP model.
                 Defaults to self.theta.
             optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", and "BFGS".
-                Note: options other than "SGD" might be quite slow. The SGD option itself can take ~3x longer per iteration than mif does.
+                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", "BFGS", and "FullMatrixAdam".
+                Note: options other than "Adam" and "SGD" might be quite slow. The "Adam" option itself can take ~3x longer per iteration than mif does.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
@@ -924,6 +925,7 @@ class Pomp:
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
+            clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
             None. Updates self.results with lists for logLik, thetas_out, and theta.
@@ -982,6 +984,7 @@ class Pomp:
             keys,
             n_monitors,
             n_obs,
+            clip_norm,
         )
 
         theta_ests_natural = np.stack(

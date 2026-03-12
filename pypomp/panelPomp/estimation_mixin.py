@@ -777,6 +777,7 @@ class PanelEstimationMixin(Base):
             list[dict[str, pd.DataFrame | None]],
             None,
         ] = None,
+        clip_norm: float | None = None,
     ):
         """
         Estimate parameters using chunked gradient-descent optimization (SGD/Adam).
@@ -794,12 +795,13 @@ class PanelEstimationMixin(Base):
             chunk_size (Union[int, str], optional): Number of units to process
                 per gradient calculation step. 'auto' will attempt to estimate
                 concurrency based on hardware.
-            optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD'.
+            optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD', 'FullMatrixAdam'.
             alpha (float, optional): Learning rate decay factor per iteration.
             key (jax.Array, optional): JAX PRNG key. If None, uses the
                 `fresh_key` attribute.
             theta (PanelParameters, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
+            clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
             None: Updates `self.theta` and appends result to `self.results_history`.
@@ -994,6 +996,7 @@ class PanelEstimationMixin(Base):
             alpha,
             n_obs,
             U,
+            clip_norm,
         )
 
         shared_traces_in = None

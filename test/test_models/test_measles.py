@@ -116,6 +116,7 @@ def test_other_models():
         )
         mod_obj.simulate(key=key, nsim=1)
         mod_obj.pfilter(J=2, key=key)
+        assert not np.isnan(mod_obj.results()["logLik"]).any()
 
 
 def test_measles_sim(london):

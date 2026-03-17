@@ -168,8 +168,8 @@ class Pomp:
         Args:
             ys (pd.DataFrame): The measurement data frame. The row index must contain
                 the observation times.
-            theta (dict | list[dict]): Parameters involved in the POMP model. Can be a
-                single dictionary or a list of dictionaries. If a list, particle filtering methods will be run for each set of parameters.
+            theta (dict | list[dict] | PompParameters): Parameters involved in the POMP
+                model. If a list or PompParameters object, particle filtering methods will be vectorized over each parameter set, thereby running significantly faster.
             statenames (list[str]): List of all latent state variable names.
             t0 (float): The initial time for the model (typically before the first observation).
             rinit (Callable): Initial state simulator function. Automatically wrapped into an [RInit](RInit) object.
@@ -456,7 +456,7 @@ class Pomp:
         key: jax.Array | None = None,
         theta: dict | list[dict] | PompParameters | None = None,
         alpha: float = 0.97,
-        process_weight_state: str | None = None,  # use state *name* here
+        process_weight_state: str | None = None,
     ) -> list[jax.Array]:
         """
         Runs the DPOP (dynamics-penalized) differentiable particle filter.
@@ -615,7 +615,9 @@ class Pomp:
             )
             rep_keys_sharding_spec = jax.sharding.NamedSharding(
                 mesh,
-                jax.sharding.PartitionSpec("theta_reps", None, None),
+                jax.sharding.PartitionSpec(
+                    "theta_reps", *([None] * (rep_keys.ndim - 1))
+                ),
             )
             thetas_array = jax.device_put(thetas_array, sharding_spec)
             rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)

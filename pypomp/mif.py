@@ -301,6 +301,7 @@ def _panel_mif_internal(
     """
     n_shared = shared_array.shape[0]
     n_spec = unit_array.shape[0]
+    inv_perms = jax.vmap(jnp.argsort)(unit_param_permutations)
 
     shared_means0 = jnp.mean(shared_array, axis=1) if n_shared > 0 else jnp.zeros((0,))
     unit_means0 = jnp.mean(unit_array, axis=1) if n_spec > 0 else jnp.zeros((0, U))
@@ -335,6 +336,7 @@ def _panel_mif_internal(
                 covars_u_dummy,
                 u_idx,
                 unit_key,
+                inv_perm_u,
             ) = unit_inputs
 
             covars_u = None if covars_per_unit is None else covars_u_dummy
@@ -384,8 +386,7 @@ def _panel_mif_internal(
             # skips initial parameters from output:
             updated_thetas_u = updated_thetas_u[1]  # (J, n_params)
 
-            inv_perm = jnp.argsort(unit_param_perm_u)
-            updated_thetas_panel = updated_thetas_u[:, inv_perm]
+            updated_thetas_panel = updated_thetas_u[:, inv_perm_u]
 
             if n_shared > 0:
                 new_shared_array = updated_thetas_panel[:, :n_shared].T
@@ -428,6 +429,7 @@ def _panel_mif_internal(
             else jnp.zeros((U, 0)),  # dummy
             jnp.arange(U),
             unit_keys,
+            inv_perms,
         )
 
         initial_inner_carry = (

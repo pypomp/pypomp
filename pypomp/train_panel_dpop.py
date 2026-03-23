@@ -253,10 +253,13 @@ def _panel_dpop_train_internal(
             )
             loglik *= ylen
 
-            dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
-            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, c_step + 1)
+            # Adjusts for jnp.sum(res) / (chunk_size * n_obs) in _chunk_obj()
+            g_u = g_u * chunk_size
 
-            c_s = c_s + eta_shared_scaled * dir_s
+            dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
+            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
+
+            c_s = c_s + (eta_shared_scaled / n_chunks) * dir_s
             c_u = c_u + eta_spec_scaled * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
 

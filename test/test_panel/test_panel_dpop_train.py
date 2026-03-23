@@ -1,6 +1,7 @@
 from copy import deepcopy
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 import pypomp as pp
 from pypomp.results import PanelPompDpopTrainResult
@@ -188,3 +189,187 @@ def test_panel_dpop_train_to_dataframe():
     df = res.to_dataframe()
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns
+
+
+def test_panel_dpop_train_multi_replicate():
+    """Multiple replicates should produce independent traces."""
+    panel = _get_sir_panel()
+    import pandas as pd
+
+    param_names = panel.canonical_param_names
+    unit_names = panel.get_unit_names()
+
+    # Build 2-replicate theta
+    base_theta = panel.theta.theta[0]
+    theta = pp.PanelParameters(theta=[deepcopy(base_theta), deepcopy(base_theta)])
+
+    J, M = 2, 2
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=0.01,
+        theta=theta,
+        chunk_size=1,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, PanelPompDpopTrainResult)
+    assert res.shared_traces.shape[0] == 2  # 2 replicates
+    assert res.unit_traces.shape[0] == 2
+
+
+def test_panel_dpop_train_reproducibility():
+    """Same key and same initial state should produce identical results."""
+    J, M = 2, 2
+    kwargs = dict(
+        J=J,
+        M=M,
+        eta=0.01,
+        chunk_size=1,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(99),
+    )
+
+    panel1 = _get_sir_panel()
+    panel1.dpop_train(theta=deepcopy(panel1.theta), **kwargs)
+    res1 = panel1.results_history[-1]
+
+    panel2 = _get_sir_panel()
+    panel2.dpop_train(theta=deepcopy(panel2.theta), **kwargs)
+    res2 = panel2.results_history[-1]
+
+    np.testing.assert_array_equal(
+        np.array(res1.unit_traces), np.array(res2.unit_traces)
+    )
+
+
+def test_panel_dpop_train_params_change():
+    """Parameters should actually change after training iterations."""
+    panel = _get_sir_panel()
+    J, M = 2, 5
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    unit_vars = [v for v in res.unit_traces.coords["variable"].values if v != "unitLogLik"]
+    initial = res.unit_traces.sel(replicate=0, iteration=0, variable=unit_vars).values
+    final = res.unit_traces.sel(replicate=0, iteration=M, variable=unit_vars).values
+    assert not np.allclose(initial, final), "Parameters should change after training"
+
+
+def test_panel_dpop_train_invalid_J():
+    panel = _get_sir_panel()
+    with pytest.raises(ValueError, match="J should be greater than 0"):
+        panel.dpop_train(
+            J=0,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_invalid_M():
+    panel = _get_sir_panel()
+    with pytest.raises(ValueError, match="M should be greater than 0"):
+        panel.dpop_train(
+            J=2,
+            M=0,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_missing_process_weight_state():
+    panel = _get_sir_panel()
+    with pytest.raises(ValueError, match="dpop_train requires a process-weight state"):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state=None,
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_invalid_process_weight_state():
+    panel = _get_sir_panel()
+    with pytest.raises(ValueError, match="not found in statenames"):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state="nonexistent_state",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_chunk_size_consistency():
+    """chunk_size=1 and chunk_size=U should give the same initial loglik."""
+    panel = _get_sir_panel()
+    J, M = 2, 1
+    key = jax.random.key(42)
+
+    panel.dpop_train(
+        J=J, M=M, eta=0.01, theta=deepcopy(panel.theta),
+        chunk_size=1, optimizer="SGD", alpha=0.8,
+        process_weight_state="logw", key=key,
+    )
+    res1 = panel.results_history[-1]
+
+    panel.dpop_train(
+        J=J, M=M, eta=0.01, theta=deepcopy(panel.theta),
+        chunk_size=2, optimizer="SGD", alpha=0.8,
+        process_weight_state="logw", key=key,
+    )
+    res2 = panel.results_history[-1]
+
+    # Initial loglik (iteration 0) should be identical regardless of chunk_size
+    ll1_init = float(res1.shared_traces.sel(replicate=0, iteration=0, variable="logLik"))
+    ll2_init = float(res2.shared_traces.sel(replicate=0, iteration=0, variable="logLik"))
+    np.testing.assert_allclose(ll1_init, ll2_init, rtol=2e-3)
+
+
+def test_panel_dpop_train_per_param_eta():
+    """Per-parameter learning rates via dict eta."""
+    panel = _get_sir_panel_with_shared()
+    param_names = panel.canonical_param_names
+    eta_dict = {p: 0.01 for p in param_names}
+    # Set one shared param to have a different learning rate
+    eta_dict["gamma"] = 0.001
+
+    J, M = 2, 2
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=eta_dict,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, PanelPompDpopTrainResult)

@@ -155,9 +155,45 @@ def gammainvf_performance():
     pass
 
 
+def rnbinom_performance():
+    # Prepare parameters
+    n = 1_000_000
+    key = jax.random.key(45)
+    size = jnp.array([1.0, 5.0, 20.0, 100.0], dtype=jnp.float32)
+    p = jnp.array([0.1, 0.5, 0.9], dtype=jnp.float32)
+    size_grid, p_grid = jnp.meshgrid(size, p, indexing="ij")
+    size_flat = size_grid.reshape(-1)
+    p_flat = p_grid.reshape(-1)
+
+    n_repeat = max(1, n // len(size_flat))
+    size_samples = jnp.tile(size_flat, n_repeat)
+    p_samples = jnp.tile(p_flat, n_repeat)
+    reps = 20
+
+    # Warmup
+    key1, _ = jax.random.split(key)
+    _ = ppr.fast_approx_rnbinom(key1, size_samples, p=p_samples).block_until_ready()
+
+    # Run
+    t_total = 0.0
+    for i in range(reps):
+        key1, _ = jax.random.split(key1)
+        t0 = time.time()
+        _ = ppr.fast_approx_rnbinom(key1, size_samples, p=p_samples).block_until_ready()
+        t1 = time.time()
+        t_total += t1 - t0
+    avg_t = t_total / reps
+
+    print(
+        f"fast_approx_rnbinom: {avg_t:.4f} seconds (avg over {reps} runs, {len(size_samples)} samples each)"
+    )
+    pass
+
+
 def compare_rpoisson_and_jax_poisson(
     seed=42,
     lam_vals=[0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0],
+    show_labels=True,
 ):
     """
     Compare distributions of pypomp.fast_approx_rpoisson (inverse CDF, continuous-valued Poisson)
@@ -213,9 +249,12 @@ def compare_rpoisson_and_jax_poisson(
             edgecolor="k",
         )
         ax_hist.set_title(r"$\lambda$ = {:.2f}".format(lam_val))
-        ax_hist.set_xlabel("Sample value")
-        if i == 0:
-            ax_hist.set_ylabel("Density")
+        if show_labels:
+            ax_hist.set_xlabel("Sample value")
+            if i == 0:
+                ax_hist.set_ylabel("Density")
+        else:
+            ax_hist.tick_params(labelbottom=False, labelleft=False)
         if i == len(lam_vals) - 1:
             ax_hist.legend()
 
@@ -232,10 +271,13 @@ def compare_rpoisson_and_jax_poisson(
         ax_qq.plot(
             [min_val, max_val], [min_val, max_val], "r--", alpha=0.7, label="y=x"
         )
-        if i == 1:
-            ax_qq.set_xlabel("jax.random.poisson quantiles")
-        if i == 0:
-            ax_qq.set_ylabel("pp.fast_approx_rpoisson quantiles")
+        if show_labels:
+            if i == 1:
+                ax_qq.set_xlabel("jax.random.poisson quantiles")
+            if i == 0:
+                ax_qq.set_ylabel("pp.fast_approx_rpoisson quantiles")
+        else:
+            ax_qq.tick_params(labelbottom=False, labelleft=False)
         if i == len(lam_vals) - 1:
             ax_qq.legend()
     plt.tight_layout()
@@ -248,6 +290,7 @@ def compare_rbinom2(
     prob_vals=[0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99],
     compare_to_exact=False,
     jitter_scale=0,  # % of the data range
+    show_labels=True,
 ):
     """
     Compare distributions of fast_approx_rbinom against either jax.random.binomial
@@ -348,11 +391,16 @@ def compare_rbinom2(
             )
 
             ax.set_title(f"n={n}, p={p_val:.4f}", fontsize=8)
-            if col == 0:
-                ax.set_ylabel("Density", fontsize=8)
-            if row == n_rows - 1:
-                ax.set_xlabel("Value", fontsize=8)
-            ax.tick_params(axis="both", which="major", labelsize=7)
+            if show_labels:
+                if col == 0:
+                    ax.set_ylabel("Density", fontsize=8)
+                if row == n_rows - 1:
+                    ax.set_xlabel("Value", fontsize=8)
+                ax.tick_params(axis="both", which="major", labelsize=7)
+            else:
+                ax.tick_params(
+                    axis="both", which="both", labelbottom=False, labelleft=False
+                )
             if row == 0 and col == n_cols - 1:
                 ax.legend(fontsize=7)
 
@@ -393,23 +441,30 @@ def compare_rbinom2(
                 s=5,
                 color="blue",
             )
-            if row == n_rows - 1:
-                ax.set_xlabel(xlabel, fontsize=8)
+            if show_labels:
+                if row == n_rows - 1:
+                    ax.set_xlabel(xlabel, fontsize=8)
+                if col == 0:
+                    ax.set_ylabel("Approx Quantiles", fontsize=8)
+                ax.tick_params(axis="both", which="major", labelsize=7)
+            else:
+                ax.tick_params(
+                    axis="both", which="both", labelbottom=False, labelleft=False
+                )
 
             # y=x line
             limit = [min(sorted_approx), max(sorted_approx)]
             ax.plot(limit, limit, "r--", alpha=0.8)
-            if col == 0:
-                ax.set_ylabel("Approx Quantiles", fontsize=8)
             ax.set_title(f"n={n}, p={p_val:.4f}", fontsize=8)
-            ax.tick_params(axis="both", which="major", labelsize=7)
 
     fig_qq.tight_layout()
     plt.show()
 
 
 def compare_rgamma_and_jax_gamma(
-    seed=42, alpha_vals=[0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
+    seed=42,
+    alpha_vals=[0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0],
+    show_labels=True,
 ):
     """
     Compare distributions of pypomp.rgamma (inverse CDF, Gamma) and
@@ -468,9 +523,12 @@ def compare_rgamma_and_jax_gamma(
             edgecolor="k",
         )
         ax_hist.set_title(r"$\alpha$ = {:.2f}".format(alpha_val))
-        ax_hist.set_xlabel("Sample value")
-        if i == 0:
-            ax_hist.set_ylabel("Density")
+        if show_labels:
+            ax_hist.set_xlabel("Sample value")
+            if i == 0:
+                ax_hist.set_ylabel("Density")
+        else:
+            ax_hist.tick_params(labelbottom=False, labelleft=False)
         if i == len(alpha_vals) - 1:
             ax_hist.legend()
 
@@ -487,10 +545,98 @@ def compare_rgamma_and_jax_gamma(
         ax_qq.plot(
             [min_val, max_val], [min_val, max_val], "r--", alpha=0.7, label="y=x"
         )
-        ax_qq.set_xlabel("jax.random.gamma quantiles")
-        ax_qq.set_ylabel("pp.rgamma quantiles")
+        if show_labels:
+            ax_qq.set_xlabel("jax.random.gamma quantiles")
+            ax_qq.set_ylabel("pp.rgamma quantiles")
+        else:
+            ax_qq.tick_params(labelbottom=False, labelleft=False)
         if i == len(alpha_vals) - 1:
             ax_qq.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def compare_rnbinom_and_scipy(
+    seed=42,
+    n_vals=[1.0, 5.0, 20.0, 100.0],
+    p_vals=[0.1, 0.5, 0.9],
+    show_labels=True,
+):
+    """
+    Compare distributions of pypomp.fast_approx_rnbinom and scipy.stats.nbinom
+    using histograms and qq-plots.
+    """
+    key = jax.random.key(seed)
+    n_samples = 100000
+
+    fig, axes = plt.subplots(
+        2, len(n_vals) * len(p_vals), figsize=(4 * len(n_vals) * len(p_vals), 8)
+    )
+    hist_axes = axes[0, :]
+    qq_axes = axes[1, :]
+
+    plot_idx = 0
+    for n_val in n_vals:
+        for p_val in p_vals:
+            # Draw samples
+            n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
+            p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
+            key_rnbinom, key = jax.random.split(key)
+            rnbinom_samples = ppr.fast_approx_rnbinom(key_rnbinom, n_arr, p=p_arr)
+
+            # Histogram
+            ax_hist = hist_axes[plot_idx]
+            min_bin = int(jnp.min(rnbinom_samples))
+            max_bin = int(jnp.max(rnbinom_samples))
+            bin_edges = np.arange(min_bin, max_bin + 2) - 0.5
+
+            ax_hist.hist(
+                rnbinom_samples,
+                bins=bin_edges,
+                alpha=0.5,
+                label="pp.rnbinom",
+                density=True,
+                color="C0",
+                edgecolor="k",
+            )
+
+            x_theory = np.arange(min_bin, max_bin + 1)
+            pmf_theory = stats.nbinom.pmf(x_theory, n_val, p_val)
+            ax_hist.step(
+                x_theory,
+                pmf_theory,
+                where="mid",
+                color="red",
+                alpha=0.8,
+                label="scipy.nbinom",
+            )
+
+            ax_hist.set_title(f"n={n_val}, p={p_val}")
+            if show_labels and plot_idx == 0:
+                ax_hist.set_ylabel("Density")
+
+            # QQ
+            ax_qq = qq_axes[plot_idx]
+            sorted_samples = np.sort(np.array(rnbinom_samples))
+            # Use percentiles for QQ to make it faster and less cluttered
+            quantiles = np.linspace(0.01, 0.99, 100)
+            sample_quants = np.percentile(sorted_samples, quantiles * 100)
+            theo_quants = stats.nbinom.ppf(quantiles, n_val, p_val)
+
+            ax_qq.scatter(theo_quants, sample_quants, alpha=0.6, s=15, color="C0")
+            limit = [
+                min(min(theo_quants), min(sample_quants)),
+                max(max(theo_quants), max(sample_quants)),
+            ]
+            ax_qq.plot(limit, limit, "r--", alpha=0.7)
+
+            if show_labels:
+                if plot_idx == 0:
+                    ax_qq.set_ylabel("pp.rnbinom quantiles")
+                ax_qq.set_xlabel("scipy.nbinom quantiles")
+
+            plot_idx += 1
+
     plt.tight_layout()
     plt.show()
 
@@ -662,3 +808,72 @@ def rgamma_goodness_of_fit():
                 f"KS={ks_stat:.4f}, p={p_value:.4f}",
                 UserWarning,
             )
+
+
+def rnbinom_goodness_of_fit():
+    """Goodness of fit test for fast_approx_rnbinom using chi-square test."""
+    n = [1.0, 5.0, 20.0, 100.0]
+    p = [0.1, 0.5, 0.9]
+    n_samples = 10000
+    significance_level = 0.1
+
+    for n_val in n:
+        for p_val in p:
+            key = jax.random.key((int(n_val * 100) + int(p_val * 10000)) % 2**31)
+            n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
+            p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
+            samples = np.array(ppr.fast_approx_rnbinom(key, n_arr, p=p_arr))
+
+            # Convert to integers
+            samples_int = np.round(samples).astype(int)
+            samples_int = np.maximum(samples_int, 0)
+
+            # Get observed frequencies
+            max_observed = int(np.max(samples_int))
+            max_val = max(max_observed + 1, int(n_val * (1 - p_val) / p_val * 3) + 10)
+            bin_edges = np.arange(-0.5, max_val + 0.5)
+            observed, _ = np.histogram(samples_int, bins=bin_edges)
+
+            # Calculate expected frequencies
+            k_values = np.arange(len(observed))
+            expected = stats.nbinom.pmf(k_values, n_val, p_val) * n_samples
+
+            # Normalize expected to sum to n_samples
+            expected_sum = np.sum(expected)
+            if expected_sum > 0:
+                expected = expected * (n_samples / expected_sum)
+
+            # Combine bins with expected frequency < 5
+            min_expected = 5
+            combined_observed = []
+            combined_expected = []
+            current_obs = 0
+            current_exp = 0
+
+            for i in range(len(observed)):
+                current_obs += observed[i]
+                current_exp += expected[i]
+                if current_exp >= min_expected or i == len(observed) - 1:
+                    if current_exp > 0:
+                        combined_observed.append(current_obs)
+                        combined_expected.append(current_exp)
+                    current_obs = 0
+                    current_exp = 0
+
+            # Normalize and test
+            if len(combined_observed) > 1:
+                obs_sum = sum(combined_observed)
+                exp_sum = sum(combined_expected)
+                if exp_sum > 0 and obs_sum > 0:
+                    combined_expected = [
+                        x * (obs_sum / exp_sum) for x in combined_expected
+                    ]
+                    chi2_stat, p_value = stats.chisquare(
+                        combined_observed, f_exp=combined_expected, ddof=0
+                    )
+                    if p_value <= significance_level:
+                        warnings.warn(
+                            f"fast_approx_rnbinom failed chi-square test for n={n_val}, p={p_val}: "
+                            f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
+                            UserWarning,
+                        )

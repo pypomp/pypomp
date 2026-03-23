@@ -295,3 +295,60 @@ def test_rgamma_moments(n_moments=3):
                 warnings.warn(
                     f"Gamma skew fail for alpha={alpha}. Empirical: {skew_emp}, Theoretical: {skew_th}"
                 )
+
+
+def test_rnbinom():
+    key = jax.random.key(0)
+    n = jnp.array([1.0, 2.0, 3.0])
+    p = jnp.array([0.5, 0.6, 0.7])
+
+    x = ppr.fast_approx_rnbinom(key, n, p=p)
+    assert x.shape == (3,)
+    assert x.min() >= 0
+
+    mu = jnp.array([1.0, 2.0, 3.0])
+    x_mu = ppr.fast_approx_rnbinom(key, n, mu=mu)
+    assert x_mu.shape == (3,)
+    assert x_mu.min() >= 0
+
+    x_int32 = ppr.fast_approx_rnbinom(key, n, p=p, dtype=jnp.int32)
+    assert x_int32.dtype == jnp.int32
+
+    # p = 1.0 -> always 0 failures
+    x_p1 = ppr.fast_approx_rnbinom(key, n, p=1.0)
+    assert jnp.all(x_p1 == 0.0)
+
+    # n <= 0 -> nan
+    x_n0 = ppr.fast_approx_rnbinom(key, 0.0, mu=1.0)
+    assert jnp.isnan(x_n0)
+
+
+def test_rnbinom_moments(n_moments=2):
+    """Check that the first n_moments moments of fast_approx_rnbinom match theoretical Negative Binomial moments."""
+    key = jax.random.key(789)
+    n_vals = [1.0, 5.0, 20.0]
+    p_vals = [0.1, 0.5, 0.9]
+    test_params = [(n, p) for n in n_vals for p in p_vals]
+    n_samples = 100000
+
+    for n, p in test_params:
+        n_arr = jnp.full((n_samples,), n, dtype=jnp.float32)
+        p_arr = jnp.full((n_samples,), p, dtype=jnp.float32)
+        samples = np.array(ppr.fast_approx_rnbinom(key, n_arr, p=p_arr))
+
+        mean_th = n * (1 - p) / p
+        var_th = n * (1 - p) / (p**2)
+
+        mean_emp = samples.mean()
+        var_emp = samples.var()
+
+        if n_moments >= 1:
+            if not np.allclose(mean_emp, mean_th, rtol=0.03, atol=0.03):
+                warnings.warn(
+                    f"NB mean fail for n={n},p={p}. Empirical: {mean_emp}, Theoretical: {mean_th}"
+                )
+        if n_moments >= 2:
+            if not np.allclose(var_emp, var_th, rtol=0.05, atol=0.05):
+                warnings.warn(
+                    f"NB var fail for n={n},p={p}. Empirical: {var_emp}, Theoretical: {var_th}"
+                )

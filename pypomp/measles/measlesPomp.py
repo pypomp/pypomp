@@ -233,6 +233,10 @@ class UKMeasles:
             # Fallback: use earliest available year
             covar_df["log_pop_1950"] = np.log(float(demog["pop"].iloc[0]))
 
+        # Placeholder for standardized log(pop_1950); must be overwritten
+        # at the panel level with correct z-score across all units.
+        covar_df["std_log_pop_1950"] = 0.0
+
         # ----pomp-construction-----------------------------------------------
 
         mod = {

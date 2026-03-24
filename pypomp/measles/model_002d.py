@@ -8,7 +8,11 @@ This is the DPOP-enabled version of model_002, combining:
   2. dmeas: custom JVP log_cdf_diff to prevent 0 * inf = NaN
   3. dmeas: NaN-safe y handling
 
-The covariate "log_pop_1950" must be present in covars (added by measlesPomp.py).
+The covariate "std_log_pop_1950" must be present in covars. This is the
+z-scored log(pop_1950): (log(pop_1950) - mean) / sd, where mean and sd are
+computed across all units in the panel. This standardization matches
+Wheeler et al. (2025). The raw "log_pop_1950" is added by measlesPomp.py;
+the standardized version must be computed at the panel level.
 
 Parameters:
 - R0: Basic reproduction number
@@ -151,9 +155,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     birthrate = covars["birthrate"]
     mu = 0.02
 
-    # iota from log-log linear model using 1950 population (constant per unit)
-    log_pop_1950 = covars["log_pop_1950"]
-    iota = jnp.exp(iota1 + iota2 * log_pop_1950)
+    # iota from log-log linear model using standardized 1950 population
+    # std_log_pop_1950 = (log(pop_1950) - mean) / sd across panel units
+    # (computed at panel level, injected as covariate)
+    std_log_pop_1950 = covars["std_log_pop_1950"]
+    iota = jnp.exp(iota1 + iota2 * std_log_pop_1950)
 
     # Cohort effect timing
     t_mod = t - jnp.floor(t)

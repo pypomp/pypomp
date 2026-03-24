@@ -6,7 +6,18 @@ import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from pypomp.random.gammainvf import fast_approx_rgamma
-from pypomp.types import ObservationDict, StateDict, ParamDict, CovarDict, TimeFloat
+from pypomp.types import (
+    ObservationDict,
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    RNGKey,
+    InitialTimeFloat,
+    StepSizeFloat,
+)
+from jax.scipy.special import log_ndtr
+
 
 param_names = (
     "R0",
@@ -28,7 +39,12 @@ statenames = ["S", "E", "I", "R", "W", "C"]
 accumvars = ["W", "C"]
 
 
-def rinit(theta_, key, covars, t0=None):
+def rinit(
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t0: InitialTimeFloat | None = None,
+):
     S_0 = theta_["S_0"]
     E_0 = theta_["E_0"]
     I_0 = theta_["I_0"]
@@ -46,7 +62,14 @@ def rinit(theta_, key, covars, t0=None):
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def rproc(X_, theta_, key, covars, t, dt):
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     S, E, I = X_["S"], X_["E"], X_["I"]
     W, C = X_["W"], X_["C"]
 
@@ -128,7 +151,7 @@ def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
     psi = theta_["psi"]
     C = X_["C"]
 
-    y = Y_["cases"]
+    y = jnp.asarray(Y_["cases"])
     safe_y = jnp.nan_to_num(y, nan=0.0)
     safe_C = jnp.maximum(C, 0.0)
 
@@ -143,50 +166,101 @@ def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
     return loglik
 
 
+LOG_SQRT_2PI = 0.5 * jnp.log(2.0 * jnp.pi)
+
+
+def _log_phi(z):
+    return -0.5 * z * z - LOG_SQRT_2PI
+
+
+def log_cdf_single(z):
+    return log_cdf_diff(z, -jnp.inf)
+
+
+def _log_sub_exp_stable(a, b):
+    return a + jnp.log1p(-jnp.exp(b - a))
+
+
+@jax.custom_jvp
+def log_cdf_diff(zh, zl):
+    a = log_ndtr(zh)
+    b = log_ndtr(zl)
+    hi = jnp.maximum(a, b)
+    lo = jnp.minimum(a, b)
+    return _log_sub_exp_stable(hi, lo)
+
+
+@log_cdf_diff.defjvp
+def _log_cdf_diff_jvp(primals, tangents):
+    zh, zl = primals
+    tzh, tzl = tangents
+    y = log_cdf_diff(zh, zl)
+    lphi_h = _log_phi(zh)
+    lphi_l = _log_phi(zl)
+
+    LOG_MAX = jnp.log(jnp.finfo(zh.dtype).max)
+
+    diff_h = lphi_h - y
+    diff_l = lphi_l - y
+
+    safe_diff_h = jnp.where(
+        jnp.isfinite(diff_h), jnp.clip(diff_h, -LOG_MAX, LOG_MAX), -LOG_MAX
+    )
+    safe_diff_l = jnp.where(
+        jnp.isfinite(diff_l), jnp.clip(diff_l, -LOG_MAX, LOG_MAX), -LOG_MAX
+    )
+
+    r_hi = jnp.exp(safe_diff_h)
+    r_lo = jnp.exp(safe_diff_l)
+    dy = r_hi * tzh - r_lo * tzl
+    return y, dy
+
+
 def dmeas(
     Y_: ObservationDict,
     X_: StateDict,
     theta_: ParamDict,
-    covars: CovarDict,
-    t: TimeFloat,
+    covars: CovarDict | None = None,
+    t: TimeFloat | None = None,
 ):
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
-    tol = 1.0e-3
+    y_raw = jnp.asarray(Y_["cases"])
 
-    y = Y_["cases"]
-    safe_y = jnp.nan_to_num(y, nan=0.0)
-    safe_C = jnp.maximum(C, 0.0)
+    tol = 1e-12
 
-    m = rho * safe_C
+    y_is_nan = jnp.isnan(y_raw)
+    y = jnp.where(y_is_nan, 0.0, y_raw)
+
+    Cpos = jnp.maximum(C, 0.0)
+    m = rho * Cpos
     v = m * (1.0 - rho + psi**2 * m)
-    sqrt_v_tol = jnp.sqrt(jnp.maximum(v, 1e-12)) + tol
+    v = jnp.maximum(v, tol * tol)
+    s = jnp.sqrt(v)
 
-    upper_cdf = jax.scipy.stats.norm.cdf(safe_y + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(safe_y - 0.5, m, sqrt_v_tol)
+    z_hi = (y + 0.5 - m) / s
+    z_lo = (y - 0.5 - m) / s
 
-    tol2 = 1.0e-18
-    lik = (
-        jnp.where(
-            safe_y > tol2,
-            upper_cdf - lower_cdf,
-            upper_cdf,
-        )
-        + tol2
-    )
+    ll_box = jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
 
-    loglik = jnp.log(lik)
-    loglik = jnp.where(C < 0, -jnp.inf, loglik)
-    loglik = jnp.where(jnp.isnan(y), 0.0, loglik)
+    loglik = jnp.maximum(ll_box, jnp.log(tol))
+
+    loglik = loglik * (1.0 - y_is_nan.astype(loglik.dtype))
 
     return loglik
 
 
-def rmeas(X_, theta_, key, covars=None, t=None):
+def rmeas(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict | None = None,
+    t: TimeFloat | None = None,
+):
     rho = theta_["rho"]
     psi = theta_["psi"]
-    C = X_["C"]
+    C = jnp.asarray(X_["C"])
     safe_C = jnp.maximum(C, 0.0)
 
     m = rho * safe_C
@@ -198,7 +272,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jnp.where(cases > 0.0, cases, 0.0)
 
 
-def to_est(theta):
+def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
     return {
@@ -218,7 +292,7 @@ def to_est(theta):
     }
 
 
-def from_est(theta):
+def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     SEIR_0 = jnp.exp(
         jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     )

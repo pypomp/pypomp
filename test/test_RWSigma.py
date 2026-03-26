@@ -47,7 +47,7 @@ class TestRWSigma:
             (
                 {"param1": "not a float"},
                 [],
-                "All values in sigmas dictionary must be floats",
+                "in sigmas dictionary must be a float",
             ),
             ({"param1": 0.1}, "not a list", "init_names must be a list"),
             ({"param1": 0.1}, [1, 2], "All values in init_names list must be strings"),
@@ -191,7 +191,7 @@ class TestRWSigma:
         "sigmas, init_names, expected_error",
         [
             ("invalid", [], "sigmas must be a dictionary"),
-            ({"a": "string"}, [], "All values in sigmas dictionary must be floats"),
+            ({"a": "string"}, [], "in sigmas dictionary must be a float"),
             ({"a": 1.0}, "invalid", "init_names must be a list"),
             ({"a": 1.0}, [1, 2], "All values in init_names list must be strings"),
             ({"a": 1.0}, ["b"], "All init_names names must be in sigmas dictionary"),

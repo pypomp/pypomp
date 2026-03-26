@@ -134,13 +134,6 @@ def _pfilter_internal(
     return output
 
 
-# Map over key
-_vmapped_pfilter_internal = jax.vmap(
-    _pfilter_internal,
-    in_axes=(None,) * 13 + (0,) + (None,) * 4,
-)
-
-
 @partial(
     jit,
     static_argnames=(

@@ -5,13 +5,15 @@ This module implements the OOP structure for POMP models.
 import importlib
 from copy import deepcopy
 import time
-from typing import Callable
+from typing import Callable, Mapping
 import numpy as np
 import jax
 import jax.numpy as jnp
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+from pypomp.types import Numeric, ThetaInput
 from .mop import _mop_internal
 from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
@@ -136,7 +138,7 @@ class Pomp:
     def __init__(
         self,
         ys: pd.DataFrame,
-        theta: dict | list[dict] | PompParameters,
+        theta: ThetaInput,
         statenames: tuple[str, ...] | list[str],
         t0: float,
         rinit: Callable,
@@ -168,8 +170,13 @@ class Pomp:
         Args:
             ys (pd.DataFrame): The measurement data frame. The row index must contain
                 the observation times.
-            theta (dict | list[dict] | PompParameters): Parameters involved in the POMP
-                model. If a list or PompParameters object, particle filtering methods will be vectorized over each parameter set, thereby running significantly faster.
+            theta (ThetaInput): Initial parameter(s) for the model. Accepts:
+                - A single dictionary: dict[str, Numeric]
+                - A list of dictionaries: list[dict[str, Numeric]]
+                - An existing PompParameters object
+                Numeric values (e.g. jax.Array, int) are automatically coerced to
+                standard Python floats for internal storage. Vectorized methods
+                (like pfilter) will run in parallel over list/PompParameters inputs.
             statenames (list[str]): List of all latent state variable names.
             t0 (float): The initial time for the model (typically before the first observation).
             rinit (Callable): Initial state simulator function. Automatically wrapped into an [RInit](RInit) object.
@@ -315,14 +322,15 @@ class Pomp:
         return self._theta
 
     @theta.setter
-    def theta(self, value: dict | list[dict] | PompParameters):
+    def theta(self, value: ThetaInput):
         if isinstance(value, PompParameters):
             self._theta = value
         else:
             self._theta = PompParameters(value)
 
     def _prepare_theta_input(
-        self, theta: dict | list[dict] | PompParameters | None
+        self,
+        theta: ThetaInput,
     ) -> PompParameters:
         """
         Prepare the theta input for the method.
@@ -363,7 +371,9 @@ class Pomp:
         return new_key, old_key
 
     @staticmethod
-    def sample_params(param_bounds: dict, n: int, key: jax.Array) -> list[dict]:
+    def sample_params(
+        param_bounds: dict[str, tuple[float, float]], n: int, key: jax.Array
+    ) -> list[dict[str, float]]:
         """
         Sample n sets of parameters from uniform distributions.
 
@@ -393,7 +403,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         alpha: float = 0.97,
     ) -> list[jax.Array]:
         """
@@ -403,8 +413,9 @@ class Pomp:
             J (int): The number of particles.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (dict or list[dict], optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Can be a single dict or a list of dicts.
+            theta (ThetaInput, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Accepts dict, list, or PompParameters.
+                Numeric values are automatically coerced to Python floats.
             alpha (float, optional): Cooling factor for the random perturbations.
                 Defaults to 0.97.
 
@@ -454,7 +465,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         alpha: float = 0.97,
         process_weight_state: str | None = None,
     ) -> list[jax.Array]:
@@ -475,8 +486,9 @@ class Pomp:
             J: Number of particles.
             key: Optional random key. If None, ``self.fresh_key`` is
                 used and updated internally.
-            theta: Optional parameter dictionary or list of dictionaries.
-                If None, ``self.theta`` is used.
+            theta (ThetaInput, optional): Optional parameter dictionary, list, or
+                PompParameters object. If None, ``self.theta`` is used.
+                Numeric values are automatically coerced to Python floats.
             alpha: Cooling factor for the particle weights.
             process_weight_state: Name of the state component that
                 stores the accumulated transition log-weight over a
@@ -552,7 +564,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         thresh: float = 0,
         reps: int = 1,
         CLL: bool = False,
@@ -567,9 +579,13 @@ class Pomp:
         Args:
             J (int): The number of particles
             key (jax.Array, optional): The random key. Defaults to self.fresh_key.
-            theta (dict or list[dict], optional): Parameters involved in the POMP model.
-                Each value must be a float. Replaced with Pomp.theta if None. Can be a
-                single dict or a list of dicts.
+            theta (ThetaInput, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Accepts:
+                - A single dictionary: dict[str, Numeric]
+                - A list of dictionaries: list[dict[str, Numeric]]
+                - An existing PompParameters object
+                Providing a list or PompParameters object enables faster, vectorized
+                execution across all parameter sets.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
             reps (int, optional): Number of replicates to run. Defaults to 1.
@@ -719,7 +735,7 @@ class Pomp:
         rw_sd: RWSigma,
         a: float,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         thresh: float = 0,
         track_time: bool = True,
     ) -> None:
@@ -735,8 +751,13 @@ class Pomp:
             a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (dict, list[dict], optional): Initial parameters for the POMP model.
-                Defaults to self.theta.
+            theta (ThetaInput, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Accepts:
+                - A single dictionary: dict[str, Numeric]
+                - A list of dictionaries: list[dict[str, Numeric]]
+                - An existing PompParameters object
+                Providing a list or PompParameters object enables faster, vectorized
+                execution across all parameter sets.
             thresh (float, optional): Resampling threshold. Defaults to 0.
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
@@ -884,7 +905,7 @@ class Pomp:
         M: int,
         eta: dict[str, float],
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         optimizer: str = "Adam",
         alpha: float = 0.97,
         thresh: int = 0,
@@ -905,8 +926,13 @@ class Pomp:
             eta (dict[str, float]): Learning rates per parameter as a dictionary.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (dict, optional): Parameters involved in the POMP model.
-                Defaults to self.theta.
+            theta (ThetaInput, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Accepts:
+                - A single dictionary: dict[str, Numeric]
+                - A list of dictionaries: list[dict[str, Numeric]]
+                - An existing PompParameters object
+                Providing a list or PompParameters object enables faster, vectorized
+                execution across all parameter sets.
             optimizer (str, optional): The gradient-based iterative optimization method
                 to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", "BFGS", and "FullMatrixAdam".
                 Note: options other than "Adam" and "SGD" might be quite slow. The "Adam" option itself can take ~3x longer per iteration than mif does.
@@ -1062,7 +1088,7 @@ class Pomp:
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
     ) -> tuple[jax.Array, jax.Array]:
         """
         Train on the DPOP objective using Adam or SGD with optional LR decay.
@@ -1089,9 +1115,10 @@ class Pomp:
             process log-weight (e.g. ``"logw"``).
         key : jax.Array or None, default None
             Random key. If None, uses ``self.fresh_key``.
-        theta : dict or list[dict] or None, default None
-            Optional initial parameter(s) in natural space. If None, uses
-            ``self.theta``. Only the first element is used.
+        theta : ThetaInput, default None
+            Optional initial parameter(s). Accepts dict[str, Numeric],
+            list[dict[str, Numeric]], or PompParameters.
+            Numeric values are coerced to floats. Defaults to self.theta.
 
         Returns
         -------
@@ -1120,7 +1147,7 @@ class Pomp:
                     "theta must be a dict, a list of dicts, or a PompParameters object"
                 )
 
-            def _to_float_dict(d: dict) -> dict:
+            def _to_float_dict(d: Mapping[str, Numeric]) -> dict[str, float]:
                 return {k: float(v) for k, v in d.items()}
 
             theta_list_raw = [_to_float_dict(d) for d in theta_list_raw]
@@ -1209,7 +1236,7 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: dict | list[dict] | PompParameters | None = None,
+        theta: ThetaInput = None,
         times: jax.Array | None = None,
         nsim: int = 1,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -1220,8 +1247,13 @@ class Pomp:
         Args:
             key (jax.Array, optional): The random key for random number generation.
                 Defaults to self.fresh_key.
-            theta (dict, optional): Parameters involved in the POMP model.
-                Defaults to self.theta.
+            theta (ThetaInput, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Accepts:
+                - A single dictionary: dict[str, Numeric]
+                - A list of dictionaries: list[dict[str, Numeric]]
+                - An existing PompParameters object
+                Providing a list or PompParameters object enables faster, vectorized
+                execution across all parameter sets.
             times (jax.Array, optional): Times at which to generate observations.
                 Defaults to self.ys.index.
             nsim (int): The number of simulations to perform. Defaults to 1.

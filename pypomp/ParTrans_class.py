@@ -1,4 +1,4 @@
-from typing import Callable, Literal
+from typing import Callable, Literal, Mapping
 import importlib
 import pandas as pd
 import jax
@@ -17,8 +17,14 @@ class ParTrans:
 
     def __init__(
         self,
-        to_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
-        from_est: Callable[[dict[str, jax.Array]], dict[str, jax.Array]] | None = None,
+        to_est: Callable[
+            [Mapping[str, float | jax.Array]], dict[str, float | jax.Array]
+        ]
+        | None = None,
+        from_est: Callable[
+            [Mapping[str, float | jax.Array]], dict[str, float | jax.Array]
+        ]
+        | None = None,
     ):
         self.to_est = to_est or _to_est_default
         self.from_est = from_est or _from_est_default
@@ -94,7 +100,9 @@ class ParTrans:
         return [self.panel_transform(t, direction) for t in theta_list]
 
     def to_floats(
-        self, theta: dict[str, jax.Array], direction: Literal["to_est", "from_est"]
+        self,
+        theta: Mapping[str, float | jax.Array],
+        direction: Literal["to_est", "from_est"],
     ) -> dict[str, float]:
         """
         Convert the theta dictionary values from jax.Array to float.
@@ -352,9 +360,13 @@ class ParTrans:
             self.from_est = getattr(module, state["_from_est_name"])
 
 
-def _to_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-    return theta
+def _to_est_default(
+    theta: Mapping[str, float | jax.Array],
+) -> dict[str, float | jax.Array]:
+    return dict(theta)
 
 
-def _from_est_default(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
-    return theta
+def _from_est_default(
+    theta: Mapping[str, float | jax.Array],
+) -> dict[str, float | jax.Array]:
+    return dict(theta)

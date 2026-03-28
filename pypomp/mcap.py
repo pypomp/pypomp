@@ -34,14 +34,6 @@ def _loess_smooth_1d(
     y = np.asarray(y, dtype=float)
     grid = np.asarray(grid, dtype=float)
 
-    # drop NaNs
-    good = np.isfinite(x) & np.isfinite(y)
-    x, y = x[good], y[good]
-
-    if x.size == 0:
-        return np.full_like(grid, np.nan, dtype=float)
-
-    # normalize predictor
     xmin = float(np.min(x))
     xmax = float(np.max(x))
     scale = xmax - xmin
@@ -50,39 +42,18 @@ def _loess_smooth_1d(
         # degenerate predictor: return flat line at mean(y)
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
-    x_norm = (x - xmin) / scale
-    grid_norm = (grid - xmin) / scale
-    grid_norm = np.clip(grid_norm, 0.0, 1.0)
+    
+    res = loess_1d(
+        x,
+        y,
+        xnew=grid,
+        degree=int(degree),
+        frac=float(span),
+        rotate=False,
+    )
 
-    # neutralize robustness by making all biweights 1
-    HUGE_SIGY = 1e12
-    sigy = np.full_like(y, HUGE_SIGY, dtype=float)
-
-    npoints = int(np.trunc(float(span) * x.size))
-
-    try:
-        res = loess_1d(
-            x_norm,
-            y,
-            xnew=grid_norm,
-            degree=int(degree),
-            frac=float(span),
-            npoints=npoints,
-            rotate=False,
-            sigy=sigy,
-        )
-    except Exception:
-        coeff = np.polyfit(x_norm, y, deg=min(degree, 2))
-        y_sm = np.polyval(coeff, grid_norm)
-        return y_sm.astype(float, copy=False)
-
-    if len(res) == 3:
-        _, y_sm, _ = res
-        return y_sm.astype(float, copy=False)
-    else:
-        # if frac == 0 in loess_1d
-        y_raw, _ = res
-        return np.interp(grid_norm, x_norm, y_raw).astype(float, copy=False)
+    _, y_sm, _ = res
+    return y_sm.astype(float, copy=False)
 
 
 def _fit_local_quadratic(

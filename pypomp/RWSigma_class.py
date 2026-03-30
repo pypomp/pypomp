@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 class RWSigma:
@@ -26,10 +27,20 @@ class RWSigma:
         """
         if not isinstance(sigmas, dict):
             raise ValueError("sigmas must be a dictionary")
-        if not all(
-            isinstance(sigmas[param_name], float) for param_name in sigmas.keys()
-        ):
-            raise ValueError("All values in sigmas dictionary must be floats")
+        for param_name, value in sigmas.items():
+            if isinstance(value, (int, np.number, jax.Array)) and not isinstance(
+                value, bool
+            ):
+                try:
+                    sigmas[param_name] = float(value)
+                except (TypeError, ValueError):
+                    pass
+
+            if not isinstance(sigmas[param_name], float):
+                raise ValueError(
+                    f"Value for parameter '{param_name}' in sigmas dictionary must be a float: "
+                    f"got {type(sigmas[param_name]).__name__}"
+                )
         if not isinstance(init_names, list):
             raise ValueError("init_names must be a list")
         if not all(isinstance(param_name, str) for param_name in init_names):

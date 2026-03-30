@@ -327,8 +327,8 @@ def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
     Calculate geometric cooling parameters for mif.
 
     Args:
-        nt (int): Current time step
-        m (int): Current iteration
+        nt (int): Current time step, starting from 0.
+        m (int): Current iteration, starting from 1.
         ntimes (int): Total number of time steps
         a (float): Amount to cool over 50 iterations
 

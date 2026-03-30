@@ -104,7 +104,12 @@ def _align_by_type(user_func: Callable, internal_order: list[str]) -> dict[str, 
 # --- Validation Utilities ---
 
 
-def _get_dummies(statenames, param_names, covar_names, y_names):
+def _get_dummies(
+    statenames: list[str],
+    param_names: list[str],
+    covar_names: list[str],
+    y_names: list[str] | None,
+) -> dict[str, dict[str, float] | float | jax.Array]:
     """Generate dummy data for validation."""
     return {
         "X_": {n: 0.1 for n in statenames},
@@ -118,7 +123,12 @@ def _get_dummies(statenames, param_names, covar_names, y_names):
     }
 
 
-def _validate_call(user_func, name_mapping, dummies, output_validator):
+def _validate_call(
+    user_func: Callable,
+    name_mapping: dict[str, str],
+    dummies: dict[str, dict[str, float] | float | jax.Array],
+    output_validator: Callable,
+):
     """Generic validator that runs the function once."""
     kwargs = {
         user_name: dummies[internal] for internal, user_name in name_mapping.items()

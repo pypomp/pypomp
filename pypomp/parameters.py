@@ -3,14 +3,16 @@ This module defines the parameter classes for Pomp and PanelPomp models.
 It handles input validation, standardization, and conversion to JAX arrays.
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 import copy
 import pandas as pd
 import jax.numpy as jnp
 import numpy as np
 import jax
-from typing import Union, Literal
+from typing import Union, Literal, Mapping, cast
 from .ParTrans_class import ParTrans
+from .types import Numeric, ThetaInput
 
 
 class ParameterSet(ABC):
@@ -58,21 +60,23 @@ class PompParameters(ParameterSet):
     Internal storage is a list of dictionaries.
     """
 
-    _params: list[dict]
+    _params: list[dict[str, float]]
     _canonical_param_names: list[str]
     estimation_scale: bool
     _logLik: np.ndarray
 
     def __init__(
         self,
-        theta: Union[dict, list[dict], "PompParameters"] | None,
+        theta: ThetaInput,
         logLik: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
         """
         Args:
-            theta: A single dictionary, a list of dictionaries, or an existing
-                   PompParameters object containing the parameter values.
+            theta: Parameters for the model. Accepts:
+                   - A single dictionary: dict[str, Numeric]
+                   - A list of dictionaries: list[dict[str, Numeric]]
+                   - An existing PompParameters object
             logLik: A numpy array of log-likelihoods.
             estimation_scale: Whether the parameters are in the estimation scale.
         """
@@ -96,11 +100,20 @@ class PompParameters(ParameterSet):
             return
 
         # Normalize input to list of dicts
-        if isinstance(theta, dict):
-            theta = [theta]
+        if isinstance(theta, Mapping):
+            theta = [dict(theta)]
+        elif isinstance(theta, (list, tuple)):
+            theta = [dict(t) if not isinstance(t, dict) else t for t in theta]
+        else:
+            try:
+                theta = [dict(t) for t in theta]
+            except (TypeError, ValueError):
+                raise TypeError(
+                    "theta must be a Mapping, Sequence of Mappings, or PompParameters"
+                )
 
         self._validate_raw(theta)
-        self._params = theta
+        self._params = cast(list[dict[str, float]], theta)
         self._canonical_param_names = list(self._params[0].keys())
         self.estimation_scale = estimation_scale
         self._logLik = self._format_logLik(logLik, len(self._params))
@@ -121,7 +134,7 @@ class PompParameters(ParameterSet):
             )
         return ll
 
-    def _validate_raw(self, theta: list[dict]):
+    def _validate_raw(self, theta: list[dict[str, Numeric]]):
         if not isinstance(theta, list):
             raise TypeError("theta must be a list of dictionaries")
 
@@ -131,12 +144,19 @@ class PompParameters(ParameterSet):
         if not all(isinstance(t, dict) for t in theta):
             raise TypeError("All elements in theta must be dictionaries")
 
-        # Check that all values of all dictionaries are single floats
         for i, t in enumerate(theta):
             for key, value in t.items():
-                if not isinstance(value, float):
+                if isinstance(value, (int, np.number, jax.Array)) and not isinstance(
+                    value, bool
+                ):
+                    try:
+                        t[key] = float(value)
+                    except (TypeError, ValueError):
+                        pass
+
+                if not isinstance(t[key], float):
                     raise TypeError(
-                        f"Parameter '{key}' at index {i} is not a float: got {type(value).__name__}"
+                        f"Parameter '{key}' at index {i} is not a float: got {type(t[key]).__name__}"
                     )
 
         # Ensure all dicts have identical keys
@@ -150,7 +170,7 @@ class PompParameters(ParameterSet):
 
     def _child_PompParameters(
         self,
-        theta: Union[dict, list[dict], "PompParameters"] | None = None,
+        theta: ThetaInput = None,
         logLik: np.ndarray | None = None,
         estimation_scale: bool | None = None,
     ):
@@ -218,7 +238,7 @@ class PompParameters(ParameterSet):
             return []
         return list(self._canonical_param_names)
 
-    def to_list(self) -> list[dict]:
+    def to_list(self) -> list[dict[str, float]]:
         """Returns the internal list of dictionaries."""
         return self._params
 
@@ -239,11 +259,15 @@ class PompParameters(ParameterSet):
             direction = "from_est" if self.estimation_scale else "to_est"
         if direction not in ["to_est", "from_est"]:
             raise ValueError(f"Invalid direction: {direction}")
-        if direction == "to_est" and self.estimation_scale is False:
-            self._params = [par_trans.to_est(theta_i) for theta_i in self._params]
+        if direction == "to_est" and not self.estimation_scale:
+            self._params = [
+                par_trans.to_floats(theta_i, "to_est") for theta_i in self._params
+            ]
             self.estimation_scale = True
-        elif direction == "from_est" and self.estimation_scale is True:
-            self._params = [par_trans.from_est(theta_i) for theta_i in self._params]
+        elif direction == "from_est" and self.estimation_scale:
+            self._params = [
+                par_trans.to_floats(theta_i, "from_est") for theta_i in self._params
+            ]
             self.estimation_scale = False
         else:
             # If this statement is reached, the parameters are already in the correct estimation space. Nothing needs to be done.
@@ -285,9 +309,7 @@ class PompParameters(ParameterSet):
         self._params = new_params
         self._logLik = new_logLik
 
-    def __getitem__(
-        self, index: Union[int, slice]
-    ) -> Union[dict, "PompParameters", float]:
+    def __getitem__(self, index: int | slice) -> dict[str, float] | "PompParameters":
         """
         Support indexing like theta[0] or theta[0:2] or theta[0]["param_name"].
         - Integer index: returns the dict at that position
@@ -479,6 +501,10 @@ class PanelParameters(ParameterSet):
                     f"All values in each dictionary must be None or pd.DataFrames. "
                     f"Found values {t.values()} of type {type(t.values())} in item {i}."
                 )
+            if t["shared"] is not None:
+                t["shared"] = t["shared"].astype(float)
+            if t["unit_specific"] is not None:
+                t["unit_specific"] = t["unit_specific"].astype(float)
 
         return theta.copy()
 

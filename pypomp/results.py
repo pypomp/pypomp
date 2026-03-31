@@ -913,13 +913,11 @@ class PanelPompMIFResult(PanelPompBaseResult):
         ):
             return False
 
-        # rw_sd comparison
         if (self.rw_sd is None) != (other.rw_sd is None):
             return False
         if self.rw_sd is not None and self.rw_sd != other.rw_sd:
             return False
 
-        # shared_traces, unit_traces, logLiks
         for name in ["shared_traces", "unit_traces", "logLiks"]:
             a = getattr(self, name)
             b = getattr(other, name)
@@ -948,7 +946,6 @@ class PanelPompMIFResult(PanelPompBaseResult):
             .rename(columns={"unitLogLik": "unit logLik"})
         )
 
-        # Avoid duplicate "iteration" column on join; keep the one from u_df
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 

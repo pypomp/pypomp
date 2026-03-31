@@ -12,6 +12,8 @@ import jax.numpy as jnp
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import warnings
+from typing import Union
 
 from pypomp.types import Numeric, ThetaInput
 from .mop import _mop_internal
@@ -705,9 +707,7 @@ class Pomp:
 
         del results
 
-        logLik_estimates = logmeanexp(
-            -neg_logliks, axis=-1, ignore_nan=False
-        )
+        logLik_estimates = logmeanexp(-neg_logliks, axis=-1, ignore_nan=False)
         theta_obj_in.logLik = logLik_estimates
         self.theta = theta_obj_in
 
@@ -1239,7 +1239,8 @@ class Pomp:
         theta: ThetaInput = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        as_pomp: bool = False,
+    ) -> Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], "Pomp"]:
         """
         Simulates the evolution of a system over time using a Partially Observed
         Markov Process (POMP) model.
@@ -1257,15 +1258,28 @@ class Pomp:
             times (jax.Array, optional): Times at which to generate observations.
                 Defaults to self.ys.index.
             nsim (int): The number of simulations to perform. Defaults to 1.
+            as_pomp (bool): If True, returns a new Pomp object containing the simulated
+                observations for the first parameter replicate and simulation, instead of DataFrames.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
-            The columns are as follows:
-            - replicate: The index of the parameter set.
-            - sim: The index of the simulation.
-            - time: The time points at which the observations were made.
-            - Remaining columns contain the features of the state and observation processes.
+            If as_pomp is False:
+                tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
+                The columns are as follows:
+                - replicate: The index of the parameter set.
+                - sim: The index of the simulation.
+                - time: The time points at which the observations were made.
+                - Remaining columns contain the features of the state and observation processes.
+            If as_pomp is True:
+                Pomp: A deep copy of the original model, where the `ys` attribute contains one dataset of simulated observations.
         """
+        if as_pomp:
+            if nsim > 1:
+                warnings.warn(
+                    "as_pomp is True, but nsim > 1. Only 1 simulation will be performed as_pomp overrides nsim.",
+                    UserWarning,
+                )
+            nsim = 1
+
         theta_obj_in = self._prepare_theta_input(theta)
 
         if self.rmeas is None:
@@ -1320,7 +1334,84 @@ class Pomp:
         X_sims_long = _to_long(X_sims, times0, "state")
         Y_sims_long = _to_long(Y_sims, np.array(times_array), "obs")
 
+        if as_pomp:
+            simulated_ys_long = Y_sims_long[
+                (Y_sims_long["replicate"] == 0) & (Y_sims_long["sim"] == 0)
+            ].copy()
+            simulated_ys = pd.DataFrame(
+                simulated_ys_long.drop(columns=["replicate", "sim", "time"])
+            )
+            simulated_ys.index = pd.Index(simulated_ys_long["time"])
+            simulated_ys.columns = self.ys.columns
+
+            pomp_copy = deepcopy(self)
+            pomp_copy.ys = simulated_ys
+            # Retain the first replicate of parameters used during simulation
+            pomp_copy.theta = theta_obj_in.subset([0])
+            return pomp_copy
+
         return X_sims_long, Y_sims_long
+
+    def probe(
+        self,
+        probes: dict[str, Callable[[pd.DataFrame], float]],
+        nsim: int = 100,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+    ) -> pd.DataFrame:
+        """
+        Evaluate probe statistics on the model's true data and simulated data.
+
+        Args:
+            probes (dict[str, Callable[[pd.DataFrame], float]]): A dictionary of probe functions.
+                Each function should receive a DataFrame of observations (with time as the index,
+                or a single dataframe component) and return a numeric scalar.
+                Example: `{"mean": lambda df: df["obs"].mean()}`
+            nsim (int, optional): Number of simulations to run per parameter set. Defaults to 100.
+            key (jax.Array, optional): JAX random key for the simulations.
+            theta (ThetaInput, optional): Parameters to simulate from.
+
+
+        Returns:
+            pd.DataFrame: A long-format DataFrame with columns:
+                `probe`, `value`, `is_real_data`, `replicate`, `sim`
+        """
+        sim_result = self.simulate(nsim=nsim, key=key, theta=theta, as_pomp=False)
+        assert isinstance(sim_result, tuple)
+        _, y_sims = sim_result
+
+        results = []
+
+        for name, func in probes.items():
+            results.append(
+                {
+                    "probe": name,
+                    "value": float(func(self.ys)),
+                    "is_real_data": True,
+                    "replicate": pd.NA,
+                    "sim": pd.NA,
+                }
+            )
+
+        def apply_probes(group):
+            replicate_id, sim_id = group.name
+            df = pd.DataFrame(group.drop(columns=["time"]))
+            df.index = pd.Index(group["time"])
+            df.columns = self.ys.columns
+            for name, func in probes.items():
+                results.append(
+                    {
+                        "probe": name,
+                        "value": float(func(df)),
+                        "is_real_data": False,
+                        "replicate": replicate_id,
+                        "sim": sim_id,
+                    }
+                )
+
+        y_sims.groupby(["replicate", "sim"]).apply(apply_probes, include_groups=False)
+
+        return pd.DataFrame(results)
 
     def traces(self) -> pd.DataFrame:
         """

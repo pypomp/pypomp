@@ -51,3 +51,28 @@ def test_simulate_invalid_theta_keys(simple):
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
         LG.simulate(nsim=1, key=key, theta=bad_theta)
+
+
+def test_simulate_as_pomp(simple):
+    LG = simple
+    key = jax.random.key(0)
+
+    # Test normal as_pomp
+    new_pomp = LG.simulate(nsim=1, key=key, as_pomp=True)
+    assert isinstance(new_pomp, pp.Pomp)
+    assert new_pomp.ys.shape == LG.ys.shape
+    assert not new_pomp.ys.equals(LG.ys)
+    assert new_pomp.theta.num_replicates() == 1
+
+    # Test as_pomp with nsim > 1 (should warn and force nsim=1)
+    with pytest.warns(UserWarning, match="as_pomp is True, but nsim > 1"):
+        new_pomp_warn = LG.simulate(nsim=5, key=key, as_pomp=True)
+    assert isinstance(new_pomp_warn, pp.Pomp)
+    assert new_pomp_warn.theta.num_replicates() == 1
+
+    # Verify that the simulated Pomp can be simulated again
+    result = new_pomp.simulate(nsim=1, key=key)
+    assert isinstance(result, tuple)
+    X, Y = result
+    assert isinstance(X, pd.DataFrame)
+    assert isinstance(Y, pd.DataFrame)

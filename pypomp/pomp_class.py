@@ -1457,6 +1457,7 @@ class Pomp:
         print(f"Number of observations: {len(self.ys)}")
         print(f"Number of time steps: {len(self._dt_array_extended)}")
         print(f"Number of parameters: {self.theta.num_params()}")
+        print(f"Number of parameter sets: {self.theta.num_replicates()}")
         print()
         self.results_history.print_summary()
 

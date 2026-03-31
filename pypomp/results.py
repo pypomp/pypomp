@@ -245,6 +245,7 @@ class PompPFilterResult(PompBaseResult):
     def print_summary(self):
         """Print summary of pfilter result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of replicates: {self.reps}")
         print(f"Resampling threshold: {self.thresh}")
@@ -422,6 +423,7 @@ class PompMIFResult(PompBaseResult):
     def print_summary(self):
         """Print summary of mif result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
@@ -577,6 +579,7 @@ class PompTrainResult(PompBaseResult):
     def print_summary(self):
         """Print summary of train result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Optimizer: {self.optimizer}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
@@ -801,6 +804,9 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel pfilter result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Number of particles (J): {self.J}")
         print(f"Number of replicates: {self.reps}")
         print(f"Resampling threshold: {self.thresh}")
@@ -988,6 +994,9 @@ class PanelPompMIFResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel mif result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
@@ -1183,6 +1192,9 @@ class PanelPompTrainResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel train result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Optimizer: {self.optimizer}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")

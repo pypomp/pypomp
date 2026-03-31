@@ -264,7 +264,7 @@ def _chunked_panel_pfilter_internal(
     ESS: bool = False,
     filter_mean: bool = False,
     prediction_mean: bool = False,
-):
+) -> dict[str, jax.Array]:
     n_reps, U, n_params = thetas.shape
     n_chunks = U // chunk_size
 

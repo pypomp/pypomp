@@ -79,6 +79,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         print(
             f"Number of time steps (first unit): {len(self.unit_objects[first_unit]._dt_array_extended)}"
         )
+        print(f"Number of parameter sets: {self.theta.num_replicates()}")
         print()
         self.results_history.print_summary()
 

@@ -142,9 +142,9 @@ def test_results(neapolitan):
 
 def test_sample_params():
     param_bounds = {
-        "R0": (0, 100),
-        "sigma": (0, 100),
-        "gamma": (0, 100),
+        "R0": (0.0, 100.0),
+        "sigma": (0.0, 100.0),
+        "gamma": (0.0, 100.0),
     }
     n = 10
     key = jax.random.key(1)

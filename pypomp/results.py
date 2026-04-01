@@ -245,6 +245,7 @@ class PompPFilterResult(PompBaseResult):
     def print_summary(self):
         """Print summary of pfilter result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of replicates: {self.reps}")
         print(f"Resampling threshold: {self.thresh}")
@@ -422,6 +423,7 @@ class PompMIFResult(PompBaseResult):
     def print_summary(self):
         """Print summary of mif result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
@@ -577,6 +579,7 @@ class PompTrainResult(PompBaseResult):
     def print_summary(self):
         """Print summary of train result."""
         print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Optimizer: {self.optimizer}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
@@ -932,6 +935,9 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel pfilter result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Number of particles (J): {self.J}")
         print(f"Number of replicates: {self.reps}")
         print(f"Resampling threshold: {self.thresh}")
@@ -1038,13 +1044,11 @@ class PanelPompMIFResult(PanelPompBaseResult):
         ):
             return False
 
-        # rw_sd comparison
         if (self.rw_sd is None) != (other.rw_sd is None):
             return False
         if self.rw_sd is not None and self.rw_sd != other.rw_sd:
             return False
 
-        # shared_traces, unit_traces, logLiks
         for name in ["shared_traces", "unit_traces", "logLiks"]:
             a = getattr(self, name)
             b = getattr(other, name)
@@ -1073,7 +1077,6 @@ class PanelPompMIFResult(PanelPompBaseResult):
             .rename(columns={"unitLogLik": "unit logLik"})
         )
 
-        # Avoid duplicate "iteration" column on join; keep the one from u_df
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 
@@ -1119,6 +1122,9 @@ class PanelPompMIFResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel mif result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
@@ -1314,6 +1320,9 @@ class PanelPompTrainResult(PanelPompBaseResult):
     def print_summary(self):
         """Print summary of panel train result."""
         print(f"Method: {self.method}")
+        print(
+            f"Number of parameter sets: {self.theta.num_replicates() if self.theta is not None else 0}"
+        )
         print(f"Optimizer: {self.optimizer}")
         print(f"Number of particles (J): {self.J}")
         print(f"Number of iterations (M): {self.M}")

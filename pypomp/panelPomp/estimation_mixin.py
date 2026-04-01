@@ -5,7 +5,8 @@ import xarray as xr
 import numpy as np
 import time
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, Union, cast, Callable
+import warnings
 
 from ..pfilter import _chunked_panel_pfilter_internal
 from ..mif import _jv_panel_mif_internal
@@ -172,27 +173,139 @@ class PanelEstimationMixin(Base):
         ] = None,
         times: jax.Array | None = None,
         nsim: int = 1,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        as_pomp: bool = False,
+    ) -> Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], "Base"]:
+        """
+        Simulate the PanelPomp model.
+
+        Args:
+            key (jax.Array): JAX random key.
+            theta (PanelParameters | dict | list, optional): Parameter sets to use.
+                If None, uses `self.theta`.
+            times (jax.Array, optional): Times at which to simulate the model.
+                If None, uses `self.times`.
+            nsim (int, optional): Number of simulations to run.
+            as_pomp (bool, optional): If True, returns a new PanelPomp object containing the simulated
+                observations for the first parameter replicate and simulation, instead of DataFrames.
+
+        Returns:
+            If as_pomp is False:
+                tuple[pd.DataFrame, pd.DataFrame]: Tuple of (X_sims, Y_sims) DataFrames.
+            If as_pomp is True:
+                PanelPomp: A deep copy of the original model with simulated observations.
+        """
+        if as_pomp:
+            if nsim > 1:
+                warnings.warn(
+                    "as_pomp is True, but nsim > 1. Only 1 simulation will be performed as_pomp overrides nsim.",
+                    UserWarning,
+                )
+            nsim = 1
+
         theta = self._prepare_theta_input(theta)
 
         X_sims_list = []
         Y_sims_list = []
+        new_unit_objects = {}
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, theta=theta)
             key, subkey = jax.random.split(key)
-            X_sims, Y_sims = obj.simulate(
+            result = obj.simulate(
                 key=subkey,
                 theta=theta_list,
                 times=times,
                 nsim=nsim,
+                as_pomp=as_pomp,
             )
-            X_sims.insert(0, "unit", unit)
-            Y_sims.insert(0, "unit", unit)
-            X_sims_list.append(X_sims)
-            Y_sims_list.append(Y_sims)
+            if as_pomp:
+                new_unit_objects[unit] = result
+            else:
+                assert isinstance(result, tuple)
+                X_sims, Y_sims = result
+                X_sims.insert(0, "unit", unit)
+                Y_sims.insert(0, "unit", unit)
+                X_sims_list.append(X_sims)
+                Y_sims_list.append(Y_sims)
+
+        if as_pomp:
+            panel_copy = deepcopy(self)
+            panel_copy.unit_objects = new_unit_objects
+            panel_copy.theta = theta.subset([0])
+            return panel_copy
+
         X_sims_long = pd.concat(X_sims_list)
         Y_sims_long = pd.concat(Y_sims_list)
         return X_sims_long, Y_sims_long
+
+    def probe(
+        self,
+        probes: dict[str, Callable[[pd.DataFrame], float]],
+        key: jax.Array,
+        nsim: int = 100,
+        theta: Union[
+            PanelParameters,
+            dict[str, pd.DataFrame | None],
+            list[dict[str, pd.DataFrame | None]],
+            None,
+        ] = None,
+    ) -> pd.DataFrame:
+        """
+        Evaluate probe statistics on the model's true data and simulated data for each unit.
+
+        Args:
+            probes (dict[str, Callable[[pd.DataFrame], float]]): A dictionary of probe functions.
+                Each function should receive a DataFrame of observations for a single unit and return a numeric scalar.
+                Example: `{"mean": lambda df: df["obs"].mean()}`
+            key (jax.Array): JAX random key for the simulations.
+            nsim (int, optional): Number of simulations to run per parameter set. Defaults to 100.
+            theta: Parameters to simulate from.
+
+        Returns:
+            pd.DataFrame: A long-format DataFrame with columns:
+                `probe`, `value`, `is_real_data`, `replicate`, `sim`, `unit`
+        """
+        sim_result = self.simulate(nsim=nsim, key=key, theta=theta)
+        assert isinstance(sim_result, tuple)
+        _, y_sims = sim_result
+
+        results = []
+
+        for unit, obj in self.unit_objects.items():
+            for name, func in probes.items():
+                results.append(
+                    {
+                        "probe": name,
+                        "value": float(func(obj.ys)),
+                        "is_real_data": True,
+                        "replicate": pd.NA,
+                        "sim": pd.NA,
+                        "unit": unit,
+                    }
+                )
+
+        def apply_probes(group):
+            unit_name, replicate_id, sim_id = group.name
+            obj = self.unit_objects[unit_name]
+            df = pd.DataFrame(group.drop(columns=["time"]))
+            df.index = pd.Index(group["time"])
+            df.columns = obj.ys.columns
+            for name, func in probes.items():
+                results.append(
+                    {
+                        "probe": name,
+                        "value": float(func(df)),
+                        "is_real_data": False,
+                        "replicate": replicate_id,
+                        "sim": sim_id,
+                        "unit": unit_name,
+                    }
+                )
+
+        y_sims.groupby(["unit", "replicate", "sim"]).apply(
+            apply_probes, include_groups=False
+        )
+
+        return pd.DataFrame(results)
 
     def pfilter(
         self,

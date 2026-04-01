@@ -21,7 +21,7 @@ from .train import _vmapped_train_internal
 from pypomp.model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
 from .simulate import _jv_simulate_internal
-from .pfilter import _vmapped_pfilter_internal2
+from .pfilter import _vmapped_pfilter_internal2, _pfilter_internal, _vmapped_pfilter_internal
 from .internal_functions import _calc_ys_covars
 from .RWSigma_class import RWSigma
 from .ParTrans_class import ParTrans
@@ -30,6 +30,7 @@ from .results import (
     PompPFilterResult,
     PompMIFResult,
     PompTrainResult,
+    PompPMCMCResult,
 )
 from .parameters import PompParameters
 from .util import logmeanexp
@@ -1232,6 +1233,195 @@ class Pomp:
 
         # 8) Return in user-friendly order: first NLL, then parameter trajectory.
         return nll_hist, theta_hist
+
+    def pmcmc(
+        self,
+        J: int,
+        Nmcmc: int,
+        proposal: Callable,
+        dprior: Callable | None = None,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+        thresh: float = 0.0,
+        reps: int = 1,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Particle Markov chain Monte Carlo (PMMH) for Bayesian parameter
+        estimation.
+
+        Runs a particle random-walk Metropolis-Hastings chain for *Nmcmc*
+        iterations, using the particle filter log-likelihood as a noisy but
+        unbiased estimate of the marginal likelihood
+        (Andrieu, Doucet & Holenstein 2010).
+
+        Args:
+            J: Number of particles per particle-filter evaluation.
+            Nmcmc: Number of MCMC iterations to perform.
+            proposal: A symmetric proposal function with signature
+                ``proposal(theta, key, n=0, accepts=0) -> theta_proposed``
+                where *theta* is a ``dict[str, float]``.
+                See :mod:`pypomp.proposals` for constructors.
+            dprior: Log-prior density function with signature
+                ``dprior(theta_dict) -> float`` returning the log-prior
+                density.  If ``None``, a flat improper prior is used
+                (always returns 0).
+            key: JAX PRNG key.  If ``None``, uses ``self.fresh_key``.
+            theta: Starting parameter values (single dict or
+                PompParameters with one replicate).  If ``None``, uses
+                ``self.theta``.
+            thresh: Threshold for adaptive resampling in the particle
+                filter.  Defaults to 0.0 (resample at every time step).
+            reps: Number of independent particle-filter runs per
+                likelihood evaluation.  The log-likelihoods are combined
+                via ``logmeanexp`` to reduce Monte Carlo variance.
+            verbose: If ``True``, print progress after each iteration.
+        """
+        start_time = time.time()
+
+        # --- Validate inputs ---
+        if self.dmeas is None:
+            raise ValueError("dmeas is required for pmcmc.")
+        if J < 1:
+            raise ValueError("J must be >= 1.")
+        if Nmcmc < 1:
+            raise ValueError("Nmcmc must be >= 1.")
+
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        if theta_obj_in.num_replicates() != 1:
+            raise ValueError(
+                "pmcmc requires exactly one parameter replicate as starting "
+                "point.  Got "
+                f"{theta_obj_in.num_replicates()}."
+            )
+
+        new_key, old_key = self._update_fresh_key(key)
+
+        # Default flat prior
+        _dprior: Callable = dprior if dprior is not None else lambda theta_dict: 0.0
+
+        # --- Extract model internals (constant across iterations) ---
+        param_names = self.canonical_param_names
+        dt_arr = np.asarray(self._dt_array_extended)
+        nstep_arr = np.asarray(self._nstep_array)
+        t0 = self.t0
+        times = np.asarray(self.ys.index)
+        ys = np.asarray(self.ys)
+        covars_ext = (
+            np.asarray(self._covars_extended)
+            if self._covars_extended is not None
+            else None
+        )
+        rinit_fn = self.rinit.struct_pf
+        rproc_fn = self.rproc.struct_pf_interp
+        dmeas_fn = self.dmeas.struct_pf
+        accumvars = self.rproc.accumvars
+
+        # --- Helper: run pfilter and return loglik ---
+        def _run_pfilter(theta_array: jax.Array, pf_key: jax.Array) -> float:
+            """Run particle filter(s) and return scalar loglik estimate."""
+            if reps == 1:
+                result = _pfilter_internal(
+                    theta_array, dt_arr, nstep_arr, t0, times, ys,
+                    J, rinit_fn, rproc_fn, dmeas_fn, accumvars,
+                    covars_ext, thresh, pf_key,
+                )
+                return -float(result["neg_loglik"])
+            else:
+                pf_keys = jax.random.split(pf_key, reps)
+                results = _vmapped_pfilter_internal(
+                    theta_array, dt_arr, nstep_arr, t0, times, ys,
+                    J, rinit_fn, rproc_fn, dmeas_fn, accumvars,
+                    covars_ext, thresh, pf_keys,
+                    False, False, False, False,  # CLL, ESS, filter_mean, prediction_mean
+                )
+                neg_logliks = results["neg_loglik"]
+                return float(logmeanexp(-neg_logliks))
+
+        # --- Initialise chain ---
+        theta_dict = theta_obj_in.to_list()[0]
+        theta_array = jnp.array([theta_dict[p] for p in param_names])
+
+        n_params = len(param_names)
+        trace_names = ["loglik", "log_prior"] + list(param_names)
+        trace_arr = np.full((Nmcmc + 1, 2 + n_params), np.nan)
+
+        # Evaluate prior and likelihood at starting point
+        log_prior = float(_dprior(theta_dict))
+        if not np.isfinite(log_prior):
+            raise ValueError("Non-finite log prior at starting parameters.")
+
+        new_key, pf_key = jax.random.split(new_key)
+        loglik = _run_pfilter(theta_array, pf_key)
+        if not np.isfinite(loglik):
+            raise ValueError("Non-finite log likelihood at starting parameters.")
+
+        trace_arr[0, :2] = [loglik, log_prior]
+        trace_arr[0, 2:] = [theta_dict[p] for p in param_names]
+
+        accepts = 0
+
+        # --- Main MCMC loop ---
+        for n in range(1, Nmcmc + 1):
+            new_key, prop_key, pf_key = jax.random.split(new_key, 3)
+
+            # Propose
+            theta_prop = proposal(theta_dict, prop_key, n=n, accepts=accepts)
+
+            # Prior
+            log_prior_prop = float(_dprior(theta_prop))
+
+            if np.isfinite(log_prior_prop):
+                # Particle-filter likelihood
+                theta_prop_array = jnp.array(
+                    [theta_prop[p] for p in param_names]
+                )
+                loglik_prop = _run_pfilter(theta_prop_array, pf_key)
+
+                # Metropolis-Hastings acceptance (symmetric proposal)
+                log_alpha = loglik_prop + log_prior_prop - loglik - log_prior
+
+                new_key, accept_key = jax.random.split(new_key)
+                u = float(jax.random.uniform(accept_key))
+
+                if np.isfinite(log_alpha) and np.log(u) < log_alpha:
+                    theta_dict = theta_prop
+                    theta_array = theta_prop_array
+                    loglik = loglik_prop
+                    log_prior = log_prior_prop
+                    accepts += 1
+
+            # Store trace
+            trace_arr[n, :2] = [loglik, log_prior]
+            trace_arr[n, 2:] = [theta_dict[p] for p in param_names]
+
+            if verbose:
+                print(
+                    f"PMCMC iteration {n} of {Nmcmc} | "
+                    f"acceptance rate: {accepts / n:.3f} | "
+                    f"loglik: {loglik:.2f}"
+                )
+
+        # --- Package results ---
+        execution_time = time.time() - start_time
+
+        # Update self.theta with the final accepted parameters
+        self.theta = PompParameters(theta_dict)
+
+        result = PompPMCMCResult(
+            method="pmcmc",
+            execution_time=execution_time,
+            key=old_key,
+            theta=[theta_dict],
+            traces_arr=trace_arr,
+            trace_names=trace_names,
+            Nmcmc=Nmcmc,
+            J=J,
+            reps=reps,
+            accepts=accepts,
+        )
+
+        self.results_history.add(result)
 
     def simulate(
         self,

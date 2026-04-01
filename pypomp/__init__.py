@@ -10,6 +10,7 @@ from .ParTrans_class import ParTrans
 from .mcap import mcap
 from .SIR import sir
 from .parameters import PompParameters, PanelParameters
+from .proposals import mvn_diag_rw, mvn_rw, mvn_rw_adaptive, MVNRWAdaptive
 from .types import (
     StateDict,
     ParamDict,

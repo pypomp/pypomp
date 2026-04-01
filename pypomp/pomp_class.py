@@ -33,6 +33,7 @@ from .results import (
     PompMIFResult,
     PompTrainResult,
     PompPMCMCResult,
+    PompABCResult,
 )
 from .parameters import PompParameters
 from .util import logmeanexp
@@ -1418,6 +1419,180 @@ class Pomp:
             Nmcmc=Nmcmc,
             J=J,
             reps=reps,
+            accepts=accepts,
+        )
+
+        self.results_history.add(result)
+
+    def abc(
+        self,
+        Nabc: int,
+        probes: dict[str, Callable],
+        scale: dict[str, float],
+        epsilon: float,
+        proposal: Callable,
+        dprior: Callable | None = None,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Approximate Bayesian Computation (ABC-MCMC) for likelihood-free
+        parameter estimation.
+
+        Implements the likelihood-free MCMC sampler of Marin et al. (2012,
+        Algorithm 3) with a symmetric proposal distribution, matching
+        R pomp's ``abc()``.
+
+        Args:
+            Nabc: Number of ABC-MCMC iterations to perform.
+            probes: Dictionary mapping probe names to callable summary
+                statistics.  Each callable has signature
+                ``probe_fn(ys: pd.DataFrame) -> float`` where *ys* has the
+                same format as ``self.ys`` (time index, observation columns).
+            scale: Dictionary mapping probe names to positive floats used
+                to normalize probe distances.  Must have the same keys as
+                *probes*.
+            epsilon: Tolerance threshold (positive float).  A proposal is
+                accepted when the scaled distance is less than
+                ``epsilon ** 2``.
+            proposal: A symmetric proposal function with signature
+                ``proposal(theta, key, n=0, accepts=0) -> theta_proposed``
+                where *theta* is a ``dict[str, float]``.
+                See :mod:`pypomp.proposals` for constructors.
+            dprior: Log-prior density function with signature
+                ``dprior(theta_dict) -> float``.  If ``None``, a flat
+                improper prior is used (always returns 0).
+            key: JAX PRNG key.  If ``None``, uses ``self.fresh_key``.
+            theta: Starting parameter values (single dict or
+                PompParameters with one replicate).  If ``None``, uses
+                ``self.theta``.
+            verbose: If ``True``, print progress after each iteration.
+        """
+        start_time = time.time()
+
+        # --- Validate inputs ---
+        if self.rmeas is None:
+            raise ValueError("rmeas is required for abc.")
+        if Nabc < 1:
+            raise ValueError("Nabc must be >= 1.")
+        if epsilon <= 0:
+            raise ValueError("epsilon must be positive.")
+        if not probes:
+            raise ValueError("probes must be a non-empty dict.")
+        if set(scale.keys()) != set(probes.keys()):
+            raise ValueError("scale keys must match probes keys.")
+        for k, v in scale.items():
+            if v <= 0:
+                raise ValueError(f"scale['{k}'] must be positive.")
+
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        if theta_obj_in.num_replicates() != 1:
+            raise ValueError(
+                "abc requires exactly one parameter replicate as starting "
+                "point.  Got "
+                f"{theta_obj_in.num_replicates()}."
+            )
+
+        new_key, old_key = self._update_fresh_key(key)
+
+        # Default flat prior
+        _dprior: Callable = dprior if dprior is not None else lambda theta_dict: 0.0
+
+        # --- Compute observed probes ---
+        probe_names = sorted(probes.keys())
+        obs_probes = np.array([probes[k](self.ys) for k in probe_names])
+        scale_arr = np.array([scale[k] for k in probe_names])
+        obs_col_names = list(self.ys.columns)
+
+        # --- Helper: simulate and compute distance ---
+        def _simulate_distance(theta_dict: dict, sim_key: jax.Array) -> float:
+            """Simulate one dataset and return scaled Euclidean distance."""
+            theta_param = PompParameters(theta_dict)
+            _, Y_sims = self.simulate(nsim=1, key=sim_key, theta=theta_param)
+            # Reconstruct DataFrame matching self.ys format
+            sim_row = Y_sims[(Y_sims["replicate"] == 0) & (Y_sims["sim"] == 0)]
+            sim_ys = sim_row.set_index("time")
+            obs_col_map = {
+                f"obs_{i}": col for i, col in enumerate(obs_col_names)
+            }
+            sim_ys = sim_ys.rename(columns=obs_col_map)[obs_col_names]
+            # Compute probes and distance
+            sim_probes = np.array([probes[k](sim_ys) for k in probe_names])
+            return float(np.sum(((obs_probes - sim_probes) / scale_arr) ** 2))
+
+        # --- Initialise chain ---
+        param_names = self.canonical_param_names
+        n_params = len(param_names)
+        trace_names = ["distance", "log_prior"] + list(param_names)
+        trace_arr = np.full((Nabc + 1, 2 + n_params), np.nan)
+
+        theta_dict = theta_obj_in.to_list()[0]
+
+        # Evaluate prior at starting point
+        log_prior = float(_dprior(theta_dict))
+        if not np.isfinite(log_prior):
+            raise ValueError("Non-finite log prior at starting parameters.")
+
+        # Distance at starting point
+        new_key, sim_key = jax.random.split(new_key)
+        distance = _simulate_distance(theta_dict, sim_key)
+
+        trace_arr[0, :2] = [distance, log_prior]
+        trace_arr[0, 2:] = [theta_dict[p] for p in param_names]
+
+        accepts = 0
+
+        # --- Main ABC-MCMC loop ---
+        for n in range(1, Nabc + 1):
+            new_key, prop_key, sim_key, accept_key = jax.random.split(new_key, 4)
+
+            # Propose
+            theta_prop = proposal(theta_dict, prop_key, n=n, accepts=accepts)
+
+            # Prior ratio check (before costly simulation)
+            log_prior_prop = float(_dprior(theta_prop))
+
+            if np.isfinite(log_prior_prop):
+                # MH prior ratio (symmetric proposal => just prior ratio)
+                log_alpha_prior = log_prior_prop - log_prior
+                u = float(jax.random.uniform(accept_key))
+
+                if np.log(u) < log_alpha_prior:
+                    # Simulate and compute distance
+                    distance_prop = _simulate_distance(theta_prop, sim_key)
+
+                    if distance_prop < epsilon ** 2:
+                        theta_dict = theta_prop
+                        distance = distance_prop
+                        log_prior = log_prior_prop
+                        accepts += 1
+
+            # Store trace
+            trace_arr[n, :2] = [distance, log_prior]
+            trace_arr[n, 2:] = [theta_dict[p] for p in param_names]
+
+            if verbose:
+                print(
+                    f"ABC iteration {n} of {Nabc} | "
+                    f"acceptance rate: {accepts / n:.3f} | "
+                    f"distance: {distance:.4f}"
+                )
+
+        # --- Package results ---
+        execution_time = time.time() - start_time
+
+        self.theta = PompParameters(theta_dict)
+
+        result = PompABCResult(
+            method="abc",
+            execution_time=execution_time,
+            key=old_key,
+            theta=[theta_dict],
+            traces_arr=trace_arr,
+            trace_names=trace_names,
+            Nabc=Nabc,
+            epsilon=epsilon,
             accepts=accepts,
         )
 

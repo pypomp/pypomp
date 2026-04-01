@@ -790,6 +790,130 @@ class PompPMCMCResult(PompBaseResult):
 
 
 @dataclass
+class PompABCResult(PompBaseResult):
+    """Result from Pomp.abc() method.
+
+    Stores the full ABC-MCMC trace (distance, log-prior, and all
+    parameter values at each iteration), the number of accepted
+    proposals, and algorithmic settings.
+    """
+
+    traces_arr: np.ndarray = field(default_factory=lambda: np.empty((0, 0)))
+    """Array of shape ``(Nabc + 1, 2 + n_params)`` with columns
+    ``[distance, log_prior, param_1, ..., param_p]``."""
+
+    trace_names: list[str] = field(default_factory=list)
+    """Column names for *traces_arr*: ``["distance", "log_prior", p1, ...]``."""
+
+    Nabc: int = 0
+    epsilon: float = 0.0
+    accepts: int = 0
+
+    def __post_init__(self):
+        self.method = "abc"
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        if not super().__eq__(other):
+            return False
+        if (
+            self.Nabc != other.Nabc
+            or self.epsilon != other.epsilon
+            or self.accepts != other.accepts
+        ):
+            return False
+        if self.trace_names != other.trace_names:
+            return False
+        if not np.array_equal(
+            np.asarray(self.traces_arr), np.asarray(other.traces_arr), equal_nan=True
+        ):
+            return False
+        return True
+
+    @property
+    def acceptance_rate(self) -> float:
+        return self.accepts / max(self.Nabc, 1)
+
+    def traces(self) -> pd.DataFrame:
+        """Return traces as a DataFrame compatible with ResultsHistory."""
+        if self.traces_arr.size == 0:
+            return pd.DataFrame()
+        df = pd.DataFrame(self.traces_arr, columns=self.trace_names)
+        if "_chain" in df.columns:
+            df["chain"] = df.pop("_chain").astype(int)
+        else:
+            df.insert(0, "chain", 0)
+        df.insert(0, "iteration", np.arange(len(df)))
+        df.insert(0, "replicate", 0)
+        return df.assign(method="abc")
+
+    def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        """Convert traces to a DataFrame."""
+        df = pd.DataFrame(self.traces_arr, columns=self.trace_names)
+        if "_chain" in df.columns:
+            df["chain"] = df.pop("_chain").astype(int)
+        else:
+            df.insert(0, "chain", 0)
+        df.insert(0, "iteration", np.arange(len(df)))
+        if ignore_nan:
+            df = df.dropna()
+        return df
+
+    def print_summary(self):
+        """Print a summary of the ABC result."""
+        print(f"Method: {self.method}")
+        print(f"ABC iterations (Nabc): {self.Nabc}")
+        print(f"Tolerance (epsilon): {self.epsilon}")
+        print(f"Accepted proposals: {self.accepts}")
+        print(f"Acceptance rate: {self.acceptance_rate:.3f}")
+        print(f"Execution time: {self.execution_time} seconds")
+        if self.traces_arr.size > 0:
+            print(f"\nFinal distance: {self.traces_arr[-1, 0]:.4f}")
+            print(f"Final log_prior: {self.traces_arr[-1, 1]:.4f}")
+
+    @staticmethod
+    def merge(*results: "PompABCResult") -> "PompABCResult":
+        """Concatenate traces from multiple ABC runs (e.g. multiple chains).
+
+        Each input result is treated as a separate chain.  The merged
+        ``traces()`` and ``to_dataframe()`` DataFrames include a ``chain``
+        column so individual chains remain distinguishable.
+        """
+        if len(results) == 0:
+            raise ValueError("At least one PompABCResult must be provided.")
+        first = results[0]
+        for r in results:
+            if not isinstance(r, type(first)):
+                raise TypeError("All results must be PompABCResult.")
+            if r.epsilon != first.epsilon:
+                raise ValueError("All results must have the same epsilon.")
+
+        parts = []
+        for chain_id, r in enumerate(results):
+            chain_col = np.full((r.traces_arr.shape[0], 1), chain_id, dtype=float)
+            parts.append(np.concatenate([r.traces_arr, chain_col], axis=1))
+        merged_traces = np.concatenate(parts, axis=0)
+        merged_trace_names = first.trace_names + ["_chain"]
+
+        merged_theta = sum((r.theta for r in results), [])
+        total_accepts = sum(r.accepts for r in results)
+        total_Nabc = sum(r.Nabc for r in results)
+        execution_times = [r.execution_time for r in results if r.execution_time is not None]
+        max_time = max(execution_times) if execution_times else None
+
+        return PompABCResult(
+            method=first.method,
+            execution_time=max_time,
+            key=first.key,
+            theta=merged_theta,
+            traces_arr=merged_traces,
+            trace_names=merged_trace_names,
+            Nabc=total_Nabc,
+            epsilon=first.epsilon,
+            accepts=total_accepts,
+        )
+
+
+@dataclass
 class PanelPompPFilterResult(PanelPompBaseResult):
     """Result from PanelPomp.pfilter() method."""
 
@@ -1699,7 +1823,7 @@ class ResultsHistory:
             if df.empty:
                 continue
 
-            is_estimation = res.method in ["mif", "train", "dpop_train", "pmcmc"]
+            is_estimation = res.method in ["mif", "train", "dpop_train", "pmcmc", "abc"]
 
             unique_reps = df["replicate"].unique()
             offsets_map = {r: global_iter_counters.get(r, 0) for r in unique_reps}

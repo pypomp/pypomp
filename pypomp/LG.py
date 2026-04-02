@@ -149,25 +149,6 @@ def LG(
         covars=None,
         statenames=["X1", "X2"],
     )
-    _, Y_sims = LG_obj_temp.simulate(key=key)
-    Y_sims = Y_sims.rename(columns={"obs_0": "Y1", "obs_1": "Y2"})
-    Y_sims = Y_sims[["time", "Y1", "Y2"]]
-    Y_sims.set_index("time", inplace=True)
-    assert isinstance(Y_sims, pd.DataFrame)
-
-    LG_obj = Pomp(
-        rinit=rinit,
-        rproc=rproc,
-        dmeas=dmeas,
-        rmeas=rmeas,
-        ys=Y_sims,
-        t0=0.0,
-        nstep=1,
-        dt=None,
-        ydim=2,
-        theta=theta,
-        covars=None,
-        statenames=["X1", "X2"],
-    )
+    LG_obj = LG_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
 
     return LG_obj

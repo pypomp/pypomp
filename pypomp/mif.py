@@ -500,3 +500,273 @@ _jv_panel_mif_internal = jit(
         18,  # U
     ),
 )
+
+
+def _panel_mif_internal_vmap(
+    shared_array: jax.Array,  # (n_shared, J)
+    unit_array: jax.Array,  # (n_spec, J, U_padded)
+    dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    t0: float,
+    times: jax.Array,
+    ys_per_unit: jax.Array,  # (U_padded, T, ...)
+    rinitializers: Callable,  # static
+    rprocesses_interp: Callable,  # static
+    dmeasures: Callable,  # static
+    sigmas: jax.Array,
+    sigmas_init: jax.Array,
+    accumvars: jax.Array | None,
+    covars_per_unit: jax.Array | None,  # (U_padded, ...) or None
+    unit_param_permutations: jax.Array,  # (U_padded, n_params)
+    unit_mask: jax.Array,  # (U_padded,) - 1.0 for real units, 0.0 for padding
+    M: int,
+    a: float,
+    J: int,
+    U: int,  # U_padded
+    thresh: float,
+    key: jax.Array,
+    vmap_chunk_size: int,  # static
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """
+    Panel IF2 with chunked vmap over units instead of sequential scan.
+
+    Within each iteration, units are processed in chunks via jax.vmap.
+    Each unit in a chunk receives the same shared parameters and independently
+    perturbs them. After each chunk, the shared parameter update is the
+    masked mean across units in that chunk. Subsequent chunks see the
+    updated shared parameters.
+
+    Returns same shapes as _panel_mif_internal:
+        shared_array_final: (n_shared, J)
+        unit_array_final: (n_spec, J, U_padded)
+        shared_traces: (M+1, n_shared+1)
+        unit_traces: (M+1, n_spec+1, U_padded)
+    """
+    n_shared = shared_array.shape[0]
+    n_spec = unit_array.shape[0]
+    inv_perms = jax.vmap(jnp.argsort)(unit_param_permutations)
+    n_chunks = U // vmap_chunk_size
+
+    shared_means0 = jnp.mean(shared_array, axis=1) if n_shared > 0 else jnp.zeros((0,))
+    unit_means0 = jnp.mean(unit_array, axis=1) if n_spec > 0 else jnp.zeros((0, U))
+
+    shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
+    unit_trace_0 = jnp.concatenate(
+        [jnp.array([jnp.nan] * U)[None, :], unit_means0], axis=0
+    )[None, :, :]
+
+    all_keys = jax.random.split(key, num=M + 1)
+    m_keys = all_keys[1:]
+
+    perms_chunked = unit_param_permutations.reshape(n_chunks, vmap_chunk_size, -1)
+    ys_chunked = ys_per_unit.reshape(
+        (n_chunks, vmap_chunk_size) + ys_per_unit.shape[1:]
+    )
+    covars_chunked = (
+        None
+        if covars_per_unit is None
+        else covars_per_unit.reshape(
+            (n_chunks, vmap_chunk_size) + covars_per_unit.shape[1:]
+        )
+    )
+    inv_perms_chunked = inv_perms.reshape(n_chunks, vmap_chunk_size, -1)
+    mask_chunked = unit_mask.reshape(n_chunks, vmap_chunk_size)
+
+    def iter_body(carry, scan_inputs):
+        shared_array_m, unit_array_m = carry
+        m, iter_key = scan_inputs
+
+        unit_keys = jax.random.split(iter_key, num=U)
+        keys_chunked = unit_keys.reshape(
+            (n_chunks, vmap_chunk_size) + unit_keys.shape[1:]
+        )
+
+        # Reshape unit_array for chunking: (n_spec, J, U) -> (n_chunks, vmap_chunk_size, n_spec, J)
+        if n_spec > 0:
+            unit_array_chunked = jnp.moveaxis(unit_array_m, 2, 0).reshape(
+                n_chunks, vmap_chunk_size, n_spec, J
+            )
+        else:
+            unit_array_chunked = jnp.zeros((n_chunks, vmap_chunk_size, 0, J))
+
+        def chunk_scan_body(chunk_carry, chunk_inputs):
+            shared_array_c = chunk_carry
+            (
+                unit_arr_chunk,
+                perm_chunk,
+                ys_chunk,
+                covars_chunk_dummy,
+                key_chunk,
+                inv_perm_chunk,
+                mask_chunk,
+            ) = chunk_inputs
+
+            def process_one_unit(
+                unit_arr_single, perm, ys_u, covars_u_dummy, key_u, inv_perm
+            ):
+                covars_u = None if covars_per_unit is None else covars_u_dummy
+
+                if (n_shared + n_spec) > 0:
+                    thetas_u_panel_order = jnp.concatenate(
+                        [shared_array_c.T, unit_arr_single.T], axis=1
+                    )
+                else:
+                    thetas_u_panel_order = jnp.zeros((J, 0))
+                thetas_u = thetas_u_panel_order[:, perm]
+
+                sigmas_u = sigmas[perm]
+                sigmas_init_u = sigmas_init[perm]
+
+                sigmas_init_u_cooled = (
+                    _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a)
+                    * sigmas_init_u
+                )
+                sigmas_u_cooled = (
+                    _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
+                )
+
+                nLL_u, updated_thetas_u = _mif_internal(
+                    thetas_u,
+                    dt_array_extended,
+                    nstep_array,
+                    t0,
+                    times,
+                    ys_u,
+                    rinitializers,
+                    rprocesses_interp,
+                    dmeasures,
+                    sigmas_u_cooled,
+                    sigmas_init_u_cooled,
+                    accumvars,
+                    covars_u,
+                    1,
+                    a,
+                    J,
+                    thresh,
+                    key_u,
+                )
+                nLL_u = nLL_u[0]
+                updated_thetas_u = updated_thetas_u[1]  # (J, n_params)
+
+                updated_thetas_panel = updated_thetas_u[:, inv_perm]
+
+                if n_shared > 0:
+                    new_shared = updated_thetas_panel[:, :n_shared].T
+                else:
+                    new_shared = shared_array_c
+
+                if n_spec > 0:
+                    updated_spec_u = updated_thetas_panel[:, n_shared:].T
+                else:
+                    updated_spec_u = unit_arr_single
+
+                loglik_u = -nLL_u
+
+                if n_spec > 0:
+                    traces_u = jnp.concatenate(
+                        [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=1)]
+                    )
+                else:
+                    traces_u = jnp.array([loglik_u])
+
+                return new_shared, updated_spec_u, loglik_u, traces_u
+
+            new_shareds, new_specs, logliks, traces = jax.vmap(process_one_unit)(
+                unit_arr_chunk,
+                perm_chunk,
+                ys_chunk,
+                covars_chunk_dummy,
+                key_chunk,
+                inv_perm_chunk,
+            )
+            # new_shareds: (vmap_chunk_size, n_shared, J)
+            # new_specs: (vmap_chunk_size, n_spec, J)
+            # logliks: (vmap_chunk_size,)
+            # traces: (vmap_chunk_size, n_spec+1)
+
+            if n_shared > 0:
+                mask_exp = mask_chunk[:, None, None]  # (vmap_chunk_size, 1, 1)
+                n_real = jnp.maximum(mask_chunk.sum(), 1.0)
+                avg_shared = jnp.sum(new_shareds * mask_exp, axis=0) / n_real
+            else:
+                avg_shared = shared_array_c
+
+            sum_loglik_chunk = jnp.sum(logliks * mask_chunk)
+
+            return avg_shared, (new_specs, traces, sum_loglik_chunk)
+
+        chunk_scan_xs = (
+            unit_array_chunked,
+            perms_chunked,
+            ys_chunked,
+            covars_chunked
+            if covars_chunked is not None
+            else jnp.zeros((n_chunks, vmap_chunk_size, 0)),
+            keys_chunked,
+            inv_perms_chunked,
+            mask_chunked,
+        )
+
+        final_shared, (all_specs, all_traces, chunk_logliks) = jax.lax.scan(
+            chunk_scan_body, shared_array_m, chunk_scan_xs
+        )
+        # all_specs: (n_chunks, vmap_chunk_size, n_spec, J)
+        # all_traces: (n_chunks, vmap_chunk_size, n_spec+1)
+        # chunk_logliks: (n_chunks,)
+
+        shared_array_m = final_shared
+        sum_loglik_iter = chunk_logliks.sum()
+
+        # Reassemble unit array: (n_chunks, vmap_chunk_size, n_spec, J) -> (n_spec, J, U)
+        if n_spec > 0:
+            unit_array_m = jnp.moveaxis(all_specs.reshape(U, n_spec, J), 0, 2)
+
+        # all_traces: (n_chunks, vmap_chunk_size, n_spec+1) -> (U, n_spec+1) -> (n_spec+1, U)
+        unit_traces_m_row = jnp.moveaxis(all_traces.reshape(U, -1), 0, 1)
+
+        if n_shared > 0:
+            shared_means = jnp.mean(shared_array_m, axis=1)
+            shared_traces_m_row = jnp.concatenate(
+                [jnp.array([sum_loglik_iter]), shared_means]
+            )
+        else:
+            shared_traces_m_row = jnp.array([sum_loglik_iter])
+
+        return (
+            (shared_array_m, unit_array_m),
+            (shared_traces_m_row, unit_traces_m_row),
+        )
+
+    initial_iter_carry = (shared_array, unit_array)
+    iter_scan_xs = (jnp.arange(M), m_keys)
+
+    (final_iter_state, (shared_traces_history, unit_traces_history)) = jax.lax.scan(
+        f=iter_body,
+        init=initial_iter_carry,
+        xs=iter_scan_xs,
+    )
+
+    (shared_array, unit_array) = final_iter_state
+
+    shared_traces = jnp.concatenate([shared_trace_0, shared_traces_history], axis=0)
+    unit_traces = jnp.concatenate([unit_trace_0, unit_traces_history], axis=0)
+
+    return (shared_array, unit_array, shared_traces, unit_traces)
+
+
+_vmapped_panel_mif_internal_vmap = jax.vmap(
+    _panel_mif_internal_vmap, in_axes=((0, 0) + (None,) * 19 + (0,) + (None,))
+)
+
+_jv_panel_mif_internal_vmap = jit(
+    _vmapped_panel_mif_internal_vmap,
+    static_argnums=(
+        7,  # rinitializers
+        8,  # rprocesses_interp
+        9,  # dmeasures
+        16,  # M
+        18,  # J
+        19,  # U
+        22,  # vmap_chunk_size
+    ),
+)

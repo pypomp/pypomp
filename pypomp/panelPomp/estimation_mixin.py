@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Union, cast, Callable
 import warnings
 
 from ..pfilter import _chunked_panel_pfilter_internal
-from ..mif import _jv_panel_mif_internal
+from ..mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
 from ..train import _vmapped_panel_train_internal
 from ..train_panel_dpop import _vmapped_panel_dpop_train_internal
 from ..RWSigma_class import RWSigma
@@ -568,6 +568,7 @@ class PanelEstimationMixin(Base):
         ] = None,
         thresh: float = 0,
         block: bool = True,
+        vmap_chunk_size: int | None = None,
     ) -> None:
         """
         Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for PanelPomp.
@@ -582,6 +583,11 @@ class PanelEstimationMixin(Base):
                 If None, uses `self.theta`.
             thresh (float, optional): Resampling threshold for the particle filter.
             block (bool, optional): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF) (currently only block=True is supported).
+            vmap_chunk_size (int, optional): (Experimental) If set, process units in parallel via
+                jax.vmap in chunks of this size instead of sequentially. Shared
+                parameters are independently perturbed per unit and averaged across
+                units at the end of each chunk. Padding is applied if the chunk
+                size does not evenly divide the number of units.
 
         Returns:
             None: Updates `self.theta` with final estimates and adds result to `self.results_history`.
@@ -730,34 +736,97 @@ class PanelEstimationMixin(Base):
         old_key = key
         keys = jax.random.split(key, n_reps)
 
-        (
-            shared_array_f,
-            unit_array_f,
-            shared_traces,
-            unit_traces,
-        ) = _jv_panel_mif_internal(
-            shared_array,
-            unit_array,
-            dt_array_extended,
-            nstep_array,
-            t0,
-            times,
-            ys_per_unit,
-            rinitializers,
-            rprocesses_interp,
-            dmeasures,
-            sigmas_array,
-            sigmas_init_array,
-            accumvars,
-            covars_per_unit,
-            unit_param_permutations,
-            M,
-            a,
-            J,
-            U,
-            thresh,
-            keys,
-        )
+        # TODO: if the vmap mode works well, remove the sequential mode
+        if vmap_chunk_size is not None:
+            U_padded = U + (vmap_chunk_size - (U % vmap_chunk_size)) % vmap_chunk_size
+            padding = U_padded - U
+
+            unit_mask = jnp.concatenate([jnp.ones(U), jnp.zeros(padding)])
+
+            if padding > 0:
+                unit_param_permutations = jnp.pad(
+                    unit_param_permutations, ((0, padding), (0, 0))
+                )
+                ys_per_unit = jnp.pad(
+                    ys_per_unit, ((0, padding),) + ((0, 0),) * (ys_per_unit.ndim - 1)
+                )
+                if covars_per_unit is not None:
+                    covars_per_unit = jnp.pad(
+                        covars_per_unit,
+                        ((0, padding),) + ((0, 0),) * (covars_per_unit.ndim - 1),
+                    )
+                if unit_array.shape[1] > 0:
+                    unit_array = jnp.pad(
+                        unit_array, ((0, 0), (0, 0), (0, 0), (0, padding))
+                    )
+
+            (
+                shared_array_f,
+                unit_array_f,
+                shared_traces,
+                unit_traces,
+            ) = _jv_panel_mif_internal_vmap(
+                shared_array,
+                unit_array,
+                dt_array_extended,
+                nstep_array,
+                t0,
+                times,
+                ys_per_unit,
+                rinitializers,
+                rprocesses_interp,
+                dmeasures,
+                sigmas_array,
+                sigmas_init_array,
+                accumvars,
+                covars_per_unit,
+                unit_param_permutations,
+                unit_mask,
+                M,
+                a,
+                J,
+                U_padded,
+                thresh,
+                keys,
+                vmap_chunk_size,
+            )
+
+            if padding > 0:
+                unit_array_f = (
+                    unit_array_f[:, :, :, :U]
+                    if unit_array_f.shape[1] > 0
+                    else unit_array_f
+                )
+                unit_traces = unit_traces[:, :, :, :U]
+        else:
+            (
+                shared_array_f,
+                unit_array_f,
+                shared_traces,
+                unit_traces,
+            ) = _jv_panel_mif_internal(
+                shared_array,
+                unit_array,
+                dt_array_extended,
+                nstep_array,
+                t0,
+                times,
+                ys_per_unit,
+                rinitializers,
+                rprocesses_interp,
+                dmeasures,
+                sigmas_array,
+                sigmas_init_array,
+                accumvars,
+                covars_per_unit,
+                unit_param_permutations,
+                M,
+                a,
+                J,
+                U,
+                thresh,
+                keys,
+            )
 
         shared_traces, unit_traces = rep_unit.par_trans.transform_panel_traces(
             shared_traces=np.array(shared_traces),

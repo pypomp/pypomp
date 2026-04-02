@@ -125,8 +125,8 @@ def rproc(
     birth_mean = br * dt
     birth_noise = all_noise[0]
     # Use a 1e-8 floor to avoid gradient numerical instability
-    safe_birth_mean = softclamp(birth_mean, 1e-8)
-    births = softclamp(birth_mean + jnp.sqrt(safe_birth_mean) * birth_noise, 0.0)
+    safe_birth_mean = softclamp(birth_mean)
+    births = softclamp(birth_mean + jnp.sqrt(safe_birth_mean) * birth_noise)
 
     # Rates
     rate_inf = foi * (dw / dt)  # effective infection rate
@@ -139,18 +139,18 @@ def rproc(
     mu_fluxes = rates * states * dt
 
     # Use a 1e-8 floor to avoid gradient numerical instability
-    safe_mu_fluxes = softclamp(mu_fluxes, 1e-8)
+    safe_mu_fluxes = softclamp(mu_fluxes)
     fluxes = mu_fluxes + jnp.sqrt(safe_mu_fluxes) * flux_noises
 
     flux_SE, flux_SD, flux_EI, flux_ED, flux_IR, flux_ID = fluxes
 
-    S_new = softclamp(S + births - flux_SE - flux_SD, 0.0)
-    E_new = softclamp(E + flux_SE - flux_EI - flux_ED, 0.0)
-    I_new = softclamp(I + flux_EI - flux_IR - flux_ID, 0.0)
-    R_new = softclamp(pop - S_new - E_new - I_new, 0.0)
+    S_new = softclamp(S + births - flux_SE - flux_SD)
+    E_new = softclamp(E + flux_SE - flux_EI - flux_ED)
+    I_new = softclamp(I + flux_EI - flux_IR - flux_ID)
+    R_new = softclamp(pop - S_new - E_new - I_new)
 
     W_new = W + (dw - dt) / sigmaSE
-    C_new = softclamp(C + flux_EI, 0.0)
+    C_new = softclamp(C + flux_EI)
 
     return {"S": S_new, "E": E_new, "I": I_new, "R": R_new, "W": W_new, "C": C_new}
 
@@ -162,12 +162,11 @@ def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
 
     y = jnp.asarray(Y_["cases"])
     safe_y = jnp.nan_to_num(y, nan=0.0)
-    safe_C = softclamp(C, 0.0)
+    safe_C = softclamp(C)
 
     m = rho * safe_C
     v = m * (1.0 - rho + psi**2 * m)
-    tol = 1.0e-3
-    scale = jnp.sqrt(softclamp(v, tol))
+    scale = jnp.sqrt(softclamp(v))
     loglik = jax.scipy.stats.norm.logpdf(safe_y, loc=m, scale=scale)
     loglik = jnp.where(jnp.isnan(y), 0.0, loglik)
     loglik = jnp.where(C < 0, -jnp.inf, loglik)
@@ -242,10 +241,10 @@ def dmeas(
     y_is_nan = jnp.isnan(y_raw)
     y = jnp.where(y_is_nan, 0.0, y_raw)
 
-    Cpos = softclamp(C, 0.0)
+    Cpos = jnp.maximum(C, 0.0)
     m = rho * Cpos
     v = m * (1.0 - rho + psi**2 * m)
-    v = softclamp(v, tol * tol)
+    v = jnp.maximum(v, tol**2)
     s = jnp.sqrt(v)
 
     z_hi = (y + 0.5 - m) / s
@@ -253,7 +252,7 @@ def dmeas(
 
     ll_box = jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
 
-    loglik = softclamp(ll_box, jnp.log(tol))
+    loglik = jnp.maximum(ll_box, jnp.log(tol))
 
     loglik = loglik * (1.0 - y_is_nan.astype(loglik.dtype))
 
@@ -270,15 +269,15 @@ def rmeas(
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = jnp.asarray(X_["C"])
-    safe_C = softclamp(C, 0.0)
+    safe_C = softclamp(C)
 
     m = rho * safe_C
     v = m * (1.0 - rho + psi**2 * m)
     tol = 1.0e-18
 
-    cases = jax.random.normal(key) * (jnp.sqrt(softclamp(v, 0.0)) + tol) + m
+    cases = jax.random.normal(key) * (jnp.sqrt(softclamp(v)) + tol) + m
 
-    return softclamp(cases, 0.0)
+    return softclamp(cases)
 
 
 def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

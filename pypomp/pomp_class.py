@@ -952,7 +952,7 @@ class Pomp:
                 max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
 
             eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
-            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This represents the factor by which the original alpha is multiplied by the end of training. Defaults to 1.0 (no cooling).
+            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the

@@ -986,7 +986,7 @@ class PanelEstimationMixin(Base):
             theta (PanelParameters, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
             eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
-            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This represents the factor by which the original alpha is multiplied by the end of training. Defaults to 1.0 (no cooling).
+            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
             clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:

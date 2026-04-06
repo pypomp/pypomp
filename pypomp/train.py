@@ -274,7 +274,7 @@ def _panel_train_internal(
             c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
 
             curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
-            curr_alpha = alpha * _cosine_cooling(i, M, alpha_cooling)
+            curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
             loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
@@ -449,7 +449,7 @@ def _train_internal(
         ) = carry
 
         curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
-        curr_alpha = alpha * _cosine_cooling(i, M, alpha_cooling)
+        curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         if n_monitors == 1:
             key, subkey = jax.random.split(key)

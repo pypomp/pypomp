@@ -2,10 +2,10 @@
 This module implements internal functions for POMP models.
 """
 
-import numpy as np
-import warnings
 import jax
 import jax.numpy as jnp
+import numpy as np
+import warnings
 from typing import Callable
 
 
@@ -338,6 +338,21 @@ def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
     factor = a ** (1 / 50)
     alpha = factor ** (nt / ntimes + m - 1)
     return alpha
+
+
+def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
+    """
+    Calculate cosine cooling parameters for train.
+
+    Args:
+        i (int): Current iteration index, starting from 0.
+        M (int): Total number of iterations.
+        c (float): Cooling factor (the factor by which the original value is multiplied by the end of the iterations).
+
+    Returns:
+        float: The fraction to cool by.
+    """
+    return c + (1.0 - c) * 0.5 * (1.0 + jnp.cos(jnp.pi * i / M))
 
 
 def _shard_rows(array: jax.Array) -> jax.Array:

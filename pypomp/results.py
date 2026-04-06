@@ -503,6 +503,8 @@ class PompTrainResult(PompBaseResult):
     ls: bool = False
     c: float = 0.1
     max_ls_itn: int = 10
+    eta_cooling: float = 1.0
+    alpha_cooling: float = 1.0
 
     def __post_init__(self):
         """Set method to train."""
@@ -523,6 +525,8 @@ class PompTrainResult(PompBaseResult):
             "ls",
             "c",
             "max_ls_itn",
+            "eta_cooling",
+            "alpha_cooling",
         ]
         for name in scalar_fields:
             if getattr(self, name) != getattr(other, name):
@@ -590,6 +594,8 @@ class PompTrainResult(PompBaseResult):
         if self.ls:
             print(f"Armijo constant (c): {self.c}")
             print(f"Max line search iterations: {self.max_ls_itn}")
+        print(f"Cooling factor for eta: {self.eta_cooling}")
+        print(f"Cooling factor for alpha: {self.alpha_cooling}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
@@ -655,6 +661,8 @@ class PompTrainResult(PompBaseResult):
             ls=first.ls,
             c=first.c,
             max_ls_itn=first.max_ls_itn,
+            eta_cooling=first.eta_cooling,
+            alpha_cooling=first.alpha_cooling,
         )
 
 
@@ -1099,6 +1107,8 @@ class PanelPompTrainResult(PanelPompBaseResult):
     M: int = 0
     eta: dict[str, float] | float = field(default_factory=lambda: {})
     alpha: float = 0.97
+    eta_cooling: float = 1.0
+    alpha_cooling: float = 1.0
 
     def __post_init__(self):
         self.method = "train"
@@ -1114,6 +1124,8 @@ class PanelPompTrainResult(PanelPompBaseResult):
             or self.M != other.M
             or self.eta != other.eta
             or self.alpha != other.alpha
+            or self.eta_cooling != other.eta_cooling
+            or self.alpha_cooling != other.alpha_cooling
         ):
             return False
 
@@ -1197,6 +1209,8 @@ class PanelPompTrainResult(PanelPompBaseResult):
         print(f"Number of iterations (M): {self.M}")
         print(f"Learning rate (eta): {self.eta}")
         print(f"Discount factor (alpha): {self.alpha}")
+        print(f"Cooling factor for eta: {self.eta_cooling}")
+        print(f"Cooling factor for alpha: {self.alpha_cooling}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
@@ -1224,9 +1238,11 @@ class PanelPompTrainResult(PanelPompBaseResult):
                 or result.M != first.M
                 or result.eta != first.eta
                 or result.alpha != first.alpha
+                or result.eta_cooling != first.eta_cooling
+                or result.alpha_cooling != first.alpha_cooling
             ):
                 raise ValueError(
-                    "All PanelPompTrainResult objects must have the same optimizer, J, M, eta, and alpha."
+                    "All PanelPompTrainResult objects must have the same optimizer, J, M, eta, alpha, eta_cooling, and alpha_cooling."
                 )
 
         merged_theta = (
@@ -1276,6 +1292,8 @@ class PanelPompTrainResult(PanelPompBaseResult):
             M=first.M,
             eta=first.eta,
             alpha=first.alpha,
+            eta_cooling=first.eta_cooling,
+            alpha_cooling=first.alpha_cooling,
         )
 
 

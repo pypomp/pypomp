@@ -959,6 +959,8 @@ class PanelEstimationMixin(Base):
             list[dict[str, pd.DataFrame | None]],
             None,
         ] = None,
+        eta_cooling: float = 1.0,
+        alpha_cooling: float = 1.0,
         clip_norm: float | None = None,
     ):
         """
@@ -983,6 +985,8 @@ class PanelEstimationMixin(Base):
                 `fresh_key` attribute.
             theta (PanelParameters, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
+            eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
+            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This represents the factor by which the original alpha is multiplied by the end of training. Defaults to 1.0 (no cooling).
             clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
@@ -1176,6 +1180,8 @@ class PanelEstimationMixin(Base):
             eta_shared,
             eta_spec,
             alpha,
+            eta_cooling,
+            alpha_cooling,
             n_obs,
             U,
             clip_norm,
@@ -1301,6 +1307,8 @@ class PanelEstimationMixin(Base):
             eta=eta,
             optimizer=optimizer,
             alpha=alpha,
+            eta_cooling=eta_cooling,
+            alpha_cooling=alpha_cooling,
         )
 
         self.results_history.add(result)

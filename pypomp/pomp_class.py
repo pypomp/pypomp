@@ -913,6 +913,8 @@ class Pomp:
         ls: bool = False,
         c: float = 0.1,
         max_ls_itn: int = 10,
+        eta_cooling: float = 1.0,
+        alpha_cooling: float = 1.0,
         n_monitors: int = 1,
         track_time: bool = True,
         clip_norm: float | None = None,
@@ -949,6 +951,8 @@ class Pomp:
 
                 max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
 
+            eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
+            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This represents the factor by which the original alpha is multiplied by the end of training. Defaults to 1.0 (no cooling).
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
@@ -983,8 +987,6 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        n_obs = len(self.ys)
-
         nLLs, theta_ests = _vmapped_train_internal(
             theta_array,
             jnp.array(self.ys),
@@ -1010,8 +1012,9 @@ class Pomp:
             ls,
             alpha,
             keys,
+            eta_cooling,
+            alpha_cooling,
             n_monitors,
-            n_obs,
             clip_norm,
         )
 
@@ -1074,6 +1077,8 @@ class Pomp:
             ls=ls,
             c=c,
             max_ls_itn=max_ls_itn,
+            eta_cooling=eta_cooling,
+            alpha_cooling=alpha_cooling,
         )
 
         self.results_history.add(result)

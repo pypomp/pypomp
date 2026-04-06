@@ -9,6 +9,7 @@ from .pfilter import (
     _pfilter_internal_mean,
 )
 from .mop import _mop_internal_mean, _mop_internal
+from .internal_functions import _cosine_cooling
 
 _grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
 _vg_pfilter_internal_mean = jax.value_and_grad(_pfilter_internal_mean)
@@ -152,6 +153,8 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "n_obs",
         "U",
         "clip_norm",
+        "eta_cooling",
+        "alpha_cooling",
     ),
 )
 def _panel_train_internal(
@@ -176,6 +179,8 @@ def _panel_train_internal(
     eta_shared: jax.Array,
     eta_spec: jax.Array,
     alpha: float,
+    eta_cooling: float,
+    alpha_cooling: float,
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
     clip_norm: float | None = None,
@@ -235,7 +240,9 @@ def _panel_train_internal(
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
 
-    def _chunk_obj(s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, keys_chunk):
+    def _chunk_obj(
+        s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, keys_chunk, curr_alpha
+    ):
         shared_tiled = jnp.tile(s_ests, (chunk_size, 1))
         theta_unordered = jnp.concatenate([shared_tiled, u_ests], axis=1)
         theta_chunk = jax.vmap(lambda t, p: t[p])(theta_unordered, perm_chunk)
@@ -252,7 +259,7 @@ def _panel_train_internal(
             dmeasure,
             accumvars,
             covars_chunk,
-            alpha,
+            curr_alpha,
             keys_chunk,
         )
         return jnp.sum(res) / (chunk_size * n_obs)
@@ -266,6 +273,9 @@ def _panel_train_internal(
             c_u = unit_ests_c[chunk_idx]
             c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
 
+            curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
+            curr_alpha = alpha * _cosine_cooling(i, M, alpha_cooling)
+
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
             loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
                 c_s,
@@ -274,6 +284,7 @@ def _panel_train_internal(
                 ys_c[chunk_idx],
                 covars_chunk,
                 iter_keys_c[chunk_idx],
+                curr_alpha,
             )
             loglik *= ylen
 
@@ -287,8 +298,8 @@ def _panel_train_internal(
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
-            c_s = c_s + (eta_shared / n_chunks) * dir_s
-            c_u = c_u + eta_spec * dir_u
+            c_s = c_s + (curr_eta_factor * eta_shared / n_chunks) * dir_s
+            c_u = c_u + (curr_eta_factor * eta_spec) * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
 
         (
@@ -365,7 +376,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 14,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 16,
 )
 
 
@@ -385,8 +396,9 @@ _vmapped_panel_train_internal = jax.vmap(
         "ls",
         "alpha",
         "n_monitors",
-        "n_obs",
         "clip_norm",
+        "eta_cooling",
+        "alpha_cooling",
     ),
 )
 def _train_internal(
@@ -410,10 +422,11 @@ def _train_internal(
     thresh: float,  # static
     scale: bool,  # static
     ls: bool,  # static
-    alpha: float,  # static
+    alpha: float | jax.Array,
     key: jax.Array,
+    eta_cooling: float,
+    alpha_cooling: float,
     n_monitors: int,  # static
-    n_obs: int,  # static
     clip_norm: float | None = None,
 ):
     """
@@ -435,6 +448,9 @@ def _train_internal(
             v_adam,
         ) = carry
 
+        curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
+        curr_alpha = alpha * _cosine_cooling(i, M, alpha_cooling)
+
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
             loglik, grad = _jvg_mop(
@@ -450,7 +466,7 @@ def _train_internal(
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
-                alpha=alpha,
+                alpha=curr_alpha,
                 key=subkey,
             )
             loglik *= ylen
@@ -469,7 +485,7 @@ def _train_internal(
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
-                alpha=alpha,
+                alpha=curr_alpha,
                 key=subkey,
             )
             if n_monitors > 0:
@@ -518,7 +534,7 @@ def _train_internal(
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
-                alpha=alpha,
+                alpha=curr_alpha,
                 key=subkey,
             )
             direction = -jnp.linalg.pinv(hess, hermitian=True) @ grad
@@ -538,7 +554,7 @@ def _train_internal(
                 dmeasure=dmeasure,
                 accumvars=accumvars,
                 covars_extended=covars_extended,
-                alpha=alpha,
+                alpha=curr_alpha,
                 key=subkey,
             )
 
@@ -669,10 +685,10 @@ def _train_internal(
                 frac=0.5,
                 stoch=False,
             )
-            theta_ests = theta_ests + eta_scalar * direction
+            theta_ests = theta_ests + (curr_eta_factor * eta_scalar) * direction
 
         else:
-            theta_ests = theta_ests + eta * direction
+            theta_ests = theta_ests + (curr_eta_factor * eta) * direction
 
         prev_grad = grad
         prev_hess = hess
@@ -720,7 +736,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 4,
 )
 
 
@@ -895,7 +911,7 @@ def _jgrad_mop(
     dmeasure: Callable,  # static
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
-    alpha: float,
+    alpha: float | jax.Array,
     key: jax.Array,
 ):
     """
@@ -938,7 +954,7 @@ def _jvg_mop(
     dmeasure: Callable,  # static
     covars_extended: jax.Array | None,
     accumvars: tuple[int, ...] | None,
-    alpha: float,
+    alpha: float | jax.Array,
     key: jax.Array,
 ) -> tuple:
     """
@@ -1032,7 +1048,7 @@ def _jhess_mop(
     dmeasure: Callable,  # static
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
-    alpha: float,
+    alpha: float | jax.Array,
     key: jax.Array,
 ):
     """

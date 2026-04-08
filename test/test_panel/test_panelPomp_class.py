@@ -21,7 +21,7 @@ def test_results(measles_panel_mp):
     results1 = panel.results(1)
     # Check expected columns for results0 (from mif, index=0)
     expected_cols = {
-        "replicate",
+        "theta_idx",
         "unit",
         "shared logLik",
         "unit logLik",
@@ -31,14 +31,14 @@ def test_results(measles_panel_mp):
     assert expected_cols.issubset(results0_cols)
     # It should have one row for each replicate/unit combination
     n_units = len(panel.unit_objects)
-    n_reps = results0["replicate"].nunique()
+    n_reps = results0["theta_idx"].nunique()
     assert len(results0) == n_units * n_reps
 
     # Check expected columns for results1 (from pfilter, index=1)
     results1_cols = set(results1.columns)
     assert expected_cols.issubset(results1_cols)
     n_units1 = len(panel.unit_objects)
-    n_reps1 = results1["replicate"].nunique()
+    n_reps1 = results1["theta_idx"].nunique()
     assert len(results1) == n_units1 * n_reps1
 
 
@@ -59,17 +59,17 @@ def test_traces(measles_panel_mp):
     panel, *_ = measles_panel_mp
     traces = panel.traces()
     assert isinstance(traces, pd.DataFrame)
-    expected_column_order = ["replicate", "unit", "iteration", "method", "logLik"]
+    expected_column_order = ["theta_idx", "unit", "iteration", "method", "logLik"]
     assert list(traces.columns[:5]) == expected_column_order, (
         f"First five columns are {list(traces.columns[:5])}, expected {expected_column_order}"
     )
 
     traces_sorted = traces.sort_values(
-        ["replicate", "unit", "iteration"], kind="stable"
+        ["theta_idx", "unit", "iteration"], kind="stable"
     ).reset_index(drop=True)
     assert traces.equals(traces_sorted)
 
-    grouped = traces.groupby(["replicate", "unit"], sort=False)
+    grouped = traces.groupby(["theta_idx", "unit"], sort=False)
     for (rep, unit), df in grouped:  # type: ignore[misc]
         if len(df) == 0:
             continue
@@ -237,9 +237,9 @@ def test_performance_comprehensive():
     # Create dummy shared traces
     shared_traces = xr.DataArray(
         np.random.randn(n_reps, n_iter + 1, 3),  # +1 for initial values
-        dims=["replicate", "iteration", "variable"],
+        dims=["theta_idx", "iteration", "variable"],
         coords={
-            "replicate": range(n_reps),
+            "theta_idx": range(n_reps),
             "iteration": range(n_iter + 1),
             "variable": ["logLik", "param1", "param2"],
         },
@@ -248,9 +248,9 @@ def test_performance_comprehensive():
     # Create dummy unit traces
     unit_traces = xr.DataArray(
         np.random.randn(n_reps, n_iter + 1, 3, n_units),  # +1 for initial values
-        dims=["replicate", "iteration", "variable", "unit"],
+        dims=["theta_idx", "iteration", "variable", "unit"],
         coords={
-            "replicate": range(n_reps),
+            "theta_idx": range(n_reps),
             "iteration": range(n_iter + 1),
             "variable": ["unitLogLik", "unit_param1", "unit_param2"],
             "unit": units,
@@ -260,8 +260,8 @@ def test_performance_comprehensive():
     # Create dummy loglikelihoods
     logLiks = xr.DataArray(
         np.random.randn(n_reps, n_units + 1),  # +1 for shared
-        dims=["replicate", "unit"],
-        coords={"replicate": range(n_reps), "unit": ["shared"] + units},
+        dims=["theta_idx", "unit"],
+        coords={"theta_idx": range(n_reps), "unit": ["shared"] + units},
     )
 
     # Add multiple MIF results to history (stress test with many results)
@@ -299,8 +299,8 @@ def test_performance_comprehensive():
     for i in range(4):  # 4 pfilter runs
         pfilter_logLiks = xr.DataArray(
             np.random.randn(n_reps, n_units, 3),  # 3 replicates per pfilter
-            dims=["theta", "unit", "replicate"],
-            coords={"theta": range(n_reps), "unit": units, "replicate": range(3)},
+            dims=["theta_idx", "unit", "rep"],
+            coords={"theta_idx": range(n_reps), "unit": units, "rep": range(3)},
         )
         result = PanelPompPFilterResult(
             method="pfilter",
@@ -345,7 +345,7 @@ def test_prune(measles_panel_mp):
 
     # Get initial state from the last result
     results_df = panel.results()
-    initial_n_reps = results_df["replicate"].nunique()
+    initial_n_reps = results_df["theta_idx"].nunique()
     assert initial_n_reps > 1, "Need multiple replicates to test prune"
 
     # Store initial parameter lists
@@ -429,7 +429,7 @@ def test_mix_and_match(measles_panel_mp):
     panel, rw_sd, key, J, M, a = measles_panel_mp
 
     results_df = panel.results()
-    initial_n_reps = results_df["replicate"].nunique()
+    initial_n_reps = results_df["theta_idx"].nunique()
     assert initial_n_reps > 1, "Need multiple replicates to test mix_and_match"
 
     # Capture original state BEFORE mix_and_match() modifies panel.theta
@@ -494,17 +494,17 @@ def test_mix_and_match(measles_panel_mp):
     if initial_n_reps >= 2:
         verify_replicate(1, 1)
 
-    # Sanity check: verify structure (mixing may or may not have occurred)
     if (
-        original_unit_specific
+        original_unit_specific is not None
         and panel.theta._theta[0].get("unit_specific") is not None
     ):
-        orig_cols = {unit: original_unit_specific[0][unit] for unit in unit_names}
-        new_cols = {
-            unit: panel.theta._theta[0]["unit_specific"][unit] for unit in unit_names
-        }
-        # Verify comparison runs (mixing may or may not have occurred)
-        _ = any(not orig_cols[u].equals(new_cols[u]) for u in unit_names)
+        new_spec = panel.theta._theta[0]["unit_specific"]
+        for unit in unit_names:
+            orig_df = original_unit_specific[0]
+            if orig_df is not None and new_spec is not None:
+                orig_col = orig_df[unit]
+                new_col = new_spec[unit]
+                _ = orig_col.equals(new_col)
 
 
 def test_print_summary(measles_panel_mp):
@@ -559,24 +559,24 @@ def test_merge(measles_panel_setup_some_shared):
         # Check that merged result has combined replications
         if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
             if merged_result.method == "pfilter":
-                # For pfilter results: logLiks has dims ["theta", "unit", "replicate"]
-                # The theta dimension corresponds to theta replications
-                merged_n_theta = merged_result.logLiks.sizes["theta"]
-                result1_n_theta = result1.logLiks.sizes["theta"]
-                result2_n_theta = result2.logLiks.sizes["theta"]
+                # For pfilter results: logLiks has dims ["theta_idx", "unit", "rep"]
+                # The theta_idx dimension corresponds to theta replications
+                merged_n_theta = merged_result.logLiks.sizes["theta_idx"]
+                result1_n_theta = result1.logLiks.sizes["theta_idx"]
+                result2_n_theta = result2.logLiks.sizes["theta_idx"]
                 assert merged_n_theta == result1_n_theta + result2_n_theta, (
-                    f"Position {i} ({merged_result.method}): merged has {merged_n_theta} theta replications, "
+                    f"Position {i} ({merged_result.method}): merged has {merged_n_theta} theta_idx replications, "
                     f"expected {result1_n_theta} + {result2_n_theta} = {result1_n_theta + result2_n_theta}"
                 )
             elif merged_result.method == "mif":
-                # For mif results: logLiks has dims ["replicate", "unit"]
-                # The replicate dimension corresponds to theta replications
-                merged_n_reps = merged_result.logLiks.sizes["replicate"]
-                result1_n_reps = result1.logLiks.sizes["replicate"]
-                result2_n_reps = result2.logLiks.sizes["replicate"]
+                # For pfilter results: logLiks has dims ["theta_idx", "unit", "rep"]
+                # For mif results: logLiks has dims ["theta_idx", "unit"]
+                merged_n_reps = merged_result.logLiks.sizes["theta_idx"]
+                result1_n_reps = result1.logLiks.sizes["theta_idx"]
+                result2_n_reps = result2.logLiks.sizes["theta_idx"]
                 assert merged_n_reps == result1_n_reps + result2_n_reps, (
                     f"Position {i} ({merged_result.method}): merged has {merged_n_reps} replicates, "
-                    f"expected {result1_n_reps} + {result2_n_reps} = {result1_n_reps + result2_n_reps}"
+                    f"expected {result1_n_reps + result2_n_reps}"
                 )
 
         # Also verify shared_traces and unit_traces for mif results
@@ -584,7 +584,7 @@ def test_merge(measles_panel_setup_some_shared):
             hasattr(merged_result, "shared_traces")
             and merged_result.shared_traces.size > 0
         ):
-            merged_n_reps = merged_result.shared_traces.sizes["replicate"]
-            result1_n_reps = result1.shared_traces.sizes["replicate"]
-            result2_n_reps = result2.shared_traces.sizes["replicate"]
+            merged_n_reps = merged_result.shared_traces.sizes["theta_idx"]
+            result1_n_reps = result1.shared_traces.sizes["theta_idx"]
+            result2_n_reps = result2.shared_traces.sizes["theta_idx"]
             assert merged_n_reps == result1_n_reps + result2_n_reps

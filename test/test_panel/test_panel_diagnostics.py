@@ -45,7 +45,7 @@ def test_panel_cll(simple_panel):
     cll_df = panel.CLL()
     assert "CLL" in cll_df.columns
     assert "unit" in cll_df.columns
-    assert "replicate" in cll_df.columns
+    assert "theta_idx" in cll_df.columns
     assert "rep" in cll_df.columns
     expected_rows = len(unit_names) * reps * len(times)
     assert cll_df.shape[0] == expected_rows
@@ -55,7 +55,7 @@ def test_panel_cll(simple_panel):
     cll_avg_df = panel.CLL(average=True)
     assert "CLL" in cll_avg_df.columns
     assert "unit" in cll_avg_df.columns
-    assert "replicate" in cll_avg_df.columns
+    assert "theta_idx" in cll_avg_df.columns
     assert "rep" not in cll_avg_df.columns
     expected_avg_rows = len(unit_names) * len(times)
     assert cll_avg_df.shape[0] == expected_avg_rows
@@ -69,7 +69,7 @@ def test_panel_ess(simple_panel):
     ess_df = panel.ESS()
     assert "ESS" in ess_df.columns
     assert "unit" in ess_df.columns
-    assert "replicate" in ess_df.columns
+    assert "theta_idx" in ess_df.columns
     assert "rep" in ess_df.columns
     expected_rows = len(unit_names) * reps * len(times)
     assert ess_df.shape[0] == expected_rows
@@ -81,7 +81,7 @@ def test_panel_ess(simple_panel):
     ess_avg_df = panel.ESS(average=True)
     assert "ESS" in ess_avg_df.columns
     assert "unit" in ess_avg_df.columns
-    assert "replicate" in ess_avg_df.columns
+    assert "theta_idx" in ess_avg_df.columns
     assert "rep" not in ess_avg_df.columns
     expected_avg_rows = len(unit_names) * len(times)
     assert ess_avg_df.shape[0] == expected_avg_rows

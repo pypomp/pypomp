@@ -3,10 +3,10 @@ import pandas as pd
 
 def test_simulate(measles_panel_setup_some_shared):
     panel, rw_sd, key = measles_panel_setup_some_shared
-    X_sim_order = ["unit", "replicate", "sim", "time"] + [
+    X_sim_order = ["unit", "theta_idx", "sim", "time"] + [
         f"state_{i}" for i in range(0, 6)
     ]
-    Y_sim_order = ["unit", "replicate", "sim", "time", "obs_0"]
+    Y_sim_order = ["unit", "theta_idx", "sim", "time", "obs_0"]
 
     X_sims, Y_sims = panel.simulate(key=key)
 

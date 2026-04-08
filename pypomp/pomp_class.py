@@ -669,7 +669,7 @@ class Pomp:
 
         neg_logliks = results["neg_loglik"]
 
-        logLik_da = xr.DataArray(-neg_logliks, dims=["theta", "replicate"])
+        logLik_da = xr.DataArray(-neg_logliks, dims=["theta_idx", "rep"])
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -684,25 +684,29 @@ class Pomp:
         if CLL and "CLL" in results:
             CLL_da = xr.DataArray(
                 results["CLL"],
-                dims=["theta", "replicate", "time"],
+                dims=["theta_idx", "rep", "time"],
+                coords={"time": self.ys.index},
             )
 
         if ESS and "ESS" in results:
             ESS_da = xr.DataArray(
                 results["ESS"],
-                dims=["theta", "replicate", "time"],
+                dims=["theta_idx", "rep", "time"],
+                coords={"time": self.ys.index},
             )
 
         if filter_mean and "filter_mean" in results:
             filter_mean_da = xr.DataArray(
                 results["filter_mean"],
-                dims=["theta", "replicate", "time", "state"],
+                dims=["theta_idx", "rep", "time", "state"],
+                coords={"time": self.ys.index},
             )
 
         if prediction_mean and "prediction_mean" in results:
             prediction_mean_da = xr.DataArray(
                 results["prediction_mean"],
-                dims=["theta", "replicate", "time", "state"],
+                dims=["theta_idx", "rep", "time", "state"],
+                coords={"time": self.ys.index},
             )
 
         del results
@@ -854,9 +858,9 @@ class Pomp:
 
         traces_da = xr.DataArray(
             trace_data,
-            dims=["replicate", "iteration", "variable"],
+            dims=["theta_idx", "iteration", "variable"],
             coords={
-                "replicate": np.arange(n_reps),
+                "theta_idx": np.arange(n_reps),
                 "iteration": np.arange(M + 1),
                 "variable": trace_vars,
             },
@@ -1031,14 +1035,14 @@ class Pomp:
         joined_array = xr.DataArray(
             np.concatenate(
                 [
-                    -nLLs[..., np.newaxis],  # shape: (replicate, iteration, 1)
-                    theta_ests_natural,  # shape: (replicate, iteration, n_theta)
+                    -nLLs[..., np.newaxis],  # shape: (theta_idx, iteration, 1)
+                    theta_ests_natural,  # shape: (theta_idx, iteration, n_theta)
                 ],
                 axis=-1,
             ),
-            dims=["replicate", "iteration", "variable"],
+            dims=["theta_idx", "iteration", "variable"],
             coords={
-                "replicate": range(0, n_reps),
+                "theta_idx": range(0, n_reps),
                 "iteration": range(0, M + 1),
                 "variable": ["logLik"] + self.canonical_param_names,
             },
@@ -1270,7 +1274,7 @@ class Pomp:
             If as_pomp is False:
                 tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
                 The columns are as follows:
-                - replicate: The index of the parameter set.
+                - theta_idx: The index of the parameter set.
                 - sim: The index of the simulation.
                 - time: The time points at which the observations were made.
                 - Remaining columns contain the features of the state and observation processes.
@@ -1316,7 +1320,9 @@ class Pomp:
         )
 
         def _to_long(
-            arr: np.ndarray, times_vec: np.ndarray, prefix: str
+            arr: Union[jax.Array, np.ndarray],
+            times_vec: Union[jax.Array, np.ndarray, pd.Index],
+            prefix: str,
         ) -> pd.DataFrame:
             vals = np.asarray(arr)  # (n_theta, n_time, n_feat, n_sim)
             n_theta_l, n_time_l, n_feat_l, n_sim_l = vals.shape
@@ -1332,7 +1338,7 @@ class Pomp:
             df = pd.DataFrame(flat, columns=cols)
             df.insert(0, "time", time_vals_l)
             df.insert(0, "sim", sim_idx_l)
-            df.insert(0, "replicate", theta_idx_l)
+            df.insert(0, "theta_idx", theta_idx_l)
             return df
 
         times0 = np.concatenate([np.array([self.t0]), np.array(times_array)])
@@ -1341,10 +1347,10 @@ class Pomp:
 
         if as_pomp:
             simulated_ys_long = Y_sims_long[
-                (Y_sims_long["replicate"] == 0) & (Y_sims_long["sim"] == 0)
+                (Y_sims_long["theta_idx"] == 0) & (Y_sims_long["sim"] == 0)
             ].copy()
             simulated_ys = pd.DataFrame(
-                simulated_ys_long.drop(columns=["replicate", "sim", "time"])
+                simulated_ys_long.drop(columns=["theta_idx", "sim", "time"])
             )
             simulated_ys.index = pd.Index(simulated_ys_long["time"])
             simulated_ys.columns = self.ys.columns
@@ -1378,7 +1384,7 @@ class Pomp:
 
         Returns:
             pd.DataFrame: A long-format DataFrame with columns:
-                `probe`, `value`, `is_real_data`, `replicate`, `sim`
+                `probe`, `value`, `is_real_data`, `theta_idx`, `sim`
         """
         sim_result = self.simulate(nsim=nsim, key=key, theta=theta, as_pomp=False)
         assert isinstance(sim_result, tuple)
@@ -1392,13 +1398,13 @@ class Pomp:
                     "probe": name,
                     "value": float(func(self.ys)),
                     "is_real_data": True,
-                    "replicate": pd.NA,
+                    "theta_idx": pd.NA,
                     "sim": pd.NA,
                 }
             )
 
         def apply_probes(group):
-            replicate_id, sim_id = group.name
+            theta_idx, sim_id = group.name
             df = pd.DataFrame(group.drop(columns=["time"]))
             df.index = pd.Index(group["time"])
             df.columns = self.ys.columns
@@ -1408,12 +1414,12 @@ class Pomp:
                         "probe": name,
                         "value": float(func(df)),
                         "is_real_data": False,
-                        "replicate": replicate_id,
+                        "theta_idx": theta_idx,
                         "sim": sim_id,
                     }
                 )
 
-        y_sims.groupby(["replicate", "sim"]).apply(apply_probes, include_groups=False)
+        y_sims.groupby(["theta_idx", "sim"]).apply(apply_probes, include_groups=False)
 
         return pd.DataFrame(results)
 

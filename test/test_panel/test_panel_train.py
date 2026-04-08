@@ -89,10 +89,10 @@ def test_panel_train_clipping():
     res_no_clip = panel.results_history[-1]
     shared_vars = panel.canonical_shared_param_names
     p0 = res_no_clip.shared_traces.sel(
-        replicate=0, iteration=0, variable=shared_vars
+        theta_idx=0, iteration=0, variable=shared_vars
     ).values
     p1_no_clip = res_no_clip.shared_traces.sel(
-        replicate=0, iteration=1, variable=shared_vars
+        theta_idx=0, iteration=1, variable=shared_vars
     ).values
     diff_no_clip = np.linalg.norm(p1_no_clip - p0)
 
@@ -107,7 +107,7 @@ def test_panel_train_clipping():
     )
     res_clip = panel.results_history[-1]
     p1_clip = res_clip.shared_traces.sel(
-        replicate=0, iteration=1, variable=shared_vars
+        theta_idx=0, iteration=1, variable=shared_vars
     ).values
     diff_clip = np.linalg.norm(p1_clip - p0)
 

@@ -20,7 +20,7 @@ def test_pomp_cll(simple_pomp):
     # Raw CLL
     cll_df = LG.CLL()
     assert "CLL" in cll_df.columns
-    assert "replicate" in cll_df.columns
+    assert "theta_idx" in cll_df.columns
     assert "rep" in cll_df.columns
     assert cll_df.shape[0] == reps * len(LG.ys)
     assert np.all(np.isfinite(cll_df["CLL"]))
@@ -28,11 +28,11 @@ def test_pomp_cll(simple_pomp):
     # Averaged CLL
     cll_avg_df = LG.CLL(average=True)
     assert "CLL" in cll_avg_df.columns
-    assert "replicate" in cll_avg_df.columns
+    assert "theta_idx" in cll_avg_df.columns
     assert "rep" not in cll_avg_df.columns
     assert cll_avg_df.shape[0] == len(LG.ys)
-    # Replicate should be 0 for averaged results
-    assert np.all(cll_avg_df["replicate"] == 0)
+    # theta_idx should be 0 for averaged results (first parameter set)
+    assert np.all(cll_avg_df["theta_idx"] == 0)
 
 
 def test_pomp_ess(simple_pomp):
@@ -41,7 +41,7 @@ def test_pomp_ess(simple_pomp):
     # Raw ESS
     ess_df = LG.ESS()
     assert "ESS" in ess_df.columns
-    assert "replicate" in ess_df.columns
+    assert "theta_idx" in ess_df.columns
     assert "rep" in ess_df.columns
     assert ess_df.shape[0] == reps * len(LG.ys)
     assert np.all(np.isfinite(ess_df["ESS"]))
@@ -51,7 +51,7 @@ def test_pomp_ess(simple_pomp):
     # Averaged ESS
     ess_avg_df = LG.ESS(average=True)
     assert "ESS" in ess_avg_df.columns
-    assert "replicate" in ess_avg_df.columns
+    assert "theta_idx" in ess_avg_df.columns
     assert "rep" not in ess_avg_df.columns
     assert ess_avg_df.shape[0] == len(LG.ys)
-    assert np.all(ess_avg_df["replicate"] == 0)
+    assert np.all(ess_avg_df["theta_idx"] == 0)

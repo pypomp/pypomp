@@ -8,7 +8,7 @@ def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
     n_theta = theta_orig.num_replicates()
     n_units = len(result.logLiks.coords["unit"])
     assert isinstance(result.logLiks, xr.DataArray)
-    assert result.logLiks.dims == ("theta", "unit", "replicate")
+    assert result.logLiks.dims == ("theta_idx", "unit", "rep")
     assert result.logLiks.shape == (n_theta, n_units, reps)
     assert result.theta == theta_orig
     assert result.J == J
@@ -69,12 +69,12 @@ def test_pfilter_diagnostics(measles_panel_setup_some_shared):
         result = panel.results_history[-1]
 
         assert result.logLiks.shape == (n_theta, n_units, reps)
-        assert result.logLiks.dims == ("theta", "unit", "replicate")
+        assert result.logLiks.dims == ("theta_idx", "unit", "rep")
 
         if CLL:
             assert result.CLL_da is not None
             assert result.CLL_da.shape == (n_theta, n_units, reps, n_time)
-            assert result.CLL_da.dims == ("theta", "unit", "replicate", "time")
+            assert result.CLL_da.dims == ("theta_idx", "unit", "rep", "time")
             assert np.all(np.isfinite(result.CLL_da.data))
         else:
             assert result.CLL_da is None
@@ -82,7 +82,7 @@ def test_pfilter_diagnostics(measles_panel_setup_some_shared):
         if ESS:
             assert result.ESS_da is not None
             assert result.ESS_da.shape == (n_theta, n_units, reps, n_time)
-            assert result.ESS_da.dims == ("theta", "unit", "replicate", "time")
+            assert result.ESS_da.dims == ("theta_idx", "unit", "rep", "time")
             assert np.all(np.isfinite(result.ESS_da.data))
             # ESS should be between 0 and J (allow small tolerance for floating point precision)
             assert np.all(result.ESS_da.data >= 0)
@@ -94,9 +94,9 @@ def test_pfilter_diagnostics(measles_panel_setup_some_shared):
             assert result.filter_mean is not None
             assert result.filter_mean.shape == (n_theta, n_units, reps, n_time, n_state)
             assert result.filter_mean.dims == (
-                "theta",
+                "theta_idx",
                 "unit",
-                "replicate",
+                "rep",
                 "time",
                 "state",
             )
@@ -113,9 +113,9 @@ def test_pfilter_diagnostics(measles_panel_setup_some_shared):
                 n_state,
             )
             assert result.prediction_mean.dims == (
-                "theta",
+                "theta_idx",
                 "unit",
-                "replicate",
+                "rep",
                 "time",
                 "state",
             )

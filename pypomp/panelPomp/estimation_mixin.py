@@ -275,7 +275,7 @@ class PanelEstimationMixin(Base):
                         "probe": name,
                         "value": float(func(obj.ys)),
                         "is_real_data": True,
-                        "replicate": pd.NA,
+                        "theta_idx": pd.NA,
                         "sim": pd.NA,
                         "unit": unit,
                     }
@@ -293,13 +293,13 @@ class PanelEstimationMixin(Base):
                         "probe": name,
                         "value": float(func(df)),
                         "is_real_data": False,
-                        "replicate": replicate_id,
+                        "theta_idx": replicate_id,
                         "sim": sim_id,
                         "unit": unit_name,
                     }
                 )
 
-        y_sims.groupby(["unit", "replicate", "sim"]).apply(
+        y_sims.groupby(["unit", "theta_idx", "sim"]).apply(
             apply_probes, include_groups=False
         )
 
@@ -470,9 +470,9 @@ class PanelEstimationMixin(Base):
 
         results_da = xr.DataArray(
             (-neg_logliks),
-            dims=["theta", "replicate", "unit"],
-            coords={"unit": unit_names, "replicate": range(reps)},
-        ).transpose("theta", "unit", "replicate")
+            dims=["theta_idx", "rep", "unit"],
+            coords={"unit": unit_names, "rep": range(reps)},
+        ).transpose("theta_idx", "unit", "rep")
 
         results_np = np.array(results_da.values)
         logLik_unit = logmeanexp(
@@ -487,7 +487,7 @@ class PanelEstimationMixin(Base):
             arr = arr[:, :U]
             arr = arr.reshape((n_theta_reps, reps, U) + arr.shape[2:])
             arr = np.moveaxis(arr, 1, 2)
-            coords = {"unit": unit_names, "replicate": range(reps)}
+            coords = {"unit": unit_names, "rep": range(reps)}
             for i, coord_name in enumerate(coord_names):
                 coord_idx = -(len(coord_names) - i)
                 if coord_name == "time":
@@ -498,7 +498,7 @@ class PanelEstimationMixin(Base):
 
         CLL_da = (
             _reshape_and_stack_diagnostics(
-                results.get("CLL"), ["theta", "unit", "replicate", "time"], ["time"]
+                results.get("CLL"), ["theta_idx", "unit", "rep", "time"], ["time"]
             )
             if CLL
             else None
@@ -506,7 +506,7 @@ class PanelEstimationMixin(Base):
 
         ESS_da = (
             _reshape_and_stack_diagnostics(
-                results.get("ESS"), ["theta", "unit", "replicate", "time"], ["time"]
+                results.get("ESS"), ["theta_idx", "unit", "rep", "time"], ["time"]
             )
             if ESS
             else None
@@ -515,7 +515,7 @@ class PanelEstimationMixin(Base):
         filter_mean_da = (
             _reshape_and_stack_diagnostics(
                 results.get("filter_mean"),
-                ["theta", "unit", "replicate", "time", "state"],
+                ["theta_idx", "unit", "rep", "time", "state"],
                 ["time", "state"],
             )
             if filter_mean
@@ -525,7 +525,7 @@ class PanelEstimationMixin(Base):
         prediction_mean_da = (
             _reshape_and_stack_diagnostics(
                 results.get("prediction_mean"),
-                ["theta", "unit", "replicate", "time", "state"],
+                ["theta_idx", "unit", "rep", "time", "state"],
                 ["time", "state"],
             )
             if prediction_mean
@@ -854,18 +854,18 @@ class PanelEstimationMixin(Base):
 
         shared_da = xr.DataArray(
             shared_traces,
-            dims=["replicate", "iteration", "variable"],
+            dims=["theta_idx", "iteration", "variable"],
             coords={
-                "replicate": jnp.arange(shared_traces.shape[0]),
+                "theta_idx": jnp.arange(shared_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": shared_vars,
             },
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["replicate", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "variable", "unit"],
             coords={
-                "replicate": jnp.arange(unit_traces.shape[0]),
+                "theta_idx": jnp.arange(unit_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": unit_vars,
                 "unit": unit_names,
@@ -879,8 +879,11 @@ class PanelEstimationMixin(Base):
             jnp.concatenate(
                 [shared_final_logliks.reshape(-1, 1), unit_final_logliks], axis=1
             ),
-            dims=["replicate", "unit"],
-            coords={"replicate": jnp.arange(n_reps), "unit": ["shared"] + unit_names},
+            dims=["theta_idx", "unit"],
+            coords={
+                "theta_idx": jnp.arange(n_reps),
+                "unit": ["shared"] + unit_names,
+            },
         )
 
         # PanelParameters ensures all shared are None or all are not None
@@ -1229,18 +1232,18 @@ class PanelEstimationMixin(Base):
 
         shared_da = xr.DataArray(
             shared_traces,
-            dims=["replicate", "iteration", "variable"],
+            dims=["theta_idx", "iteration", "variable"],
             coords={
-                "replicate": jnp.arange(shared_traces.shape[0]),
+                "theta_idx": jnp.arange(shared_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": shared_vars,
             },
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["replicate", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "variable", "unit"],
             coords={
-                "replicate": jnp.arange(unit_traces.shape[0]),
+                "theta_idx": jnp.arange(unit_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": unit_vars,
                 "unit": unit_names,
@@ -1296,9 +1299,9 @@ class PanelEstimationMixin(Base):
             unit_traces=unit_da,
             logLiks=xr.DataArray(  # Placeholder as we don't have unit logliks separated
                 np.full((n_reps, U + 1), np.nan),
-                dims=["replicate", "unit"],
+                dims=["theta_idx", "unit"],
                 coords={
-                    "replicate": jnp.arange(n_reps),
+                    "theta_idx": jnp.arange(n_reps),
                     "unit": ["shared"] + unit_names,
                 },
             ),

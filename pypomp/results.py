@@ -219,6 +219,7 @@ class PompPFilterResult(PompBaseResult):
 
         df = pd.DataFrame(
             {
+                "theta_idx": np.arange(len(theta_df), dtype=int),
                 "logLik": logLik.astype(float),
                 "se": se.astype(float),
             }
@@ -239,23 +240,21 @@ class PompPFilterResult(PompBaseResult):
             cll_avg = logmeanexp(cll_values, axis=1)
             n_theta, n_time = cll_avg.shape
 
-            df_list = []
-            for i in range(n_theta):
-                df_i = pd.DataFrame(
-                    {
-                        "replicate": i,
-                        "time": cll.coords["time"].values
-                        if "time" in cll.coords
-                        else np.arange(n_time),
-                        "CLL": cll_avg[i],
-                    }
-                )
-                df_list.append(df_i)
-            return pd.concat(df_list, ignore_index=True)
+            avg_da = xr.DataArray(
+                cll_avg,
+                dims=["theta_idx", "time"],
+                coords={
+                    "theta_idx": cll.coords["theta_idx"].values
+                    if "theta_idx" in cll.coords
+                    else np.arange(n_theta),
+                    "time": cll.coords["time"].values
+                    if "time" in cll.coords
+                    else np.arange(n_time),
+                },
+            )
+            return avg_da.to_dataframe(name="CLL").reset_index()
         else:
-            df = cll.to_dataframe(name="CLL").reset_index()
-            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
-            return df
+            return cll.to_dataframe(name="CLL").reset_index()
 
     def ESS(self, average: bool = False) -> pd.DataFrame:
         """Return Effective Sample Size as a DataFrame."""
@@ -264,14 +263,10 @@ class PompPFilterResult(PompBaseResult):
 
         ess: xr.DataArray = self.ESS_da
         if average:
-            ess_avg = ess.mean(dim="replicate")
-            df = ess_avg.to_dataframe(name="ESS").reset_index()
-            df = df.rename(columns={"theta": "replicate"})
-            return df
+            ess_avg = ess.mean(dim="rep")
+            return ess_avg.to_dataframe(name="ESS").reset_index()
         else:
-            df = ess.to_dataframe(name="ESS").reset_index()
-            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
-            return df
+            return ess.to_dataframe(name="ESS").reset_index()
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this pfilter result."""
@@ -286,7 +281,7 @@ class PompPFilterResult(PompBaseResult):
 
         base_df = pd.DataFrame(
             {
-                "replicate": np.arange(n_reps, dtype=int),
+                "theta_idx": np.arange(n_reps, dtype=int),
                 "iteration": np.zeros(n_reps, dtype=int),
                 "method": self.method,
                 "logLik": logliks.astype(float),
@@ -350,11 +345,11 @@ class PompPFilterResult(PompBaseResult):
             if result.logLiks.size > 0:
                 logLik_arrays.append(result.logLiks)
         if logLik_arrays:
-            merged_logLiks: xr.DataArray = xr.concat(logLik_arrays, dim="theta")  # type: ignore[assignment]
+            merged_logLiks: xr.DataArray = xr.concat(logLik_arrays, dim="theta_idx")  # type: ignore[assignment]
         else:
             merged_logLiks = xr.DataArray([])
 
-        # Concatenate optional diagnostics along the "theta" dimension
+        # Concatenate optional diagnostics along the "theta_idx" dimension
         def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
             arrays = []
             for result in results:
@@ -362,7 +357,7 @@ class PompPFilterResult(PompBaseResult):
                 if diag is not None and diag.size > 0:
                     arrays.append(diag)
             if arrays:
-                return xr.concat(arrays, dim="theta")  # type: ignore[return-value]
+                return xr.concat(arrays, dim="theta_idx")  # type: ignore[return-value]
             return None
 
         merged_CLL = merge_optional_diagnostic("CLL_da")
@@ -457,9 +452,9 @@ class PompMIFResult(PompBaseResult):
         )
 
         param_names = list(self.theta[0].keys())
-        cols = ["logLik"] + param_names
+        cols = ["theta_idx", "logLik"] + param_names
         df = pd.DataFrame(df[cols])
-        df.insert(1, "se", np.nan)
+        df.insert(2, "se", np.nan)
 
         return df
 
@@ -526,7 +521,7 @@ class PompMIFResult(PompBaseResult):
 
         trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
         merged_traces = (
-            xr.concat(trace_arrays, dim="replicate")
+            xr.concat(trace_arrays, dim="theta_idx")
             if trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
@@ -623,9 +618,9 @@ class PompTrainResult(PompBaseResult):
         )
 
         param_names = list(self.theta[0].keys())
-        cols = ["logLik"] + param_names
+        cols = ["theta_idx", "logLik"] + param_names
         df = pd.DataFrame(df[cols])
-        df.insert(1, "se", np.nan)
+        df.insert(2, "se", np.nan)
 
         return df
 
@@ -703,7 +698,7 @@ class PompTrainResult(PompBaseResult):
 
         trace_arrays = [r.traces_da for r in results if r.traces_da.size > 0]
         merged_traces = (
-            xr.concat(trace_arrays, dim="replicate")
+            xr.concat(trace_arrays, dim="theta_idx")
             if trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
@@ -793,11 +788,11 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         df = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
             .assign(
-                replicate=lambda x: range(len(x)),
+                theta_idx=lambda x: range(len(x)),
                 **{"shared logLik": lambda x: x.sum(axis=1)},
             )
             .melt(
-                id_vars=["replicate", "shared logLik"],
+                id_vars=["theta_idx", "shared logLik"],
                 var_name="unit",
                 value_name="unit logLik",
             )
@@ -817,7 +812,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
             if shared_list:
                 s_params = pd.concat(shared_list, axis=1).T.reset_index(drop=True)
-                df = df.join(s_params, on="replicate")
+                df = df.join(s_params, on="theta_idx")
 
             if unit_specific_list:
                 u_params = (
@@ -828,10 +823,10 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 )
                 col_names = list(u_params.columns)
                 u_params.rename(
-                    columns={col_names[0]: "replicate", col_names[1]: "unit"},
+                    columns={col_names[0]: "theta_idx", col_names[1]: "unit"},
                     inplace=True,
                 )
-                df = df.merge(u_params, on=["replicate", "unit"], how="left")
+                df = df.merge(u_params, on=["theta_idx", "unit"], how="left")
 
         return df
 
@@ -846,21 +841,20 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             cll_avg = logmeanexp(cll_values, axis=2)
             avg_da = xr.DataArray(
                 cll_avg,
-                dims=["theta", "unit", "time"],
+                dims=["theta_idx", "unit", "time"],
                 coords={
+                    "theta_idx": cll.coords["theta_idx"].values
+                    if "theta_idx" in cll.coords
+                    else np.arange(cll_avg.shape[0]),
                     "unit": cll.coords["unit"].values,
                     "time": cll.coords["time"].values
                     if "time" in cll.coords
                     else np.arange(cll_avg.shape[2]),
                 },
             )
-            df = avg_da.to_dataframe(name="CLL").reset_index()
-            df = df.rename(columns={"theta": "replicate"})
-            return df
+            return avg_da.to_dataframe(name="CLL").reset_index()
         else:
-            df = cll.to_dataframe(name="CLL").reset_index()
-            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
-            return df
+            return cll.to_dataframe(name="CLL").reset_index()
 
     def ESS(self, average: bool = False) -> pd.DataFrame:
         """Return Effective Sample Size as a DataFrame."""
@@ -869,14 +863,10 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
         ess: xr.DataArray = self.ESS_da
         if average:
-            ess_avg = ess.mean(dim="replicate")
-            df = ess_avg.to_dataframe(name="ESS").reset_index()
-            df = df.rename(columns={"theta": "replicate"})
-            return df
+            ess_avg = ess.mean(dim="rep")
+            return ess_avg.to_dataframe(name="ESS").reset_index()
         else:
-            df = ess.to_dataframe(name="ESS").reset_index()
-            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
-            return df
+            return ess.to_dataframe(name="ESS").reset_index()
 
     def traces(self) -> pd.DataFrame:
         """Return pfilter results formatted as traces (long format)."""
@@ -884,14 +874,14 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         reps = np.arange(len(ll))
 
         df_s = pd.DataFrame(
-            {"replicate": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
+            {"theta_idx": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
         )
 
         df_u = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values, index=reps)
             .melt(ignore_index=False, var_name="unit", value_name="logLik")
             .reset_index()
-            .rename(columns={"index": "replicate"})
+            .rename(columns={"index": "theta_idx"})
         )
 
         if self.theta is not None:
@@ -907,13 +897,13 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
             if shared_list:
                 p_s = pd.concat(shared_list, axis=1).T.set_axis(reps, axis=0)
-                df_s = df_s.join(p_s, on="replicate")
-                df_u = df_u.join(p_s, on="replicate")
+                df_s = df_s.join(p_s, on="theta_idx")
+                df_u = df_u.join(p_s, on="theta_idx")
 
             if unit_specific_list:
                 p_u = pd.concat(unit_specific_list, keys=reps).stack().unstack(level=1)
-                p_u.index.names = ["replicate", "unit"]
-                df_u = df_u.join(p_u, on=["replicate", "unit"])
+                p_u.index.names = ["theta_idx", "unit"]
+                df_u = df_u.join(p_u, on=["theta_idx", "unit"])
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(
             method="pfilter", iteration=1
@@ -966,7 +956,9 @@ class PanelPompPFilterResult(PanelPompBaseResult):
 
         logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
         merged_logLiks = (
-            xr.concat(logLik_arrays, dim="theta") if logLik_arrays else xr.DataArray([])
+            xr.concat(logLik_arrays, dim="theta_idx")
+            if logLik_arrays
+            else xr.DataArray([])
         )  # type: ignore[assignment]
 
         def merge_optional_diagnostic(name: str) -> xr.DataArray | None:
@@ -975,7 +967,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 for r in results
                 if getattr(r, name) is not None and getattr(r, name).size > 0
             ]
-            return xr.concat(arrays, dim="theta") if arrays else None  # type: ignore[return-value]
+            return xr.concat(arrays, dim="theta_idx") if arrays else None  # type: ignore[return-value]
 
         execution_times = [
             r.execution_time for r in results if r.execution_time is not None
@@ -1067,13 +1059,13 @@ class PanelPompMIFResult(PanelPompBaseResult):
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 
-        u_df = u_df.join(s_df, on="replicate").reset_index()
+        u_df = u_df.join(s_df, on="theta_idx").reset_index()
 
-        cols = ["replicate", "iteration", "shared logLik", "unit", "unit logLik"] + [
+        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"] + [
             c
             for c in u_df.columns
             if c
-            not in {"replicate", "iteration", "shared logLik", "unit", "unit logLik"}
+            not in {"theta_idx", "iteration", "shared logLik", "unit", "unit logLik"}
         ]
         u_df = u_df[cols]
 
@@ -1094,13 +1086,13 @@ class PanelPompMIFResult(PanelPompBaseResult):
         df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
         df_u = df_u.rename(columns={"unitLogLik": "logLik"})
 
-        meta_cols = {"replicate", "iteration", "logLik", "unit"}
+        meta_cols = {"theta_idx", "iteration", "logLik", "unit"}
         shared_params = [c for c in df_s.columns if c not in meta_cols]
 
         if shared_params:
             df_u = df_u.merge(
-                df_s[["replicate", "iteration"] + shared_params],
-                on=["replicate", "iteration"],
+                df_s[["theta_idx", "iteration"] + shared_params],
+                on=["theta_idx", "iteration"],
                 how="left",
             )
 
@@ -1171,21 +1163,21 @@ class PanelPompMIFResult(PanelPompBaseResult):
             r.shared_traces for r in results if r.shared_traces.size > 0
         ]
         merged_shared_traces = (
-            xr.concat(shared_trace_arrays, dim="replicate")
+            xr.concat(shared_trace_arrays, dim="theta_idx")
             if shared_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
         unit_trace_arrays = [r.unit_traces for r in results if r.unit_traces.size > 0]
         merged_unit_traces = (
-            xr.concat(unit_trace_arrays, dim="replicate")
+            xr.concat(unit_trace_arrays, dim="theta_idx")
             if unit_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
         logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
         merged_logLiks = (
-            xr.concat(logLik_arrays, dim="replicate")
+            xr.concat(logLik_arrays, dim="theta_idx")
             if logLik_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
@@ -1277,13 +1269,19 @@ class PanelPompTrainResult(PanelPompBaseResult):
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 
-        u_df = u_df.join(s_df, on="replicate").reset_index()
+        u_df = u_df.join(s_df, on="theta_idx").reset_index()
 
-        cols = ["replicate", "iteration", "shared logLik", "unit", "unit logLik"] + [
+        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"] + [
             c
             for c in u_df.columns
             if c
-            not in {"replicate", "iteration", "shared logLik", "unit", "unit logLik"}
+            not in {
+                "theta_idx",
+                "iteration",
+                "shared logLik",
+                "unit",
+                "unit logLik",
+            }
         ]
         u_df = u_df[cols]
 
@@ -1304,15 +1302,23 @@ class PanelPompTrainResult(PanelPompBaseResult):
         df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
         df_u = df_u.rename(columns={"unitLogLik": "logLik"})
 
-        meta_cols = {"replicate", "iteration", "logLik", "unit"}
-        shared_params = [c for c in df_s.columns if c not in meta_cols]
+        if self.theta is not None:
+            shared_df = self.theta.theta[0].get("shared")
+            unit_df = self.theta.theta[0].get("unit_specific")
 
-        if shared_params:
-            df_u = df_u.merge(
-                df_s[["replicate", "iteration"] + shared_params],
-                on=["replicate", "iteration"],
-                how="left",
-            )
+            shared_params = list(shared_df.index) if shared_df is not None else []
+
+            if unit_df is not None:
+                df_long = df_u.merge(
+                    df_s[["theta_idx", "iteration"] + shared_params],
+                    on=["theta_idx", "iteration"],
+                    how="left",
+                )
+                return df_long
+            else:
+                return df_s.assign(method="train")
+
+        return df_u.assign(method="train")
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(method="train")
 
@@ -1381,21 +1387,21 @@ class PanelPompTrainResult(PanelPompBaseResult):
             r.shared_traces for r in results if r.shared_traces.size > 0
         ]
         merged_shared_traces = (
-            xr.concat(shared_trace_arrays, dim="replicate")
+            xr.concat(shared_trace_arrays, dim="theta_idx")
             if shared_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
         unit_trace_arrays = [r.unit_traces for r in results if r.unit_traces.size > 0]
         merged_unit_traces = (
-            xr.concat(unit_trace_arrays, dim="replicate")
+            xr.concat(unit_trace_arrays, dim="theta_idx")
             if unit_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
         logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
         merged_logLiks = (
-            xr.concat(logLik_arrays, dim="replicate")
+            xr.concat(logLik_arrays, dim="theta_idx")
             if logLik_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
@@ -1530,20 +1536,20 @@ class ResultsHistory:
 
             is_estimation = res.method in ["mif", "train"]
 
-            unique_reps = df["replicate"].unique()
+            unique_reps = df["theta_idx"].unique()
             offsets_map = {r: global_iter_counters.get(r, 0) for r in unique_reps}
 
-            row_offsets = df["replicate"].map(offsets_map)
+            row_offsets = df["theta_idx"].map(offsets_map)
 
             if is_estimation:
                 mask = (df["iteration"] > 0) | (row_offsets == 0)
                 df = df.loc[mask].copy()
 
-                row_offsets = df["replicate"].map(offsets_map)
+                row_offsets = df["theta_idx"].map(offsets_map)
 
                 df["iteration"] = df["iteration"] + row_offsets
 
-                new_maxes = df.groupby("replicate")["iteration"].max()
+                new_maxes = df.groupby("theta_idx")["iteration"].max()
                 for r, mx in new_maxes.items():
                     global_iter_counters[r] = int(mx)
 
@@ -1562,13 +1568,13 @@ class ResultsHistory:
 
         result_df = pd.concat(all_dfs, ignore_index=True)
 
-        sort_cols = ["replicate", "iteration"]
+        sort_cols = ["theta_idx", "iteration"]
         if "unit" in result_df.columns:
             sort_cols.insert(1, "unit")
 
         result_df = result_df.sort_values(sort_cols).reset_index(drop=True)
 
-        canonical_first = ["replicate", "unit", "iteration", "method", "logLik"]
+        canonical_first = ["theta_idx", "unit", "iteration", "method", "logLik"]
         existing_first = [c for c in canonical_first if c in result_df.columns]
         remaining = [c for c in result_df.columns if c not in existing_first]
         result_df = result_df[existing_first + remaining]

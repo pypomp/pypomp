@@ -124,7 +124,7 @@ def test_results(neapolitan):
     n_paramsets = len(LG.theta)
     res_pfilter = LG.results(0)
     assert res_pfilter.shape[0] == n_paramsets  # one row per parameter set
-    expected_cols = {"logLik", "se", *LG.theta[0].keys()}
+    expected_cols = {"theta_idx", "logLik", "se", *LG.theta[0].keys()}
     assert set(res_pfilter.columns) == expected_cols
 
     # mif: should be one row per parameter set (len(theta))
@@ -173,7 +173,7 @@ def test_theta_carryover_mif(simple):
     assert list(LG.results_history[-1].theta[0].keys()) == theta_order
     traces_da = LG.results_history[-2].traces_da
     param_names = traces_da.coords["variable"].values[1:]
-    last_row = traces_da.sel(replicate=0, iteration=traces_da.sizes["iteration"] - 1)
+    last_row = traces_da.sel(theta_idx=0, iteration=traces_da.sizes["iteration"] - 1)
     last_param_values = [
         float(last_row.sel(variable=param).values) for param in param_names
     ]
@@ -199,7 +199,7 @@ def test_theta_carryover_train(simple):
     assert list(LG.results_history[-1].theta[0].keys()) == theta_order
     traces_da = LG.results_history[-2].traces_da
     param_names = traces_da.coords["variable"].values[1:]
-    last_row = traces_da.sel(replicate=0, iteration=traces_da.sizes["iteration"] - 1)
+    last_row = traces_da.sel(theta_idx=0, iteration=traces_da.sizes["iteration"] - 1)
     last_param_values = [
         float(last_row.sel(variable=param).values) for param in param_names
     ]
@@ -335,14 +335,14 @@ def test_merge(simple_setup):
             assert merged_result.optimizer == result1.optimizer == result2.optimizer
 
         if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
-            # Pfilter result: logLiks dims ["theta", "replicate"]
-            merged_n_theta = merged_result.logLiks.sizes.get("theta", 0)
-            result1_n_theta = result1.logLiks.sizes.get("theta", 0)
-            result2_n_theta = result2.logLiks.sizes.get("theta", 0)
+            # Pfilter result: logLiks dims ["theta_idx", "rep"]
+            merged_n_theta = merged_result.logLiks.sizes.get("theta_idx", 0)
+            result1_n_theta = result1.logLiks.sizes.get("theta_idx", 0)
+            result2_n_theta = result2.logLiks.sizes.get("theta_idx", 0)
             assert merged_n_theta == result1_n_theta + result2_n_theta
 
         if hasattr(merged_result, "traces_da") and merged_result.traces_da.size > 0:
-            merged_n_reps = merged_result.traces_da.sizes.get("replicate", 0)
-            result1_n_reps = result1.traces_da.sizes.get("replicate", 0)
-            result2_n_reps = result2.traces_da.sizes.get("replicate", 0)
+            merged_n_reps = merged_result.traces_da.sizes.get("theta_idx", 0)
+            result1_n_reps = result1.traces_da.sizes.get("theta_idx", 0)
+            result2_n_reps = result2.traces_da.sizes.get("theta_idx", 0)
             assert merged_n_reps == result1_n_reps + result2_n_reps

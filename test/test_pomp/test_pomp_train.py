@@ -30,7 +30,7 @@ def test_train_basic(optimizer, simple):
     GD_out = LG.results_history[-1]
     traces = GD_out.traces_da
     # Check shape for first replicate
-    assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
+    assert traces.sel(theta_idx=0).shape == (M + 1, len(LG.theta[0]) + 1)
     # Check that "logLik" and all parameter names are in variable coordinate
     assert "logLik" in list(traces.coords["variable"].values)
     for param in LG.theta.to_list()[0].keys():
@@ -56,7 +56,7 @@ def test_train_with_line_search(simple):
 
     GD_out = LG.results_history[-1]
     traces = GD_out.traces_da
-    assert traces.sel(replicate=0).shape == (M + 1, len(LG.theta[0]) + 1)
+    assert traces.sel(theta_idx=0).shape == (M + 1, len(LG.theta[0]) + 1)
     assert "logLik" in list(traces.coords["variable"].values)
 
 
@@ -147,12 +147,12 @@ def test_train_clipping(simple):
     LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=None)
     p0 = (
         LG.results_history[-1]
-        .traces_da.sel(replicate=0, iteration=0, variable=LG.canonical_param_names)
+        .traces_da.sel(theta_idx=0, iteration=0, variable=LG.canonical_param_names)
         .values
     )
     p1_no_clip = (
         LG.results_history[-1]
-        .traces_da.sel(replicate=0, iteration=1, variable=LG.canonical_param_names)
+        .traces_da.sel(theta_idx=0, iteration=1, variable=LG.canonical_param_names)
         .values
     )
     diff_no_clip = np.linalg.norm(p1_no_clip - p0)
@@ -160,7 +160,7 @@ def test_train_clipping(simple):
     LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=1e-5)
     p1_clip = (
         LG.results_history[-1]
-        .traces_da.sel(replicate=0, iteration=1, variable=LG.canonical_param_names)
+        .traces_da.sel(theta_idx=0, iteration=1, variable=LG.canonical_param_names)
         .values
     )
     diff_clip = np.linalg.norm(p1_clip - p0)

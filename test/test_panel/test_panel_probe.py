@@ -11,7 +11,7 @@ def test_panel_pomp_probe(measles_panel_setup_some_shared):
     probe_df = panel.probe(probes=probes, nsim=nsim, key=key)
 
     assert isinstance(probe_df, pd.DataFrame)
-    expected_cols = ["probe", "value", "is_real_data", "replicate", "sim", "unit"]
+    expected_cols = ["probe", "value", "is_real_data", "theta_idx", "sim", "unit"]
     assert all(col in probe_df.columns for col in expected_cols)
 
     unit_names = list(panel.unit_objects.keys())
@@ -45,5 +45,5 @@ def test_panel_pomp_probe_with_subset_theta(measles_panel_setup_some_shared):
 
     num_units = len(panel.unit_objects)
     assert len(probe_df) == num_units + (num_units * 2)
-    assert set(probe_df[~probe_df["is_real_data"]]["replicate"]) == {0}
+    assert set(probe_df[~probe_df["is_real_data"]]["theta_idx"]) == {0}
     assert set(probe_df[~probe_df["is_real_data"]]["sim"]) == {0, 1}

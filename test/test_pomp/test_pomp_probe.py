@@ -23,7 +23,7 @@ def test_pomp_probe_structure(simple_pomp):
     probe_df = pomp.probe(probes=probes, nsim=nsim, key=key)
 
     assert isinstance(probe_df, pd.DataFrame)
-    expected_cols = ["probe", "value", "is_real_data", "replicate", "sim"]
+    expected_cols = ["probe", "value", "is_real_data", "theta_idx", "sim"]
     assert all(col in probe_df.columns for col in expected_cols)
 
     assert len(probe_df) == 2 + (1 * nsim * 2)
@@ -62,5 +62,5 @@ def test_pomp_probe_with_list_theta(simple_pomp):
 
     assert len(probe_df) == 1 + (3 * nsim)
 
-    assert set(probe_df[~probe_df["is_real_data"]]["replicate"]) == {0, 1, 2}
+    assert set(probe_df[~probe_df["is_real_data"]]["theta_idx"]) == {0, 1, 2}
     assert set(probe_df[~probe_df["is_real_data"]]["sim"]) == {0, 1}

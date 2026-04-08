@@ -150,5 +150,6 @@ def LG(
         statenames=["X1", "X2"],
     )
     LG_obj = LG_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
+    assert isinstance(LG_obj, Pomp)
 
     return LG_obj

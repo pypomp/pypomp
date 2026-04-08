@@ -72,23 +72,23 @@ def test_pfilter_diagnostics(measles_panel_setup_some_shared):
         assert result.logLiks.dims == ("theta", "unit", "replicate")
 
         if CLL:
-            assert result.CLL is not None
-            assert result.CLL.shape == (n_theta, n_units, reps, n_time)
-            assert result.CLL.dims == ("theta", "unit", "replicate", "time")
-            assert np.all(np.isfinite(result.CLL.data))
+            assert result.CLL_da is not None
+            assert result.CLL_da.shape == (n_theta, n_units, reps, n_time)
+            assert result.CLL_da.dims == ("theta", "unit", "replicate", "time")
+            assert np.all(np.isfinite(result.CLL_da.data))
         else:
-            assert result.CLL is None
+            assert result.CLL_da is None
 
         if ESS:
-            assert result.ESS is not None
-            assert result.ESS.shape == (n_theta, n_units, reps, n_time)
-            assert result.ESS.dims == ("theta", "unit", "replicate", "time")
-            assert np.all(np.isfinite(result.ESS.data))
+            assert result.ESS_da is not None
+            assert result.ESS_da.shape == (n_theta, n_units, reps, n_time)
+            assert result.ESS_da.dims == ("theta", "unit", "replicate", "time")
+            assert np.all(np.isfinite(result.ESS_da.data))
             # ESS should be between 0 and J (allow small tolerance for floating point precision)
-            assert np.all(result.ESS.data >= 0)
-            assert np.all(result.ESS.data <= J + 1e-5)
+            assert np.all(result.ESS_da.data >= 0)
+            assert np.all(result.ESS_da.data <= J + 1e-5)
         else:
-            assert result.ESS is None
+            assert result.ESS_da is None
 
         if filter_mean:
             assert result.filter_mean is not None

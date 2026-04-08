@@ -21,7 +21,7 @@ def test_class_basic_default(simple):
     assert val1.shape == (1, 1)
     assert jnp.isfinite(val1.item())
     assert val1.dtype == jnp.float32
-    assert LG.results_history[-1].CLL is None
+    assert LG.results_history[-1].CLL_da is None
 
 
 def test_reps_default(simple):
@@ -31,7 +31,7 @@ def test_reps_default(simple):
     LG.pfilter(J=J, key=key, theta=theta_list, reps=2)
     val1 = LG.results_history[-1].logLiks
     assert val1.shape == (2, 2)
-    assert LG.results_history[-1].CLL is None
+    assert LG.results_history[-1].CLL_da is None
 
 
 def test_order_of_parameters_consistency(simple):
@@ -95,18 +95,18 @@ def test_diagnostics(simple):
 
             # CLL:
             if CLL:
-                condLogLiks = LG.results_history[-1].CLL
+                condLogLiks = LG.results_history[-1].CLL_da
                 assert condLogLiks is not None
                 condLogLiks_arr = condLogLiks.data
                 assert condLogLiks_arr.shape == expected_shape + (len(ys),)
                 assert jnp.all(jnp.isfinite(condLogLiks_arr))
                 assert jnp.issubdtype(condLogLiks_arr.dtype, jnp.floating)
             else:
-                assert LG.results_history[-1].CLL is None
+                assert LG.results_history[-1].CLL_da is None
 
             # ESS:
             if ESS:
-                ess = LG.results_history[-1].ESS
+                ess = LG.results_history[-1].ESS_da
                 assert ess is not None
                 ess_arr = ess.data
                 assert ess_arr.shape == expected_shape + (len(ys),)
@@ -115,7 +115,7 @@ def test_diagnostics(simple):
                 # all elements should be  between 0 and J inclusive
                 assert jnp.all((ess_arr >= 0) & (ess_arr <= J))
             else:
-                assert LG.results_history[-1].ESS is None
+                assert LG.results_history[-1].ESS_da is None
 
             # filter_mean:
             if filter_mean:

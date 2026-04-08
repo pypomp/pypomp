@@ -720,8 +720,8 @@ class Pomp:
             J=J,
             reps=reps,
             thresh=thresh,
-            CLL=CLL_da,
-            ESS=ESS_da,
+            CLL_da=CLL_da,
+            ESS_da=ESS_da,
             filter_mean=filter_mean_da,
             prediction_mean=prediction_mean_da,
         )
@@ -1351,7 +1351,6 @@ class Pomp:
 
             pomp_copy = deepcopy(self)
             pomp_copy.ys = simulated_ys
-            # Retain the first replicate of parameters used during simulation
             pomp_copy.theta = theta_obj_in.subset([0])
             return pomp_copy
 
@@ -1443,6 +1442,34 @@ class Pomp:
             pd.DataFrame: A DataFrame with the results of the method run at the given index.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
+
+    def CLL(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the conditional log-likelihoods of the method run at the given index.
+
+        Args:
+            index (int, optional): The index of the result to retrieve. Defaults to -1.
+            average (bool, optional): Boolean flag controlling whether to average
+                the conditional log-likelihoods over replicates using logmeanexp.
+                Defaults to False.
+        Returns:
+            pd.DataFrame: A DataFrame with the conditional log-likelihoods.
+        """
+        return self.results_history.CLL(index=index, average=average)
+
+    def ESS(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the effective sample size of the method run at the given index.
+
+        Args:
+            index (int, optional): The index of the result to retrieve. Defaults to -1.
+            average (bool, optional): Boolean flag controlling whether to average
+                the effective sample size over replicates using arithmetic mean.
+                Defaults to False.
+        Returns:
+            pd.DataFrame: A DataFrame with the effective sample size.
+        """
+        return self.results_history.ESS(index=index, average=average)
 
     def time(self):
         """

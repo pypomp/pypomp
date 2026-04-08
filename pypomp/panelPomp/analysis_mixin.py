@@ -32,7 +32,45 @@ class PanelAnalysisMixin(Base):
         self.theta.mix_and_match()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the results of the method run at the given index.
+
+        Args:
+            index (int, optional): The index of the result to retrieve. Defaults to -1.
+            ignore_nan (bool, optional): Boolean flag controlling whether to ignore
+                NaN values in the log-likelihoods. Defaults to False.
+        Returns:
+            pd.DataFrame: A DataFrame with the log-likelihoods and parameters used.
+        """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
+
+    def CLL(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the conditional log-likelihoods of the method run at the given index.
+
+        Args:
+            index (int, optional): The index of the result to retrieve. Defaults to -1.
+            average (bool, optional): Boolean flag controlling whether to average
+                the conditional log-likelihoods over replicates using logmeanexp.
+                Defaults to False.
+        Returns:
+            pd.DataFrame: A DataFrame with the conditional log-likelihoods.
+        """
+        return self.results_history.CLL(index=index, average=average)
+
+    def ESS(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the effective sample size of the method run at the given index.
+
+        Args:
+            index (int, optional): The index of the result to retrieve. Defaults to -1.
+            average (bool, optional): Boolean flag controlling whether to average
+                the effective sample size over replicates using arithmetic mean.
+                Defaults to False.
+        Returns:
+            pd.DataFrame: A DataFrame with the effective sample size.
+        """
+        return self.results_history.ESS(index=index, average=average)
 
     def time(self):
         """

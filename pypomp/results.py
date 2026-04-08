@@ -86,6 +86,16 @@ class BaseResult(ABC):
         pass
 
     @abstractmethod
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        """Return conditional log-likelihoods as a DataFrame."""
+        pass
+
+    @abstractmethod
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        """Return Effective Sample Size as a DataFrame."""
+        pass
+
+    @abstractmethod
     def print_summary(self):
         """Print a summary of this result."""
         pass
@@ -145,8 +155,8 @@ class PompPFilterResult(PompBaseResult):
     J: int = 0
     reps: int = 1
     thresh: float = 0.0
-    CLL: xr.DataArray | None = None
-    ESS: xr.DataArray | None = None
+    CLL_da: xr.DataArray | None = None
+    ESS_da: xr.DataArray | None = None
     filter_mean: xr.DataArray | None = None
     prediction_mean: xr.DataArray | None = None
 
@@ -175,7 +185,7 @@ class PompPFilterResult(PompBaseResult):
                 return False
 
         # Optional diagnostics
-        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+        for name in ["CLL_da", "ESS_da", "filter_mean", "prediction_mean"]:
             a = getattr(self, name)
             b = getattr(other, name)
             if (a is None) != (b is None):
@@ -217,6 +227,51 @@ class PompPFilterResult(PompBaseResult):
         return pd.concat(
             [df.reset_index(drop=True), theta_df.reset_index(drop=True)], axis=1
         )
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        """Return conditional log-likelihoods as a DataFrame."""
+        if self.CLL_da is None or self.CLL_da.size == 0:
+            return pd.DataFrame()
+
+        cll: xr.DataArray = self.CLL_da
+        if average:
+            cll_values = np.asarray(cll.values)
+            cll_avg = logmeanexp(cll_values, axis=1)
+            n_theta, n_time = cll_avg.shape
+
+            df_list = []
+            for i in range(n_theta):
+                df_i = pd.DataFrame(
+                    {
+                        "replicate": i,
+                        "time": cll.coords["time"].values
+                        if "time" in cll.coords
+                        else np.arange(n_time),
+                        "CLL": cll_avg[i],
+                    }
+                )
+                df_list.append(df_i)
+            return pd.concat(df_list, ignore_index=True)
+        else:
+            df = cll.to_dataframe(name="CLL").reset_index()
+            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
+            return df
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        """Return Effective Sample Size as a DataFrame."""
+        if self.ESS_da is None or self.ESS_da.size == 0:
+            return pd.DataFrame()
+
+        ess: xr.DataArray = self.ESS_da
+        if average:
+            ess_avg = ess.mean(dim="replicate")
+            df = ess_avg.to_dataframe(name="ESS").reset_index()
+            df = df.rename(columns={"theta": "replicate"})
+            return df
+        else:
+            df = ess.to_dataframe(name="ESS").reset_index()
+            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
+            return df
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this pfilter result."""
@@ -310,8 +365,8 @@ class PompPFilterResult(PompBaseResult):
                 return xr.concat(arrays, dim="theta")  # type: ignore[return-value]
             return None
 
-        merged_CLL = merge_optional_diagnostic("CLL")
-        merged_ESS = merge_optional_diagnostic("ESS")
+        merged_CLL = merge_optional_diagnostic("CLL_da")
+        merged_ESS = merge_optional_diagnostic("ESS_da")
         merged_filter_mean = merge_optional_diagnostic("filter_mean")
         merged_prediction_mean = merge_optional_diagnostic("prediction_mean")
 
@@ -330,8 +385,8 @@ class PompPFilterResult(PompBaseResult):
             J=first.J,
             reps=first.reps,
             thresh=first.thresh,
-            CLL=merged_CLL,
-            ESS=merged_ESS,
+            CLL_da=merged_CLL,
+            ESS_da=merged_ESS,
             filter_mean=merged_filter_mean,
             prediction_mean=merged_prediction_mean,
         )
@@ -407,6 +462,12 @@ class PompMIFResult(PompBaseResult):
         df.insert(1, "se", np.nan)
 
         return df
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this mif result."""
@@ -568,6 +629,12 @@ class PompTrainResult(PompBaseResult):
 
         return df
 
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this train result."""
         if self.traces_da is None:
@@ -675,8 +742,8 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     reps: int = 1
     thresh: float = 0.0
     theta: "PanelParameters | None" = None
-    CLL: xr.DataArray | None = None
-    ESS: xr.DataArray | None = None
+    CLL_da: xr.DataArray | None = None
+    ESS_da: xr.DataArray | None = None
     filter_mean: xr.DataArray | None = None
     prediction_mean: xr.DataArray | None = None
 
@@ -705,7 +772,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             ):
                 return False
 
-        for name in ["CLL", "ESS", "filter_mean", "prediction_mean"]:
+        for name in ["CLL_da", "ESS_da", "filter_mean", "prediction_mean"]:
             a = getattr(self, name)
             b = getattr(other, name)
             if (a is None) != (b is None):
@@ -767,6 +834,49 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 df = df.merge(u_params, on=["replicate", "unit"], how="left")
 
         return df
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        """Return conditional log-likelihoods as a DataFrame."""
+        if self.CLL_da is None or self.CLL_da.size == 0:
+            return pd.DataFrame()
+
+        cll: xr.DataArray = self.CLL_da
+        if average:
+            cll_values = np.asarray(cll.values)
+            cll_avg = logmeanexp(cll_values, axis=2)
+            avg_da = xr.DataArray(
+                cll_avg,
+                dims=["theta", "unit", "time"],
+                coords={
+                    "unit": cll.coords["unit"].values,
+                    "time": cll.coords["time"].values
+                    if "time" in cll.coords
+                    else np.arange(cll_avg.shape[2]),
+                },
+            )
+            df = avg_da.to_dataframe(name="CLL").reset_index()
+            df = df.rename(columns={"theta": "replicate"})
+            return df
+        else:
+            df = cll.to_dataframe(name="CLL").reset_index()
+            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
+            return df
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        """Return Effective Sample Size as a DataFrame."""
+        if self.ESS_da is None or self.ESS_da.size == 0:
+            return pd.DataFrame()
+
+        ess: xr.DataArray = self.ESS_da
+        if average:
+            ess_avg = ess.mean(dim="replicate")
+            df = ess_avg.to_dataframe(name="ESS").reset_index()
+            df = df.rename(columns={"theta": "replicate"})
+            return df
+        else:
+            df = ess.to_dataframe(name="ESS").reset_index()
+            df = df.rename(columns={"theta": "replicate", "replicate": "rep"})
+            return df
 
     def traces(self) -> pd.DataFrame:
         """Return pfilter results formatted as traces (long format)."""
@@ -881,8 +991,8 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             J=first.J,
             reps=first.reps,
             thresh=first.thresh,
-            CLL=merge_optional_diagnostic("CLL"),
-            ESS=merge_optional_diagnostic("ESS"),
+            CLL_da=merge_optional_diagnostic("CLL_da"),
+            ESS_da=merge_optional_diagnostic("ESS_da"),
             filter_mean=merge_optional_diagnostic("filter_mean"),
             prediction_mean=merge_optional_diagnostic("prediction_mean"),
         )
@@ -995,6 +1105,14 @@ class PanelPompMIFResult(PanelPompBaseResult):
             )
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(method="mif")
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        """Return conditional log-likelihoods as a DataFrame."""
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        """Return Effective Sample Size as a DataFrame."""
+        return pd.DataFrame()
 
     def print_summary(self):
         """Print summary of panel mif result."""
@@ -1198,6 +1316,14 @@ class PanelPompTrainResult(PanelPompBaseResult):
 
         return pd.concat([df_s, df_u], ignore_index=True).assign(method="train")
 
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        """Return conditional log-likelihoods as a DataFrame."""
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        """Return Effective Sample Size as a DataFrame."""
+        return pd.DataFrame()
+
     def print_summary(self):
         """Print summary of panel train result."""
         print(f"Method: {self.method}")
@@ -1356,6 +1482,20 @@ class ResultsHistory:
             return pd.DataFrame()
         result = self._entries[index]
         return result.to_dataframe(ignore_nan=ignore_nan)
+
+    def CLL(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """Get conditional log-likelihoods for entry at index."""
+        if not self._entries:
+            return pd.DataFrame()
+        result = self._entries[index]
+        return result.CLL(average=average)
+
+    def ESS(self, index: int = -1, average: bool = False) -> pd.DataFrame:
+        """Get Effective Sample Size for entry at index."""
+        if not self._entries:
+            return pd.DataFrame()
+        result = self._entries[index]
+        return result.ESS(average=average)
 
     def time(self) -> pd.DataFrame:
         """Return execution times DataFrame."""

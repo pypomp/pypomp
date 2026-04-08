@@ -543,8 +543,8 @@ class PanelEstimationMixin(Base):
             J=J,
             reps=reps,
             thresh=thresh,
-            CLL=CLL_da,
-            ESS=ESS_da,
+            CLL_da=CLL_da,
+            ESS_da=ESS_da,
             filter_mean=filter_mean_da,
             prediction_mean=prediction_mean_da,
         )

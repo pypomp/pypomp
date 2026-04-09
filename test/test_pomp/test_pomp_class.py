@@ -284,6 +284,12 @@ def test_print_summary(neapolitan):
     LG.print_summary()
 
 
+def test_print_metadata(neapolitan):
+    # Should not error
+    LG, *_ = neapolitan
+    LG.print_metadata()
+
+
 def test_merge(simple_setup):
     """Test merging two Pomp objects."""
     base_LG, rw_sd, J, a, M, key, theta, fresh_key = simple_setup

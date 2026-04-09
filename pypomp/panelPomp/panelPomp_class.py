@@ -10,6 +10,7 @@ from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
 from pypomp.panelPomp.analysis_mixin import PanelAnalysisMixin
 from pypomp.results import ResultsHistory
 from pypomp.parameters import PanelParameters
+from pypomp.metadata import ModelMetadata
 from copy import deepcopy
 
 
@@ -18,6 +19,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
     theta: PanelParameters
     results_history: ResultsHistory
     fresh_key: jax.Array | None
+    metadata: ModelMetadata
     canonical_param_names: list[str]
     canonical_shared_param_names: list[str]
     canonical_unit_param_names: list[str]
@@ -52,6 +54,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         self.unit_objects = Pomp_dict
         self.results_history = ResultsHistory()
         self.fresh_key = None
+        self.metadata = ModelMetadata()
         self.canonical_param_names = self.theta.get_param_names()
         self.canonical_shared_param_names = self.theta.get_shared_param_names()
         self.canonical_unit_param_names = self.theta.get_unit_param_names()
@@ -63,6 +66,12 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
     def get_unit_names(self) -> list[str]:
         return list(self.unit_objects.keys())
+
+    def print_metadata(self) -> None:
+        """
+        Prints the creation and runtime environment metadata for this instance.
+        """
+        self.metadata.print_metadata()
 
     def print_summary(self):
         """

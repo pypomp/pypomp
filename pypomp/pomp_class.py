@@ -16,6 +16,7 @@ import warnings
 from typing import Union
 
 from pypomp.types import Numeric, ThetaInput
+from pypomp.metadata import ModelMetadata
 from .mop import _mop_internal
 from .dpop import _dpop_internal
 from .mif import _jv_mif_internal
@@ -137,6 +138,9 @@ class Pomp:
     fresh_key: jax.Array | None
     """Running a method that takes a key will store a fresh, unused key here."""
 
+    metadata: ModelMetadata
+    """Environment and version metadata initialized when this instance was built."""
+
     def __init__(
         self,
         ys: pd.DataFrame,
@@ -243,6 +247,7 @@ class Pomp:
         self.t0 = float(t0)
         self.results_history = ResultsHistory()
         self.fresh_key = None
+        self.metadata = ModelMetadata()
 
         if covars is not None:
             self.covar_names = list(covars.columns)
@@ -400,6 +405,12 @@ class Pomp:
             param_sets.append(params)
 
         return param_sets
+
+    def print_metadata(self) -> None:
+        """
+        Prints the creation and runtime environment metadata for this instance.
+        """
+        self.metadata.print_metadata()
 
     def mop(
         self,

@@ -6,7 +6,7 @@ import numpy as np
 
 @pytest.fixture
 def simple_pomp():
-    LG_obj = pp.LG()
+    LG_obj = pp.models.LG()
     key = jax.random.key(123)
     J = 10
     reps = 3

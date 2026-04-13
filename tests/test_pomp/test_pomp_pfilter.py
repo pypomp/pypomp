@@ -8,7 +8,7 @@ import pypomp as pp
 
 @pytest.fixture(scope="function")
 def simple():
-    LG = pp.LG()
+    LG = pp.models.LG()
     key = jax.random.key(111)
     J = 3
     return LG, key, J

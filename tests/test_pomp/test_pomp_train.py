@@ -7,7 +7,7 @@ import pypomp as pp
 @pytest.fixture(scope="function")
 def simple():
     # Set default values for tests
-    LG = pp.LG()
+    LG = pp.models.LG()
     ys = LG.ys
     covars = None
     theta = LG.theta

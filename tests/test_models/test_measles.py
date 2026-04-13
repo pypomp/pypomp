@@ -37,7 +37,7 @@ def london():
     theta = BASE_THETA.copy()
     del theta["mu"]
     del theta["alpha"]
-    measles = pp.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.Pomp(
         unit=["London"],
         theta=theta,
         clean=True,
@@ -74,7 +74,7 @@ def default_rw_sd():
 @pytest.fixture(scope="function")
 def london_003():
     theta = BASE_THETA.copy()
-    measles = pp.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.Pomp(
         unit=["London"],
         theta=theta,
         model="003",
@@ -108,7 +108,7 @@ def test_other_models():
 
     key = jax.random.key(0)
     for model, theta in models.items():
-        mod_obj = pp.UKMeasles.Pomp(
+        mod_obj = pp.models.UKMeasles.Pomp(
             unit=["London"],
             theta=theta,
             model=model,
@@ -151,7 +151,7 @@ def test_measles_mop(london):
 
 
 def test_measles_clean():
-    data = pp.UKMeasles.subset(clean=True)
+    data = pp.models.UKMeasles.subset(clean=True)
     london_cleaned = np.isnan(
         data["measles"]
         .loc[

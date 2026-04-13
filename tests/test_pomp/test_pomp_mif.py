@@ -7,7 +7,7 @@ import pypomp as pp
 @pytest.fixture(scope="module")
 def simple_setup():
     # Set default values for tests
-    LG = pp.LG()
+    LG = pp.models.LG()
     rw_sd = pp.RWSigma(
         sigmas={
             "A1": 0.02,

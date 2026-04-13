@@ -6,7 +6,7 @@ import pandas as pd
 
 @pytest.fixture(scope="function")
 def simple():
-    LG = pp.LG()
+    LG = pp.models.LG()
     return LG
 
 

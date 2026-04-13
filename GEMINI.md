@@ -9,7 +9,7 @@ source .venv/bin/activate
 ## Running Tests
 To run all tests:
 ```bash
-pytest test
+pytest
 ```
 You may need to run `source .venv/bin/activate && pip install -e .` first to update the package in the environment.
 

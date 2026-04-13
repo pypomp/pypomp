@@ -6,7 +6,7 @@ from pypomp.core.results import ResultsHistory
 
 @pytest.fixture(scope="function")
 def simple_setup():
-    spx_model = pp.spx()
+    spx_model = pp.models.spx()
     J = 3
     key = jax.random.key(111)
     theta = spx_model.theta

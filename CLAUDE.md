@@ -29,15 +29,15 @@ pytest
 pytest --cov
 
 # Run specific test file
-pytest test/test_pomp/test_pomp_pfilter.py
+pytest tests/test_pomp/test_pomp_pfilter.py
 
 # Run specific test function
-pytest test/test_pomp/test_pomp_pfilter.py::test_class_basic_default
+pytest tests/test_pomp/test_pomp_pfilter.py::test_class_basic_default
 
 # Run tests for a specific module (e.g., pomp, panel, models)
-pytest test/test_pomp/
-pytest test/test_panel/
-pytest test/test_models/
+pytest tests/test_pomp/
+pytest tests/test_panel/
+pytest tests/test_models/
 ```
 
 ### Linting
@@ -157,7 +157,7 @@ The package includes several example models for testing and demonstration:
 ### Test Structure
 
 ```
-test/
+tests/
 ├── test_core.py                  # Foundation tests
 ├── test_util.py                  # Utility function tests
 ├── test_ParTrans.py             # Parameter transformation tests

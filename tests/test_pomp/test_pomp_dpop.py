@@ -24,7 +24,7 @@ def simple_sir():
     key : jax.random.key
         Base random key for tests.
     """
-    model = pp.sir()
+    model = pp.models.sir()
 
     # Keep J small so tests run fast
     J = 2

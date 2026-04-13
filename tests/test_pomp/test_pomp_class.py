@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def simple_setup():
-    LG = pp.LG()
+    LG = pp.models.LG()
     J = 2
     rw_sd = pp.RWSigma(
         sigmas={
@@ -39,7 +39,7 @@ def simple_setup():
 
 @pytest.fixture(scope="module")
 def neapolitan_setup():
-    LG = pp.LG()
+    LG = pp.models.LG()
     J = 2
     a = 0.5
     M = 2
@@ -294,8 +294,8 @@ def test_merge(simple_setup):
     """Test merging two Pomp objects."""
     base_LG, rw_sd, J, a, M, key, theta, fresh_key = simple_setup
 
-    LG1 = pp.LG()
-    LG2 = pp.LG()
+    LG1 = pp.models.LG()
+    LG2 = pp.models.LG()
 
     key1, key2 = jax.random.split(key)
 

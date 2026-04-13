@@ -8,7 +8,7 @@ import pandas as pd
 @pytest.fixture
 def simple_panel():
     unit_names = ["unit1", "unit2"]
-    units = {name: pp.LG() for name in unit_names}
+    units = {name: pp.models.LG() for name in unit_names}
 
     unit_theta = units["unit1"].theta.to_list()[0]
     shared_names = [

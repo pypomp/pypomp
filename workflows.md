@@ -26,7 +26,7 @@ ruff format
 
 ## Testing
 
-A test workflow is described in pypomp/test/README
+A test workflow is described in tests/README
 
 ## Pushing edits to main
 
@@ -44,7 +44,7 @@ This is the workflow used on 25-07-22 for v0.1.4. At this time, AJA and ELI are 
 cd ~/git/pypomp
 emacs pyproject.toml # to update pypomp version 
 pip install .     # to update local install
-cd test
+cd tests
 pytest .
 cd ..
 python -m build

@@ -13,7 +13,7 @@ def simple_sir_for_dpop():
     """
     Build a small SIR Pomp model for testing the DPOP optimizers.
     """
-    model = pp.sir()
+    model = pp.models.sir()
     return model
 
 

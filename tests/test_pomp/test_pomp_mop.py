@@ -6,7 +6,7 @@ import pypomp as pp
 
 @pytest.fixture(scope="function")
 def simple():
-    LG = pp.LG()
+    LG = pp.models.LG()
     J = 2
     ys = LG.ys
     theta = LG.theta

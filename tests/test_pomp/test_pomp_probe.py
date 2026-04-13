@@ -7,7 +7,7 @@ import numpy as np
 
 @pytest.fixture(scope="function")
 def simple_pomp():
-    return pp.LG()
+    return pp.models.LG()
 
 
 def test_pomp_probe_structure(simple_pomp):

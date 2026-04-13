@@ -9,15 +9,15 @@ from pypomp.core.results import PanelPompTrainResult
 
 
 def _get_measles_003_panel():
-    AK_mles = cast(pd.DataFrame, pp.UKMeasles.AK_mles())
+    AK_mles = cast(pd.DataFrame, pp.models.UKMeasles.AK_mles())
     london_theta = AK_mles["London"].to_dict()
     hastings_theta = AK_mles["Hastings"].to_dict()
-    london = pp.UKMeasles.Pomp(
+    london = pp.models.UKMeasles.Pomp(
         unit=["London"],
         theta=london_theta,
         model="003",
     )
-    hastings = pp.UKMeasles.Pomp(
+    hastings = pp.models.UKMeasles.Pomp(
         unit=["Hastings"],
         theta=hastings_theta,
         model="003",

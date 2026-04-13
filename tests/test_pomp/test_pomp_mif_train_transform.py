@@ -14,7 +14,7 @@ import pytest
 def simple_pomp_with_transform():
     """Create a simple POMP model with parameter transformation."""
     # Simple linear Gaussian model
-    LG = pp.LG()
+    LG = pp.models.LG()
 
     # Define transformations that log-transform positive parameters
     def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:

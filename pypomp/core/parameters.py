@@ -11,8 +11,8 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 from typing import Union, Literal, Mapping, cast
-from .ParTrans_class import ParTrans
-from .types import Numeric, ThetaInput
+from .par_trans import ParTrans
+from pypomp.types import Numeric, ThetaInput
 
 
 class ParameterSet(ABC):

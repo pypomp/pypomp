@@ -4,17 +4,12 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 import jax
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .RWSigma_class import RWSigma
-    from .parameters import PanelParameters
-else:
-    RWSigma = object
-    PanelParameters = object
-
-from .util import logmeanexp, logmeanexp_se
+from .rw_sigma import RWSigma
 from .parameters import PanelParameters
+
+
+from ..util import logmeanexp, logmeanexp_se
 
 
 @dataclass

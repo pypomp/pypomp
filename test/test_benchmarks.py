@@ -12,8 +12,8 @@ except ImportError:
     HAS_STATSMODELS = False
 
 from pypomp.benchmarks import arma_benchmark, negbin_benchmark
-from pypomp.pomp_class import Pomp
-from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
+from pypomp import Pomp
+from pypomp.panel.estimation_mixin import PanelEstimationMixin
 
 
 @pytest.fixture

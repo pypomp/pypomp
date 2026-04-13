@@ -2,22 +2,22 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
-import pypomp.measles.model_001 as m001
-import pypomp.measles.model_001b as m001b
-import pypomp.measles.model_001c as m001c
-import pypomp.measles.model_001d as m001d  # FIX: added import for DPOP model
-import pypomp.measles.model_002 as m002
-import pypomp.measles.model_003 as m003
+import pypomp.models.measles.model_001 as m001
+import pypomp.models.measles.model_001b as m001b
+import pypomp.models.measles.model_001c as m001c
+import pypomp.models.measles.model_001d as m001d
+import pypomp.models.measles.model_002 as m002
+import pypomp.models.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
-from pypomp.pomp_class import Pomp
+from pypomp.core.pomp import Pomp
 import copy
-from pypomp.ParTrans_class import ParTrans
+from pypomp.core.par_trans import ParTrans
 
 
 # Not sure if this is the best way to implement this.
 class UKMeasles:
     _module_dir = os.path.dirname(os.path.abspath(__file__))
-    _data_dir = os.path.join(_module_dir, os.pardir, "data/uk_measles")
+    _data_dir = os.path.join(_module_dir, os.pardir, os.pardir, "data/uk_measles")
     _data_file = os.path.join(_data_dir, "uk_measles.pkl")
     with open(_data_file, "rb") as _f:
         _data = pickle.load(_f)
@@ -125,7 +125,9 @@ class UKMeasles:
         MLEs from https://kingaa.github.io/sbied/measles/index.html
         """
         module_dir = os.path.dirname(os.path.abspath(__file__))
-        data_file = os.path.join(module_dir, os.pardir, "data/uk_measles/AK_mles.csv")
+        data_file = os.path.join(
+            module_dir, os.pardir, os.pardir, "data/uk_measles/AK_mles.csv"
+        )
         df = pd.read_csv(data_file, index_col="town")
         df.drop(columns=["loglik", "loglik.sd", "mu", "delay"], inplace=True)
         return df[

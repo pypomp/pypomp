@@ -1,4 +1,4 @@
-import pypomp.internal_functions as ifunc
+import pypomp.core.algorithms.helpers as ifunc
 import numpy as np
 
 

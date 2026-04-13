@@ -2,11 +2,11 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
-from .internal_functions import _normalize_weights
-from .internal_functions import _keys_helper
-from .internal_functions import _resampler_thetas
-from .internal_functions import _no_resampler_thetas
-from .internal_functions import _geometric_cooling
+from .helpers import _normalize_weights
+from .helpers import _keys_helper
+from .helpers import _resampler_thetas
+from .helpers import _no_resampler_thetas
+from .helpers import _geometric_cooling
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 

@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 
-from .internal_functions import _keys_helper, _normalize_weights, _resampler
+from .helpers import _keys_helper, _normalize_weights, _resampler
 
 # Should transformations be applied to the parameters?
 SHOULD_TRANS = True

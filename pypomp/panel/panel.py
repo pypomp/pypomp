@@ -4,13 +4,13 @@ This module implements the OOP structure for PanelPOMP models.
 
 import jax
 import pandas as pd
-from pypomp.pomp_class import Pomp
-from pypomp.panelPomp.validation_mixin import PanelValidationMixin
-from pypomp.panelPomp.estimation_mixin import PanelEstimationMixin
-from pypomp.panelPomp.analysis_mixin import PanelAnalysisMixin
-from pypomp.results import ResultsHistory
-from pypomp.parameters import PanelParameters
-from pypomp.metadata import ModelMetadata
+from pypomp.core.pomp import Pomp
+from .validation_mixin import PanelValidationMixin
+from .estimation_mixin import PanelEstimationMixin
+from .analysis_mixin import PanelAnalysisMixin
+from pypomp.core.results import ResultsHistory
+from pypomp.core.parameters import PanelParameters
+from pypomp.core.metadata import ModelMetadata
 from copy import deepcopy
 
 

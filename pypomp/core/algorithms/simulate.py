@@ -6,7 +6,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from typing import Callable
-from .internal_functions import _keys_helper
+from .helpers import _keys_helper
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 

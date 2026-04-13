@@ -10,12 +10,12 @@ import jax.scipy.special as jspecial
 import numpy as np
 import pandas as pd
 
-from pypomp.pomp_class import Pomp
-from pypomp.ParTrans_class import ParTrans
-from pypomp.ctmc_multinom import sample_and_log_prob
+from pypomp.core.pomp import Pomp
+from pypomp.core.par_trans import ParTrans
+from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poissoninvf import fast_approx_rpoisson
-from pypomp.random.binominvf import fast_approx_rmultinom
 from pypomp.random.gammainvf import fast_approx_rgamma
+
 
 # ---------------------------------------------------------------------
 # State names and default parameters

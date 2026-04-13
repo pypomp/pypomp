@@ -2,9 +2,9 @@ from typing import Protocol
 import jax.numpy as jnp
 import pandas as pd
 import jax
-from ..pomp_class import Pomp
-from ..parameters import PanelParameters
-from ..results import ResultsHistory
+from ..core.pomp import Pomp
+from ..core.parameters import PanelParameters
+from ..core.results import ResultsHistory
 
 
 # This Protocol defines what attributes the Mixins can expect to exist

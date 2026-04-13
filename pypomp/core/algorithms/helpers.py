@@ -1,5 +1,5 @@
 """
-This module implements internal functions for POMP models.
+This module implements helper functions for POMP algorithms.
 """
 
 import jax

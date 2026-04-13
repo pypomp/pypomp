@@ -3,10 +3,10 @@ import csv
 import jax
 import jax.numpy as jnp
 import pandas as pd
-from pypomp.pomp_class import Pomp
+from pypomp.core.pomp import Pomp
 import jax.scipy.special as jspecial
 import numpy as np
-from pypomp.ParTrans_class import ParTrans
+from pypomp.core.par_trans import ParTrans
 from pypomp.types import (
     StateDict,
     ParamDict,
@@ -42,7 +42,7 @@ theta = {
 
 
 test_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(test_dir, "data/dacca")
+data_dir = os.path.join(test_dir, os.pardir, "data/dacca")
 
 dacca_path = os.path.join(data_dir, "dacca.csv")
 covars_path = os.path.join(data_dir, "covars.csv")
@@ -426,11 +426,10 @@ def dacca(
     Pomp
         A POMP model object representing the Dacca cholera model.
     """
-    from pypomp.dacca import rproc
-    from pypomp.dacca import rproc_gamma
+    # Local rproc and rproc_gamma are used
 
+    rproc_func = rproc_gamma if gamma else rproc
     if gamma:
-        rproc = rproc_gamma
         print(
             "Warning: Using overdispersed gamma white noise. Ensure this is intended behavior."
         )
@@ -440,7 +439,7 @@ def dacca(
 
     dacca_obj = Pomp(
         rinit=rinit,
-        rproc=rproc,
+        rproc=rproc_func,
         dmeas=dmeas,
         rmeas=rmeas,
         ys=ys,

@@ -8,21 +8,22 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast, Callable
 import warnings
 
-from ..pfilter import _chunked_panel_pfilter_internal
-from ..mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
-from ..train import _vmapped_panel_train_internal
-from ..RWSigma_class import RWSigma
-from ..results import (
+from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
+from ..core.algorithms.mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
+from ..core.algorithms.train import _vmapped_panel_train_internal
+from ..core.rw_sigma import RWSigma
+from ..core.results import (
     PanelPompPFilterResult,
     PanelPompMIFResult,
     PanelPompTrainResult,
 )
-from ..parameters import PanelParameters
+from ..core.parameters import PanelParameters
 from ..util import logmeanexp
 from ..benchmarks import (
     arma_benchmark as _arma_benchmark,
     negbin_benchmark as _negbin_benchmark,
 )
+
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base

@@ -3,10 +3,10 @@ import jax.numpy as jnp
 import jax
 from jax import jit
 from typing import Callable
-from .internal_functions import _resampler
-from .internal_functions import _no_resampler
-from .internal_functions import _keys_helper
-from .internal_functions import _normalize_weights
+from .helpers import _resampler
+from .helpers import _no_resampler
+from .helpers import _keys_helper
+from .helpers import _normalize_weights
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 

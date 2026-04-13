@@ -4,8 +4,8 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as random
 import jax
-from pypomp.pomp_class import Pomp
-from pypomp.ParTrans_class import ParTrans
+from pypomp.core.pomp import Pomp
+from pypomp.core.par_trans import ParTrans
 from pypomp.types import (
     StateDict,
     ParamDict,
@@ -18,7 +18,7 @@ from pypomp.types import (
 )
 
 module_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(module_dir, "data")
+data_dir = os.path.join(module_dir, os.pardir, "data")
 data_file = os.path.join(data_dir, "SPX.csv")
 
 sp500_raw = pd.read_csv(data_file)

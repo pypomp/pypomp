@@ -1,7 +1,7 @@
 import jax
 import pytest
 import pypomp as pp
-from pypomp.results import ResultsHistory
+from pypomp.core.results import ResultsHistory
 
 
 @pytest.fixture(scope="function")

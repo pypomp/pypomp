@@ -12,7 +12,7 @@ from pypomp.types import (
     ObservationDict,
     InitialTimeFloat,
 )
-from pypomp.model_struct import RInit, RProc, DMeas, RMeas
+from pypomp.core.model_struct import RInit, RProc, DMeas, RMeas
 
 
 def test_RInit_value_error():

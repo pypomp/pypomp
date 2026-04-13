@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-from pypomp.pomp_class import Pomp
+from pypomp.core.pomp import Pomp
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -65,4 +65,6 @@ class PanelValidationMixin(Base):
             raise ValueError(
                 "The canonical parameter names must match the canonical parameter names in the unit objects (up to reordering)."
             )
-        self.canonical_param_names = self.canonical_shared_param_names + self.canonical_unit_param_names
+        self.canonical_param_names = (
+            self.canonical_shared_param_names + self.canonical_unit_param_names
+        )

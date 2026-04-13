@@ -16,18 +16,18 @@ import warnings
 from typing import Union
 
 from pypomp.types import Numeric, ThetaInput
-from pypomp.metadata import ModelMetadata
-from .mop import _mop_internal
-from .dpop import _dpop_internal
-from .mif import _jv_mif_internal
-from .train import _vmapped_train_internal
-from pypomp.model_struct import RInit, RProc, DMeas, RMeas
+from .metadata import ModelMetadata
+from .algorithms.mop import _mop_internal
+from .algorithms.dpop import _dpop_internal
+from .algorithms.mif import _jv_mif_internal
+from .algorithms.train import _vmapped_train_internal
+from .model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
-from .simulate import _jv_simulate_internal
-from .pfilter import _vmapped_pfilter_internal2
-from .internal_functions import _calc_ys_covars
-from .RWSigma_class import RWSigma
-from .ParTrans_class import ParTrans
+from .algorithms.simulate import _jv_simulate_internal
+from .algorithms.pfilter import _vmapped_pfilter_internal2
+from .algorithms.helpers import _calc_ys_covars
+from .rw_sigma import RWSigma
+from .par_trans import ParTrans
 from .results import (
     ResultsHistory,
     PompPFilterResult,
@@ -35,8 +35,8 @@ from .results import (
     PompTrainResult,
 )
 from .parameters import PompParameters
-from .util import logmeanexp
-from .benchmarks import (
+from pypomp.util import logmeanexp
+from pypomp.benchmarks import (
     arma_benchmark as _arma_benchmark,
     negbin_benchmark as _negbin_benchmark,
 )
@@ -1439,7 +1439,7 @@ class Pomp:
         Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
         Columns are
 
-            - replicate: The index of the parameter set (for all methods)
+            - theta_idx: The index of the parameter set (for all methods)
             - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
             - method: 'pfilter', 'mif', or 'train'
             - logLik: The log-likelihood estimate (averaged over reps for pfilter)

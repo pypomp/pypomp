@@ -9,7 +9,7 @@ from .pfilter import (
     _pfilter_internal_mean,
 )
 from .mop import _mop_internal_mean, _mop_internal
-from .internal_functions import _cosine_cooling
+from .helpers import _cosine_cooling
 
 _grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
 _vg_pfilter_internal_mean = jax.value_and_grad(_pfilter_internal_mean)

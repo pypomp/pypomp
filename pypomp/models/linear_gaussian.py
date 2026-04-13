@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from pypomp.pomp_class import Pomp
+from pypomp.core.pomp import Pomp
 from pypomp.types import (
     StateDict,
     ParamDict,

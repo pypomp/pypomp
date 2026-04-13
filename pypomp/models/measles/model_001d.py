@@ -11,9 +11,8 @@ import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
-from pypomp.ctmc_multinom import sample_and_log_prob
+from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poissoninvf import fast_approx_rpoisson
-from pypomp.random.binominvf import fast_approx_rmultinom
 from pypomp.random.gammainvf import fast_approx_rgamma
 
 

@@ -76,7 +76,7 @@ def test_001d_dpop_train(london_001d):
 
 def test_001d_par_trans_roundtrip(london_001d):
     """Parameter transform round-trip: natural -> est -> natural."""
-    from pypomp.measles.model_001d import to_est, from_est
+    from pypomp.models.measles.model_001d import to_est, from_est
 
     theta = BASE_THETA_001D.copy()
     theta_jax = {k: jnp.array(v) for k, v in theta.items()}
@@ -92,7 +92,7 @@ def test_001d_par_trans_roundtrip(london_001d):
 
 def test_001d_dmeas_nan_handling():
     """dmeas should return 0 for NaN observations (not NaN)."""
-    from pypomp.measles.model_001d import dmeas
+    from pypomp.models.measles.model_001d import dmeas
 
     Y = {"cases": jnp.array(float("nan"))}
     X = {"C": jnp.array(100.0)}
@@ -104,7 +104,7 @@ def test_001d_dmeas_nan_handling():
 
 def test_001d_dmeas_zero_cases():
     """dmeas should handle y=0 (uses log_cdf_single path)."""
-    from pypomp.measles.model_001d import dmeas
+    from pypomp.models.measles.model_001d import dmeas
 
     Y = {"cases": jnp.array(0.0)}
     X = {"C": jnp.array(100.0)}
@@ -115,7 +115,7 @@ def test_001d_dmeas_zero_cases():
 
 def test_001d_dmeas_positive_cases():
     """dmeas should handle y>0 (uses log_cdf_diff path)."""
-    from pypomp.measles.model_001d import dmeas
+    from pypomp.models.measles.model_001d import dmeas
 
     Y = {"cases": jnp.array(50.0)}
     X = {"C": jnp.array(100.0)}
@@ -127,7 +127,7 @@ def test_001d_dmeas_positive_cases():
 
 def test_001d_log_cdf_diff_gradient():
     """log_cdf_diff should produce finite gradients."""
-    from pypomp.measles.model_001d import log_cdf_diff
+    from pypomp.models.measles.model_001d import log_cdf_diff
 
     def f(zh, zl):
         return log_cdf_diff(zh, zl)
@@ -141,7 +141,7 @@ def test_001d_log_cdf_diff_gradient():
 
 def test_001d_log_cdf_diff_extreme():
     """log_cdf_diff should handle moderately extreme z values without NaN gradients."""
-    from pypomp.measles.model_001d import log_cdf_diff
+    from pypomp.models.measles.model_001d import log_cdf_diff
 
     def f(zh, zl):
         return log_cdf_diff(zh, zl)

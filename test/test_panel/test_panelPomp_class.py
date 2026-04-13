@@ -265,7 +265,7 @@ def test_performance_comprehensive():
     )
 
     # Add multiple MIF results to history (stress test with many results)
-    from pypomp.results import PanelPompMIFResult, PanelPompPFilterResult
+    from pypomp.core.results import PanelPompMIFResult, PanelPompPFilterResult
 
     for i in range(6):  # 6 MIF runs
         result = PanelPompMIFResult(

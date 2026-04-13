@@ -5,7 +5,7 @@ import pytest
 from typing import cast
 import numpy as np
 import pypomp as pp
-from pypomp.results import PanelPompTrainResult
+from pypomp.core.results import PanelPompTrainResult
 
 
 def _get_measles_003_panel():

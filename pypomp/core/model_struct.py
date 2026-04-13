@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from functools import partial
-from .ParTrans_class import ParTrans
+from .par_trans import ParTrans
 from typing import Annotated, Callable, get_origin, get_args, get_type_hints
-from .types import (
+from pypomp.types import (
     StateDict,
     ParamDict,
     CovarDict,
@@ -19,6 +19,7 @@ from .types import (
     ObservationDict,
     InitialTimeFloat,
 )
+
 
 # --- Type Inspection Utilities ---
 

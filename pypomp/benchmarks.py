@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import importlib.util
 
+__all__ = ["arma", "negbin"]
+
 
 def _check_statsmodels():
     """Check if statsmodels is installed, raising an ImportError if not."""
@@ -13,7 +15,7 @@ def _check_statsmodels():
         )
 
 
-def arma_benchmark(
+def arma(
     ys: pd.DataFrame,
     order: tuple[int, int, int] = (1, 0, 1),
     log_ys: bool = False,
@@ -61,7 +63,7 @@ def arma_benchmark(
 
         if len(w) > 0:
             warnings.warn(
-                f"arma_benchmark: {len(w)} warnings were produced by statsmodels. "
+                f"arma: {len(w)} warnings were produced by statsmodels. "
                 "Set suppress_warnings=False to see the raw output.",
                 UserWarning,
                 stacklevel=2,
@@ -70,7 +72,7 @@ def arma_benchmark(
     return float(total_llf)
 
 
-def negbin_benchmark(
+def negbin(
     ys: pd.DataFrame, autoregressive: bool = False, suppress_warnings: bool = True
 ) -> float:
     """
@@ -150,7 +152,7 @@ def negbin_benchmark(
 
         if len(w) > 0:
             warnings.warn(
-                f"negbin_benchmark: {len(w)} warnings were produced by statsmodels. "
+                f"negbin: {len(w)} warnings were produced by statsmodels. "
                 "Set suppress_warnings=False to see the raw output.",
                 UserWarning,
                 stacklevel=2,

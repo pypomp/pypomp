@@ -36,10 +36,7 @@ from .results import (
 )
 from .parameters import PompParameters
 from pypomp.util import logmeanexp
-from pypomp.benchmarks import (
-    arma_benchmark as _arma_benchmark,
-    negbin_benchmark as _negbin_benchmark,
-)
+from pypomp import benchmarks
 
 
 # TODO: use just one doc link for each model component class
@@ -1147,7 +1144,7 @@ class Pomp:
         theta_history : jax.Array, shape (M+1, p)
             Parameter vector (estimation space) at each step.
         """
-        from .train_dpop import dpop_train as _dpop_train
+        from .algorithms.train_dpop import dpop_train as _dpop_train
 
         # 1) Update fresh_key.
         new_key, _ = self._update_fresh_key(key)
@@ -1898,7 +1895,7 @@ class Pomp:
             if key in self.__dict__:
                 del self.__dict__[key]
 
-    def arma_benchmark(
+    def arma(
         self,
         order: tuple[int, int, int] = (1, 0, 1),
         log_ys: bool = False,
@@ -1908,7 +1905,7 @@ class Pomp:
         Fits an independent ARIMA model to the observation data and returns the estimated
         log-likelihood.
 
-        This is a wrapper around `pypomp.benchmarks.arma_benchmark`.
+        This is a wrapper around `pypomp.benchmarks.arma`.
 
         Args:
             order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
@@ -1919,18 +1916,18 @@ class Pomp:
         Returns:
             float: The sum of the log-likelihoods.
         """
-        return _arma_benchmark(
+        return benchmarks.arma(
             self.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
         )
 
-    def negbin_benchmark(
+    def negbin(
         self, autoregressive: bool = False, suppress_warnings: bool = True
     ) -> float:
         """
         Fits a Negative Binomial model to the observation data and returns
         the log-likelihood.
 
-        This is a wrapper around `pypomp.benchmarks.negbin_benchmark`.
+        This is a wrapper around `pypomp.benchmarks.negbin`.
 
         Args:
             autoregressive (bool, optional): If True, fits an AR(1) model.
@@ -1941,7 +1938,7 @@ class Pomp:
         Returns:
             float: The sum of the log-likelihoods.
         """
-        return _negbin_benchmark(
+        return benchmarks.negbin(
             self.ys,
             autoregressive=autoregressive,
             suppress_warnings=suppress_warnings,

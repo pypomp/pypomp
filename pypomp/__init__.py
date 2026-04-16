@@ -18,7 +18,7 @@ from .panel.panel import PanelPomp
 from .mcap import mcap
 from .util import expit, logit, logmeanexp, logmeanexp_se
 
-from . import random, models
+from . import random, models, benchmarks
 
 from .types import (
     CovarDict,
@@ -58,4 +58,5 @@ __all__ = [
     # Submodules
     "random",
     "models",
+    "benchmarks",
 ]

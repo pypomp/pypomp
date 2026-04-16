@@ -19,10 +19,7 @@ from ..core.results import (
 )
 from ..core.parameters import PanelParameters
 from ..util import logmeanexp
-from ..benchmarks import (
-    arma_benchmark as _arma_benchmark,
-    negbin_benchmark as _negbin_benchmark,
-)
+from .. import benchmarks
 
 
 if TYPE_CHECKING:
@@ -1317,7 +1314,7 @@ class PanelEstimationMixin(Base):
 
         self.results_history.add(result)
 
-    def arma_benchmark(
+    def arma(
         self,
         order: tuple[int, int, int] = (1, 0, 1),
         log_ys: bool = False,
@@ -1327,7 +1324,7 @@ class PanelEstimationMixin(Base):
         Fits an independent ARIMA model to the observation data for each unit and returns
         a DataFrame with the estimated log-likelihoods for each unit and the total.
 
-        This is a wrapper around `pypomp.benchmarks.arma_benchmark`.
+        This is a wrapper around `pypomp.benchmarks.arma`.
 
         Args:
             order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
@@ -1348,7 +1345,7 @@ class PanelEstimationMixin(Base):
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
                 for name, unit in self.unit_objects.items():
-                    llf = _arma_benchmark(
+                    llf = benchmarks.arma(
                         unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
                     )
                     results.append({"unit": name, "logLik": llf})
@@ -1356,14 +1353,14 @@ class PanelEstimationMixin(Base):
 
             if len(w) > 0:
                 warnings.warn(
-                    f"arma_benchmark: {len(w)} warnings were produced by statsmodels across units. "
+                    f"arma: {len(w)} warnings were produced by statsmodels across units. "
                     "Set suppress_warnings=False to see the raw output.",
                     UserWarning,
                     stacklevel=2,
                 )
         else:
             for name, unit in self.unit_objects.items():
-                llf = _arma_benchmark(
+                llf = benchmarks.arma(
                     unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
                 )
                 results.append({"unit": name, "logLik": llf})
@@ -1373,7 +1370,7 @@ class PanelEstimationMixin(Base):
         results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})
         return pd.DataFrame(results)
 
-    def negbin_benchmark(
+    def negbin(
         self, autoregressive: bool = False, suppress_warnings: bool = True
     ) -> pd.DataFrame:
         """
@@ -1399,7 +1396,7 @@ class PanelEstimationMixin(Base):
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
                 for name, unit in self.unit_objects.items():
-                    llf = _negbin_benchmark(
+                    llf = benchmarks.negbin(
                         unit.ys, autoregressive=autoregressive, suppress_warnings=False
                     )
                     results.append({"unit": name, "logLik": llf})
@@ -1407,14 +1404,14 @@ class PanelEstimationMixin(Base):
 
             if len(w) > 0:
                 warnings.warn(
-                    f"negbin_benchmark: {len(w)} warnings were produced by statsmodels across units. "
+                    f"negbin: {len(w)} warnings were produced by statsmodels across units. "
                     "Set suppress_warnings=False to see the raw output.",
                     UserWarning,
                     stacklevel=2,
                 )
         else:
             for name, unit in self.unit_objects.items():
-                llf = _negbin_benchmark(
+                llf = benchmarks.negbin(
                     unit.ys, autoregressive=autoregressive, suppress_warnings=False
                 )
                 results.append({"unit": name, "logLik": llf})

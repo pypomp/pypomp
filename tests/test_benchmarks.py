@@ -11,7 +11,7 @@ try:
 except ImportError:
     HAS_STATSMODELS = False
 
-from pypomp.benchmarks import arma_benchmark, negbin_benchmark
+from pypomp import benchmarks
 from pypomp import Pomp
 from pypomp.panel.estimation_mixin import PanelEstimationMixin
 
@@ -25,46 +25,46 @@ def dummy_data():
 
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
-def test_arma_benchmark_function(dummy_data):
+def test_arma_function(dummy_data):
     # Test univariate
-    llf1 = arma_benchmark(dummy_data[["y1"]], order=(1, 0, 0))
+    llf1 = benchmarks.arma(dummy_data[["y1"]], order=(1, 0, 0))
     assert isinstance(llf1, float)
 
     # Test multivariate
-    llf_both = arma_benchmark(dummy_data, order=(1, 0, 0))
-    llf2 = arma_benchmark(dummy_data[["y2"]], order=(1, 0, 0))
+    llf_both = benchmarks.arma(dummy_data, order=(1, 0, 0))
+    llf2 = benchmarks.arma(dummy_data[["y2"]], order=(1, 0, 0))
 
     # Should be the sum of individual likelihoods
     assert np.isclose(llf_both, llf1 + llf2)
 
     # Test log_ys
     # Implementation now uses log(y + 1)
-    llf_log = arma_benchmark(dummy_data, order=(1, 0, 0), log_ys=True)
-    llf_manual_log = arma_benchmark(
+    llf_log = benchmarks.arma(dummy_data, order=(1, 0, 0), log_ys=True)
+    llf_manual_log = benchmarks.arma(
         np.log(dummy_data + 1), order=(1, 0, 0), log_ys=False
     )
     assert np.isclose(llf_log, llf_manual_log)
 
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
-def test_negbin_benchmark_function(dummy_data):
+def test_negbin_function(dummy_data):
     # Test iid
-    llf1 = negbin_benchmark(dummy_data[["y1"]], autoregressive=False)
+    llf1 = benchmarks.negbin(dummy_data[["y1"]], autoregressive=False)
     assert isinstance(llf1, float)
 
-    llf_both = negbin_benchmark(dummy_data, autoregressive=False)
-    llf2 = negbin_benchmark(dummy_data[["y2"]], autoregressive=False)
+    llf_both = benchmarks.negbin(dummy_data, autoregressive=False)
+    llf2 = benchmarks.negbin(dummy_data[["y2"]], autoregressive=False)
 
     assert np.isclose(llf_both, llf1 + llf2)
 
     # Test AR(1)
-    llf_ar1 = negbin_benchmark(dummy_data[["y1"]], autoregressive=True)
+    llf_ar1 = benchmarks.negbin(dummy_data[["y1"]], autoregressive=True)
     assert isinstance(llf_ar1, float)
     # Typically AR(1) likelihood should be different from iid
     assert not np.isclose(llf_ar1, llf1)
 
-    llf_both_ar = negbin_benchmark(dummy_data, autoregressive=True)
-    llf2_ar = negbin_benchmark(dummy_data[["y2"]], autoregressive=True)
+    llf_both_ar = benchmarks.negbin(dummy_data, autoregressive=True)
+    llf2_ar = benchmarks.negbin(dummy_data[["y2"]], autoregressive=True)
     assert np.isclose(llf_both_ar, llf_ar1 + llf2_ar)
 
 
@@ -76,13 +76,13 @@ def test_pomp_benchmark_methods(dummy_data):
     # We monkeypatch the Pomp benchmark method directly by calling the class method
     # Or more robustly, we create a mock that has the mixin logic, or test on a real Pomp if easy.
     # Since Pomp is complex, we'll just test the unbound method on a dummy object
-    pomp.arma_benchmark = Pomp.arma_benchmark.__get__(pomp)
-    pomp.negbin_benchmark = Pomp.negbin_benchmark.__get__(pomp)
+    pomp.arma = Pomp.arma.__get__(pomp)
+    pomp.negbin = Pomp.negbin.__get__(pomp)
 
-    llf_arma = pomp.arma_benchmark(order=(1, 0, 0))
+    llf_arma = pomp.arma(order=(1, 0, 0))
     assert isinstance(llf_arma, float)
 
-    llf_nb = pomp.negbin_benchmark()
+    llf_nb = pomp.negbin()
     assert isinstance(llf_nb, float)
 
 
@@ -97,10 +97,10 @@ def test_panel_benchmark_methods(dummy_data):
     panel = MagicMock(spec=PanelEstimationMixin)
     panel.unit_objects = {"u1": unit1, "u2": unit2}
 
-    panel.arma_benchmark = PanelEstimationMixin.arma_benchmark.__get__(panel)
-    panel.negbin_benchmark = PanelEstimationMixin.negbin_benchmark.__get__(panel)
+    panel.arma = PanelEstimationMixin.arma.__get__(panel)
+    panel.negbin = PanelEstimationMixin.negbin.__get__(panel)
 
-    df_arma = panel.arma_benchmark(order=(1, 0, 0))
+    df_arma = panel.arma(order=(1, 0, 0))
     assert isinstance(df_arma, pd.DataFrame)
     assert "unit" in df_arma.columns
     assert "logLik" in df_arma.columns
@@ -110,15 +110,15 @@ def test_panel_benchmark_methods(dummy_data):
     assert df_arma.iloc[0]["unit"] == "[[TOTAL]]"
 
     total_llf_arma = df_arma.iloc[0]["logLik"]
-    expected_total_arma = arma_benchmark(dummy_data, order=(1, 0, 0))
+    expected_total_arma = benchmarks.arma(dummy_data, order=(1, 0, 0))
     assert np.isclose(total_llf_arma, expected_total_arma)
 
-    df_nb = panel.negbin_benchmark()
+    df_nb = panel.negbin()
     assert isinstance(df_nb, pd.DataFrame)
     assert len(df_nb) == 3
     assert df_nb.iloc[0]["unit"] == "[[TOTAL]]"
     total_llf_nb = df_nb.iloc[0]["logLik"]
-    expected_total_nb = negbin_benchmark(dummy_data)
+    expected_total_nb = benchmarks.negbin(dummy_data)
     assert np.isclose(total_llf_nb, expected_total_nb)
 
 
@@ -132,10 +132,10 @@ def test_missing_statsmodels_raises(monkeypatch, dummy_data):
     monkeypatch.setattr(importlib.util, "find_spec", mock_find_spec)
 
     with pytest.raises(ImportError, match="statsmodels"):
-        arma_benchmark(dummy_data)
+        benchmarks.arma(dummy_data)
 
     with pytest.raises(ImportError, match="statsmodels"):
-        negbin_benchmark(dummy_data)
+        benchmarks.negbin(dummy_data)
 
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
@@ -159,13 +159,13 @@ def test_benchmark_warning_suppression(dummy_data):
         # Use -1 to ensure only 1 warning is captured in our check
         with warnings.catch_warnings(record=True) as w_list:
             warnings.simplefilter("always")
-            arma_benchmark(dummy_data[["y1"]], suppress_warnings=True)
+            benchmarks.arma(dummy_data[["y1"]], suppress_warnings=True)
 
             assert mock_model.fit.called
             summary_warnings = [
                 warn
                 for warn in w_list
-                if "arma_benchmark: 1 warnings were produced by statsmodels"
+                if "arma: 1 warnings were produced by statsmodels"
                 in str(warn.message)
             ]
             assert len(summary_warnings) == 1
@@ -185,13 +185,13 @@ def test_benchmark_warning_suppression(dummy_data):
 
         with warnings.catch_warnings(record=True) as w_list:
             warnings.simplefilter("always")
-            negbin_benchmark(dummy_data[["y1"]], suppress_warnings=True)
+            benchmarks.negbin(dummy_data[["y1"]], suppress_warnings=True)
 
             assert mock_model.fit.called
             summary_warnings = [
                 warn
                 for warn in w_list
-                if "negbin_benchmark: 1 warnings were produced by statsmodels"
+                if "negbin: 1 warnings were produced by statsmodels"
                 in str(warn.message)
             ]
             assert len(summary_warnings) == 1
@@ -209,8 +209,8 @@ def test_panel_benchmark_warning_suppression(dummy_data):
 
     panel = MagicMock(spec=PanelEstimationMixin)
     panel.unit_objects = {"u1": unit1, "u2": unit2}
-    panel.arma_benchmark = PanelEstimationMixin.arma_benchmark.__get__(panel)
-    panel.negbin_benchmark = PanelEstimationMixin.negbin_benchmark.__get__(panel)
+    panel.arma = PanelEstimationMixin.arma.__get__(panel)
+    panel.negbin = PanelEstimationMixin.negbin.__get__(panel)
 
     # Patch ARIMA class in the statsmodels module
     with patch("statsmodels.tsa.arima.model.ARIMA") as mock_arima_cls:
@@ -227,12 +227,12 @@ def test_panel_benchmark_warning_suppression(dummy_data):
 
         with warnings.catch_warnings(record=True) as w_list:
             warnings.simplefilter("always")
-            panel.arma_benchmark(suppress_warnings=True)
+            panel.arma(suppress_warnings=True)
 
             # Each unit (u1, u2) produced a warning.
             # Total 2 warnings captured and summarized into ONE warning by PanelPomp
             summary_pattern = (
-                "arma_benchmark: 2 warnings were produced by statsmodels across units"
+                "arma: 2 warnings were produced by statsmodels across units"
             )
             summary_warnings = [
                 warn for warn in w_list if summary_pattern in str(warn.message)
@@ -254,10 +254,10 @@ def test_panel_benchmark_warning_suppression(dummy_data):
 
         with warnings.catch_warnings(record=True) as w_list:
             warnings.simplefilter("always")
-            panel.negbin_benchmark(suppress_warnings=True)
+            panel.negbin(suppress_warnings=True)
 
             summary_pattern = (
-                "negbin_benchmark: 2 warnings were produced by statsmodels across units"
+                "negbin: 2 warnings were produced by statsmodels across units"
             )
             summary_warnings = [
                 warn for warn in w_list if summary_pattern in str(warn.message)

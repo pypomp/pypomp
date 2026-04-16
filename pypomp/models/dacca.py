@@ -83,7 +83,6 @@ with open(covars_path, "r") as f:
         ),
     )
 
-key = jax.random.key(111)
 theta_names = (
     [
         "gamma",
@@ -253,7 +252,7 @@ def rproc_gamma(
     nrstage = 3
     clin = 1  # HARDCODED SEIR
     rho = 0  # HARDCODED INAPPARENT INFECTIONS
-    std = jnp.sqrt(dt)
+    # std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
     passages = jnp.zeros(nrstage + 1)

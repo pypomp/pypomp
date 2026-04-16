@@ -20,9 +20,9 @@ Parameters:
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.random.poissoninvf import fast_approx_rpoisson
-from pypomp.random.binominvf import fast_approx_rbinom
-from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.random.poisson import fast_poisson
+from pypomp.random.binom import fast_binomial
+from pypomp.random.gamma import fast_gamma
 
 
 param_names = (
@@ -100,13 +100,13 @@ def rproc(X_, theta_, key, covars, t, dt):
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
     # dw = jax.random.gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-    dw = fast_approx_rgamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     rate = jnp.array([foi * dw / dt, sigma, gamma])
 
     # Poisson births
     # births = jax.random.poisson(keys[1], br * dt)
-    births = fast_approx_rpoisson(keys[1], br * dt)
+    births = fast_poisson(keys[1], br * dt)
 
     # transitions between classes
     # rt_final = jnp.zeros((3, 2))
@@ -118,7 +118,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # rt_final = rt_final.at[:, 0].set(1 - p0_values).at[:, 1].set(p0_values)
 
     # transitions = jax.random.multinomial(keys[2], populations, rt_final)
-    transitions = fast_approx_rbinom(keys[2], populations, p0_values)
+    transitions = fast_binomial(keys[2], populations, p0_values)
 
     trans_S = transitions[0]
     trans_E = transitions[1]

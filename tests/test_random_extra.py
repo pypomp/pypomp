@@ -14,7 +14,7 @@ from jax.scipy.stats import binom as jax_binom
 from scipy.stats import binom as scipy_binom
 
 
-def poissoninvf_performance():
+def poisson_performance():
     # Prepare parameters
     n = 1_000_000
     key = jax.random.key(42)
@@ -24,15 +24,15 @@ def poissoninvf_performance():
 
     # Warmup to trigger JITs
     key1, key2 = jax.random.split(key)
-    _ = ppr.fast_approx_rpoisson(key1, lam_samples).block_until_ready()
+    _ = ppr.fast_poisson(key1, lam_samples).block_until_ready()
     _ = jax.random.poisson(key2, lam_samples).block_until_ready()
 
-    # Run fast_approx_rpoisson reps times
+    # Run fast_poisson reps times
     t_pp_total = 0.0
     for i in range(reps):
         key1, _ = jax.random.split(key1)
         t0 = time.time()
-        _ = ppr.fast_approx_rpoisson(key1, lam_samples).block_until_ready()
+        _ = ppr.fast_poisson(key1, lam_samples).block_until_ready()
         t1 = time.time()
         t_pp_total += t1 - t0
     avg_t_pp = t_pp_total / reps
@@ -48,7 +48,7 @@ def poissoninvf_performance():
     avg_t_jax = t_jax_total / reps
 
     print(
-        f"pp.fast_approx_rpoisson: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n} samples each)"
+        f"pp.fast_poisson: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n} samples each)"
     )
     print(
         f"jax.random.poisson: {avg_t_jax:.4f} seconds (avg over {reps} runs, {n} samples each)"
@@ -57,7 +57,7 @@ def poissoninvf_performance():
     pass
 
 
-def binominvf_performance():
+def binomial_performance():
     # Prepare parameters
     n = 1_000_000
     key = jax.random.key(43)
@@ -74,15 +74,15 @@ def binominvf_performance():
 
     # Warmup to trigger JITs
     key1, key2 = jax.random.split(key)
-    _ = ppr.fast_approx_rbinom(key1, trial_samples, p_samples).block_until_ready()
+    _ = ppr.fast_binomial(key1, trial_samples, p_samples).block_until_ready()
     _ = jax.random.binomial(key2, trial_samples, p_samples).block_until_ready()
 
-    # Run fast_approx_rbinom reps times
+    # Run fast_binomial reps times
     t_pp_total = 0.0
     for i in range(reps):
         key1, _ = jax.random.split(key1)
         t0 = time.time()
-        _ = ppr.fast_approx_rbinom(key1, trial_samples, p_samples).block_until_ready()
+        _ = ppr.fast_binomial(key1, trial_samples, p_samples).block_until_ready()
         t1 = time.time()
         t_pp_total += t1 - t0
     avg_t_pp = t_pp_total / reps
@@ -98,7 +98,7 @@ def binominvf_performance():
     avg_t_jax = t_jax_total / reps
 
     print(
-        f"fast_approx_rbinom: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n_samples} samples each)"
+        f"fast_binomial: {avg_t_pp:.4f} seconds (avg over {reps} runs, {n_samples} samples each)"
     )
     print(
         f"jax.random.binomial: {avg_t_jax:.4f} seconds (avg over {reps} runs, {n_samples} samples each)"
@@ -107,7 +107,7 @@ def binominvf_performance():
     pass
 
 
-def gammainvf_performance():
+def gamma_performance():
     # Prepare parameters
     n = 1_000_000
     key = jax.random.key(44)
@@ -118,7 +118,7 @@ def gammainvf_performance():
     # Warmup to trigger JITs
     key1, key2 = jax.random.split(key)
     t0 = time.time()
-    _ = ppr.fast_approx_rgamma(key1, alpha_samples).block_until_ready()
+    _ = ppr.fast_gamma(key1, alpha_samples).block_until_ready()
     t1 = time.time()
     print(f"Warmup ppr.rgamma: {t1 - t0:.4f} seconds")
 
@@ -132,7 +132,7 @@ def gammainvf_performance():
     for i in range(reps):
         key1, _ = jax.random.split(key1)
         t0 = time.time()
-        _ = ppr.fast_approx_rgamma(key1, alpha_samples).block_until_ready()
+        _ = ppr.fast_gamma(key1, alpha_samples).block_until_ready()
         t1 = time.time()
         t_pp_total += t1 - t0
     avg_t_pp = t_pp_total / reps
@@ -172,20 +172,20 @@ def rnbinom_performance():
 
     # Warmup
     key1, _ = jax.random.split(key)
-    _ = ppr.fast_approx_rnbinom(key1, size_samples, p=p_samples).block_until_ready()
+    _ = ppr.fast_nbinomial(key1, size_samples, p=p_samples).block_until_ready()
 
     # Run
     t_total = 0.0
     for i in range(reps):
         key1, _ = jax.random.split(key1)
         t0 = time.time()
-        _ = ppr.fast_approx_rnbinom(key1, size_samples, p=p_samples).block_until_ready()
+        _ = ppr.fast_nbinomial(key1, size_samples, p=p_samples).block_until_ready()
         t1 = time.time()
         t_total += t1 - t0
     avg_t = t_total / reps
 
     print(
-        f"fast_approx_rnbinom: {avg_t:.4f} seconds (avg over {reps} runs, {len(size_samples)} samples each)"
+        f"fast_nbinomial: {avg_t:.4f} seconds (avg over {reps} runs, {len(size_samples)} samples each)"
     )
     pass
 
@@ -196,7 +196,7 @@ def compare_rpoisson_and_jax_poisson(
     show_labels=True,
 ):
     """
-    Compare distributions of pypomp.fast_approx_rpoisson (inverse CDF, continuous-valued Poisson)
+    Compare distributions of pypomp.fast_poisson (inverse CDF, continuous-valued Poisson)
     and jax.random.poisson (discrete Poisson), for various rates, using histograms and qq-plots.
     """
     key = jax.random.key(seed)
@@ -213,7 +213,7 @@ def compare_rpoisson_and_jax_poisson(
         lam_arr = jnp.full((n_samples,), lam_val)
         # Use a new PRNG split for each
         key_rpoisson, key = jax.random.split(key)
-        rpoisson_samples = ppr.fast_approx_rpoisson(key_rpoisson, lam_arr)
+        rpoisson_samples = ppr.fast_poisson(key_rpoisson, lam_arr)
         key_jax, key = jax.random.split(key)
         jax_poisson_samples = jax.random.poisson(key_jax, lam_arr)
 
@@ -243,7 +243,7 @@ def compare_rpoisson_and_jax_poisson(
             rpoisson_samples,
             bins=bin_edges,
             alpha=0.5,
-            label="pp.fast_approx_rpoisson",
+            label="pp.fast_poisson",
             density=True,
             color="C0",
             edgecolor="k",
@@ -275,7 +275,7 @@ def compare_rpoisson_and_jax_poisson(
             if i == 1:
                 ax_qq.set_xlabel("jax.random.poisson quantiles")
             if i == 0:
-                ax_qq.set_ylabel("pp.fast_approx_rpoisson quantiles")
+                ax_qq.set_ylabel("pp.fast_poisson quantiles")
         else:
             ax_qq.tick_params(labelbottom=False, labelleft=False)
         if i == len(lam_vals) - 1:
@@ -293,7 +293,7 @@ def compare_rbinom2(
     show_labels=True,
 ):
     """
-    Compare distributions of fast_approx_rbinom against either jax.random.binomial
+    Compare distributions of fast_binomial against either jax.random.binomial
     or the exact theoretical Binomial PMF/Quantiles.
 
     Args:
@@ -321,9 +321,7 @@ def compare_rbinom2(
 
             key_rbinom, key = jax.random.split(key)
             # Assuming ppr is available in your namespace
-            rbinom_samples = ppr.fast_approx_rbinom(
-                key_rbinom, n_arr, p_arr, exact_max=5
-            )
+            rbinom_samples = ppr.fast_binomial(key_rbinom, n_arr, p_arr, exact_max=5)
 
             if compare_to_exact:
                 # Store n and p for theoretical calculation
@@ -379,7 +377,7 @@ def compare_rbinom2(
                     edgecolor="k",
                 )
 
-            # Plot fast_approx_rbinom
+            # Plot fast_binomial
             ax.hist(
                 rbinom_samples,
                 bins=bins,
@@ -486,7 +484,7 @@ def compare_rgamma_and_jax_gamma(
         alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
         # Use a new PRNG split for each
         key_rgamma, key = jax.random.split(key)
-        rgamma_samples = ppr.fast_approx_rgamma(key_rgamma, alpha_arr)
+        rgamma_samples = ppr.fast_gamma(key_rgamma, alpha_arr)
         key_jax, key = jax.random.split(key)
         jax_gamma_samples = jax.random.gamma(key_jax, alpha_arr)
 
@@ -563,7 +561,7 @@ def compare_rnbinom_and_scipy(
     show_labels=True,
 ):
     """
-    Compare distributions of pypomp.fast_approx_rnbinom and scipy.stats.nbinom
+    Compare distributions of pypomp.fast_nbinomial and scipy.stats.nbinom
     using histograms and qq-plots.
     """
     key = jax.random.key(seed)
@@ -582,7 +580,7 @@ def compare_rnbinom_and_scipy(
             n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
             key_rnbinom, key = jax.random.split(key)
-            rnbinom_samples = ppr.fast_approx_rnbinom(key_rnbinom, n_arr, p=p_arr)
+            rnbinom_samples = ppr.fast_nbinomial(key_rnbinom, n_arr, p=p_arr)
 
             # Histogram
             ax_hist = hist_axes[plot_idx]
@@ -642,7 +640,7 @@ def compare_rnbinom_and_scipy(
 
 
 def rpoisson_goodness_of_fit():
-    """Goodness of fit test for fast_approx_rpoisson using chi-square test."""
+    """Goodness of fit test for fast_poisson using chi-square test."""
     lam = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
     n_samples = 10000
     significance_level = 0.1
@@ -650,7 +648,7 @@ def rpoisson_goodness_of_fit():
     for lam_val in lam:
         key = jax.random.key(int(lam_val * 1000) % 2**31)
         lam_arr = jnp.full((n_samples,), lam_val, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rpoisson(key, lam_arr))
+        samples = np.array(ppr.fast_poisson(key, lam_arr))
 
         # Convert to integers for chi-square test (round to nearest integer)
         samples_int = np.round(samples).astype(int)
@@ -703,14 +701,14 @@ def rpoisson_goodness_of_fit():
                 # We use a lenient significance level since we're testing approximations
                 if p_value <= significance_level:
                     warnings.warn(
-                        f"fast_approx_rpoisson failed chi-square test for lambda={lam_val}: "
+                        f"fast_poisson failed chi-square test for lambda={lam_val}: "
                         f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
                         UserWarning,
                     )
 
 
 def rbinom_goodness_of_fit():
-    """Goodness of fit test for fast_approx_rbinom using chi-square test."""
+    """Goodness of fit test for fast_binomial using chi-square test."""
     n = [3, 20, 100, 2000]
     p = [0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99]
     n_samples = 10000
@@ -727,7 +725,7 @@ def rbinom_goodness_of_fit():
             key = jax.random.key((int(n_val * 100) + int(p_val * 10000)) % 2**31)
             n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
-            samples = np.array(ppr.fast_approx_rbinom(key, n_arr, p_arr))
+            samples = np.array(ppr.fast_binomial(key, n_arr, p_arr))
 
             # Convert to integers
             samples_int = np.round(samples).astype(int)
@@ -778,7 +776,7 @@ def rbinom_goodness_of_fit():
                     # We use a lenient significance level since we're testing approximations
                     if p_value <= significance_level:
                         warnings.warn(
-                            f"fast_approx_rbinom failed chi-square test for n={n_val}, p={p_val}: "
+                            f"fast_binomial failed chi-square test for n={n_val}, p={p_val}: "
                             f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
                             UserWarning,
                         )
@@ -793,7 +791,7 @@ def rgamma_goodness_of_fit():
     for alpha_val in alpha:
         key = jax.random.key(int(alpha_val * 1000) % 2**31)
         alpha_arr = jnp.full((n_samples,), alpha_val, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rgamma(key, alpha_arr))
+        samples = np.array(ppr.fast_gamma(key, alpha_arr))
 
         # Perform Kolmogorov-Smirnov test
         # Gamma distribution with shape=alpha, scale=1 (rate=1)
@@ -811,7 +809,7 @@ def rgamma_goodness_of_fit():
 
 
 def rnbinom_goodness_of_fit():
-    """Goodness of fit test for fast_approx_rnbinom using chi-square test."""
+    """Goodness of fit test for fast_nbinomial using chi-square test."""
     n = [1.0, 5.0, 20.0, 100.0]
     p = [0.1, 0.5, 0.9]
     n_samples = 10000
@@ -822,7 +820,7 @@ def rnbinom_goodness_of_fit():
             key = jax.random.key((int(n_val * 100) + int(p_val * 10000)) % 2**31)
             n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
-            samples = np.array(ppr.fast_approx_rnbinom(key, n_arr, p=p_arr))
+            samples = np.array(ppr.fast_nbinomial(key, n_arr, p=p_arr))
 
             # Convert to integers
             samples_int = np.round(samples).astype(int)
@@ -873,7 +871,7 @@ def rnbinom_goodness_of_fit():
                     )
                     if p_value <= significance_level:
                         warnings.warn(
-                            f"fast_approx_rnbinom failed chi-square test for n={n_val}, p={p_val}: "
+                            f"fast_nbinomial failed chi-square test for n={n_val}, p={p_val}: "
                             f"chi2={chi2_stat:.4f}, p={p_value:.4f}",
                             UserWarning,
                         )

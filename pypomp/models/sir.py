@@ -13,8 +13,8 @@ import pandas as pd
 from pypomp.core.pomp import Pomp
 from pypomp.core.par_trans import ParTrans
 from pypomp.models.ctmc_multinom import sample_and_log_prob
-from pypomp.random.poissoninvf import fast_approx_rpoisson
-from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.random.poisson import fast_poisson
+from pypomp.random.gamma import fast_gamma
 
 
 # ---------------------------------------------------------------------
@@ -192,7 +192,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     # Gamma white noise
     key, subkey = jax.random.split(key)
     shape = dt / (beta_sd**2 + 1e-10)
-    dW = fast_approx_rgamma(subkey, shape) * (beta_sd**2)
+    dW = fast_gamma(subkey, shape) * (beta_sd**2)
 
     # Transition rates
     rate_foi = (iota + beta * I * dW / dt) / pop
@@ -201,7 +201,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     key, k1, k2, k3, k4 = jax.random.split(key, 5)
 
     # Births: Poisson
-    births = fast_approx_rpoisson(k1, mu * pop * dt)
+    births = fast_poisson(k1, mu * pop * dt)
 
     # S transitions
     S_int = jnp.maximum(jnp.round(S), 0.0)

@@ -7,7 +7,7 @@ These helpers are model-agnostic and can be reused across different
 process models that use a multinomial Euler scheme.
 
 Multinomial samples are drawn using a fast inverse-CDF based sampler
-(`pypomp.random.binominvf.rmultinomial`), and log-probabilities are
+(`pypomp.random.binom.rmultinomial`), and log-probabilities are
 computed via an explicit multinomial log-pmf formula.
 """
 
@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import gammaln
 
-from pypomp.random.binominvf import fast_approx_rmultinom as fast_rmultinomial
+from pypomp.random.binom import fast_multinomial as fast_rmultinomial
 
 
 def _euler_multinomial_probs(
@@ -129,9 +129,7 @@ def reulermultinom(
     probs_b = jnp.broadcast_to(probs, (num_samples, probs.shape[0]))
 
     # Vectorized multinomial sampling
-    samples_flat = jax.vmap(fast_rmultinomial, in_axes=(0, 0, 0))(
-        keys, n_b, probs_b
-    )
+    samples_flat = jax.vmap(fast_rmultinomial, in_axes=(0, 0, 0))(keys, n_b, probs_b)
 
     out_shape = shape + (probs.shape[0],)
     return samples_flat.reshape(out_shape)

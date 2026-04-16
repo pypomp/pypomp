@@ -19,7 +19,7 @@ from jax._src import dtypes
 from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
 
 
-def _gammainvf_scalar(u: Array, alpha: Array, dtype) -> Array:
+def _gammainv_scalar(u: Array, alpha: Array, dtype) -> Array:
     """
     Scalar inverse Gamma CDF using the Temme (1992) asymptotic inversion method.
 
@@ -85,11 +85,11 @@ def _gammainvf_scalar(u: Array, alpha: Array, dtype) -> Array:
     return x
 
 
-_gammainvf_vmap = jax.vmap(_gammainvf_scalar, in_axes=(0, 0, None))
+_gammainv_vmap = jax.vmap(_gammainv_scalar, in_axes=(0, 0, None))
 
 
 @partial(jax.jit, static_argnames=["dtype"])
-def gammainvf(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
+def gammainv(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
     """
     Vectorized inverse Gamma CDF approximation using JAX primitives.
 
@@ -104,21 +104,21 @@ def gammainvf(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
     u_arr, alpha_arr = jnp.broadcast_arrays(u, alpha)
     flat_u = u_arr.reshape(-1)
     flat_alpha = alpha_arr.reshape(-1)
-    flat_res = _gammainvf_vmap(flat_u, flat_alpha, dtype)
+    flat_res = _gammainv_vmap(flat_u, flat_alpha, dtype)
     return flat_res.reshape(u_arr.shape)
 
 
 @partial(jax.jit, static_argnames=["adjustment_size", "dtype"])
-def fast_approx_rgamma(
+def fast_gamma(
     key: jax.Array,
     alpha: jax.Array,
     adjustment_size: int = 3,
     dtype: np.dtype | None = None,
 ) -> jax.Array:
     """
-    Generate a Gamma random variable with given shape parameter.
+    Generate a Gamma random variable using an approximate inverse CDF method in order to run fast on GPUs.
 
-    The implementation follows the methodology from Temme (1992). To extend the method to small alpha values, we apply a multi-step trick.
+    The implementation follows the methodology from Temme (1992). To extend the method to small alpha values, we apply a multi-step trick. The method does not produce exact Gamma random variables, but it is very close to exact.
 
     Args:
         key: a PRNG key used as the random key.
@@ -141,7 +141,7 @@ def fast_approx_rgamma(
 
     if not dtypes.issubdtype(dtype, np.floating):
         raise ValueError(
-            f"dtype argument to `fast_approx_rgamma` must be a float dtype, got {dtype}"
+            f"dtype argument to `fast_gamma` must be a float dtype, got {dtype}"
         )
 
     # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
@@ -160,7 +160,7 @@ def fast_approx_rgamma(
     # Guard against edge case numerical issues.
     # Especially necessary for gradient calculations.
     u_base = jnp.clip(u_base, 1e-7, 1.0 - 1e-7)
-    x = gammainvf(u_base, alpha_base, dtype=dtype)
+    x = gammainv(u_base, alpha_base, dtype=dtype)
 
     u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape, dtype=dtype)
     u_adj = jnp.clip(u_adj, 1e-7, 1.0 - 1e-7)

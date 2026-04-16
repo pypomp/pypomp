@@ -13,12 +13,12 @@ import numpy as np
 from jax._src import dtypes
 
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
-from .gammainvf import fast_approx_rgamma
-from .poissoninvf import fast_approx_rpoisson
+from .gamma import fast_gamma
+from .poisson import fast_poisson
 
 
 @partial(jax.jit, static_argnames=["dtype"])
-def fast_approx_rnbinom(
+def fast_nbinomial(
     key: Array,
     n: Array,
     p: Array | None = None,
@@ -26,7 +26,7 @@ def fast_approx_rnbinom(
     dtype: np.dtype | None = None,
 ) -> Array:
     """
-    Generate negative binomial random variables using a Gamma-Poisson mixture.
+    Generate negative binomial random variables using approximate inverse CDF methods in order to run fast on GPUs.
 
     The Negative Binomial distribution NB(n, p) represents the number of failures
     before n successes, where p is the probability of success.
@@ -55,7 +55,7 @@ def fast_approx_rnbinom(
         dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
     ):
         raise ValueError(
-            f"dtype argument to `fast_approx_rnbinom` must be a float or integer dtype, got {dtype}"
+            f"dtype argument to `fast_nbinomial` must be a float or integer dtype, got {dtype}"
         )
 
     current_float_64 = dtypes.issubdtype(dtype, np.int64) or dtypes.issubdtype(
@@ -81,14 +81,14 @@ def fast_approx_rnbinom(
 
     key_gamma, key_poisson = jax.random.split(key)
 
-    gamma_samples = fast_approx_rgamma(key_gamma, safe_n, dtype=float_dtype)
+    gamma_samples = fast_gamma(key_gamma, safe_n, dtype=float_dtype)
     lam = gamma_samples * safe_scale
     poisson_dtype = (
         jnp.int64
         if dtypes.issubdtype(dtype, np.int64) or dtypes.issubdtype(dtype, np.float64)
         else jnp.int32
     )
-    x = fast_approx_rpoisson(key_poisson, lam, dtype=poisson_dtype)
+    x = fast_poisson(key_poisson, lam, dtype=poisson_dtype)
     x = jnp.where(lam == 0.0, 0, x)
 
     if dtypes.issubdtype(dtype, np.floating):

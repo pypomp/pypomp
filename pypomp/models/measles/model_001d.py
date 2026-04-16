@@ -1,7 +1,7 @@
 """He10 model without alpha or mu parameters - DPOP enabled with gradient-stable dmeas
 
 Gradient stability fixes:
-1. rproc: Use jax.random.gamma instead of fast_approx_rgamma (stable reparameterization)
+1. rproc: Use jax.random.gamma instead of fast_gamma (stable reparameterization)
 2. rproc: Use sample_and_log_prob instead of rmultinomial + deulermultinom (unified gradient path)
 3. dmeas: Use custom JVP for log_cdf_diff (prevents 0 * inf = NaN in extreme z regions)
 4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
@@ -12,8 +12,8 @@ import jax
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
 from pypomp.models.ctmc_multinom import sample_and_log_prob
-from pypomp.random.poissoninvf import fast_approx_rpoisson
-from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.random.poisson import fast_poisson
+from pypomp.random.gamma import fast_gamma
 
 
 # =========================================================================
@@ -168,10 +168,10 @@ def rproc(X_, theta_, key, covars, t, dt):
     # White noise (extrademographic stochasticity)
     # FIX 1: Use jax.random.gamma for gradient stability
     keys = jax.random.split(key, 3)
-    dw = fast_approx_rgamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     # Poisson births
-    births = fast_approx_rpoisson(keys[1], br * dt).astype(jnp.float32)
+    births = fast_poisson(keys[1], br * dt).astype(jnp.float32)
 
     # Transition rates for Euler-multinomial steps
     rates_S = jnp.array([foi * dw / dt, mu])

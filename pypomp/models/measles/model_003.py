@@ -5,7 +5,7 @@ He10 model with continuous process model.
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
-from pypomp.random.gammainvf import fast_approx_rgamma
+from pypomp.random.gamma import fast_gamma
 from pypomp.types import (
     ObservationDict,
     StateDict,
@@ -120,7 +120,7 @@ def rproc(
     normal_keys, gamma_key = jax.random.split(key, 2)
     all_noise = jax.random.normal(normal_keys, shape=(7,))
 
-    dw = fast_approx_rgamma(gamma_key, dt / sigmaSE**2) * sigmaSE**2
+    dw = fast_gamma(gamma_key, dt / sigmaSE**2) * sigmaSE**2
 
     birth_mean = br * dt
     birth_noise = all_noise[0]

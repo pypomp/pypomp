@@ -145,7 +145,6 @@ def _binom_bottom_up(
             is_stalled = (cdf > 0.95) & (pmf < epsilon)
         else:
             is_stalled = False
-
         found_now = (cdf >= u) | is_stalled
 
         is_new_discovery = jnp.logical_and(~found, found_now)
@@ -156,7 +155,7 @@ def _binom_bottom_up(
     return cast(Array, jnp.clip(result, 0.0, n))
 
 
-def _binominvf_scalar(
+def _binominv_scalar(
     u: Array, n: Array, p: Array, exact_max: int, order: int = 2
 ) -> Array:
     """
@@ -264,11 +263,11 @@ def _binominvf_scalar(
     return k_result
 
 
-_binominvf_vmap = jax.vmap(_binominvf_scalar, in_axes=(0, 0, 0, None, None))
+_binominv_vmap = jax.vmap(_binominv_scalar, in_axes=(0, 0, 0, None, None))
 
 
 @partial(jax.jit, static_argnames=["order", "exact_max"])
-def binominvf(
+def binominv(
     u: Array,
     n: Array,
     p: Array,
@@ -306,12 +305,12 @@ def binominvf(
     flat_u = u_arr.reshape(-1)
     flat_n = n_arr.reshape(-1)
     flat_p = p_arr.reshape(-1)
-    flat_res = _binominvf_vmap(flat_u, flat_n, flat_p, exact_max, order)
+    flat_res = _binominv_vmap(flat_u, flat_n, flat_p, exact_max, order)
     return flat_res.reshape(u_arr.shape)
 
 
 @partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
-def fast_approx_rbinom(
+def fast_binomial(
     key: Array,
     n: Array,
     p: Array,
@@ -320,9 +319,9 @@ def fast_approx_rbinom(
     dtype: np.dtype | None = None,
 ) -> Array:
     """
-    Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation.
+    Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation in order to run fast on GPUs.
 
-    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016).
+    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016). Our implementation of the method does not produce exact binomial random variables, but it is very close to exact.
 
     Args:
         key: PRNG key used as the random key.
@@ -348,7 +347,7 @@ def fast_approx_rbinom(
         dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
     ):
         raise ValueError(
-            f"dtype argument to `fast_approx_rbinom` must be a float or integer dtype, got {dtype}"
+            f"dtype argument to `fast_binomial` must be a float or integer dtype, got {dtype}"
         )
 
     # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
@@ -360,7 +359,7 @@ def fast_approx_rbinom(
     shape = jnp.broadcast_shapes(n.shape, p.shape)
 
     u = jax.random.uniform(key, shape)
-    x = binominvf(u, n, p, exact_max, order=order)
+    x = binominv(u, n, p, exact_max, order=order)
 
     if jnp.issubdtype(dtype, jnp.integer):
         x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)
@@ -369,11 +368,13 @@ def fast_approx_rbinom(
 
 
 @partial(jax.jit, static_argnames=["dtype"])
-def fast_approx_rmultinom(
+def fast_multinomial(
     key: Array, n: Array, p: Array, dtype: np.dtype | None = None
 ) -> Array:
     """
-    Generate multinomial random variables using the inverse CDF method with fast_approx_rbinom.
+    Generate multinomial random variables using the inverse CDF method with fast_binomial in order to run fast on GPUs.
+
+    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016). Our implementation of the method does not produce exact multinomial random variables, but it is very close to exact.
 
     Args:
         key: PRNG key used as the random key.
@@ -390,7 +391,7 @@ def fast_approx_rmultinom(
         dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
     ):
         raise ValueError(
-            f"dtype argument to `fast_approx_rmultinom` must be a float or integer dtype, got {dtype}"
+            f"dtype argument to `fast_multinomial` must be a float or integer dtype, got {dtype}"
         )
     # Flatten inputs for broadcasting convenience
     n = jnp.asarray(n)
@@ -427,7 +428,7 @@ def fast_approx_rmultinom(
         for j in range(num_cat - 1):
             p_cur = p_i[j] / p_remain
             p_cur = jnp.clip(p_cur, 0.0, 1.0)  # ensure numerically safe
-            x = fast_approx_rbinom(
+            x = fast_binomial(
                 keys[j], jnp.array(n_remaining), jnp.array(p_cur), dtype=dtype
             )
             out.append(x)

@@ -5,48 +5,48 @@ import numpy as np
 import warnings
 
 
-def test_rpoisson():
+def test_poisson():
     key = jax.random.key(0)
     lam = jnp.array([1.0, 2.0, 3.0])
-    x = ppr.fast_approx_rpoisson(key, lam)
+    x = ppr.fast_poisson(key, lam)
     assert x.shape == (3,)
     assert x.dtype == jnp.int32  # Default is int32 when jax_enable_x64 is false
     assert x.min() >= 0
 
-    x_int32 = ppr.fast_approx_rpoisson(key, lam, dtype=jnp.int32)
+    x_int32 = ppr.fast_poisson(key, lam, dtype=jnp.int32)
     assert x_int32.dtype == jnp.int32
 
     jax.config.update("jax_enable_x64", True)
-    x_int64 = ppr.fast_approx_rpoisson(key, lam, dtype=jnp.int64)
+    x_int64 = ppr.fast_poisson(key, lam, dtype=jnp.int64)
     assert x_int64.dtype == jnp.int64
     jax.config.update("jax_enable_x64", False)
 
 
-def test_rbinom():
+def test_binomial():
     key = jax.random.key(0)
     n = jnp.array([1, 2, 3])
     p = jnp.array([0.5, 0.6, 0.7])
-    x = ppr.fast_approx_rbinom(key, n, p)
+    x = ppr.fast_binomial(key, n, p)
     assert x.shape == (3,)
     assert x.min() >= 0
     assert all(x <= n)
 
-    x = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int32)
+    x = ppr.fast_binomial(key, n, p, dtype=jnp.int32)
     assert x.dtype == jnp.int32
 
     jax.config.update("jax_enable_x64", True)
-    x_int64 = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int64)
+    x_int64 = ppr.fast_binomial(key, n, p, dtype=jnp.int64)
     assert x_int64.dtype == jnp.int64
     jax.config.update("jax_enable_x64", False)
 
 
-def test_rbinom_invalid_and_edges():
+def test_binomial_invalid_and_edges():
     key = jax.random.key(0)
     # Includes deterministic edges (p=0, p=1, n=0) and invalid inputs.
     n = jnp.array([5.0, 5.0, 0.0, -2.0, 5.0, 5.0], dtype=jnp.float32)
     p = jnp.array([0.0, 1.0, 0.4, 0.4, -0.1, 1.2], dtype=jnp.float32)
 
-    x = ppr.fast_approx_rbinom(key, n, p)
+    x = ppr.fast_binomial(key, n, p)
 
     assert x.shape == n.shape
     assert x.dtype == n.dtype
@@ -57,7 +57,7 @@ def test_rbinom_invalid_and_edges():
     assert jnp.isnan(x[4])  # p < 0 → invalid, returns nan
     assert jnp.isnan(x[5])  # p > 1 → invalid, returns nan
 
-    x = ppr.fast_approx_rbinom(key, n, p, dtype=jnp.int32)
+    x = ppr.fast_binomial(key, n, p, dtype=jnp.int32)
 
     assert x.shape == n.shape
     assert x.dtype == jnp.int32
@@ -69,11 +69,11 @@ def test_rbinom_invalid_and_edges():
     assert x[5] == -1  # p > 1 → invalid, returns -1
 
 
-def test_rmultinom():
+def test_multinomial():
     key = jax.random.key(0)
     n = jnp.array([5, 10], dtype=jnp.int32)
     p = jnp.array([[0.2, 0.3, 0.5], [0.1, 0.4, 0.5]], dtype=jnp.float32)
-    x = ppr.fast_approx_rmultinom(key, n, p)
+    x = ppr.fast_multinomial(key, n, p)
     # Shape: should be (2, 3) for 2 draws, 3 categories
     assert x.shape == (2, 3)
     # Sum across categories should equal n for each row
@@ -85,19 +85,19 @@ def test_rmultinom():
     # Test with a batch of 1 for broadcasting
     n2 = jnp.array(12, dtype=jnp.int32)
     p2 = jnp.array([0.5, 0.3, 0.2], dtype=jnp.float32)
-    x2 = ppr.fast_approx_rmultinom(key, n2, p2)
+    x2 = ppr.fast_multinomial(key, n2, p2)
     assert x2.shape == (3,)
     assert jnp.sum(x2) == n2
     assert jnp.all(x2 >= 0)
 
 
-def test_rmultinom_edges_and_invalid():
+def test_multinomial_edges_and_invalid():
     key = jax.random.key(0)
 
     # Edge case 1: n=0, valid probability vector
     n = jnp.array(0, dtype=jnp.int32)
     p = jnp.array([0.2, 0.3, 0.5], dtype=jnp.float32)
-    x = ppr.fast_approx_rmultinom(key, n, p)
+    x = ppr.fast_multinomial(key, n, p)
     assert x.shape == (3,)
     assert jnp.sum(x) == 0
     assert jnp.all(x == 0)
@@ -105,22 +105,22 @@ def test_rmultinom_edges_and_invalid():
     # Edge case 2: p = [1.0, 0.0, 0.0] (all probability on first class)
     n = jnp.array(5, dtype=jnp.int32)
     p = jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32)
-    x = ppr.fast_approx_rmultinom(key, n, p)
+    x = ppr.fast_multinomial(key, n, p)
     assert x.shape == (3,)
     assert x[0] == 5
     assert jnp.all(x[1:] == 0)
 
     # Edge case 3: p = [0.0, 1.0, 0.0] (all on second class)
-    x = ppr.fast_approx_rmultinom(key, n, jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32))
+    x = ppr.fast_multinomial(key, n, jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32))
     assert x[1] == 5
     assert jnp.all(x[np.array([0, 2])] == 0)
 
     # Edge case 4: n = negative, should return nan or -1
     n_neg = jnp.array(-3, dtype=jnp.int32)
 
-    x = ppr.fast_approx_rmultinom(key, n_neg, p, dtype=jnp.float32)
+    x = ppr.fast_multinomial(key, n_neg, p, dtype=jnp.float32)
     assert jnp.all(jnp.isnan(x))
-    x = ppr.fast_approx_rmultinom(key, n_neg, p, dtype=jnp.int32)
+    x = ppr.fast_multinomial(key, n_neg, p, dtype=jnp.int32)
     assert jnp.all(x == -1)
 
     # Edge case 5: Probability vector does not sum to 1; should normalize to sum to 1
@@ -128,58 +128,58 @@ def test_rmultinom_edges_and_invalid():
     p_bad = jnp.array([0.2, 0.3, 0.7], dtype=jnp.float32)  # sums to 1.2
     p_good = jnp.array([0.2 / 1.2, 0.3 / 1.2, 0.7 / 1.2], dtype=jnp.float32)
 
-    x_bad = ppr.fast_approx_rmultinom(key, n, p_bad)
-    x_good = ppr.fast_approx_rmultinom(key, n, p_good)
+    x_bad = ppr.fast_multinomial(key, n, p_bad)
+    x_good = ppr.fast_multinomial(key, n, p_good)
     assert jnp.allclose(x_bad, x_good)
 
     # Edge case 6: Probability vector contains negative values; should normalize to sum to 1
     # p_bad = jnp.array([0.5, -0.2, 0.7], dtype=jnp.float32)
     # p_good = jnp.array([0.3, 0.0, 0.7], dtype=jnp.float32)
-    # x_bad = ppr.fast_approx_rmultinom(key, n, p_bad)
-    # x_good = ppr.fast_approx_rmultinom(key, n, p_good)
+    # x_bad = ppr.fast_multinomial(key, n, p_bad)
+    # x_good = ppr.fast_multinomial(key, n, p_good)
     # assert jnp.allclose(x_bad, x_good)
 
     # Edge case 7: Only one category (should get all in that category)
     n = jnp.array(4, dtype=jnp.int32)
     p_onecat = jnp.array([1.0], dtype=jnp.float32)
-    x = ppr.fast_approx_rmultinom(key, n, p_onecat)
+    x = ppr.fast_multinomial(key, n, p_onecat)
     assert x.shape == (1,)
     assert x[0] == n
 
     # Edge case 8: Shape/broadcasting mismatch
     n = jnp.array([5, 6], dtype=jnp.int32)
     p2 = jnp.array([[0.5, 0.5], [0.7, 0.3]], dtype=jnp.float32)
-    x = ppr.fast_approx_rmultinom(key, n, p2)
+    x = ppr.fast_multinomial(key, n, p2)
     assert x.shape == (2, 2)
     assert jnp.allclose(jnp.sum(x, axis=1), n)
 
 
-def test_rgamma():
+def test_gamma():
     key = jax.random.key(0)
     alpha = jnp.array([1.0, 2.0, 3.0])
-    x = ppr.fast_approx_rgamma(key, alpha)
+    x = ppr.fast_gamma(key, alpha)
     assert x.shape == (3,)
     assert x.dtype == jnp.float32
     assert x.min() >= 0
 
-    x_float32 = ppr.fast_approx_rgamma(key, alpha, dtype=jnp.float32)
+    x_float32 = ppr.fast_gamma(key, alpha, dtype=jnp.float32)
     assert x_float32.dtype == jnp.float32
 
     jax.config.update("jax_enable_x64", True)
-    x_float64 = ppr.fast_approx_rgamma(key, alpha, dtype=jnp.float64)
+    x_float64 = ppr.fast_gamma(key, alpha, dtype=jnp.float64)
     assert x_float64.dtype == jnp.float64
     jax.config.update("jax_enable_x64", False)
 
 
-def test_rpoisson_moments(n_moments=3):
-    """Check that the first n_moments moments of fast_approx_rpoisson match theoretical Poisson moments."""
+def test_poisson_moments(n_moments=3):
+    """Check that the first n_moments moments of fast_poisson match theoretical Poisson moments."""
     key = jax.random.key(42)
     lam_vals = [0.0001, 0.1, 1.0, 4.0, 4.01, 8.0, 15, 19.9, 20.1, 25, 30, 100.0, 500.0]
     n_samples = 100000
 
     for lam in lam_vals:
         lam_arr = jnp.full((n_samples,), lam, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rpoisson(key, lam_arr))
+        samples = np.array(ppr.fast_poisson(key, lam_arr))
 
         # Theoretical moments for Poisson
         mean_th = lam
@@ -211,8 +211,8 @@ def test_rpoisson_moments(n_moments=3):
                 )
 
 
-def test_rbinom_moments(n_moments=3):
-    """Check that the first n_moments moments of fast_approx_rbinom match theoretical Binomial moments."""
+def test_binomial_moments(n_moments=3):
+    """Check that the first n_moments moments of fast_binomial match theoretical Binomial moments."""
     key = jax.random.key(123)
     n = [3, 20, 100, 2000]
     p = [0.02 / 365.25, 0.01, 0.1, 0.3, 0.5, 0.8, 0.95, 0.99]
@@ -222,7 +222,7 @@ def test_rbinom_moments(n_moments=3):
     for n, p in test_params:
         n_arr = jnp.full((n_samples,), n, dtype=jnp.float32)
         p_arr = jnp.full((n_samples,), p, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rbinom(key, n_arr, p_arr))
+        samples = np.array(ppr.fast_binomial(key, n_arr, p_arr))
 
         mean_th = n * p
         var_th = n * p * (1 - p)
@@ -255,7 +255,7 @@ def test_rbinom_moments(n_moments=3):
                 )
 
 
-def test_rgamma_moments(n_moments=3):
+def test_gamma_moments(n_moments=3):
     """Check that the first n_moments moments of rgamma match theoretical Gamma moments (scale=1)."""
     key = jax.random.key(456)
     alpha_vals = [0.01, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0, 100.0]
@@ -263,7 +263,7 @@ def test_rgamma_moments(n_moments=3):
 
     for alpha in alpha_vals:
         alpha_arr = jnp.full((n_samples,), alpha, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rgamma(key, alpha_arr))
+        samples = np.array(ppr.fast_gamma(key, alpha_arr))
 
         # Theoretical moments for Gamma(shape=alpha, scale=1)
         mean_th = alpha
@@ -297,34 +297,34 @@ def test_rgamma_moments(n_moments=3):
                 )
 
 
-def test_rnbinom():
+def test_nbinomial():
     key = jax.random.key(0)
     n = jnp.array([1.0, 2.0, 3.0])
     p = jnp.array([0.5, 0.6, 0.7])
 
-    x = ppr.fast_approx_rnbinom(key, n, p=p)
+    x = ppr.fast_nbinomial(key, n, p=p)
     assert x.shape == (3,)
     assert x.min() >= 0
 
     mu = jnp.array([1.0, 2.0, 3.0])
-    x_mu = ppr.fast_approx_rnbinom(key, n, mu=mu)
+    x_mu = ppr.fast_nbinomial(key, n, mu=mu)
     assert x_mu.shape == (3,)
     assert x_mu.min() >= 0
 
-    x_int32 = ppr.fast_approx_rnbinom(key, n, p=p, dtype=jnp.int32)
+    x_int32 = ppr.fast_nbinomial(key, n, p=p, dtype=jnp.int32)
     assert x_int32.dtype == jnp.int32
 
     # p = 1.0 -> always 0 failures
-    x_p1 = ppr.fast_approx_rnbinom(key, n, p=1.0)
+    x_p1 = ppr.fast_nbinomial(key, n, p=1.0)
     assert jnp.all(x_p1 == 0.0)
 
     # n <= 0 -> nan
-    x_n0 = ppr.fast_approx_rnbinom(key, 0.0, mu=1.0)
+    x_n0 = ppr.fast_nbinomial(key, 0.0, mu=1.0)
     assert jnp.isnan(x_n0)
 
 
-def test_rnbinom_moments(n_moments=2):
-    """Check that the first n_moments moments of fast_approx_rnbinom match theoretical Negative Binomial moments."""
+def test_nbinomial_moments(n_moments=2):
+    """Check that the first n_moments moments of fast_nbinomial match theoretical Negative Binomial moments."""
     key = jax.random.key(789)
     n_vals = [1.0, 5.0, 20.0]
     p_vals = [0.1, 0.5, 0.9]
@@ -334,7 +334,7 @@ def test_rnbinom_moments(n_moments=2):
     for n, p in test_params:
         n_arr = jnp.full((n_samples,), n, dtype=jnp.float32)
         p_arr = jnp.full((n_samples,), p, dtype=jnp.float32)
-        samples = np.array(ppr.fast_approx_rnbinom(key, n_arr, p=p_arr))
+        samples = np.array(ppr.fast_nbinomial(key, n_arr, p=p_arr))
 
         mean_th = n * (1 - p) / p
         var_th = n * (1 - p) / (p**2)

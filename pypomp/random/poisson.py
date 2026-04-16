@@ -225,7 +225,7 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
     )
 
 
-def _poissinvf_scalar(u: Array, lam: Array, dtype) -> Array:
+def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
     u = jnp.asarray(u, dtype=dtype)
     lam = jnp.asarray(lam, dtype=dtype)
 
@@ -292,11 +292,11 @@ def _poissinvf_scalar(u: Array, lam: Array, dtype) -> Array:
     return x
 
 
-_poissinvf_vmap = jax.vmap(_poissinvf_scalar, in_axes=(0, 0, None))
+_poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None))
 
 
 @partial(jax.jit, static_argnames=["dtype"])
-def poissinvf(u: Array, lam: Array, dtype=jnp.float32) -> Array:
+def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
     """
     Vectorized inverse Poisson CDF approximation using JAX primitives.
 
@@ -312,17 +312,15 @@ def poissinvf(u: Array, lam: Array, dtype=jnp.float32) -> Array:
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
     flat_u = u_arr.reshape(-1)
     flat_lam = lam_arr.reshape(-1)
-    flat_res = _poissinvf_vmap(flat_u, flat_lam, dtype)
+    flat_res = _poissoninv_vmap(flat_u, flat_lam, dtype)
     return flat_res.reshape(u_arr.shape)
 
 
-def fast_approx_rpoisson(
-    key: Array, lam: Array, dtype: np.dtype | None = None
-) -> Array:
+def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array:
     """
-    Generate a Poisson random variable with given rate parameter.
+    Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
 
-    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve the speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method.
+    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve the speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
 
     Args:
         key: a PRNG key used as the random key.
@@ -340,7 +338,7 @@ def fast_approx_rpoisson(
     assert dtype is not None
     if not dtypes.issubdtype(dtype, np.integer):
         raise ValueError(
-            f"dtype argument to `fast_approx_rpoisson` must be an integer dtype, got {dtype}"
+            f"dtype argument to `fast_poisson` must be an integer dtype, got {dtype}"
         )
 
     # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
@@ -368,7 +366,7 @@ def fast_approx_rpoisson(
     )
     u = jnp.minimum(u, u_max)
     lam_float = lam.astype(float_dtype)
-    x = poissinvf(u, lam_float, dtype=float_dtype)
+    x = poissoninv(u, lam_float, dtype=float_dtype)
     # Cap the output to a reasonable maximum to prevent overflow
     max_val = lam_float + jnp.array(10.0, dtype=float_dtype) * jnp.sqrt(
         jnp.maximum(lam_float, jnp.array(1.0, dtype=float_dtype))

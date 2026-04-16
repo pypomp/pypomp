@@ -1,8 +1,10 @@
 from typing import Any, overload
 import numpy as np
-import jax
-import jax.numpy as jnp
 import warnings
+from jax.scipy.special import logit, expit
+
+
+__all__ = ["logmeanexp", "logmeanexp_se", "logit", "expit"]
 
 
 @overload
@@ -100,11 +102,3 @@ def logmeanexp_se(x, axis: int | None = None, ignore_nan: bool = False) -> Any:
     )
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)
     return float(se)
-
-
-def logit(x: jax.Array | float) -> jax.Array:
-    return jnp.log(x / (1 - x))
-
-
-def expit(x: jax.Array | float) -> jax.Array:
-    return 1 / (1 + jnp.exp(-x))

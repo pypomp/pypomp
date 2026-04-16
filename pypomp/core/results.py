@@ -9,7 +9,7 @@ from .rw_sigma import RWSigma
 from .parameters import PanelParameters
 
 
-from ..util import logmeanexp, logmeanexp_se
+from ..maths import logmeanexp, logmeanexp_se
 
 
 @dataclass

@@ -2,13 +2,6 @@
 pypomp: Modeling and inference using partially observed Markov process (POMP) models.
 """
 
-from importlib.metadata import PackageNotFoundError, version
-
-try:
-    __version__ = version("pypomp")
-except PackageNotFoundError:
-    __version__ = "unknown"
-
 from .core.parameters import PanelParameters, PompParameters
 from .core.par_trans import ParTrans
 from .core.pomp import Pomp
@@ -16,20 +9,21 @@ from .core.rw_sigma import RWSigma
 from .panel.panel import PanelPomp
 
 from .mcap import mcap
-from .util import expit, logit, logmeanexp, logmeanexp_se
 
-from . import random, models, benchmarks
+from . import random, models, benchmarks, types, maths
 
-from .types import (
-    CovarDict,
-    InitialTimeFloat,
-    ObservationDict,
-    ParamDict,
-    RNGKey,
-    StateDict,
-    StepSizeFloat,
-    TimeFloat,
-)
+
+def _get_version():
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("pypomp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+__version__ = _get_version()
+del _get_version
 
 __all__ = [
     "__version__",
@@ -40,23 +34,12 @@ __all__ = [
     "Pomp",
     "PompParameters",
     "RWSigma",
-    # Inference / Utils
-    "expit",
-    "logit",
-    "logmeanexp",
-    "logmeanexp_se",
+    # Inference / Algorithms
     "mcap",
-    # Types
-    "CovarDict",
-    "InitialTimeFloat",
-    "ObservationDict",
-    "ParamDict",
-    "RNGKey",
-    "StateDict",
-    "StepSizeFloat",
-    "TimeFloat",
     # Submodules
-    "random",
-    "models",
     "benchmarks",
+    "models",
+    "random",
+    "types",
+    "maths",
 ]

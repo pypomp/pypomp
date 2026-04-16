@@ -18,7 +18,7 @@ from ..core.results import (
     PanelPompTrainResult,
 )
 from ..core.parameters import PanelParameters
-from ..util import logmeanexp
+from ..maths import logmeanexp
 from .. import benchmarks
 
 

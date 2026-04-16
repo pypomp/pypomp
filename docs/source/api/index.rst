@@ -42,7 +42,7 @@ Utilities
 .. toctree::
    :maxdepth: 2
 
-   util
+   maths
    random
 
 Example Models

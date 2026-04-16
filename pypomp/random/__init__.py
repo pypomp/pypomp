@@ -2,10 +2,13 @@
 JAX-compatible random variable samplers optimized for GPUs.
 """
 
-from .poissoninvf import fast_approx_rpoisson
-from .binominvf import fast_approx_rbinom, fast_approx_rmultinom
-from .gammainvf import fast_approx_rgamma
-from .nbinom import fast_approx_rnbinom
+from . import poissoninvf, binominvf, gammainvf, nbinom, _dtype_helpers
+
+fast_approx_rpoisson = poissoninvf.fast_approx_rpoisson
+fast_approx_rbinom = binominvf.fast_approx_rbinom
+fast_approx_rmultinom = binominvf.fast_approx_rmultinom
+fast_approx_rgamma = gammainvf.fast_approx_rgamma
+fast_approx_rnbinom = nbinom.fast_approx_rnbinom
 
 __all__ = [
     "fast_approx_rpoisson",
@@ -14,3 +17,5 @@ __all__ = [
     "fast_approx_rgamma",
     "fast_approx_rnbinom",
 ]
+
+del poissoninvf, binominvf, gammainvf, nbinom, _dtype_helpers

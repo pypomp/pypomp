@@ -35,7 +35,7 @@ from .results import (
     PompTrainResult,
 )
 from .parameters import PompParameters
-from pypomp.util import logmeanexp
+from pypomp.maths import logmeanexp
 from pypomp import benchmarks
 
 

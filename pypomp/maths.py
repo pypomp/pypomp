@@ -96,9 +96,22 @@ def logmeanexp_se(x, axis: int | None = None, ignore_nan: bool = False) -> Any:
     if n <= 1:
         return np.nan
 
-    jack = np.asarray(
-        [logmeanexp(np.delete(x_array, i), ignore_nan=False) for i in range(n)],
-        dtype=float,
-    )
+    x_max = np.max(x_array)
+    s = np.exp(x_array - x_max)
+    S = np.sum(s)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        jack = np.log((S - s) / (n - 1)) + x_max
+
+    # Handle numerical stability if the max is unique and dominant
+    is_max = x_array == x_max
+    if np.sum(is_max) == 1:
+        idx_max = np.argmax(x_array)
+        # S - s[idx_max] might be zero due to underflow
+        # If so, re-calculate this single jackknife sample accurately
+        if S - s[idx_max] <= 0:
+            subset = np.delete(x_array, idx_max)
+            jack[idx_max] = logmeanexp(subset, ignore_nan=False)
+
     se = np.sqrt(n - 1) * np.std(jack, ddof=0)
     return float(se)

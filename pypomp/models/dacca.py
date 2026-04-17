@@ -29,9 +29,16 @@ theta = {
         f"bs{i + 1}": float(b)
         for i, b in enumerate([0.747, 6.38, -3.44, 4.23, 3.33, 4.55])
     },  # seasonal transmission rates
-    "sigma": 3.13,  # 3.13 # 0.77 # environmental noise intensity
+    "sigma": 3.13,  # environmental noise intensity
     "tau": 0.23,  # measurement error s.d.
-    "omega": float(jnp.exp(-4.5)),
+    "alpha": 1.0,  # non-linear transmission parameter
+    "delta": 0.02,  # mortality rate
+    "S_0": 0.621,
+    "I_0": 0.378,
+    "Y_0": 0.0,
+    "R1_0": 0.000843,
+    "R2_0": 0.000972,
+    "R3_0": 1.16e-07,
     **{
         f"omegas{i + 1}": float(omega)
         for i, omega in enumerate(
@@ -89,14 +96,21 @@ theta_names = (
         "m",
         "rho",
         "epsilon",
-        "omega",
         "c",
         "beta_trend",
         "sigma",
         "tau",
+        "alpha",
+        "delta",
+        "S_0",
+        "I_0",
+        "Y_0",
+        "R1_0",
+        "R2_0",
+        "R3_0",
     ]
-    + [f"b{i}" for i in range(1, 7)]
-    + [f"omega{i}" for i in range(1, 7)]
+    + [f"bs{i}" for i in range(1, 7)]
+    + [f"omegas{i}" for i in range(1, 7)]
 )
 
 
@@ -105,29 +119,29 @@ accumvars = ["Mn"]
 
 
 def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
-    S_0 = 0.621
-    I_0 = 0.378
-    Y_0 = 0
-    R1_0 = 0.000843
-    R2_0 = 0.000972
-    R3_0 = 1.16e-07
+    S_0 = theta_["S_0"]
+    I_0 = theta_["I_0"]
+    Y_0 = theta_["Y_0"]
+    R0 = jnp.array([theta_[f"R{i}_0"] for i in range(1, 4)])
+
+    total_sum = S_0 + I_0 + Y_0 + jnp.sum(R0)
     pop = covars["pop"]
-    S = pop * S_0
-    I = pop * I_0
-    Y = pop * Y_0
-    R1 = pop * R1_0
-    R2 = pop * R2_0
-    R3 = pop * R3_0
-    Mn = 0
-    count = 0
+
+    S = jnp.round(pop * S_0 / total_sum)
+    I = jnp.round(pop * I_0 / total_sum)
+    Y = jnp.round(pop * Y_0 / total_sum)
+    R = jnp.round(pop * R0 / total_sum)
+
+    Mn = 0.0
+    count = 0.0
     return {
         "S": S,
         "I": I,
         "Y": Y,
         "Mn": Mn,
-        "R1": R1,
-        "R2": R2,
-        "R3": R3,
+        "R1": R[0],
+        "R2": R[1],
+        "R3": R[2],
         "count": count,
     }
 
@@ -154,17 +168,15 @@ def rproc(
     deltaI = theta_["m"]
     rho = theta_["rho"]
     eps = theta_["epsilon"]
-    omega = theta_["omega"]
     clin = theta_["c"]
     beta_trend = theta_["beta_trend"]
     sd_beta = theta_["sigma"]
+    alpha = theta_["alpha"]
+    delta = theta_["delta"]
     omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
     bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
 
-    delta = 0.02
     nrstage = 3
-    clin = 1  # HARDCODED SEIR
-    rho = 0  # HARDCODED INAPPARENT INFECTIONS
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
@@ -177,7 +189,7 @@ def rproc(
     subkey, key = jax.random.split(key)
     dw = jax.random.normal(subkey) * std
 
-    effI = I / pop
+    effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
     passages = passages.at[0].set(gamma * I)
     ideaths = delta * I
@@ -241,17 +253,15 @@ def rproc_gamma(
     deltaI = theta_["m"]
     rho = theta_["rho"]
     eps = theta_["epsilon"]
-    omega = theta_["omega"]
     clin = theta_["c"]
     beta_trend = theta_["beta_trend"]
     sd_beta = theta_["sigma"]
+    alpha = theta_["alpha"]
+    delta = theta_["delta"]
     omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
     bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
 
-    delta = 0.02
     nrstage = 3
-    clin = 1  # HARDCODED SEIR
-    rho = 0  # HARDCODED INAPPARENT INFECTIONS
     # std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
@@ -264,7 +274,7 @@ def rproc_gamma(
     subkey, key = jax.random.split(key)
     # dw = jax.random.normal(subkey) * std
 
-    effI = I / pop
+    effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
     passages = passages.at[0].set(gamma * I)
     ideaths = delta * I
@@ -368,32 +378,42 @@ def rmeas(
 
 
 def to_est(theta: dict) -> dict:
+    IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
+    IVPs = jnp.array([theta[k] for k in IVP_list])
+    IVP_ests = jnp.log(IVPs / jnp.sum(IVPs))
     return {
         "gamma": jnp.log(theta["gamma"]),
         "m": jnp.log(theta["m"]),
         "rho": jnp.log(theta["rho"]),
         "epsilon": jnp.log(theta["epsilon"]),
-        "omega": jnp.log(theta["omega"]),
         "c": jspecial.logit(theta["c"]),
         "beta_trend": theta["beta_trend"] * 100,
         "sigma": jnp.log(theta["sigma"]),
         "tau": jnp.log(theta["tau"]),
+        "alpha": jnp.log(theta["alpha"]),
+        "delta": jnp.log(theta["delta"]),
+        **{k: IVP_ests[i] for i, k in enumerate(IVP_list)},
         **{f"bs{i}": theta[f"bs{i}"] for i in range(1, 7)},
         **{f"omegas{i}": theta[f"omegas{i}"] for i in range(1, 7)},
     }
 
 
 def from_est(theta: dict) -> dict:
+    IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
+    IVP_ests = jnp.exp(jnp.array([theta[k] for k in IVP_list]))
+    IVPs = IVP_ests / jnp.sum(IVP_ests)
     return {
         "gamma": jnp.exp(theta["gamma"]),
         "m": jnp.exp(theta["m"]),
         "rho": jnp.exp(theta["rho"]),
         "epsilon": jnp.exp(theta["epsilon"]),
-        "omega": jnp.exp(theta["omega"]),
         "c": jspecial.expit(theta["c"]),
         "beta_trend": theta["beta_trend"] / 100,
         "sigma": jnp.exp(theta["sigma"]),
         "tau": jnp.exp(theta["tau"]),
+        "alpha": jnp.exp(theta["alpha"]),
+        "delta": jnp.exp(theta["delta"]),
+        **{k: IVPs[i] for i, k in enumerate(IVP_list)},
         **{f"bs{i}": theta[f"bs{i}"] for i in range(1, 7)},
         **{f"omegas{i}": theta[f"omegas{i}"] for i in range(1, 7)},
     }

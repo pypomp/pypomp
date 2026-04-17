@@ -148,3 +148,136 @@ def measles_panel_mp(measles_panel_mp_module):
     panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key, J, M, a
+@pytest.fixture(scope="module")
+def lg_panel_setup_some_shared_module():
+    lg1 = pp.models.LG()
+    lg2 = pp.models.LG()
+    # Create PanelParameters with some shared and some unit-specific
+    shared_names = ["A1", "C1"]
+    unit_specific_names = [n for n in lg1.canonical_param_names if n not in shared_names]
+    
+    # Simple averaging for shared
+    p1, p2 = lg1.theta[0], lg2.theta[0]
+    shared_df = pd.DataFrame(
+        {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
+        index=pd.Index(shared_names)
+    )
+    
+    unit_specific_df = pd.DataFrame(
+        {
+            "unit1": [p1[n] for n in unit_specific_names],
+            "unit2": [p2[n] for n in unit_specific_names],
+        },
+        index=pd.Index(unit_specific_names),
+    )
+    
+    theta = pp.PanelParameters(theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]) * 2
+    panel = pp.PanelPomp(
+        Pomp_dict={"unit1": lg1, "unit2": lg2},
+        theta=theta,
+    )
+    key = jax.random.key(0)
+    fresh_key = panel.fresh_key
+    
+    # Create simple rw_sd for LG
+    rw_sd = pp.RWSigma(
+        sigmas={n: 0.02 for n in lg1.canonical_param_names},
+        init_names=[]
+    )
+    
+    return panel, rw_sd, theta, key, fresh_key
+
+
+@pytest.fixture(scope="function")
+def lg_panel_setup_some_shared(lg_panel_setup_some_shared_module):
+    panel_orig, rw_sd, theta, key, fresh_key = lg_panel_setup_some_shared_module
+    panel = deepcopy(panel_orig)
+    panel.results_history.clear()
+    panel.theta = deepcopy(theta)
+    panel.fresh_key = fresh_key
+    return panel, rw_sd, key
+
+
+@pytest.fixture(scope="module")
+def lg_panel_setup_specific_only_module():
+    lg1 = pp.models.LG()
+    lg2 = pp.models.LG()
+    # Create PanelParameters with only unit-specific
+    p1, p2 = lg1.theta[0], lg2.theta[0]
+    unit_specific_df = pd.DataFrame(
+        {
+            "unit1": [p1[n] for n in lg1.canonical_param_names],
+            "unit2": [p2[n] for n in lg2.canonical_param_names],
+        },
+        index=pd.Index(lg1.canonical_param_names),
+    )
+    
+    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific_df}]) * 2
+    panel = pp.PanelPomp(
+        Pomp_dict={"unit1": lg1, "unit2": lg2},
+        theta=theta,
+    )
+    key = jax.random.key(0)
+    fresh_key = panel.fresh_key
+    
+    # Create simple rw_sd for LG
+    rw_sd = pp.RWSigma(
+        sigmas={n: 0.02 for n in lg1.canonical_param_names},
+        init_names=[]
+    )
+    
+    return panel, rw_sd, theta, key, fresh_key
+
+
+@pytest.fixture(scope="function")
+def lg_panel_setup_specific_only(lg_panel_setup_specific_only_module):
+    panel_orig, rw_sd, theta, key, fresh_key = lg_panel_setup_specific_only_module
+    panel = deepcopy(panel_orig)
+    panel.results_history.clear()
+    panel.theta = deepcopy(theta)
+    panel.fresh_key = fresh_key
+    return panel, rw_sd, key
+
+
+@pytest.fixture(scope="module")
+def lg_panel_mp_module(lg_panel_setup_some_shared_module):
+    panel_orig, rw_sd, theta, key, fresh_key = lg_panel_setup_some_shared_module
+    panel = deepcopy(panel_orig)
+    J = 2
+    M = 2
+    a = 0.5
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    panel.pfilter(J=J)
+    results_history = deepcopy(panel.results_history)
+    fresh_key = panel.fresh_key
+    return (
+        panel_orig,
+        rw_sd,
+        key,
+        J,
+        M,
+        a,
+        theta,
+        fresh_key,
+        results_history,
+    )
+
+
+@pytest.fixture(scope="function")
+def lg_panel_mp(lg_panel_mp_module):
+    (
+        panel_orig,
+        rw_sd,
+        key,
+        J,
+        M,
+        a,
+        theta,
+        fresh_key,
+        results_history,
+    ) = lg_panel_mp_module
+    panel = deepcopy(panel_orig)
+    panel.results_history = deepcopy(results_history)
+    panel.theta = deepcopy(theta)
+    panel.fresh_key = fresh_key
+    return panel, rw_sd, key, J, M, a

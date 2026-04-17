@@ -7,16 +7,16 @@ import pickle
 import time
 
 
-def test_get_unit_parameters(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
-    params = panel.get_unit_parameters(unit="London")
+def test_get_unit_parameters(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
+    params = panel.get_unit_parameters(unit="unit1")
     assert isinstance(params, list)
     assert isinstance(params[0], dict)
     assert len(params) == panel.theta.num_replicates()
 
 
-def test_results(measles_panel_mp):
-    panel, *_ = measles_panel_mp
+def test_results(lg_panel_mp):
+    panel, *_ = lg_panel_mp
     results0 = panel.results(0)
     results1 = panel.results(1)
     # Check expected columns for results0 (from mif, index=0)
@@ -42,8 +42,8 @@ def test_results(measles_panel_mp):
     assert len(results1) == n_units1 * n_reps1
 
 
-def test_fresh_key(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
+def test_fresh_key(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J = 2
     panel.pfilter(J=J, key=key)
     assert not np.array_equal(
@@ -55,8 +55,8 @@ def test_fresh_key(measles_panel_setup_some_shared):
     )
 
 
-def test_traces(measles_panel_mp):
-    panel, *_ = measles_panel_mp
+def test_traces(lg_panel_mp):
+    panel, *_ = lg_panel_mp
     traces = panel.traces()
     assert isinstance(traces, pd.DataFrame)
     expected_column_order = ["theta_idx", "unit", "iteration", "method", "logLik"]
@@ -97,8 +97,8 @@ def test_traces(measles_panel_mp):
             )
 
 
-def test_time(measles_panel_mp):
-    panel, *_ = measles_panel_mp
+def test_time(lg_panel_mp):
+    panel, *_ = lg_panel_mp
     time_df = panel.time()
     assert isinstance(time_df, pd.DataFrame)
     assert "method" in time_df.columns
@@ -106,8 +106,8 @@ def test_time(measles_panel_mp):
     assert time_df.index.name == "history_index"
 
 
-def test_pickle_panelpomp(measles_panel_mp):
-    panel, *_ = measles_panel_mp
+def test_pickle_panelpomp(lg_panel_mp):
+    panel, *_ = lg_panel_mp
 
     pickled = pickle.dumps(panel)
     unpickled_panel = pickle.loads(pickled)
@@ -119,8 +119,8 @@ def test_pickle_panelpomp(measles_panel_mp):
     unpickled_panel.pfilter(J=2)
 
 
-def test_sample_params(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
+def test_sample_params(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
     param_bounds = {
         "R0": [10.0, 60.0],
         "sigma": [25.0, 100.0],
@@ -340,8 +340,8 @@ def test_performance_comprehensive():
     assert len(traces_df) > 0
 
 
-def test_prune(measles_panel_mp):
-    panel, rw_sd, key, J, M, a = measles_panel_mp
+def test_prune(lg_panel_mp):
+    panel, rw_sd, key, J, M, a = lg_panel_mp
 
     # Get initial state from the last result
     results_df = panel.results()
@@ -425,8 +425,8 @@ def test_prune(measles_panel_mp):
                 )
 
 
-def test_mix_and_match(measles_panel_mp):
-    panel, rw_sd, key, J, M, a = measles_panel_mp
+def test_mix_and_match(lg_panel_mp):
+    panel, rw_sd, key, J, M, a = lg_panel_mp
 
     results_df = panel.results()
     initial_n_reps = results_df["theta_idx"].nunique()
@@ -507,15 +507,15 @@ def test_mix_and_match(measles_panel_mp):
                 _ = orig_col.equals(new_col)
 
 
-def test_print_summary(measles_panel_mp):
-    panel, rw_sd, key, J, M, a = measles_panel_mp
+def test_print_summary(lg_panel_mp):
+    panel, rw_sd, key, J, M, a = lg_panel_mp
     panel.print_summary()
 
 
-def test_merge(measles_panel_setup_some_shared):
+def test_merge(lg_panel_setup_some_shared):
     """Test merging two PanelPomp objects."""
-    panel1, rw_sd, key1 = measles_panel_setup_some_shared
-    panel2, _, key2 = measles_panel_setup_some_shared
+    panel1, rw_sd, key1 = lg_panel_setup_some_shared
+    panel2, _, key2 = lg_panel_setup_some_shared
 
     J = 2
     M = 2

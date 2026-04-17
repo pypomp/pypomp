@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 
 
-def test_panel_pomp_probe(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
+def test_panel_pomp_probe(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
 
     probes = {"mean_first_col": lambda df: df.iloc[:, 0].mean()}
 
@@ -33,8 +33,8 @@ def test_panel_pomp_probe(measles_panel_setup_some_shared):
         assert np.isclose(unit_real_val, expected_val)
 
 
-def test_panel_pomp_probe_with_subset_theta(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
+def test_panel_pomp_probe_with_subset_theta(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
 
     panel.theta = panel.theta.subset([0])
 

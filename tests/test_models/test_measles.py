@@ -82,41 +82,44 @@ def london_003():
     return measles
 
 
-def test_other_models():
-    base = BASE_THETA
-    models = {
-        "001": base,
-        "001c": base,
-        "003": base,
-        "002": {
-            "R0": base["R0"],
-            "sigma": base["sigma"],
-            "gamma": base["gamma"],
-            "iota1": np.log(base["iota"]),
-            "iota2": 0.1,
-            "rho": base["rho"],
-            "sigmaSE": base["sigmaSE"],
-            "psi": base["psi"],
-            "cohort": base["cohort"],
-            "amplitude": base["amplitude"],
-            "S_0": base["S_0"],
-            "E_0": base["E_0"],
-            "I_0": base["I_0"],
-            "R_0": base["R_0"],
-        },
-    }
-
+@pytest.mark.parametrize(
+    "model,theta",
+    [
+        ("001", BASE_THETA),
+        ("001c", BASE_THETA),
+        ("003", BASE_THETA),
+        (
+            "002",
+            {
+                "R0": BASE_THETA["R0"],
+                "sigma": BASE_THETA["sigma"],
+                "gamma": BASE_THETA["gamma"],
+                "iota1": np.log(BASE_THETA["iota"]),
+                "iota2": 0.1,
+                "rho": BASE_THETA["rho"],
+                "sigmaSE": BASE_THETA["sigmaSE"],
+                "psi": BASE_THETA["psi"],
+                "cohort": BASE_THETA["cohort"],
+                "amplitude": BASE_THETA["amplitude"],
+                "S_0": BASE_THETA["S_0"],
+                "E_0": BASE_THETA["E_0"],
+                "I_0": BASE_THETA["I_0"],
+                "R_0": BASE_THETA["R_0"],
+            },
+        ),
+    ],
+)
+def test_other_models(model, theta):
     key = jax.random.key(0)
-    for model, theta in models.items():
-        mod_obj = pp.models.UKMeasles.Pomp(
-            unit=["London"],
-            theta=theta,
-            model=model,
-            clean=True,
-        )
-        mod_obj.simulate(key=key, nsim=1)
-        mod_obj.pfilter(J=2, key=key)
-        assert not np.isnan(mod_obj.results()["logLik"]).any()
+    mod_obj = pp.models.UKMeasles.Pomp(
+        unit=["London"],
+        theta=theta,
+        model=model,
+        clean=True,
+    )
+    mod_obj.simulate(key=key, nsim=1)
+    mod_obj.pfilter(J=2, key=key)
+    assert not np.isnan(mod_obj.results()["logLik"]).any()
 
 
 def test_measles_sim(london):

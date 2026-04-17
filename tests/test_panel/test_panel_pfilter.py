@@ -19,9 +19,9 @@ def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
     assert hasattr(result, "execution_time")
 
 
-def test_pfilter_basic(measles_panel_setup_some_shared):
+def test_pfilter_basic(lg_panel_setup_some_shared):
     """Test basic pfilter functionality with some shared parameters."""
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     theta_orig = deepcopy(panel.theta)
     J = 2
     panel.pfilter(J=J, key=key)
@@ -29,9 +29,9 @@ def test_pfilter_basic(measles_panel_setup_some_shared):
     check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)
 
 
-def test_pfilter_unit_specific_only(measles_panel_setup_specific_only):
+def test_pfilter_unit_specific_only(lg_panel_setup_specific_only):
     """Test pfilter with unit-specific parameters only."""
-    panel, rw_sd, key = measles_panel_setup_specific_only
+    panel, rw_sd, key = lg_panel_setup_specific_only
     theta_orig = deepcopy(panel.theta)
     J = 2
     panel.pfilter(J=J, key=key)
@@ -39,9 +39,9 @@ def test_pfilter_unit_specific_only(measles_panel_setup_specific_only):
     check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)
 
 
-def test_pfilter_diagnostics(measles_panel_setup_some_shared):
+def test_pfilter_diagnostics(lg_panel_setup_some_shared):
     """Test that CLL, ESS, filter_mean, and prediction_mean work correctly."""
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     n_units = len(panel.unit_objects)
     n_theta = panel.theta.num_replicates()
     reps = 2

@@ -1,12 +1,10 @@
 import pandas as pd
 
 
-def test_simulate(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
-    X_sim_order = ["unit", "theta_idx", "sim", "time"] + [
-        f"state_{i}" for i in range(0, 6)
-    ]
-    Y_sim_order = ["unit", "theta_idx", "sim", "time", "obs_0"]
+def test_simulate(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
+    X_sim_order = ["unit", "theta_idx", "sim", "time"] + ["state_0", "state_1"]
+    Y_sim_order = ["unit", "theta_idx", "sim", "time", "obs_0", "obs_1"]
 
     X_sims, Y_sims = panel.simulate(key=key)
 
@@ -16,11 +14,11 @@ def test_simulate(measles_panel_setup_some_shared):
     assert list(Y_sims.columns) == Y_sim_order
 
 
-def test_simulate_as_pomp(measles_panel_setup_some_shared):
+def test_simulate_as_pomp(lg_panel_setup_some_shared):
     import pytest
     import pypomp as pp
 
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
 
     # Test normal as_pomp
     new_panel = panel.simulate(key=key, as_pomp=True)

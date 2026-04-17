@@ -42,8 +42,8 @@ def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
     )
 
 
-def test_mif(measles_panel_setup_some_shared):
-    panel, rw_sd, key = measles_panel_setup_some_shared
+def test_mif(lg_panel_setup_some_shared):
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     theta_orig = deepcopy(panel.theta)
     panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
@@ -51,11 +51,11 @@ def test_mif(measles_panel_setup_some_shared):
     check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
 
 
-def test_mif_parameter_order_consistency(measles_panel_setup_some_shared):
+def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
     """
     Test that MIF produces consistent results regardless of parameter order in parameter dataframes.
     """
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J = 2
     M = 3
     a = 0.5
@@ -219,9 +219,9 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(measles_panel_setup
         )
 
 
-def test_mif_vmap_some_shared(measles_panel_setup_some_shared):
+def test_mif_vmap_some_shared(lg_panel_setup_some_shared):
     """Test vmap MIF with shared + unit-specific params, chunk_size = U."""
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     theta_orig = deepcopy(panel.theta)
@@ -230,9 +230,9 @@ def test_mif_vmap_some_shared(measles_panel_setup_some_shared):
     check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
 
 
-def test_mif_vmap_specific_only(measles_panel_setup_specific_only):
+def test_mif_vmap_specific_only(lg_panel_setup_specific_only):
     """Test vmap MIF with only unit-specific params."""
-    panel, rw_sd, key = measles_panel_setup_specific_only
+    panel, rw_sd, key = lg_panel_setup_specific_only
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     theta_orig = deepcopy(panel.theta)
@@ -241,9 +241,9 @@ def test_mif_vmap_specific_only(measles_panel_setup_specific_only):
     check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
 
 
-def test_mif_vmap_chunk_size_1(measles_panel_setup_some_shared):
+def test_mif_vmap_chunk_size_1(lg_panel_setup_some_shared):
     """Test vmap MIF with chunk_size=1 (degenerate: one unit per chunk)."""
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     theta_orig = deepcopy(panel.theta)
     panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=1)
@@ -251,9 +251,9 @@ def test_mif_vmap_chunk_size_1(measles_panel_setup_some_shared):
     check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
 
 
-def test_mif_vmap_with_padding(measles_panel_setup_some_shared):
+def test_mif_vmap_with_padding(lg_panel_setup_some_shared):
     """Test vmap MIF when chunk_size does not divide U (requires padding)."""
-    panel, rw_sd, key = measles_panel_setup_some_shared
+    panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     # Use a chunk_size that doesn't divide U

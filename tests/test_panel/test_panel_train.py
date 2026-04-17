@@ -8,35 +8,34 @@ import pypomp as pp
 from pypomp.core.results import PanelPompTrainResult
 
 
-def _get_measles_003_panel():
-    AK_mles = cast(pd.DataFrame, pp.models.UKMeasles.AK_mles())
-    london_theta = AK_mles["London"].to_dict()
-    hastings_theta = AK_mles["Hastings"].to_dict()
-    london = pp.models.UKMeasles.Pomp(
-        unit=["London"],
-        theta=london_theta,
-        model="003",
+def _get_lg_panel():
+    lg1 = pp.models.LG()
+    lg2 = pp.models.LG()
+    # Create PanelParameters with some shared and some unit-specific
+    shared_names = ["A1", "C1"]
+    unit_specific_names = [
+        n for n in lg1.canonical_param_names if n not in shared_names
+    ]
+
+    p1, p2 = lg1.theta[0], lg2.theta[0]
+    shared_df = pd.DataFrame(
+        {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
+        index=pd.Index(shared_names),
     )
-    hastings = pp.models.UKMeasles.Pomp(
-        unit=["Hastings"],
-        theta=hastings_theta,
-        model="003",
+
+    unit_specific_df = pd.DataFrame(
+        {
+            "unit1": [p1[n] for n in unit_specific_names],
+            "unit2": [p2[n] for n in unit_specific_names],
+        },
+        index=pd.Index(unit_specific_names),
     )
-    unit_specific = cast(
-        pd.DataFrame, AK_mles[["London", "Hastings"]].drop(labels=["gamma", "cohort"])
-    )
-    shared = cast(
-        pd.DataFrame,
-        AK_mles[["London", "Hastings"]]
-        .loc[["gamma", "cohort"], :]
-        .mean(axis=1)
-        .to_frame(name="shared"),
-    )
+
     theta = pp.PanelParameters(
-        theta=[{"shared": shared, "unit_specific": unit_specific}]
+        theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]
     )
     panel = pp.PanelPomp(
-        Pomp_dict={"London": london, "Hastings": hastings},
+        Pomp_dict={"unit1": lg1, "unit2": lg2},
         theta=theta,
     )
     return panel
@@ -45,7 +44,7 @@ def _get_measles_003_panel():
 @pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])
 @pytest.mark.parametrize("optimizer", ["Adam", "FullMatrixAdam"])
 def test_panel_train(chunk_size, optimizer):
-    panel = _get_measles_003_panel()
+    panel = _get_lg_panel()
     J, M = 2, 2
     panel.train(
         J=J,
@@ -54,7 +53,7 @@ def test_panel_train(chunk_size, optimizer):
         theta=deepcopy(panel.theta),
         chunk_size=chunk_size,
         optimizer=optimizer,
-        key=jax.random.key(0),
+        key=jax.random.key(1),
     )
 
     res = panel.results_history[-1]
@@ -67,13 +66,13 @@ def test_panel_train(chunk_size, optimizer):
     df = res.to_dataframe()
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns
-    assert "R0" in df.columns
+    assert "A1" in df.columns
 
 
 def test_panel_train_clipping():
-    panel = _get_measles_003_panel()
+    panel = _get_lg_panel()
     J, M = 2, 1
-    eta = 10.0
+    eta = 0.5
     key = jax.random.key(0)
     theta_init = deepcopy(panel.theta)
 

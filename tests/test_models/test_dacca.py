@@ -37,7 +37,7 @@ def simple():
 
 def test_dacca_pfilter(simple):
     dacca, rw_sd, J, key, ys = simple
-    dacca.pfilter(J=1000, reps=3, key=key)
+    dacca.pfilter(J=1000, reps=6, key=key)
     logLik = pp.maths.logmeanexp(dacca.results_history[-1].logLiks)
     assert abs(logLik - -3748.6) < 2
 

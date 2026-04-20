@@ -495,7 +495,6 @@ def dacca(
         nstep=nstep,
         dt=dt,
         accumvars=accumvars,
-        ydim=1,
         theta=theta,
         covars=covars,
         statenames=statenames,

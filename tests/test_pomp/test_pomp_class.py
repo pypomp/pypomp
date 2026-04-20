@@ -263,7 +263,6 @@ def test_prune(simple):
         dmeas=LG.dmeas.original_func,
         t0=LG.t0,
         nstep=LG.rproc.nstep,
-        ydim=LG.rmeas.ydim,
         statenames=["X1", "X2"],
     )
     with pytest.raises(ValueError):

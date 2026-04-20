@@ -114,7 +114,7 @@ def test_RMeas_value_error():
         with pytest.raises(ValueError):
             RMeas(
                 fn,
-                ydim=1,
+                y_names=["y_0"],
                 statenames=["state_0"],
                 param_names=["param_0"],
                 covar_names=[],
@@ -123,7 +123,7 @@ def test_RMeas_value_error():
     # Test that correct arguments run without error
     RMeas(
         lambda X_, theta_, key, covars, t: jnp.array([0]),
-        ydim=1,
+        y_names=["y_0"],
         statenames=["state_0"],
         param_names=["param_0"],
         covar_names=[],
@@ -229,7 +229,7 @@ def test_RMeas_type_annotations():
 
     rmeas = RMeas(
         custom_rmeas,  # type: ignore
-        ydim=1,
+        y_names=["y_0"],
         statenames=["state_0"],
         param_names=["param_0"],
         covar_names=[],
@@ -264,7 +264,7 @@ def make_component(comp_class, func):
     if comp_class == RProc:
         kwargs["nstep"] = 1
     elif comp_class == RMeas:
-        kwargs["ydim"] = 1
+        kwargs["y_names"] = ["y_0"]
     elif comp_class == DMeas:
         pass
 

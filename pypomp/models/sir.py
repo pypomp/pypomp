@@ -343,7 +343,6 @@ def sir(
         nstep=20,
         accumvars=accumvars,
         covars=covars,
-        ydim=1,
     )
 
     # Simulate data
@@ -371,7 +370,6 @@ def sir(
         nstep=20,
         accumvars=accumvars,
         covars=covars,
-        ydim=1,
     )
 
 

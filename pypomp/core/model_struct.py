@@ -540,11 +540,11 @@ class RMeas(_ModelComponent):
 
     Args:
         struct (Callable): The user-defined simulation function.
-        ydim (int): Dimension of the observation vector.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
         par_trans (ParTrans): Parameter transformation object.
+        y_names (list[str], optional): List of observation names.
 
     User Function Structure
     -----------------------
@@ -585,13 +585,40 @@ class RMeas(_ModelComponent):
     vmap_axes_pf = (0, None, 0, None, None, None)
     vmap_axes_per = (0, 0, 0, None, None, None)
 
-    def __init__(self, struct, ydim, *args, **kwargs):
-        self.ydim = ydim
-        super().__init__(struct, *args, **kwargs)
+    def __init__(
+        self,
+        struct: Callable,
+        statenames: list[str],
+        param_names: list[str],
+        covar_names: list[str],
+        par_trans: ParTrans,
+        y_names: list[str] | None = None,
+        validate_logic: bool = True,
+    ):
+        self.ydim = len(y_names) if y_names is not None else 0
+
+        super().__init__(
+            struct,
+            statenames,
+            param_names,
+            covar_names,
+            par_trans,
+            y_names=y_names,
+            validate_logic=validate_logic,
+        )
 
     def _validate_output(self, result):
-        if not hasattr(result, "shape"):  # Duck type check for array
+        if not hasattr(result, "shape"):
             raise TypeError(f"RMeas must return a JAX array, got {type(result)}")
+
+        if self.ydim == 1 and result.shape == ():
+            return
+
+        if result.shape != (self.ydim,):
+            raise ValueError(
+                f"RMeas output shape {result.shape} does not match ydim {self.ydim} "
+                f"(derived from y_names={self.y_names})."
+            )
 
     def _make_wrapper(self, user_func):
         pnames, snames, cnames = self.param_names, self.statenames, self.covar_names

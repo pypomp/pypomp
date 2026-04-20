@@ -245,7 +245,6 @@ class UKMeasles:
             t0=t0,
             nstep=None,
             dt=dt,
-            ydim=1,
             accumvars=mod.accumvars,
             statenames=mod.statenames,
             rinit=mod.rinit,

@@ -144,7 +144,6 @@ def LG(
         t0=0.0,
         nstep=1,
         dt=None,
-        ydim=2,
         theta=theta,
         covars=None,
         statenames=["X1", "X2"],

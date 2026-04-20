@@ -152,7 +152,6 @@ def spx():
         t0=0.0,
         nstep=1,
         dt=None,
-        ydim=1,
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,

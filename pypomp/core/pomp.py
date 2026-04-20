@@ -120,9 +120,6 @@ class Pomp:
     _max_steps_per_interval: int
     """Maximum number of integration steps between any two observation times."""
 
-    ydim: int | None
-    """Dimension of the observation vector when an observation simulator is provided."""
-
     accumvars: list[str] | None
     """Names of accumulator state variables that are reset at each observation time."""
 
@@ -151,7 +148,6 @@ class Pomp:
         par_trans: ParTrans | None = None,
         nstep: int | None = None,
         dt: float | None = None,
-        ydim: int | None = None,
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
         validate_logic: bool = True,
@@ -196,9 +192,7 @@ class Pomp:
                 Passed automatically to the `RProc` component. Must be None if `dt` is provided.
             dt (float, optional): Fixed time step size for the process model.
                 Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
-            ydim (int, optional): The dimension of the measurement vector (number of observed variables).
-                Only required if `rmeas` is provided. Passed automatically to the `RMeas` component.
-            accumvars (tuple[int, ...], optional): Indices of accumulator state variables (e.g.,
+            accumvars (tuple[str, ...], optional): Names of accumulator state variables (e.g.,
                 incidence tracking). These are reset to 0 at the start of each observation interval.
             validate_logic (bool, optional): Whether to validate the logic of the model components.
         """
@@ -275,15 +269,13 @@ class Pomp:
             self.dmeas = None
 
         if rmeas is not None:
-            if ydim is None:
-                raise ValueError("rmeas function must have ydim attribute")
             self.rmeas = RMeas(
                 struct=rmeas,
-                ydim=ydim,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
                 par_trans=self.par_trans,
+                y_names=list(self.ys.columns),
                 validate_logic=validate_logic,
             )
         else:
@@ -1741,7 +1733,6 @@ class Pomp:
         if self.rmeas is not None and hasattr(self.rmeas, "struct"):
             original_func = self.rmeas.original_func
             state["_rmeas_func_name"] = original_func.__name__
-            state["_rmeas_ydim"] = self.rmeas.ydim
             state["_rmeas_module"] = original_func.__module__
 
         # Store JAX key as raw bits (key is not picklable directly)
@@ -1844,11 +1835,11 @@ class Pomp:
             else:
                 self.rmeas = RMeas(
                     struct=obj,
-                    ydim=state["_rmeas_ydim"],
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
+                    y_names=list(self.ys.columns) if hasattr(self, "ys") else None,
                 )
 
         # Set rmeas or dmeas to None if not set
@@ -1869,7 +1860,6 @@ class Pomp:
             "_dmeas_func_name",
             "_dmeas_module",
             "_rmeas_func_name",
-            "_rmeas_ydim",
             "_rmeas_module",
             "_fresh_key_data",
         ]:

@@ -8,7 +8,7 @@ Users see the underlying type (e.g. dict[str, float]); the tag is used internall
 from typing import Annotated, TypeAlias, Mapping, Sequence, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .core.parameters import PompParameters
+    import pypomp.core.parameters
 import jax
 import numpy as np
 
@@ -42,6 +42,6 @@ InitialTimeFloat = Annotated[float, "InitialTimeFloat"]
 ThetaInput: TypeAlias = Union[
     Mapping[str, Numeric],
     Sequence[Mapping[str, Numeric]],
-    "PompParameters",
+    "pypomp.core.parameters.PompParameters",
     None,
 ]

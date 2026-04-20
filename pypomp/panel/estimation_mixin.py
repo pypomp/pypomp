@@ -195,10 +195,9 @@ class PanelEstimationMixin(Base):
                 observations for the first parameter replicate and simulation, instead of DataFrames.
 
         Returns:
-            If as_pomp is False:
-                tuple[pd.DataFrame, pd.DataFrame]: Tuple of (X_sims, Y_sims) DataFrames.
-            If as_pomp is True:
-                PanelPomp: A deep copy of the original model with simulated observations.
+            Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], PanelPomp]:
+                If as_pomp is False, returns a tuple of (X_sims, Y_sims) DataFrames.
+                If as_pomp is True, returns a deep copy of the original model with simulated observations.
         """
         if as_pomp:
             if nsim > 1:

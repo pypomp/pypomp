@@ -1,7 +1,7 @@
 Parameter Transformations
 ==========================
 
-.. automodule:: pypomp.ParTrans_class
+.. automodule:: pypomp.core.par_trans
    :members:
    :undoc-members:
    :show-inheritance:

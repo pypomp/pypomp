@@ -6,7 +6,7 @@ pypomp includes several example models:
 Dacca Model
 -----------
 
-.. automodule:: pypomp.dacca
+.. automodule:: pypomp.models.dacca
    :members:
    :undoc-members:
    :show-inheritance:
@@ -14,7 +14,7 @@ Dacca Model
 SPX Model
 ---------
 
-.. automodule:: pypomp.spx
+.. automodule:: pypomp.models.spx
    :members:
    :undoc-members:
    :show-inheritance:
@@ -22,7 +22,7 @@ SPX Model
 UK Measles Model
 ----------------
 
-.. automodule:: pypomp.measles.measlesPomp
+.. automodule:: pypomp.models.measles.measlesPomp
    :members:
    :undoc-members:
    :show-inheritance:
@@ -30,7 +30,7 @@ UK Measles Model
 Linear Gaussian Model
 ---------------------
 
-.. automodule:: pypomp.LG
+.. automodule:: pypomp.models.linear_gaussian
    :members:
    :undoc-members:
    :show-inheritance:

@@ -1,7 +1,7 @@
 Parameters
 ==========
 
-.. automodule:: pypomp.parameters
+.. automodule:: pypomp.core.parameters
    :members:
    :undoc-members:
    :show-inheritance:

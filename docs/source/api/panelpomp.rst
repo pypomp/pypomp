@@ -1,7 +1,7 @@
 PanelPomp Class
 ===============
 
-.. automodule:: pypomp.panelPomp.panelPomp_class
+.. automodule:: pypomp.panel.panel
    :members:
    :undoc-members:
    :show-inheritance:
@@ -9,22 +9,22 @@ PanelPomp Class
 PanelPomp Mixins
 ----------------
 
-.. automodule:: pypomp.panelPomp.analysis_mixin
+.. automodule:: pypomp.panel.analysis_mixin
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: pypomp.panelPomp.estimation_mixin
+.. automodule:: pypomp.panel.estimation_mixin
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: pypomp.panelPomp.validation_mixin
+.. automodule:: pypomp.panel.validation_mixin
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: pypomp.panelPomp.interfaces
+.. automodule:: pypomp.panel.interfaces
    :members:
    :undoc-members:
    :show-inheritance:

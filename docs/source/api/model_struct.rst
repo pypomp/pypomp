@@ -1,7 +1,7 @@
 Model Structure Components
 ==========================
 
-.. automodule:: pypomp.model_struct
+.. automodule:: pypomp.core.model_struct
    :members:
    :undoc-members:
    :show-inheritance:

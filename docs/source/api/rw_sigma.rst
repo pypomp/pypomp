@@ -1,7 +1,7 @@
 Random Walk Sigma
 =================
 
-.. automodule:: pypomp.RWSigma_class
+.. automodule:: pypomp.core.rw_sigma
    :members:
    :undoc-members:
    :show-inheritance:

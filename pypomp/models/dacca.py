@@ -127,10 +127,10 @@ def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloa
     total_sum = S_0 + I_0 + Y_0 + jnp.sum(R0)
     pop = covars["pop"]
 
-    S = jnp.round(pop * S_0 / total_sum)
-    I = jnp.round(pop * I_0 / total_sum)
-    Y = jnp.round(pop * Y_0 / total_sum)
-    R = jnp.round(pop * R0 / total_sum)
+    S = pop * S_0 / total_sum
+    I = pop * I_0 / total_sum
+    Y = pop * Y_0 / total_sum
+    R = pop * R0 / total_sum
 
     Mn = 0.0
     count = 0.0

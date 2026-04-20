@@ -18,15 +18,20 @@ def simple_panel():
         n for n in unit_theta.keys() if n.startswith("Q") or n.startswith("R")
     ]
 
-    theta = {
-        "shared": pd.DataFrame({n: [unit_theta[n]] for n in shared_names}).T.rename(
-            columns={0: "value"}
-        ),
-        "unit_specific": pd.DataFrame(
-            {un: [unit_theta[pn] for pn in unit_specific_names] for un in unit_names},
-            index=pd.Index(unit_specific_names),
-        ),
-    }
+    theta = pp.PanelParameters(
+        {
+            "shared": pd.DataFrame({n: [unit_theta[n]] for n in shared_names}).T.rename(
+                columns={0: "value"}
+            ),
+            "unit_specific": pd.DataFrame(
+                {
+                    un: [unit_theta[pn] for pn in unit_specific_names]
+                    for un in unit_names
+                },
+                index=pd.Index(unit_specific_names),
+            ),
+        }
+    )
     panel = pp.PanelPomp(units, theta=theta)
 
     key = jax.random.key(456)

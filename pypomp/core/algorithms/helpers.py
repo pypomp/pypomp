@@ -18,12 +18,12 @@ def _keys_helper(
     particle filtering algorithms.
     """
     if covars is not None and len(covars.shape) > 2:
-        key, *keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        keys = jnp.array(keys).reshape(J, covars.shape[1], 2).astype(jnp.uint32)
+        keys = jax.random.split(key, num=J * covars.shape[1] + 1)
+        res_keys = keys[1:].reshape(J, covars.shape[1], 2).astype(jnp.uint32)
     else:
-        key, *keys = jax.random.split(key, num=J + 1)
-        keys = jnp.array(keys)
-    return key, keys
+        keys = jax.random.split(key, num=J + 1)
+        res_keys = keys[1:]
+    return keys[0], res_keys
 
 
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
@@ -172,34 +172,34 @@ def _no_resampler_thetas(
 
 
 def _num_fixedstep_steps(
-    t1: float, t2: float, dt: float | None, nstep: int
+    t1: float, t2: float, dt: float | None, nstep: int | None
 ) -> tuple[int, float]:
     """
     Calculate the number of steps and the step size for a fixed number of steps.
     """
+    assert nstep is not None
     return nstep, (t2 - t1) / nstep
 
 
 def _num_euler_steps(
-    t1: float, t2: float, dt: float, nstep: int | None
-) -> tuple[np.ndarray, np.ndarray]:
+    t1: float, t2: float, dt: float | None, nstep: int | None
+) -> tuple[int, float]:
     """
     Calculate the number of steps and the step size for a given time step size.
     """
+    assert dt is not None
     tol = np.sqrt(np.finfo(float).eps)
 
-    nstep2 = np.ceil((t2 - t1) / dt / (1 + tol)).astype(int)
-    dt2 = (t2 - t1) / nstep2
+    if t1 >= t2:
+        return 0, 0.0
 
-    check1 = t1 + dt >= t2
-    nstep2 = np.where(check1, 1, nstep2)
-    dt2 = np.where(check1, t2 - t1, dt2)
+    if t1 + dt >= t2:
+        return 1, t2 - t1
 
-    check2 = t1 >= t2
-    nstep2 = np.where(check2, 0, nstep2)
-    dt2 = np.where(check2, 0.0, dt2)
+    nstep_val = int(np.ceil((t2 - t1) / dt / (1 + tol)))
+    dt_val = (t2 - t1) / nstep_val
 
-    return nstep2, dt2
+    return nstep_val, dt_val
 
 
 def _calc_steps(

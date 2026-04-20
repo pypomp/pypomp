@@ -3,6 +3,7 @@ from pypomp.core.pomp import Pomp
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
+    from ..core.parameters import PanelParameters
 else:
     Base = object  # At runtime, this is just a normal class
 
@@ -11,6 +12,12 @@ class PanelValidationMixin(Base):
     """
     Handles internal validation of DataFrames, Pomp objects, and parameter names.
     """
+
+    canonical_param_names: list[str]
+    canonical_shared_param_names: list[str]
+    canonical_unit_param_names: list[str]
+    theta: "PanelParameters"
+    unit_objects: dict[str, Pomp]
 
     def _validate_unit_objects(self) -> None:
         if not isinstance(self.unit_objects, dict):

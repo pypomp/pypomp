@@ -12,6 +12,7 @@ import pandas as pd
 
 from pypomp.core.pomp import Pomp
 from pypomp.core.par_trans import ParTrans
+from pypomp.types import ParamDict
 from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
@@ -110,7 +111,7 @@ def precompute_bspline_covars(times, t0, period=1.0, nbasis=3, degree=3):
 # ---------------------------------------------------------------------
 
 
-def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def to_est(theta: ParamDict) -> ParamDict:
     SIR_0 = jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]])
     SIR_0 = SIR_0 / jnp.sum(SIR_0)
     S_0_est, I_0_est, R_0_est = jnp.log(SIR_0)
@@ -131,7 +132,7 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     }
 
 
-def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def from_est(theta: ParamDict) -> ParamDict:
     SIR_0 = jnp.exp(jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]]))
     SIR_0 = SIR_0 / jnp.sum(SIR_0)
     return {
@@ -347,7 +348,9 @@ def sir(
 
     # Simulate data
     key = jax.random.key(seed)
-    X_long, Y_long = sir_temp.simulate(key=key, nsim=1)
+    sim_result = sir_temp.simulate(key=key, nsim=1)
+    assert isinstance(sim_result, tuple)
+    X_long, Y_long = sim_result
     y_sims = (
         Y_long.loc[(Y_long["replicate"] == 0) & (Y_long["sim"] == 0)]
         .set_index("time")[["obs_0"]]

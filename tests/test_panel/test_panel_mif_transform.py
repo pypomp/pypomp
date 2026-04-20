@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import pypomp as pp
 import pytest
 from typing import cast
+from pypomp.types import ParamDict
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def panel_pomp_with_transform():
     LG2 = pp.models.LG()
 
     # Define transformations
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         result = {}
         for k, v in theta.items():
             if k.startswith("Q") or k.startswith("R"):
@@ -28,7 +29,7 @@ def panel_pomp_with_transform():
                 result[k] = v
         return result
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         result = {}
         for k, v in theta.items():
             if k.startswith("Q") or k.startswith("R"):

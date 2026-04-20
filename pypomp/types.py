@@ -8,7 +8,7 @@ Users see the underlying type (e.g. dict[str, float]); the tag is used internall
 from typing import Annotated, TypeAlias, Mapping, Sequence, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .parameters import PompParameters
+    from .core.parameters import PompParameters
 import jax
 import numpy as np
 

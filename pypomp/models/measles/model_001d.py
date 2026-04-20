@@ -14,6 +14,7 @@ from jax.scipy.special import log_ndtr
 from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
+from pypomp.types import ParamDict
 
 
 # =========================================================================
@@ -255,7 +256,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)
 
 
-def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def to_est(theta: ParamDict) -> ParamDict:
     SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
     return {
@@ -275,7 +276,7 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     }
 
 
-def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def from_est(theta: ParamDict) -> ParamDict:
     SEIR_0 = jnp.exp(
         jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     )

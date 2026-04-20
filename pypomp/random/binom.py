@@ -11,7 +11,6 @@ from Section 2 of the paper.
 from __future__ import annotations
 
 import math
-from typing import cast
 from functools import partial
 
 import jax
@@ -21,7 +20,10 @@ from jax.scipy.stats import norm
 import numpy as np
 from jax._src import dtypes
 
-from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
+from ._dtype_helpers import (
+    check_and_canonicalize_user_dtype,
+    _get_available_dtype,
+)
 
 
 def _q_n0(
@@ -124,7 +126,7 @@ def _binom_bottom_up(
     found = cdf >= u
 
     # Initialize result with approx (fallback), but if found at k=0, use 0.
-    result = cast(Array, jnp.where(found, 0.0, approx))
+    result: Array = jnp.where(found, 0.0, approx)
 
     for i in range(1, max_k):
         k_curr_val = i
@@ -144,15 +146,15 @@ def _binom_bottom_up(
         if dtype == jnp.float32:
             is_stalled = (cdf > 0.95) & (pmf < epsilon)
         else:
-            is_stalled = False
+            is_stalled = jnp.zeros_like(found, dtype=bool)
         found_now = (cdf >= u) | is_stalled
 
         is_new_discovery = jnp.logical_and(~found, found_now)
-        result = cast(Array, jnp.where(is_new_discovery, k_curr, result))
+        result = jnp.where(is_new_discovery, k_curr, result)
 
         found = jnp.logical_or(found, found_now)
 
-    return cast(Array, jnp.clip(result, 0.0, n))
+    return jnp.clip(result, 0.0, n)
 
 
 def _binominv_scalar(
@@ -199,15 +201,12 @@ def _binominv_scalar(
     # Use symmetry: if p > 0.5, work with 1-p and flip result
     p_val = jnp.asarray(p, dtype=dtype)
     flip = p_val > 0.5
-    p_safe = cast(Array, jnp.where(flip, 1.0 - p_val, p_val))
-    u_flipped = cast(Array, jnp.where(flip, 1.0 - u, u))
+    p_safe: Array = jnp.where(flip, 1.0 - p_val, p_val)
+    u_flipped: Array = jnp.where(flip, 1.0 - u, u)
 
-    n_safe = cast(Array, jnp.where(invalid_n, 1.0, n))
-    p_safe = cast(Array, jnp.clip(p_safe, 0.0, 1.0))
-    u_safe = cast(
-        Array,
-        jnp.clip(u_flipped, 1e-9, 1.0 - 1e-9),
-    )  # Clip to avoid inf from norm.ppf
+    n_safe: Array = jnp.where(invalid_n, 1.0, n)
+    p_safe = jnp.clip(p_safe, 0.0, 1.0)
+    u_safe = jnp.clip(u_flipped, 1e-9, 1.0 - 1e-9)
 
     # Pre-compute shared values for the approximation formulas
     q = 1.0 - p_safe
@@ -230,7 +229,7 @@ def _binominv_scalar(
         lambda x: _q_n1(*x),
         lambda x: _q_n2(*x),
     ]
-    q_u = lax.switch(order_idx, branches, args)
+    q_u: Array = lax.switch(order_idx, branches, args)
 
     # The paper states \overline{C}^{-1}(u) = floor(C^{-1}(u))
     # Clip to valid range [0, n] and take floor
@@ -246,19 +245,19 @@ def _binominv_scalar(
     k_small = k_approx < x_cutoff
     np_small = np_ < np_cutoff
     use_bottom_up = k_small | np_small
-    k_approx = cast(Array, jnp.where(use_bottom_up, k_bottom_up, k_approx))
+    k_approx = jnp.where(use_bottom_up, k_bottom_up, k_approx)
 
     # Apply symmetry flip if needed
-    k_flipped = cast(Array, jnp.where(flip, n_safe - k_approx, k_approx))
+    k_flipped: Array = jnp.where(flip, n_safe - k_approx, k_approx)
 
     k_result = k_flipped
-    k_result = cast(Array, jnp.where(n_is_zero, 0.0, k_result))
-    k_result = cast(Array, jnp.where(u_is_zero, 0.0, k_result))
-    k_result = cast(Array, jnp.where(u_is_one, n_safe, k_result))
-    k_result = cast(Array, jnp.where(p_is_zero, 0.0, k_result))
-    k_result = cast(Array, jnp.where(p_is_one, n_safe, k_result))
-    k_result = cast(Array, jnp.clip(k_result, 0.0, n_safe))
-    k_result = cast(Array, jnp.where(invalid, nan, k_result))
+    k_result = jnp.where(n_is_zero, 0.0, k_result)
+    k_result = jnp.where(u_is_zero, 0.0, k_result)
+    k_result = jnp.where(u_is_one, n_safe, k_result)
+    k_result = jnp.where(p_is_zero, 0.0, k_result)
+    k_result = jnp.where(p_is_one, n_safe, k_result)
+    k_result = jnp.clip(k_result, 0.0, n_safe)
+    k_result = jnp.where(invalid, nan, k_result)
 
     return k_result
 

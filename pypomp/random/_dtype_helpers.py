@@ -1,9 +1,13 @@
 """Helper functions for dtype handling in JAX random number generators."""
 
-from __future__ import annotations
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from jax import Array
+else:
+    Array = Any
 
 import warnings
-
 import jax.numpy as jnp
 import numpy as np
 from jax._src import dtypes

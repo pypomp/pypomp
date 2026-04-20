@@ -29,7 +29,7 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = []
+exclude_patterns: list[str] = []
 
 # Napoleon settings for docstring parsing
 napoleon_google_docstring = True

@@ -76,8 +76,8 @@ def fast_nbinomial(
         invalid = (n <= 0.0) | (mu < 0.0)
         scale = mu / jnp.maximum(n, jnp.finfo(float_dtype).tiny)
 
-    safe_n = jnp.where(invalid, 1.0, n)
-    safe_scale = jnp.where(invalid, 1.0, scale)
+    safe_n: Array = jnp.where(invalid, 1.0, n)
+    safe_scale: Array = jnp.where(invalid, 1.0, scale)
 
     key_gamma, key_poisson = jax.random.split(key)
 
@@ -88,14 +88,14 @@ def fast_nbinomial(
         if dtypes.issubdtype(dtype, np.int64) or dtypes.issubdtype(dtype, np.float64)
         else jnp.int32
     )
-    x = fast_poisson(key_poisson, lam, dtype=poisson_dtype)
+    x: Array = fast_poisson(key_poisson, lam, dtype=poisson_dtype)
     x = jnp.where(lam == 0.0, 0, x)
 
     if dtypes.issubdtype(dtype, np.floating):
-        res = x.astype(dtype)
+        res: Array = x.astype(dtype)
         res = jnp.where(invalid, jnp.nan, res)
     else:
-        res = x.astype(dtype)
+        res: Array = x.astype(dtype)
         # For integer dtype, follow the convention of returning -1 for invalid inputs
         res = jnp.where(invalid, -1, res)
 

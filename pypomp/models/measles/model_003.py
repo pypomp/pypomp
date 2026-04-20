@@ -280,7 +280,7 @@ def rmeas(
     return softclamp(cases)
 
 
-def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def to_est(theta: ParamDict) -> ParamDict:
     SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
     return {
@@ -300,7 +300,7 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     }
 
 
-def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def from_est(theta: ParamDict) -> ParamDict:
     SEIR_0 = jnp.exp(
         jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     )

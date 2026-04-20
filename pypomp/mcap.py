@@ -42,7 +42,6 @@ def _loess_smooth_1d(
         # degenerate predictor: return flat line at mean(y)
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
-    
     res = loess_1d(
         x,
         y,
@@ -52,7 +51,7 @@ def _loess_smooth_1d(
         rotate=False,
     )
 
-    _, y_sm, _ = res
+    y_sm = res[1]
     return y_sm.astype(float, copy=False)
 
 
@@ -207,6 +206,7 @@ def mcap(
     # CI from smoothed profile
     diff = float(np.nanmax(y_sm)) - y_sm
     inside = diff < delta
+    ci: tuple[float | None, float | None]
     if not np.any(inside):
         ci = (None, None)
     else:

@@ -10,7 +10,7 @@ small.
 
 from __future__ import annotations
 
-from typing import Tuple, cast
+from typing import Tuple, Any
 from functools import partial
 
 import jax
@@ -136,11 +136,15 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
     del0 = jnp.where(u > 0.5, t0 * (1e-6 * t0), 0.0)
     s0 = 1.0 - t0 * (u * t0) + del0
 
-    def unrolled_computation(x_init, s0, del0, lami) -> Tuple[Array, Array, Array]:
+    def unrolled_computation(
+        x_init: Array, s0: Array, del0: Array, lami: Array
+    ) -> Tuple[Array, Array, Array]:
         MAX_LOOPS = 20
 
         # Initialize state
-        x, s, delta = x_init, s0, del0
+        x: Array = x_init
+        s: Array = s0
+        delta: Array = del0
         t = jnp.array(0.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
         one = jnp.array(1.0, dtype=dtype)
@@ -150,7 +154,6 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
 
         # JAX will unroll this loop during compilation
         for _ in range(MAX_LOOPS):
-            # Check condition: s < 0.0
             current_cond = s < zero
 
             # Determine if we should update in this step
@@ -158,10 +161,10 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
             keep_going = jnp.logical_and(active, current_cond)
 
             # Calculate candidates for next step
-            x_next = x + one
-            t_next = x_next * lami
-            delta_next = t_next * delta
-            s_next = t_next * s + one
+            x_next: Array = x + one
+            t_next: Array = x_next * lami
+            delta_next: Array = t_next * delta
+            s_next: Array = t_next * s + one
 
             # Apply updates only if keep_going is True
             x = jnp.where(keep_going, x_next, x)
@@ -174,13 +177,10 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
 
         return x, s, delta
 
-    x_init = 0.0
+    x_init = jnp.array(0.0, dtype=dtype)
     x, s, delta = unrolled_computation(x_init, s0, del0, lami)
-    x = cast(Array, x)
-    s = cast(Array, s)
-    delta = cast(Array, delta)
 
-    def top_down_branch(state):
+    def top_down_branch(state: Tuple[Array, Array]) -> Array:
         x_val, delta_val = state
         one = jnp.array(1.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
@@ -192,28 +192,28 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
 
         # Unrolled first loop (finding x_hi, delta_hi)
         MAX_LOOPS_2 = 20
-        x_hi = x_val
-        delta_hi = delta_scaled
+        x_hi: Array = x_val
+        delta_hi: Array = delta_scaled
         for _ in range(MAX_LOOPS_2):
-            cond = delta_hi < t_thresh
-            x_next = x_hi + one
-            delta_next = delta_hi * (x_next * lami)
+            cond: Array = delta_hi < t_thresh
+            x_next: Array = x_hi + one
+            delta_next: Array = delta_hi * (x_next * lami)
             x_hi = jnp.where(cond, x_next, x_hi)
             delta_hi = jnp.where(cond, delta_next, delta_hi)
 
         # Unrolled second loop (finding x_lo)
         MAX_LOOPS_3 = 20
-        x_lo = x_hi
-        s_lo = delta_hi
-        t_lo = one
+        x_lo: Array = x_hi
+        s_lo: Array = delta_hi
+        t_lo: Array = one
         for _ in range(MAX_LOOPS_3):
-            cond = s_lo > zero
-            t_next = cast(Array, t_lo * (x_lo * lami))
-            s_next = cast(Array, s_lo - t_next)
-            x_next = cast(Array, x_lo - one)
-            x_lo = cast(Array, jnp.where(cond, x_next, x_lo))
-            s_lo = cast(Array, jnp.where(cond, s_next, s_lo))
-            t_lo = cast(Array, jnp.where(cond, t_next, t_lo))
+            cond: Array = s_lo > zero
+            t_next: Array = t_lo * (x_lo * lami)
+            s_next: Array = s_lo - t_next
+            x_next: Array = x_lo - one
+            x_lo = jnp.where(cond, x_next, x_lo)
+            s_lo = jnp.where(cond, s_next, s_lo)
+            t_lo = jnp.where(cond, t_next, t_lo)
         return x_lo
 
     two = jnp.array(2.0, dtype=dtype)
@@ -235,15 +235,15 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
     sqrt2 = jnp.sqrt(jnp.array(2.0, dtype=dtype))
 
     lam_invalid = lam <= zero
-    lam_safe = cast(Array, jnp.where(lam_invalid, one, lam))
+    lam_safe = jnp.where(lam_invalid, one, lam)
 
-    def large_lambda_case(_):
+    def large_lambda_case(_: Any) -> Array:
         s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
 
-        def central(_):
+        def central(_: Any) -> Array:
             return _central_region(s, lam_safe, dtype)
 
-        def non_central(_):
+        def non_central(_: Any) -> Array:
             return lax.cond(
                 s > -sqrt2,
                 lambda __: _newton_region(s, lam_safe, dtype),
@@ -262,18 +262,18 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
         )
 
     large_lambda = lam_safe > jnp.array(4.0, dtype=dtype)
-    x_large = lax.cond(
+    x_large: Array = lax.cond(
         large_lambda,
         large_lambda_case,
         lambda _: x0,
         operand=zero,
     )
 
-    def bottom_up_branch(_):
+    def bottom_up_branch(_: Any) -> Array:
         return _bottom_up(u, lam_safe, dtype)
 
     bottom_up = x_large <= jnp.array(10.0, dtype=dtype)
-    x = lax.cond(
+    x: Array = lax.cond(
         bottom_up,
         bottom_up_branch,
         lambda _: x_large,
@@ -283,12 +283,12 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
     nan = jnp.array(jnp.nan, dtype=dtype)
     inf = jnp.array(jnp.inf, dtype=dtype)
 
-    x = cast(Array, jnp.where(u < zero, nan, x))
-    x = cast(Array, jnp.where(u == zero, zero, x))
-    x = cast(Array, jnp.where(u == one, inf, x))
-    x = cast(Array, jnp.where(u > one, nan, x))
-    x = cast(Array, jnp.where(lam_invalid, nan, x))
-    x = cast(Array, jnp.where(x < zero, zero, x))
+    x = jnp.where(u < zero, nan, x)
+    x = jnp.where(u == zero, zero, x)
+    x = jnp.where(u == one, inf, x)
+    x = jnp.where(u > one, nan, x)
+    x = jnp.where(lam_invalid, nan, x)
+    x = jnp.where(x < zero, zero, x)
     return x
 
 

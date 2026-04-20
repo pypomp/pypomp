@@ -24,6 +24,7 @@ from .. import benchmarks
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
+    from ..core.pomp import Pomp
 else:
     Base = object  # At runtime, this is just a normal class
 
@@ -33,6 +34,10 @@ class PanelEstimationMixin(Base):
     Handles Simulation, Particle Filtering, and MIF algorithms.
     """
 
+    fresh_key: jax.Array | None
+    theta: "PanelParameters"  # From TYPE_CHECKING or imports
+    unit_objects: dict[str, "Pomp"]
+
     def _update_fresh_key(
         self, key: jax.Array | None = None
     ) -> tuple[jax.Array, jax.Array]:
@@ -41,7 +46,8 @@ class PanelEstimationMixin(Base):
             raise ValueError(
                 "Both the key argument and the fresh_key attribute are None. At least one key must be given."
             )
-        self.fresh_key, new_key = jax.random.split(old_key)
+        new_f_key, new_key = jax.random.split(old_key)
+        self.fresh_key = new_f_key
         return new_key, old_key
 
     def _prepare_theta_input(
@@ -90,14 +96,18 @@ class PanelEstimationMixin(Base):
         theta = self._prepare_theta_input(theta)
 
         tll = theta.num_replicates()
-        params = [{} for _ in range(tll)]
+        params: list[dict[str, float]] = [{} for _ in range(tll)]
 
         for i in range(tll):
             theta_dict = theta.theta[i]
             if theta_dict["shared"] is not None:
-                params[i].update(theta_dict["shared"].iloc[:, 0].to_dict())
+                params[i].update(
+                    cast(dict[str, float], theta_dict["shared"].iloc[:, 0].to_dict())
+                )
             if theta_dict["unit_specific"] is not None:
-                params[i].update(theta_dict["unit_specific"][unit].to_dict())
+                params[i].update(
+                    cast(dict[str, float], theta_dict["unit_specific"][unit].to_dict())
+                )
 
         return params
 
@@ -202,7 +212,7 @@ class PanelEstimationMixin(Base):
 
         X_sims_list = []
         Y_sims_list = []
-        new_unit_objects = {}
+        new_unit_objects: dict[str, "Pomp"] = {}
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, theta=theta)
             key, subkey = jax.random.split(key)
@@ -214,6 +224,9 @@ class PanelEstimationMixin(Base):
                 as_pomp=as_pomp,
             )
             if as_pomp:
+                from ..core.pomp import Pomp
+
+                assert isinstance(result, Pomp)
                 new_unit_objects[unit] = result
             else:
                 assert isinstance(result, tuple)
@@ -279,10 +292,11 @@ class PanelEstimationMixin(Base):
                     }
                 )
 
-        def apply_probes(group):
-            unit_name, replicate_id, sim_id = group.name
-            obj = self.unit_objects[unit_name]
-            df = pd.DataFrame(group.drop(columns=["time"]))
+        for (unit_name, replicate_id, sim_id), group in y_sims.groupby(
+            ["unit", "theta_idx", "sim"]
+        ):
+            obj = self.unit_objects[str(unit_name)]
+            df = pd.DataFrame(group.drop(columns=["unit", "theta_idx", "sim", "time"]))
             df.index = pd.Index(group["time"])
             df.columns = obj.ys.columns
             for name, func in probes.items():
@@ -296,10 +310,6 @@ class PanelEstimationMixin(Base):
                         "unit": unit_name,
                     }
                 )
-
-        y_sims.groupby(["unit", "theta_idx", "sim"]).apply(
-            apply_probes, include_groups=False
-        )
 
         return pd.DataFrame(results)
 
@@ -680,21 +690,11 @@ class PanelEstimationMixin(Base):
         else:
             shared_index = self.canonical_shared_param_names
             n_shared = len(shared_index)
-            # PanelParameters ensures all shared are None or all are not None
-            # Cast to list[pd.DataFrame] since we know all are not None here
             shared_trans_list_nonnull = cast(list[pd.DataFrame], shared_trans_list)
-            shared_array = jnp.stack(
-                [
-                    jnp.tile(
-                        self._dataframe_to_array_canonical(
-                            df, self.canonical_shared_param_names, "shared"
-                        ).reshape(n_shared, 1),
-                        (1, J),
-                    )
-                    for df in shared_trans_list_nonnull
-                ],
-                axis=0,
-            )
+            shared_array = jnp.zeros((n_reps, n_shared, J))
+            for j, df in enumerate(shared_trans_list_nonnull):
+                values = df.loc[shared_index, "shared"].to_numpy(dtype=float)
+                shared_array = shared_array.at[j].set(jnp.tile(values[:, None], (1, J)))
 
         if all(df is None for df in spec_trans_list):
             n_spec = 0

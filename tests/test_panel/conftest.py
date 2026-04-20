@@ -148,21 +148,25 @@ def measles_panel_mp(measles_panel_mp_module):
     panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key, J, M, a
+
+
 @pytest.fixture(scope="module")
 def lg_panel_setup_some_shared_module():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()
     # Create PanelParameters with some shared and some unit-specific
     shared_names = ["A1", "C1"]
-    unit_specific_names = [n for n in lg1.canonical_param_names if n not in shared_names]
-    
+    unit_specific_names = [
+        n for n in lg1.canonical_param_names if n not in shared_names
+    ]
+
     # Simple averaging for shared
     p1, p2 = lg1.theta[0], lg2.theta[0]
     shared_df = pd.DataFrame(
         {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
-        index=pd.Index(shared_names)
+        index=pd.Index(shared_names),
     )
-    
+
     unit_specific_df = pd.DataFrame(
         {
             "unit1": [p1[n] for n in unit_specific_names],
@@ -170,21 +174,25 @@ def lg_panel_setup_some_shared_module():
         },
         index=pd.Index(unit_specific_names),
     )
-    
-    theta = pp.PanelParameters(theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]) * 2
+
+    theta = (
+        pp.PanelParameters(
+            theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]
+        )
+        * 2
+    )
     panel = pp.PanelPomp(
         Pomp_dict={"unit1": lg1, "unit2": lg2},
         theta=theta,
     )
     key = jax.random.key(0)
     fresh_key = panel.fresh_key
-    
+
     # Create simple rw_sd for LG
     rw_sd = pp.RWSigma(
-        sigmas={n: 0.02 for n in lg1.canonical_param_names},
-        init_names=[]
+        sigmas={n: 0.02 for n in lg1.canonical_param_names}, init_names=[]
     )
-    
+
     return panel, rw_sd, theta, key, fresh_key
 
 
@@ -211,21 +219,23 @@ def lg_panel_setup_specific_only_module():
         },
         index=pd.Index(lg1.canonical_param_names),
     )
-    
-    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific_df}]) * 2
+
+    theta = (
+        pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific_df}])
+        * 2
+    )
     panel = pp.PanelPomp(
         Pomp_dict={"unit1": lg1, "unit2": lg2},
         theta=theta,
     )
     key = jax.random.key(0)
     fresh_key = panel.fresh_key
-    
+
     # Create simple rw_sd for LG
     rw_sd = pp.RWSigma(
-        sigmas={n: 0.02 for n in lg1.canonical_param_names},
-        init_names=[]
+        sigmas={n: 0.02 for n in lg1.canonical_param_names}, init_names=[]
     )
-    
+
     return panel, rw_sd, theta, key, fresh_key
 
 

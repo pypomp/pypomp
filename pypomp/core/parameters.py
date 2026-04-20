@@ -10,9 +10,9 @@ import pandas as pd
 import jax.numpy as jnp
 import numpy as np
 import jax
-from typing import Union, Literal, Mapping, cast
+from typing import Union, Literal, Mapping, cast, overload
 from .par_trans import ParTrans
-from pypomp.types import Numeric, ThetaInput
+from pypomp.types import Numeric, ThetaInput, ParamDict
 
 
 class ParameterSet(ABC):
@@ -99,21 +99,22 @@ class PompParameters(ParameterSet):
             self.estimation_scale = theta.estimation_scale
             return
 
+        theta_dicts: list[dict[str, Numeric]] = []
         # Normalize input to list of dicts
         if isinstance(theta, Mapping):
-            theta = [dict(theta)]
+            theta_dicts = [dict(theta)]
         elif isinstance(theta, (list, tuple)):
-            theta = [dict(t) if not isinstance(t, dict) else t for t in theta]
+            theta_dicts = [dict(t) if not isinstance(t, dict) else t for t in theta]
         else:
             try:
-                theta = [dict(t) for t in theta]
+                theta_dicts = [dict(t) for t in theta]
             except (TypeError, ValueError):
                 raise TypeError(
                     "theta must be a Mapping, Sequence of Mappings, or PompParameters"
                 )
 
-        self._validate_raw(theta)
-        self._params = cast(list[dict[str, float]], theta)
+        self._validate_raw(theta_dicts)
+        self._params = cast(list[dict[str, float]], theta_dicts)
         self._canonical_param_names = list(self._params[0].keys())
         self.estimation_scale = estimation_scale
         self._logLik = self._format_logLik(logLik, len(self._params))
@@ -238,9 +239,9 @@ class PompParameters(ParameterSet):
             return []
         return list(self._canonical_param_names)
 
-    def to_list(self) -> list[dict[str, float]]:
+    def to_list(self) -> list[ParamDict]:
         """Returns the internal list of dictionaries."""
-        return self._params
+        return cast(list[ParamDict], self._params)
 
     def transform(
         self,
@@ -308,6 +309,12 @@ class PompParameters(ParameterSet):
 
         self._params = new_params
         self._logLik = new_logLik
+
+    @overload
+    def __getitem__(self, index: int) -> dict[str, float]: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> "PompParameters": ...
 
     def __getitem__(self, index: int | slice) -> dict[str, float] | "PompParameters":
         """
@@ -722,10 +729,12 @@ class PanelParameters(ParameterSet):
         for j, t in enumerate(self._theta):
             if specific_names_list and t["unit_specific"] is not None:
                 try:
-                    values = (
-                        t["unit_specific"].loc[specific_names_list, unit_names].values
+                    spec_values = (
+                        t["unit_specific"]
+                        .loc[specific_names_list, unit_names]
+                        .to_numpy()
                     )
-                    full_array[j][:, specific_idx] = values.T
+                    full_array[j][:, specific_idx] = spec_values.T
                 except KeyError as e:
                     missing = [
                         p
@@ -737,8 +746,10 @@ class PanelParameters(ParameterSet):
                     else:
                         raise e
             if shared_names_list and t["shared"] is not None:
-                values = t["shared"].loc[shared_names_list, s_col].values
-                full_array[j][:, shared_idx] = values
+                shared_values = t["shared"].loc[shared_names_list, s_col].to_numpy()
+                full_array[j, :, shared_idx] = np.broadcast_to(
+                    shared_values, (n_units, len(shared_idx))
+                )
 
         return jnp.array(full_array)
 
@@ -842,7 +853,15 @@ class PanelParameters(ParameterSet):
     def to_list(self) -> list[dict[str, pd.DataFrame | None]]:
         return self._theta.copy()
 
-    def __getitem__(self, index):
+    @overload
+    def __getitem__(self, index: int) -> dict[str, pd.DataFrame | None]: ...
+
+    @overload
+    def __getitem__(self, index: slice | list[int]) -> "PanelParameters": ...
+
+    def __getitem__(
+        self, index: int | slice | list[int]
+    ) -> dict[str, pd.DataFrame | None] | "PanelParameters":
         if isinstance(index, int):
             return self._theta[index]
         return self.subset(index)
@@ -949,6 +968,7 @@ class PanelParameters(ParameterSet):
                     return False
                 if df1 is not None:
                     try:
+                        assert df2 is not None
                         pd.testing.assert_frame_equal(df1, df2, check_dtype=True)
                     except AssertionError:
                         return False

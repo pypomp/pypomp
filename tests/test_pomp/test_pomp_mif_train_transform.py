@@ -9,6 +9,8 @@ import jax.numpy as jnp
 import pypomp as pp
 import pytest
 
+from pypomp.types import ParamDict
+
 
 @pytest.fixture
 def simple_pomp_with_transform():
@@ -17,7 +19,7 @@ def simple_pomp_with_transform():
     LG = pp.models.LG()
 
     # Define transformations that log-transform positive parameters
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         # Transform Q and R parameters to log scale
         result = {}
         for k, v in theta.items():
@@ -27,7 +29,7 @@ def simple_pomp_with_transform():
                 result[k] = v
         return result
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         # Transform back from log scale
         result = {}
         for k, v in theta.items():

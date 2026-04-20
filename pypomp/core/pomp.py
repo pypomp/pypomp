@@ -5,7 +5,7 @@ This module implements the OOP structure for POMP models.
 import importlib
 from copy import deepcopy
 import time
-from typing import Callable, Mapping
+from typing import Callable
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,7 @@ import seaborn as sns
 import warnings
 from typing import Union
 
-from pypomp.types import Numeric, ThetaInput
+from pypomp.types import ThetaInput
 from .metadata import ModelMetadata
 from .algorithms.mop import _mop_internal
 from .algorithms.dpop import _dpop_internal
@@ -1150,26 +1150,7 @@ class Pomp:
         new_key, _ = self._update_fresh_key(key)
 
         # 2) Decide which theta to use as initial point.
-        if theta is None:
-            theta_list_raw = self.theta
-        elif isinstance(theta, PompParameters):
-            theta_list_raw = theta
-        else:
-            if isinstance(theta, dict):
-                theta_list_raw = [theta]
-            elif isinstance(theta, list):
-                theta_list_raw = theta
-            else:
-                raise TypeError(
-                    "theta must be a dict, a list of dicts, or a PompParameters object"
-                )
-
-            def _to_float_dict(d: Mapping[str, Numeric]) -> dict[str, float]:
-                return {k: float(v) for k, v in d.items()}
-
-            theta_list_raw = [_to_float_dict(d) for d in theta_list_raw]
-
-        theta_obj = self._prepare_theta_input(theta_list_raw)
+        theta_obj = self._prepare_theta_input(theta)
         theta_nat = theta_obj.to_list()[0]
 
         # 3) Map initial theta to estimation space in canonical order.
@@ -1427,7 +1408,7 @@ class Pomp:
                     }
                 )
 
-        y_sims.groupby(["theta_idx", "sim"]).apply(apply_probes, include_groups=False)
+        y_sims.groupby(["theta_idx", "sim"]).apply(apply_probes, include_groups=False)  # type: ignore[call-overload]
 
         return pd.DataFrame(results)
 
@@ -1520,7 +1501,7 @@ class Pomp:
         traces = self.traces()
         if traces.empty:
             print("No trace data to plot.")
-            return
+            return None
         # Melt the DataFrame to long format for FacetGrid
         value_vars = [
             col
@@ -1627,7 +1608,7 @@ class Pomp:
             return False
         if (self.covars is None) != (other.covars is None):
             return False
-        if self.covars is not None:
+        if self.covars is not None and other.covars is not None:
             if not self.covars.equals(other.covars):
                 return False
         # Handle _covars_extended (can be None or JAX array)

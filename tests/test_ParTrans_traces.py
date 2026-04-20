@@ -4,21 +4,21 @@ Tests for parameter transformation applied to traces in mif and train methods.
 # TODO: Consider deleting this file? Not sure these tests are necessary.
 
 import numpy as np
-import jax
 import jax.numpy as jnp
 import pypomp as pp
+from pypomp.types import ParamDict
 
 
 def test_transform_array_single_param_set():
     """Test transform_array with a single parameter set (1D array)."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         return {
             "pos_param": jnp.log(theta["pos_param"]),
             "standard_param": theta["standard_param"],
         }
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         return {
             "pos_param": jnp.exp(theta["pos_param"]),
             "standard_param": theta["standard_param"],
@@ -46,13 +46,13 @@ def test_transform_array_single_param_set():
 def test_transform_array_multiple_param_sets():
     """Test transform_array with multiple parameter sets (2D array)."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         return {
             "pos_param": jnp.log(theta["pos_param"]),
             "standard_param": theta["standard_param"],
         }
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         return {
             "pos_param": jnp.exp(theta["pos_param"]),
             "standard_param": theta["standard_param"],
@@ -104,10 +104,10 @@ def test_transform_array_default_transformation():
 def test_transform_panel_traces_shared_only():
     """Test transform_panel_traces with shared parameters only."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.log(v) for k, v in theta.items()}
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.exp(v) for k, v in theta.items()}
 
     par_trans = pp.ParTrans(to_est, from_est)
@@ -157,10 +157,10 @@ def test_transform_panel_traces_shared_only():
 def test_transform_panel_traces_unit_only():
     """Test transform_panel_traces with unit-specific parameters only."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.log(v) for k, v in theta.items()}
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.exp(v) for k, v in theta.items()}
 
     par_trans = pp.ParTrans(to_est, from_est)
@@ -212,11 +212,11 @@ def test_transform_panel_traces_unit_only():
 def test_transform_panel_traces_both():
     """Test transform_panel_traces with both shared and unit-specific parameters."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         # Simple log transformation for all params
         return {k: jnp.log(v) if v > 0 else v for k, v in theta.items()}
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         # Exp transformation for all params
         return {k: jnp.exp(v) for k, v in theta.items()}
 
@@ -282,10 +282,10 @@ def test_transform_panel_traces_both():
 def test_transform_roundtrip():
     """Test that transform_array does a proper round-trip transformation."""
 
-    def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def to_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.log(v) for k, v in theta.items()}
 
-    def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+    def from_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.exp(v) for k, v in theta.items()}
 
     par_trans = pp.ParTrans(to_est, from_est)

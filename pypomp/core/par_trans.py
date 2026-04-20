@@ -1,4 +1,5 @@
-from typing import Callable, Literal, Mapping
+from typing import Callable, Literal, Mapping, cast
+from ..types import ParamDict
 import importlib
 import pandas as pd
 import jax
@@ -17,17 +18,11 @@ class ParTrans:
 
     def __init__(
         self,
-        to_est: Callable[
-            [Mapping[str, float | jax.Array]], dict[str, float | jax.Array]
-        ]
-        | None = None,
-        from_est: Callable[
-            [Mapping[str, float | jax.Array]], dict[str, float | jax.Array]
-        ]
-        | None = None,
+        to_est: Callable[[ParamDict], ParamDict] | None = None,
+        from_est: Callable[[ParamDict], ParamDict] | None = None,
     ):
-        self.to_est = to_est or _to_est_default
-        self.from_est = from_est or _from_est_default
+        self.to_est: Callable[[ParamDict], ParamDict] = to_est or _to_est_default
+        self.from_est: Callable[[ParamDict], ParamDict] = from_est or _from_est_default
 
     def panel_transform(
         self,
@@ -52,7 +47,7 @@ class ParTrans:
         res: dict[str, pd.DataFrame | None] = {"shared": None, "unit_specific": None}
 
         # Pre-calculate shared dictionary (param -> value)
-        s_vals = s_df.iloc[:, 0].to_dict() if s_df is not None else {}
+        s_vals = cast(dict, s_df.iloc[:, 0].to_dict()) if s_df is not None else {}
 
         # 1. Transform Shared Parameters
         if s_df is not None:
@@ -60,15 +55,15 @@ class ParTrans:
             ctx = s_vals.copy()
             if u_df is not None:
                 first_unit = u_df.columns[0]
-                ctx.update(u_df[first_unit].to_dict())
+                ctx.update(cast(dict, u_df[first_unit].to_dict()))
 
-            trans = func(ctx)
+            trans: ParamDict = func(cast(ParamDict, ctx))
 
             # Filter output back to just shared keys
             new_s_vals = {k: trans[k] for k in s_vals}
             res["shared"] = pd.DataFrame(
-                new_s_vals.values(),
-                index=pd.Index(new_s_vals.keys()),
+                list(new_s_vals.values()),
+                index=pd.Index(list(new_s_vals.keys())),
                 columns=pd.Index(["shared"]),
             )
 
@@ -78,9 +73,9 @@ class ParTrans:
             for unit in u_df.columns:
                 # Context: Shared values + This unit's specific values
                 ctx = s_vals.copy()
-                ctx.update(u_df[unit].to_dict())
+                ctx.update(cast(dict, u_df[unit].to_dict()))
 
-                trans = func(ctx)
+                trans = func(cast(ParamDict, ctx))
 
                 # Filter output back to specific keys (maintaining order)
                 new_u_data[unit] = [trans[k] for k in u_df.index]
@@ -108,11 +103,11 @@ class ParTrans:
         Convert the theta dictionary values from jax.Array to float.
         """
         if direction == "to_est":
-            theta = self.to_est(theta)
-            return {k: float(v) for k, v in theta.items()}
+            theta_out = self.to_est(dict(theta))
+            return {k: float(v) for k, v in theta_out.items()}
         elif direction == "from_est":
-            theta = self.from_est(theta)
-            return {k: float(v) for k, v in theta.items()}
+            theta_out = self.from_est(dict(theta))
+            return {k: float(v) for k, v in theta_out.items()}
         else:
             raise ValueError(f"Invalid direction: {direction}")
 
@@ -309,8 +304,6 @@ class ParTrans:
         """
         state = {}
 
-        # Store function information for reconstruction
-        # Check if to_est is a module-level function
         if (
             hasattr(self.to_est, "__module__")
             and hasattr(self.to_est, "__name__")
@@ -319,10 +312,8 @@ class ParTrans:
             state["_to_est_module"] = self.to_est.__module__
             state["_to_est_name"] = self.to_est.__name__
         else:
-            # Lambda or closure - can't reliably pickle, will use default
             state["_to_est_is_lambda"] = True
 
-        # Check if from_est is a module-level function
         if (
             hasattr(self.from_est, "__module__")
             and hasattr(self.from_est, "__name__")
@@ -331,7 +322,6 @@ class ParTrans:
             state["_from_est_module"] = self.from_est.__module__
             state["_from_est_name"] = self.from_est.__name__
         else:
-            # Lambda or closure - can't reliably pickle, will use default
             state["_from_est_is_lambda"] = True
 
         return state
@@ -343,17 +333,14 @@ class ParTrans:
         Reconstructs module-level functions by importing them.
         Falls back to defaults for lambdas/closures.
         """
-        # Reconstruct to_est
+
         if "_to_est_is_lambda" in state:
-            # Can't reconstruct lambdas - use default
             self.to_est = _to_est_default
         else:
             module = importlib.import_module(state["_to_est_module"])
             self.to_est = getattr(module, state["_to_est_name"])
 
-        # Reconstruct from_est
         if "_from_est_is_lambda" in state:
-            # Can't reconstruct lambdas - use default
             self.from_est = _from_est_default
         else:
             module = importlib.import_module(state["_from_est_module"])
@@ -361,12 +348,12 @@ class ParTrans:
 
 
 def _to_est_default(
-    theta: Mapping[str, float | jax.Array],
-) -> dict[str, float | jax.Array]:
+    theta: ParamDict,
+) -> ParamDict:
     return dict(theta)
 
 
 def _from_est_default(
-    theta: Mapping[str, float | jax.Array],
-) -> dict[str, float | jax.Array]:
+    theta: ParamDict,
+) -> ParamDict:
     return dict(theta)

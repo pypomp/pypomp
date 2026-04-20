@@ -6,7 +6,6 @@ The implementation uses the asymptotic inversion method described in Temme (1992
 
 from __future__ import annotations
 
-from typing import cast
 from functools import partial
 
 import jax
@@ -38,7 +37,7 @@ def _gammainv_scalar(u: Array, alpha: Array, dtype) -> Array:
     one = jnp.array(1.0, dtype=dtype)
 
     alpha_invalid = alpha <= zero
-    alpha_safe = cast(Array, jnp.where(alpha_invalid, one, alpha))
+    alpha_safe: Array = jnp.where(alpha_invalid, one, alpha)
 
     # 1. Calculate eta_0 (The starting approximation)
     # Eq (3.2) implies eta_0 is related to the inverse error function.
@@ -71,17 +70,17 @@ def _gammainv_scalar(u: Array, alpha: Array, dtype) -> Array:
     # with the condition sign(eta) == sign(lambda - 1).
     lam = _solve_lambda_from_eta(eta, dtype)
 
-    x = alpha_safe * lam
+    x: Array = alpha_safe * lam
 
     nan = jnp.array(jnp.nan, dtype=dtype)
     inf = jnp.array(jnp.inf, dtype=dtype)
 
-    x = cast(Array, jnp.where(u < zero, nan, x))
-    x = cast(Array, jnp.where(u == zero, zero, x))
-    x = cast(Array, jnp.where(u == one, inf, x))
-    x = cast(Array, jnp.where(u > one, nan, x))
-    x = cast(Array, jnp.where(alpha_invalid, nan, x))
-    x = cast(Array, jnp.where(x < zero, zero, x))
+    x = jnp.where(u < zero, nan, x)
+    x = jnp.where(u == zero, zero, x)
+    x = jnp.where(u == one, inf, x)
+    x = jnp.where(u > one, nan, x)
+    x = jnp.where(alpha_invalid, nan, x)
+    x = jnp.where(x < zero, zero, x)
     return x
 
 

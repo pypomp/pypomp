@@ -65,8 +65,8 @@ with open(dacca_path, "r") as f:
 with open(covart_path, "r") as f:
     reader = csv.reader(f)
     next(reader)
-    covart_index = [float(row[1]) for row in reader]
-    covart_index = jnp.array(covart_index)
+    covart_index_list = [float(row[1]) for row in reader]
+    covart_index_arr = jnp.array(covart_index_list)
 
 with open(covars_path, "r") as f:
     reader = csv.reader(f)
@@ -74,7 +74,7 @@ with open(covars_path, "r") as f:
     covars_data = [[float(value) for value in row[1:]] for row in reader]
     covars = pd.DataFrame(
         covars_data,
-        index=np.array(covart_index),
+        index=np.array(covart_index_arr),
         columns=pd.Index(
             [
                 "trend",
@@ -377,7 +377,7 @@ def rmeas(
     return jax.random.normal(key) * v + deaths
 
 
-def to_est(theta: dict) -> dict:
+def to_est(theta: ParamDict) -> ParamDict:
     IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
     IVPs = jnp.array([theta[k] for k in IVP_list])
     IVP_ests = jnp.log(IVPs / jnp.sum(IVPs))
@@ -398,7 +398,7 @@ def to_est(theta: dict) -> dict:
     }
 
 
-def from_est(theta: dict) -> dict:
+def from_est(theta: ParamDict) -> ParamDict:
     IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
     IVP_ests = jnp.exp(jnp.array([theta[k] for k in IVP_list]))
     IVPs = IVP_ests / jnp.sum(IVP_ests)
@@ -423,13 +423,13 @@ def dacca(
     dt: float | None = 1 / 240, nstep: int | None = None, gamma: bool = False
 ) -> Pomp:
     """
-    Creates a POMP model for the Dacca measles data.
+    Creates a POMP model for the Dacca cholera data.
 
     This function constructs a Partially Observed Markov Process (POMP) model
-    for the Dacca measles dataset. The model includes a stochastic process for
+    for the Dacca cholera dataset. The model includes a stochastic process for
     the underlying disease dynamics and a measurement model for observed deaths.
 
-    Parameters
+    Arguments
     ----------
     dt : float, optional
         Time step size for the process model. Determines the number of sub-steps per observation interval for the process model.
@@ -439,6 +439,35 @@ def dacca(
     gamma : bool, optional
         Indicator for whether gamma white noise should be used in place of Gaussian noise.
         This corresponds to a large-population approximation of an overdispersed death process.
+
+    Model Parameters
+    ----------------
+    gamma : float
+        Recovery rate (duration of infectiousness).
+    epsilon : float
+        Rate of waning of immunity for severe infections.
+    rho : float
+        Rate of waning of immunity for inapparent infections.
+    m : float
+        Cholera-specific mortality rate.
+    c : float
+        Fraction of infections that lead to severe (clinically apparent) infection.
+    beta_trend : float
+        Slope of the secular trend in transmission.
+    bs1-bs6 : float
+        Seasonal transmission rates (B-spline coefficients).
+    sigma : float
+        Environmental noise intensity.
+    tau : float
+        Measurement error standard deviation.
+    alpha : float
+        Non-linear transmission parameter.
+    delta : float
+        Natural mortality rate.
+    S_0, I_0, Y_0, R1_0, R2_0, R3_0 : float
+        Initial value parameters (IVPs) for the model state proportions.
+    omegas1-omegas6 : float
+        Seasonal environmental reservoir parameters (B-spline coefficients for the log-reservoir).
 
     Returns
     -------

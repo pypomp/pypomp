@@ -103,7 +103,7 @@ def dmeas(
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
 
-def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def to_est(theta: ParamDict) -> ParamDict:
     return {
         "mu": jnp.log(theta["mu"]),
         "kappa": jnp.log(theta["kappa"]),
@@ -114,7 +114,7 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     }
 
 
-def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
+def from_est(theta: ParamDict) -> ParamDict:
     return {
         "mu": jnp.exp(theta["mu"]),
         "kappa": jnp.exp(theta["kappa"]),

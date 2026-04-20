@@ -121,8 +121,9 @@ def _simulate_helper(
     t = times0[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    key, *keys = jax.random.split(key, num=nsim + 1)
-    keys = jnp.array(keys)
+    split_keys = jax.random.split(key, num=nsim + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     Y_sims = rmeasure(X_sims, theta, keys, covars_t, t, SHOULD_TRANS)
 
     X_array = X_array.at[i + 1].set(X_sims.T)

@@ -13,9 +13,9 @@ sys.path.insert(0, os.path.abspath("../.."))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "pypomp"
-copyright = "2025, pypomp team"
+copyright = "2026, pypomp team"
 author = "pypomp team"
-release = "0.4.4.8"
+release = "0.4.4.9"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

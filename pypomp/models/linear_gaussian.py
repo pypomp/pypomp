@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from pypomp.core.pomp import Pomp
+from pypomp.core.par_trans import ParTrans
 from pypomp.types import (
     StateDict,
     ParamDict,
@@ -19,9 +20,6 @@ from pypomp.types import (
 
 
 def _get_thetas(theta):
-    """
-    Cast a theta vector into A, C, Q, and R matrices as if casting iron.
-    """
     A = jnp.array([theta["A1"], theta["A2"], theta["A3"], theta["A4"]]).reshape(2, 2)
     C = jnp.array([theta["C1"], theta["C2"], theta["C3"], theta["C4"]]).reshape(2, 2)
     Q = jnp.array([theta["Q1"], theta["Q2"], theta["Q3"], theta["Q4"]]).reshape(2, 2)
@@ -30,9 +28,6 @@ def _get_thetas(theta):
 
 
 def _transform_thetas(A, C, Q, R):
-    """
-    Take A, C, Q, and R matrices and melt them into a single 1D array.
-    """
     return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
 
 
@@ -43,7 +38,6 @@ def rinit(
     covars: CovarDict,
     t0: InitialTimeFloat,
 ):
-    """Initial state process simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     result = jax.random.multivariate_normal(key=key, mean=jnp.array([0, 0]), cov=Q)
     return {"X1": result[0], "X2": result[1]}
@@ -57,7 +51,6 @@ def rproc(
     t: TimeFloat,
     dt: StepSizeFloat,
 ):
-    """Process simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     result = jax.random.multivariate_normal(key=key, mean=A @ X_array, cov=Q)
@@ -71,7 +64,6 @@ def dmeas(
     covars: CovarDict,
     t: TimeFloat,
 ):
-    """Measurement model distribution for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     Y_array = jnp.array([Y_["Y1"], Y_["Y2"]])
@@ -85,10 +77,25 @@ def rmeas(
     covars: CovarDict,
     t: TimeFloat,
 ):
-    """Measurement simulator for the linear Gaussian model"""
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
     return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
+
+
+def to_est(theta: ParamDict) -> ParamDict:
+    new_theta = {**theta}
+    for name in "ACQR":
+        new_theta[f"{name}1"] = jnp.log(theta[f"{name}1"])
+        new_theta[f"{name}4"] = jnp.log(theta[f"{name}4"])
+    return new_theta
+
+
+def from_est(theta: ParamDict) -> ParamDict:
+    new_theta = {**theta}
+    for name in "ACQR":
+        new_theta[f"{name}1"] = jnp.exp(theta[f"{name}1"])
+        new_theta[f"{name}4"] = jnp.exp(theta[f"{name}4"])
+    return new_theta
 
 
 def LG(
@@ -147,6 +154,7 @@ def LG(
         theta=theta,
         covars=None,
         statenames=["X1", "X2"],
+        par_trans=ParTrans(to_est=to_est, from_est=from_est),
     )
     LG_obj = LG_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
     assert isinstance(LG_obj, Pomp)

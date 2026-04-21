@@ -50,7 +50,7 @@ exclude = ["**/.venv"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 
 [tool.mypy]
 python_version = "3.12"

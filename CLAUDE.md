@@ -20,6 +20,16 @@ pip install -r requirements.txt
 # Do not overwrite an existing environment.
 ```
 
+### Additional Environment Setup for Testing
+
+```bash
+# Check that pytest is installed with the cov and xdist plugins
+pip list | grep pytest-
+
+# Install package in editable mode for development
+pip install -e .
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -49,11 +59,6 @@ ruff check .
 pyright
 ```
 
-### Building
-```bash
-# Install package in editable mode for development
-pip install -e .
-```
 
 ## Architecture Overview
 

@@ -1,17 +1,46 @@
 
 ## Testing procedure
 
-# start in the pypomp project directory, which confusingly contains
+# start in the pypomp git repository directory, which confusingly contains
 # a subdirectory also called pypomp.
 
+# pytest expects the xdist extension
+pip install pytest-xdist
+
+# we can test installing from a wheel. this is not essential here
+# for the code below, 0.0.3 should be the current version number
 cd pypomp
 python3 -m build
 pip install --force-reinstall dist/pypomp-0.0.3-py3-none-any.whl
 
-# or, equivalently,
+# or, equivalently and more conveniently,
 cd pypomp
 pip install .
 
+# for developing tests and measuring coverage,
+# do an editable install:
 
-cd test
+pip install -e .
+
+# This makes import pypomp resolve to /Users/ionides/git/pypomp/pypomp/ — the working source.
+# Edits are picked up immediately, and --cov=pypomp measures the same files the tests are
+# exercising.
+
+# Verifying: After pip install -e .,
+```
+python -c "import pypomp; print(pypomp.__file__)"
+```
+# should print /Users/ionides/git/pypomp/pypomp/__init__.py
+# — and crucially the same path should appear in any pytest warning
+# that references a pypomp file. That's how you know the test process and the coverage
+# tool are looking at the same files.
+
+# The pytest.ini (with -n auto) is fine for normal test runs. For coverage runs, pytest-cov
+# does support xdist (it merges per-worker data files automatically), so -n auto shouldn't be
+# the blocker once the editable install is fixed.
+
+
+# for this, pytest should be run in the root directory of the pypomp repo,
+# not the tests subdirectory
+# this is necessary to read the pytest.ini file
 pytest .

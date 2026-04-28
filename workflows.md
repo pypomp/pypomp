@@ -5,7 +5,7 @@ A basic environment for developing pypomp, supposing that the package from https
 
 ```
 cd ~/git/pypomp
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -24,9 +24,20 @@ ruff check
 ruff format
 ```
 
+
+## Use with Claude Code
+
+The CLAUDE.md file has some overlap with this file.
+For now, both are being developed simultaneously.
+
 ## Testing
 
 A test workflow is described in tests/README
+A set-up file is in pytest.ini. This requires
+```
+pip install pytest-xdist
+```
+
 
 ## Pushing edits to main
 
@@ -35,6 +46,7 @@ A test workflow is described in tests/README
 * New code should be unit tested and usually should not break existing unit tests.
 
 * If a previous unit test is broken, then the new code is not backward compatible and a discussion with the entire development team may be appropriate. If the change is desirable, the previous unit test should be fixed accordingly.
+
 
 ## Pushing to PyPI
 

@@ -102,7 +102,7 @@ class PanelAnalysisMixin(Base):
         value_cols = [
             c
             for c in traces.columns
-            if c not in ["replicate", "iteration", "method", "unit"]
+            if c not in ["theta_idx", "iteration", "method", "unit"]
         ]
 
         has_shared_rows = bool((traces["unit"] == "shared").any())
@@ -112,8 +112,6 @@ class PanelAnalysisMixin(Base):
             for c in value_cols:
                 if c != "logLik" and pd.notna(shared_rows[c]).any():
                     shared_params.append(c)
-        else:
-            shared_params = []
 
         unit_params = [
             c for c in value_cols if c != "logLik" and c not in shared_params
@@ -130,11 +128,11 @@ class PanelAnalysisMixin(Base):
 
             df_shared = traces.loc[
                 traces["unit"] == "shared",
-                ["replicate", "iteration", "method", *shared_vars],
+                ["theta_idx", "iteration", "method", *shared_vars],
             ]
             assert isinstance(df_shared, pd.DataFrame)
             df_shared_long: pd.DataFrame = df_shared.melt(
-                id_vars=["replicate", "iteration", "method"],
+                id_vars=["theta_idx", "iteration", "method"],
                 value_vars=shared_vars,
                 var_name="variable",
                 value_name="value",
@@ -145,7 +143,7 @@ class PanelAnalysisMixin(Base):
                 col="variable",
                 sharex=True,
                 sharey=False,
-                hue="replicate",
+                hue="theta_idx",
                 col_wrap=3,
                 height=3.5,
                 aspect=1.2,
@@ -153,7 +151,7 @@ class PanelAnalysisMixin(Base):
             )
 
             def facet_plot_shared(data, color, **kwargs):
-                for rep, group in data.groupby("replicate"):
+                for rep, group in data.groupby("theta_idx"):
                     for method in ["mif", "train"]:
                         sub = group[group["method"] == method]
                         if len(sub) > 1:
@@ -162,14 +160,6 @@ class PanelAnalysisMixin(Base):
                                 sub["value"],
                                 "-",
                                 color=color,
-                                alpha=0.8,
-                            )
-                        elif len(sub) == 1:
-                            plt.scatter(
-                                sub["iteration"],
-                                sub["value"],
-                                color=color,
-                                marker="o",
                                 alpha=0.8,
                             )
                     sub = group[group["method"] == "pfilter"]
@@ -195,10 +185,10 @@ class PanelAnalysisMixin(Base):
         if which == "unitLogLik":
             df_ul = traces.loc[
                 traces["unit"] != "shared",
-                ["replicate", "iteration", "method", "unit", "logLik"],
+                ["theta_idx", "iteration", "method", "unit", "logLik"],
             ].rename(columns={"logLik": "value"})
             df_ul = df_ul.loc[pd.notna(df_ul["value"])]
-            if bool(df_ul.empty):
+            if bool(df_ul.empty):  # pragma: no cover
                 print("No unit-specific logLik data to plot.")
                 return None
 
@@ -207,7 +197,7 @@ class PanelAnalysisMixin(Base):
                 col="unit",
                 sharex=True,
                 sharey=False,
-                hue="replicate",
+                hue="theta_idx",
                 col_wrap=4,
                 height=3.2,
                 aspect=1.1,
@@ -215,7 +205,7 @@ class PanelAnalysisMixin(Base):
             )
 
             def facet_plot_units_ll(data, color, **kwargs):
-                for rep, group in data.groupby("replicate"):
+                for rep, group in data.groupby("theta_idx"):
                     for method in ["mif", "train"]:
                         sub = group[group["method"] == method]
                         if len(sub) > 1:
@@ -224,14 +214,6 @@ class PanelAnalysisMixin(Base):
                                 sub["value"],
                                 "-",
                                 color=color,
-                                alpha=0.8,
-                            )
-                        elif len(sub) == 1:
-                            plt.scatter(
-                                sub["iteration"],
-                                sub["value"],
-                                color=color,
-                                marker="o",
                                 alpha=0.8,
                             )
                     sub = group[group["method"] == "pfilter"]
@@ -260,13 +242,10 @@ class PanelAnalysisMixin(Base):
             )
 
         df_param = traces.loc[
-            :, ["replicate", "iteration", "method", "unit", which]
+            :, ["theta_idx", "iteration", "method", "unit", which]
         ].copy()
         assert isinstance(df_param, pd.DataFrame)
         df_param = df_param.loc[pd.notna(df_param[which])]
-        if bool(df_param.empty):
-            print(f"No data to plot for unit-specific parameter '{which}'.")
-            return None
         df_param = df_param.rename(columns={which: "value"})
 
         g = sns.FacetGrid(
@@ -274,7 +253,7 @@ class PanelAnalysisMixin(Base):
             col="unit",
             sharex=True,
             sharey=False,
-            hue="replicate",
+            hue="theta_idx",
             col_wrap=4,
             height=3.2,
             aspect=1.1,
@@ -282,20 +261,12 @@ class PanelAnalysisMixin(Base):
         )
 
         def facet_plot_units(data, color, **kwargs):
-            for rep, group in data.groupby("replicate"):
+            for rep, group in data.groupby("theta_idx"):
                 for method in ["mif", "train"]:
                     sub = group[group["method"] == method]
                     if len(sub) > 1:
                         plt.plot(
                             sub["iteration"], sub["value"], "-", color=color, alpha=0.8
-                        )
-                    elif len(sub) == 1:
-                        plt.scatter(
-                            sub["iteration"],
-                            sub["value"],
-                            color=color,
-                            marker="o",
-                            alpha=0.8,
                         )
                 sub = group[group["method"] == "pfilter"]
                 if not sub.empty:

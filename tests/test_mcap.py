@@ -86,6 +86,39 @@ def test_mcap_higher_level_widens_delta():
     assert r99.delta > r95.delta
 
 
+def test_mcap_monotonic_profile_signals_failed_fit():
+    # When the parameter range does not bracket a local maximum, the local
+    # quadratic fit returns non-positive curvature (a <= 0). This is a real
+    # MCAP failure mode; the function falls back to (None, None) for the CI
+    # and to the smoothed MLE for quadratic_max.
+    rng = np.random.default_rng(4)
+    x = np.linspace(0.0, 1.0, 40)
+    y = x + rng.normal(0.0, 0.05, size=40)
+
+    import warnings
+
+    with warnings.catch_warnings():
+        # se_stat2 = 1/(2a) is negative when a < 0; sqrt(se_stat2) -> NaN
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = mcap(x, y)
+
+    assert result.quadratic_coef["a"] < 0.0
+    assert result.quadratic_max == result.mle
+    assert result.delta < 0.0
+    assert result.ci == (None, None)
+
+
+def test_mcap_small_sample_uses_zero_residual_variance():
+    # With only 5 points, the local fit's effective degrees of freedom can be
+    # <= 0, exercising the s2 = 0.0 branch in _fit_local_quadratic.
+    rng = np.random.default_rng(0)
+    x = np.linspace(-1.0, 1.0, 5)
+    y = -0.5 * x**2 + rng.normal(0.0, 0.05, size=5)
+    result = mcap(x, y, span=0.75)
+    assert isinstance(result, MCAPResult)
+    assert np.isfinite(result.mle)
+
+
 def test_qchisq_matches_scipy():
     # Sanity check on the private helper; values are well-known.
     assert _qchisq(0.95, df=1) == pytest.approx(3.841458, rel=1e-4)

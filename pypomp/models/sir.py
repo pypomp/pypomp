@@ -98,11 +98,10 @@ def precompute_bspline_covars(times, t0, period=1.0, nbasis=3, degree=3):
     t_min = t0
     t_max = max(times) + 0.2
     t_grid = np.arange(t_min, t_max + 0.01, 0.01)
-    basis_data = {f"seas_{i + 1}": [] for i in range(nbasis)}
-    for t in t_grid:
-        basis = periodic_bspline_basis_eval(t, period, degree, nbasis, deriv=0)
-        for i in range(nbasis):
-            basis_data[f"seas_{i + 1}"].append(float(basis[i]))
+
+    basis_matrix = periodic_bspline_basis_eval(t_grid, period, degree, nbasis, deriv=0)
+
+    basis_data = {f"seas_{i + 1}": np.array(basis_matrix[i]) for i in range(nbasis)}
     return pd.DataFrame(basis_data, index=pd.Index(t_grid, name="time"))
 
 
@@ -272,7 +271,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     gamma_sample = jax.random.gamma(key1, size) * scale
     reports = jax.random.poisson(key2, gamma_sample)
 
-    return jnp.array([reports], dtype=jnp.float64)
+    return jnp.array([reports], dtype=float)
 
 
 # ---------------------------------------------------------------------

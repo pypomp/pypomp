@@ -42,14 +42,31 @@ def _loess_smooth_1d(
         # degenerate predictor: return flat line at mean(y)
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
-    res = loess_1d(
-        x,
-        y,
-        xnew=grid,
-        degree=int(degree),
-        frac=float(span),
-        rotate=False,
-    )
+    try:
+        res = loess_1d(
+            x,
+            y,
+            xnew=grid,
+            degree=int(degree),
+            frac=float(span),
+            rotate=False,
+        )
+    except np.linalg.LinAlgError:
+        # loess_1d can fail with LinAlgError if the internal robust iterations
+        # encounter mad=0 (perfect fit), leading to inf weights that clip to 0.
+        # Retrying with a tiny sigy forces it to avoid mad-based scaling.
+        # TODO: This is just a bandaid so GitHub Actions will pass the CI tests for
+        # now. Figure out a more permanent solution.
+        print("LinAlgError in loess_1d, retrying with 1e-10 sigy")
+        res = loess_1d(
+            x,
+            y,
+            xnew=grid,
+            degree=int(degree),
+            frac=float(span),
+            rotate=False,
+            sigy=np.full_like(y, 1e-10),
+        )
 
     y_sm = res[1]
     return y_sm.astype(float, copy=False)

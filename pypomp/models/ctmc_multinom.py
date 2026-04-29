@@ -74,9 +74,9 @@ def _multinomial_logpmf(
 
     where sum_i x_i = n and sum_i p_i = 1.
     """
-    counts = jnp.asarray(counts, dtype=jnp.float64)
-    n = jnp.asarray(n, dtype=jnp.float64)
-    probs = jnp.asarray(probs, dtype=jnp.float64)
+    counts = jnp.asarray(counts, dtype=float)
+    n = jnp.asarray(n, dtype=float)
+    probs = jnp.asarray(probs, dtype=float)
 
     # Clip probabilities to avoid log(0).
     probs_safe = jnp.clip(probs, 1.0e-12, 1.0)

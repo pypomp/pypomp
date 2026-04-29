@@ -60,7 +60,7 @@ class BaseResult(ABC):
         """
         Custom pickling: store JAX key as raw bits (key is not always picklable directly).
         """
-        state = self.__dict__.copy()
+        state = vars(self).copy()
         if self.key is not None:
             state["_key_data"] = jax.random.key_data(self.key)
         state.pop("key", None)
@@ -70,10 +70,10 @@ class BaseResult(ABC):
         """
         Custom unpickling: reconstruct JAX key from raw bits.
         """
-        self.__dict__.update(state)
+        vars(self).update(state)
         if "_key_data" in state:
             self.key = jax.random.wrap_key_data(state["_key_data"])
-        self.__dict__.pop("_key_data", None)
+        vars(self).pop("_key_data", None)
 
     @abstractmethod
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:

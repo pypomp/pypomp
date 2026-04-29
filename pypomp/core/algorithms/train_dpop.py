@@ -212,7 +212,7 @@ def dpop_train(
         nll_history = nll_history.at[m].set(nll_mean)
 
         # NaN protection
-        grad_safe = jnp.where(jnp.isnan(grad), 0.0, grad)
+        grad_safe = jnp.array(jnp.where(jnp.isnan(grad), 0.0, grad))
 
         # Learning rate decay
         m_f = m.astype(jnp.float32)

@@ -220,7 +220,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     # jnp.where computes BOTH branches, so NaN in y propagates to gradient
     # By replacing NaN with 0 first, z computation stays finite
     y_is_nan = jnp.isnan(y_raw)
-    y = jnp.where(y_is_nan, 0.0, y_raw)
+    y = jnp.array(jnp.where(y_is_nan, 0.0, y_raw))
 
     # Mean and variance
     Cpos = jnp.maximum(C, 0.0)

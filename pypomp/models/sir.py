@@ -68,11 +68,15 @@ def _bspline_eval(x, knots, i, degree, deriv=0):
             y2 = _bspline_eval(x, knots, i2, p2, 0)
             denom1 = knots[i + degree] - knots[i]
             denom2 = knots[i2 + degree] - knots[i2]
-            a = jnp.where(jnp.abs(denom1) > 1e-10, (x - knots[i]) / denom1, 0.0)
-            b = jnp.where(
-                jnp.abs(denom2) > 1e-10,
-                (knots[i2 + degree] - x) / denom2,
-                0.0,
+            a = jnp.array(
+                jnp.where(jnp.abs(denom1) > 1e-10, (x - knots[i]) / denom1, 0.0)
+            )
+            b = jnp.array(
+                jnp.where(
+                    jnp.abs(denom2) > 1e-10,
+                    (knots[i2 + degree] - x) / denom2,
+                    0.0,
+                )
             )
             return a * y1 + b * y2
         else:

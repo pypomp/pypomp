@@ -747,7 +747,7 @@ class PanelParameters(ParameterSet):
                         raise e
             if shared_names_list and t["shared"] is not None:
                 shared_values = t["shared"].loc[shared_names_list, s_col].to_numpy()
-                full_array[j, :, shared_idx] = np.broadcast_to(
+                full_array[j][:, shared_idx] = np.broadcast_to(
                     shared_values, (n_units, len(shared_idx))
                 )
 

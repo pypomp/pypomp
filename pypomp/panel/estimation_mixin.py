@@ -50,6 +50,21 @@ class PanelEstimationMixin(Base):
         self.fresh_key = new_f_key
         return new_key, old_key
 
+    def _get_covars_per_unit(self, unit_names: list[str]) -> jax.Array | None:
+        has_covars = [
+            self.unit_objects[u]._covars_extended is not None for u in unit_names
+        ]
+        if all(has_covars):
+            return jnp.stack(
+                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
+                axis=0,
+            )
+        if any(has_covars):
+            raise NotImplementedError(
+                "Some units have covariates, but not all units have covariates. This is not supported yet."
+            )
+        return None
+
     def _prepare_theta_input(
         self,
         theta: Union[
@@ -341,7 +356,7 @@ class PanelEstimationMixin(Base):
             thresh (float, optional): Resampling threshold. If 0.0, always resample.
             reps (int, optional): Number of replicates per parameter set.
             chunk_size (Union[int, str], optional): Number of units to process
-                per batch. 'auto' will attempt to estimate based on memory.
+                per batch.
             CLL (bool, optional): Whether to compute conditional log-likelihoods.
             ESS (bool, optional): Whether to compute effective sample sizes.
             filter_mean (bool, optional): Whether to compute filtering means.
@@ -363,54 +378,12 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        # "auto" is experimental and should maybe be deleted
-        if chunk_size == "auto":
-            try:
-                import psutil
-
-                bytes_per_unit = (
-                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
-                )  # rough estimate
-                mem = psutil.virtual_memory()
-                avail = mem.available * 0.4
-                max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size = min(U, max_units)
-                try:
-                    device = jax.devices()[0]
-                    if device.platform == "gpu":
-                        avail = (
-                            device.memory_stats()["bytes_limit"]
-                            - device.memory_stats()["bytes_in_use"]
-                        )
-                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                        chunk_size = min(U, max_units)
-                except Exception:
-                    pass
-            except Exception:
-                chunk_size = max(1, U // 4)
-        else:
-            chunk_size = int(chunk_size)
-
-        if chunk_size < 1:
-            chunk_size = 1
+        chunk_size = max(1, int(chunk_size))
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
         )
-        has_covars = [
-            self.unit_objects[u]._covars_extended is not None for u in unit_names
-        ]
-        if all(has_covars):
-            covars_per_unit = jnp.stack(
-                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
-                axis=0,
-            )
-        elif any(has_covars):
-            raise NotImplementedError(
-                "Some units have covariates, but not all units have covariates. This is not supported yet."
-            )
-        else:
-            covars_per_unit = None
+        covars_per_unit = self._get_covars_per_unit(unit_names)
 
         thetas_per_unit = []
         for unit in unit_names:
@@ -599,6 +572,7 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
+        theta_for_result = deepcopy(theta_obj_in)
         if theta_obj_in is None:
             raise ValueError("theta must be provided or self.theta must exist")
 
@@ -636,92 +610,27 @@ class PanelEstimationMixin(Base):
         dmeasures = rep_unit.dmeas.struct_per
         accumvars = rep_unit.rproc.accumvars
 
-        has_covars = [
-            self.unit_objects[u]._covars_extended is not None for u in unit_names
-        ]
-        if all(has_covars):
-            covars_per_unit = jnp.stack(
-                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
-                axis=0,
-            )
-        elif any(has_covars):
-            raise NotImplementedError(
-                "Some units have covariates, but not all units have covariates. This is not supported yet."
-            )
-        else:
-            covars_per_unit = None
+        covars_per_unit = self._get_covars_per_unit(unit_names)
 
         n_reps = theta_obj_in.num_replicates()
+        theta_obj_in.transform(rep_unit.par_trans, direction="to_est")
 
-        # Extract theta list from PanelParameters and transform to estimation scale if needed
-        theta_list = theta_obj_in.theta
-        if not theta_obj_in.estimation_scale:
-            # Create a copy to avoid modifying the original
-            theta_list = [
-                {
-                    "shared": t["shared"].copy() if t["shared"] is not None else None,
-                    "unit_specific": (
-                        t["unit_specific"].copy()
-                        if t["unit_specific"] is not None
-                        else None
-                    ),
-                }
-                for t in theta_list
-            ]
-            theta_trans_list = rep_unit.par_trans.panel_transform_list(
-                theta_list, direction="to_est"
-            )
-        else:
-            theta_trans_list = theta_list
-
-        # Extract shared and unit_specific DataFrames from transformed list
-        shared_trans_list = [t.get("shared") for t in theta_trans_list]
-        spec_trans_list = [t.get("unit_specific") for t in theta_trans_list]
-
-        # Store original shared/unit_specific for later use
-        shared = [t.get("shared") for t in theta_list]
-        unit_specific = [t.get("unit_specific") for t in theta_list]
-
-        if all(df is None for df in shared_trans_list):
-            n_shared = 0
+        shared_index = self.canonical_shared_param_names
+        n_shared = len(shared_index)
+        if n_shared == 0:
             shared_array = jnp.zeros((n_reps, 0, J))
-            shared_index: list[str] = []
         else:
-            shared_index = self.canonical_shared_param_names
-            n_shared = len(shared_index)
-            shared_trans_list_nonnull = cast(list[pd.DataFrame], shared_trans_list)
-            shared_array = jnp.zeros((n_reps, n_shared, J))
-            for j, df in enumerate(shared_trans_list_nonnull):
-                values = df.loc[shared_index, "shared"].to_numpy(dtype=float)
-                shared_array = shared_array.at[j].set(jnp.tile(values[:, None], (1, J)))
+            shared_vals = theta_obj_in.to_jax_array(shared_index, unit_names=unit_names)
+            shared_array = jnp.tile(shared_vals[:, 0, :, None], (1, 1, J))
 
-        if all(df is None for df in spec_trans_list):
-            n_spec = 0
+        spec_index = self.canonical_unit_param_names
+        n_spec = len(spec_index)
+        if n_spec == 0:
             unit_array = jnp.zeros((n_reps, 0, J, U))
-            spec_index: list[str] = []
         else:
-            spec_index = self.canonical_unit_param_names
-            n_spec = len(spec_index)
-            # PanelParameters ensures all unit_specific are None or all are not None
-            # Cast to list[pd.DataFrame] since we know all are not None here
-            spec_trans_list_nonnull = cast(list[pd.DataFrame], spec_trans_list)
-            unit_array = jnp.stack(
-                [
-                    jnp.stack(
-                        [
-                            jnp.tile(
-                                self._dataframe_to_array_canonical(
-                                    df, self.canonical_unit_param_names, unit
-                                ).reshape(n_spec, 1),
-                                (1, J),
-                            )
-                            for unit in unit_names
-                        ],
-                        axis=2,
-                    )
-                    for df in spec_trans_list_nonnull
-                ],
-                axis=0,
+            spec_vals = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
+            unit_array = jnp.tile(
+                spec_vals.transpose(0, 2, 1)[:, :, None, :], (1, 1, J, 1)
             )
 
         ys_per_unit = jnp.stack(
@@ -735,7 +644,6 @@ class PanelEstimationMixin(Base):
         if vmap_chunk_size is not None:
             U_padded = U + (vmap_chunk_size - (U % vmap_chunk_size)) % vmap_chunk_size
             padding = U_padded - U
-
             unit_mask = jnp.concatenate([jnp.ones(U), jnp.zeros(padding)])
 
             if padding > 0:
@@ -755,12 +663,7 @@ class PanelEstimationMixin(Base):
                         unit_array, ((0, 0), (0, 0), (0, 0), (0, padding))
                     )
 
-            (
-                shared_array_f,
-                unit_array_f,
-                shared_traces,
-                unit_traces,
-            ) = _jv_panel_mif_internal_vmap(
+            res = _jv_panel_mif_internal_vmap(
                 shared_array,
                 unit_array,
                 dt_array_extended,
@@ -785,7 +688,7 @@ class PanelEstimationMixin(Base):
                 keys,
                 vmap_chunk_size,
             )
-
+            shared_array_f, unit_array_f, shared_traces, unit_traces = res
             if padding > 0:
                 unit_array_f = (
                     unit_array_f[:, :, :, :U]
@@ -794,33 +697,30 @@ class PanelEstimationMixin(Base):
                 )
                 unit_traces = unit_traces[:, :, :, :U]
         else:
-            (
-                shared_array_f,
-                unit_array_f,
-                shared_traces,
-                unit_traces,
-            ) = _jv_panel_mif_internal(
-                shared_array,
-                unit_array,
-                dt_array_extended,
-                nstep_array,
-                t0,
-                times,
-                ys_per_unit,
-                rinitializers,
-                rprocesses_interp,
-                dmeasures,
-                sigmas_array,
-                sigmas_init_array,
-                accumvars,
-                covars_per_unit,
-                unit_param_permutations,
-                M,
-                a,
-                J,
-                U,
-                thresh,
-                keys,
+            shared_array_f, unit_array_f, shared_traces, unit_traces = (
+                _jv_panel_mif_internal(
+                    shared_array,
+                    unit_array,
+                    dt_array_extended,
+                    nstep_array,
+                    t0,
+                    times,
+                    ys_per_unit,
+                    rinitializers,
+                    rprocesses_interp,
+                    dmeasures,
+                    sigmas_array,
+                    sigmas_init_array,
+                    accumvars,
+                    covars_per_unit,
+                    unit_param_permutations,
+                    M,
+                    a,
+                    J,
+                    U,
+                    thresh,
+                    keys,
+                )
             )
 
         shared_traces, unit_traces = rep_unit.par_trans.transform_panel_traces(
@@ -837,111 +737,76 @@ class PanelEstimationMixin(Base):
                 raise ValueError(
                     "Both shared_traces and unit_traces are None; cannot build traces."
                 )
-            n_reps = unit_traces.shape[0]
-            shared_ll = np.sum(unit_traces[:, :, 0, :], axis=-1, keepdims=True)
-            shared_traces = shared_ll
+            shared_traces = np.sum(unit_traces[:, :, 0, :], axis=-1, keepdims=True)
             shared_index = []
         if unit_traces is None:
-            n_reps = shared_traces.shape[0]
-            unit_ll = np.zeros((n_reps, M + 1, 1, U), dtype=float)
-            unit_traces = unit_ll
-
-        shared_vars = ["logLik"] + shared_index
-        unit_vars = ["unitLogLik"] + spec_index
+            unit_traces = np.zeros((shared_traces.shape[0], M + 1, 1, U))
 
         shared_da = xr.DataArray(
             shared_traces,
             dims=["theta_idx", "iteration", "variable"],
             coords={
-                "theta_idx": jnp.arange(shared_traces.shape[0]),
-                "iteration": jnp.arange(M + 1),
-                "variable": shared_vars,
+                "theta_idx": range(shared_traces.shape[0]),
+                "iteration": range(M + 1),
+                "variable": ["logLik"] + shared_index,
             },
         )
         unit_da = xr.DataArray(
             unit_traces,
             dims=["theta_idx", "iteration", "variable", "unit"],
             coords={
-                "theta_idx": jnp.arange(unit_traces.shape[0]),
-                "iteration": jnp.arange(M + 1),
-                "variable": unit_vars,
+                "theta_idx": range(unit_traces.shape[0]),
+                "iteration": range(M + 1),
+                "variable": ["unitLogLik"] + spec_index,
                 "unit": unit_names,
             },
         )
 
-        shared_final_logliks = shared_traces[:, -1, 0]
-        unit_final_logliks = unit_traces[:, -1, 0, :]
-
-        full_logliks = xr.DataArray(
-            jnp.concatenate(
-                [shared_final_logliks.reshape(-1, 1), unit_final_logliks], axis=1
-            ),
-            dims=["theta_idx", "unit"],
-            coords={
-                "theta_idx": jnp.arange(n_reps),
-                "unit": ["shared"] + unit_names,
-            },
+        self.theta = PanelParameters(
+            theta=[
+                {
+                    "shared": pd.DataFrame(
+                        shared_traces[rep, -1, 1:].reshape(-1, 1).astype(float),
+                        index=pd.Index(shared_index),
+                        columns=pd.Index(["shared"]),
+                    )
+                    if n_shared > 0
+                    else None,
+                    "unit_specific": pd.DataFrame(
+                        unit_traces[rep, -1, 1:, :].astype(float),
+                        index=pd.Index(spec_index),
+                        columns=pd.Index(unit_names),
+                    )
+                    if n_spec > 0
+                    else None,
+                }
+                for rep in range(n_reps)
+            ],
+            logLik_unit=unit_traces[:, -1, 0, :].astype(float),
+            estimation_scale=False,
         )
-
-        # PanelParameters ensures all shared are None or all are not None
-        if shared and shared[0] is not None:
-            shared_list_out = [
-                pd.DataFrame(
-                    shared_traces[rep, -1, 1:].reshape(-1, 1),
-                    index=pd.Index(shared_index),
-                    columns=pd.Index(["shared"]),
-                )
-                for rep in range(shared_traces.shape[0])
-            ]
-        else:
-            shared_list_out = None
-
-        # PanelParameters ensures all unit_specific are None or all are not None
-        if unit_specific and unit_specific[0] is not None:
-            specific_list_out = [
-                pd.DataFrame(
-                    unit_traces[rep, -1, 1:, :],
-                    index=pd.Index(spec_index),
-                    columns=pd.Index(unit_names),
-                )
-                for rep in range(unit_traces.shape[0])
-            ]
-        else:
-            specific_list_out = None
-
-        theta_list_out = [
-            {
-                "shared": shared_list_out[rep] if shared_list_out else None,
-                "unit_specific": specific_list_out[rep] if specific_list_out else None,
-            }
-            for rep in range(n_reps)
-        ]
-
-        # unit_final_logliks has shape (n_reps, U)
-        logLik_unit_out = np.array(unit_final_logliks)
-
-        self.theta.theta = theta_list_out
-        self.theta.logLik_unit = logLik_unit_out
-        self.theta.estimation_scale = False
-
-        execution_time = time.time() - start_time
 
         result = PanelPompMIFResult(
             method="mif",
-            execution_time=execution_time,
+            execution_time=time.time() - start_time,
             key=old_key,
-            theta=theta_obj_in,
+            theta=theta_for_result,
             shared_traces=shared_da,
             unit_traces=unit_da,
-            logLiks=full_logliks,
             J=J,
             M=M,
             rw_sd=rw_sd,
             a=a,
             thresh=thresh,
             block=block,
+            logLiks=xr.DataArray(
+                np.concatenate(
+                    [shared_traces[:, -1, 0:1], unit_traces[:, -1, 0, :]], axis=1
+                ),
+                dims=["theta_idx", "unit"],
+                coords={"theta_idx": range(n_reps), "unit": ["shared"] + unit_names},
+            ),
         )
-
         self.results_history.add(result)
 
     def train(
@@ -1010,37 +875,7 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        # Determine chunk size similar to pfilter
-        # This is experimental and should maybe be removed
-        if chunk_size == "auto":
-            try:
-                import psutil
-
-                bytes_per_unit = (
-                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
-                )  # rough estimate
-                mem = psutil.virtual_memory()
-                avail = mem.available * 0.4
-                max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size = min(U, max_units)
-                try:
-                    device = jax.devices()[0]
-                    if device.platform == "gpu":
-                        avail = (
-                            device.memory_stats()["bytes_limit"]
-                            - device.memory_stats()["bytes_in_use"]
-                        )
-                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                        chunk_size = min(U, max_units)
-                except Exception:
-                    pass
-            except Exception:
-                chunk_size = max(1, U // 4)
-        else:
-            chunk_size = int(chunk_size)
-
-        if chunk_size < 1:
-            chunk_size = 1
+        chunk_size = max(1, int(chunk_size))
 
         unit_param_permutations = jnp.stack(
             [self._get_unit_param_permutation(u) for u in unit_names], axis=0
@@ -1056,20 +891,7 @@ class PanelEstimationMixin(Base):
         dmeasures = rep_unit.dmeas.struct_pf
         accumvars = rep_unit.rproc.accumvars
 
-        has_covars = [
-            self.unit_objects[u]._covars_extended is not None for u in unit_names
-        ]
-        if all(has_covars):
-            covars_per_unit = jnp.stack(
-                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
-                axis=0,
-            )
-        elif any(has_covars):
-            raise NotImplementedError(
-                "Some units have covariates, but not all units have covariates. This is not supported yet."
-            )
-        else:
-            covars_per_unit = None
+        covars_per_unit = self._get_covars_per_unit(unit_names)
 
         n_reps = theta_obj_in.num_replicates()
 

@@ -8,12 +8,13 @@ J_DEFAULT = 2
 M_DEFAULT = 2
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def simple_sir_for_dpop():
     """
     Build a small SIR Pomp model for testing the DPOP optimizers.
     """
-    model = pp.models.sir()
+    # Mirror the shrinkage in test_pomp_dpop.py::simple_sir to keep setup fast.
+    model = pp.models.sir(delta_t=0.1, times=[0.2, 0.4])
     return model
 
 

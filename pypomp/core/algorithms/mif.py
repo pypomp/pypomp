@@ -30,7 +30,7 @@ def _mif_internal(
     J: int,  # static
     thresh: float,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     times = times.astype(float)
     all_keys = jax.random.split(key, num=M + 1)
     m_keys = all_keys[1:]
@@ -59,23 +59,25 @@ def _mif_internal(
             thresh=thresh,
             a=a,
         )
-        return next_theta_Jd, (next_theta_Jd, loglik_m)
+        return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), loglik_m)
 
     init_carry = theta_Jd
     scan_xs = (jnp.arange(M), m_keys)
 
-    final_state, (thetas_history, logliks_history) = jax.lax.scan(
+    final_theta_Jd, (thetas_history_mean, logliks_history) = jax.lax.scan(
         f=mif_scan_body,
         init=init_carry,
         xs=scan_xs,
     )
 
-    # thetas_MJd: (M+1, J, n_theta)
-    thetas_MJd = jnp.concatenate([theta_Jd[None, :, :], thetas_history], axis=0)
+    # thetas_traces_Md: (M+1, n_theta)
+    thetas_traces_Md = jnp.concatenate(
+        [jnp.mean(theta_Jd, axis=0)[None, :], thetas_history_mean], axis=0
+    )
     # logliks_M: (M,)
     logliks_M = logliks_history
 
-    return logliks_M, thetas_MJd
+    return logliks_M, thetas_traces_Md, final_theta_Jd
 
 
 _vmapped_mif_internal = jax.vmap(
@@ -362,7 +364,7 @@ def _panel_mif_internal(
                 _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
             )
 
-            nLL_u, updated_thetas_u = _mif_internal(
+            nLL_u, _, updated_final_thetas_u = _mif_internal(
                 thetas_u,
                 dt_array_extended,
                 nstep_array,
@@ -384,7 +386,7 @@ def _panel_mif_internal(
             )
             nLL_u = nLL_u[0]
             # skips initial parameters from output:
-            updated_thetas_u = updated_thetas_u[1]  # (J, n_params)
+            updated_thetas_u = updated_final_thetas_u  # (J, n_params)
 
             updated_thetas_panel = updated_thetas_u[:, inv_perm_u]
 
@@ -625,7 +627,7 @@ def _panel_mif_internal_vmap(
                     _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
                 )
 
-                nLL_u, updated_thetas_u = _mif_internal(
+                nLL_u, _, updated_final_thetas_u = _mif_internal(
                     thetas_u,
                     dt_array_extended,
                     nstep_array,
@@ -646,7 +648,7 @@ def _panel_mif_internal_vmap(
                     key_u,
                 )
                 nLL_u = nLL_u[0]
-                updated_thetas_u = updated_thetas_u[1]  # (J, n_params)
+                updated_thetas_u = updated_final_thetas_u  # (J, n_params)
 
                 updated_thetas_panel = updated_thetas_u[:, inv_perm]
 

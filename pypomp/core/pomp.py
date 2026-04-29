@@ -804,7 +804,7 @@ class Pomp:
             )
             theta_tiled = jax.device_put(theta_tiled, sharding_spec)
 
-        nLLs_jax, theta_ests_jax = _jv_mif_internal(
+        nLLs_jax, theta_traces_jax, final_thetas_jax = _jv_mif_internal(
             theta_tiled,
             np.asarray(self._dt_array_extended),
             np.asarray(self._nstep_array),
@@ -828,9 +828,10 @@ class Pomp:
         )
 
         nLLs = jax.device_get(nLLs_jax)
-        theta_ests = jax.device_get(theta_ests_jax)
+        theta_traces = jax.device_get(theta_traces_jax)
+        final_thetas = jax.device_get(final_thetas_jax)
 
-        del nLLs_jax, theta_ests_jax
+        del nLLs_jax, theta_traces_jax, final_thetas_jax
 
         final_theta_ests = []
         param_names = self.canonical_param_names
@@ -840,21 +841,16 @@ class Pomp:
         for i in range(n_reps):
             # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
-            # Average parameter estimates over particles for each iteration
-            param_traces = np.stack(
-                [
-                    np.mean(theta_ests[i, :, :, j], axis=1)
-                    for j in range(len(param_names))
-                ],
-                axis=1,
-            )  # shape: (M+1, n_params)
+            
+            param_traces = theta_traces[i]  # shape: (M+1, n_params)
+            
             # Transform traces from estimation space to natural space
             param_traces = self.par_trans.transform_array(
                 param_traces, param_names, direction="from_est"
             )
             trace_data[i, :, 0] = logliks_with_nan
             trace_data[i, :, 1:] = param_traces
-            final_theta_ests.append(theta_ests[i])
+            final_theta_ests.append(final_thetas[i])
 
         traces_da = xr.DataArray(
             trace_data,
@@ -871,12 +867,12 @@ class Pomp:
                 theta=dict(
                     zip(
                         self.canonical_param_names,
-                        np.mean(theta_ests[-1], axis=0).tolist(),
+                        np.mean(theta_est, axis=0).tolist(),
                     )
                 ),
                 direction="from_est",
             )
-            for theta_ests in final_theta_ests
+            for theta_est in final_theta_ests
         ]
         logLik_estimates = -nLLs
         self.theta = PompParameters(theta, logLik=logLik_estimates)

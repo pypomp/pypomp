@@ -30,7 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmarks = ["statsmodels"]
-tests = ["pytest", "pytest-xdist"]
+tests = ["pytest", "pytest-xdist", "pandas-stubs", "scipy-stubs"]
 
 
 [project.urls]

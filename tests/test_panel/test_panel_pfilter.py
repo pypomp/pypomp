@@ -121,3 +121,13 @@ def test_pfilter_diagnostics(lg_panel_setup_some_shared):
             )
         else:
             assert result.prediction_mean is None
+
+
+def test_pfilter_chunk_size_not_dividing_U(lg_panel_setup_some_shared):
+    """When chunk_size does not divide the number of units, the padding
+    branch in pfilter must run. With U=2 and chunk_size=3, padding is 1."""
+    panel, _, key = lg_panel_setup_some_shared
+    theta_orig = deepcopy(panel.theta)
+    J = 2
+    panel.pfilter(J=J, chunk_size=3, key=key)
+    check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)

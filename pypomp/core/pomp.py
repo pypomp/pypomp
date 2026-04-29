@@ -1498,10 +1498,10 @@ class Pomp:
         value_vars = [
             col
             for col in traces.columns
-            if col not in ["replicate", "iteration", "method"]
+            if col not in ["theta_idx", "iteration", "method"]
         ]
         df_long = traces.melt(
-            id_vars=["replicate", "iteration", "method"],
+            id_vars=["theta_idx", "iteration", "method"],
             value_vars=value_vars,
             var_name="variable",
             value_name="value",
@@ -1512,7 +1512,7 @@ class Pomp:
             col="variable",
             sharex=True,
             sharey=False,
-            hue="replicate",
+            hue="theta_idx",
             col_wrap=3,
             height=3.5,
             aspect=1.2,
@@ -1522,20 +1522,12 @@ class Pomp:
         # Plot lines for mif/train, dots for pfilter
         def facet_plot(data, color, **kwargs):
             # Lines for mif/train
-            for rep, group in data.groupby("replicate"):
+            for rep, group in data.groupby("theta_idx"):
                 for method in ["mif", "train"]:
                     sub = group[group["method"] == method]
                     if len(sub) > 1:
                         plt.plot(
                             sub["iteration"], sub["value"], "-", color=color, alpha=0.8
-                        )
-                    elif len(sub) == 1:
-                        plt.scatter(
-                            sub["iteration"],
-                            sub["value"],
-                            color=color,
-                            marker="o",
-                            alpha=0.8,
                         )
                 # Dots for pfilter
                 sub = group[group["method"] == "pfilter"]

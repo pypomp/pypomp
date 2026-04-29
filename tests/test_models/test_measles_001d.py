@@ -23,7 +23,7 @@ DEFAULT_J = 2
 DEFAULT_KEY = jax.random.key(1)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def london_001d():
     measles = pp.models.UKMeasles.Pomp(
         unit=["London"],

@@ -324,7 +324,7 @@ class PanelEstimationMixin(Base):
         ] = None,
         thresh: float = 0.0,
         reps: int = 1,
-        chunk_size: Union[int, str] = 1,
+        chunk_size: int = 1,
         CLL: bool = False,
         ESS: bool = False,
         filter_mean: bool = False,
@@ -340,8 +340,7 @@ class PanelEstimationMixin(Base):
                 If None, uses `self.theta`.
             thresh (float, optional): Resampling threshold. If 0.0, always resample.
             reps (int, optional): Number of replicates per parameter set.
-            chunk_size (Union[int, str], optional): Number of units to process
-                per batch. 'auto' will attempt to estimate based on memory.
+            chunk_size (int, optional): Number of units to process per batch.
             CLL (bool, optional): Whether to compute conditional log-likelihoods.
             ESS (bool, optional): Whether to compute effective sample sizes.
             filter_mean (bool, optional): Whether to compute filtering means.
@@ -363,34 +362,7 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        # "auto" is experimental and should maybe be deleted
-        if chunk_size == "auto":
-            try:
-                import psutil
-
-                bytes_per_unit = (
-                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
-                )  # rough estimate
-                mem = psutil.virtual_memory()
-                avail = mem.available * 0.4
-                max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size = min(U, max_units)
-                try:
-                    device = jax.devices()[0]
-                    if device.platform == "gpu":
-                        avail = (
-                            device.memory_stats()["bytes_limit"]
-                            - device.memory_stats()["bytes_in_use"]
-                        )
-                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                        chunk_size = min(U, max_units)
-                except Exception:
-                    pass
-            except Exception:
-                chunk_size = max(1, U // 4)
-        else:
-            chunk_size = int(chunk_size)
-
+        chunk_size = int(chunk_size)
         if chunk_size < 1:
             chunk_size = 1
 
@@ -426,12 +398,16 @@ class PanelEstimationMixin(Base):
             thetas_panel, reps, axis=0
         )  # (n_theta_reps * reps, U, n_params)
 
-        rep_unit_keys = jax.random.split(new_key, n_theta_reps * reps * U)
-        rep_unit_keys = rep_unit_keys.reshape(
-            (n_theta_reps * reps, U) + rep_unit_keys.shape[1:]
-        )
-
         padding = (chunk_size - (U % chunk_size)) % chunk_size
+        U_padded = U + padding
+
+        # Pre-allocate keys at padded size: jnp.pad on PRNG keys would fail
+        # because their dtype (key<fry>) cannot be filled with a scalar. When
+        # padding == 0 (the common case), this matches the unpadded behavior.
+        rep_unit_keys = jax.random.split(new_key, n_theta_reps * reps * U_padded)
+        rep_unit_keys = rep_unit_keys.reshape(
+            (n_theta_reps * reps, U_padded) + rep_unit_keys.shape[1:]
+        )
 
         if padding > 0:
             thetas_panel_repl = jnp.pad(
@@ -442,10 +418,6 @@ class PanelEstimationMixin(Base):
                 covars_per_unit = jnp.pad(
                     covars_per_unit, ((0, padding), (0, 0), (0, 0))
                 )
-            rep_unit_keys = jnp.pad(
-                rep_unit_keys,
-                ((0, 0), (0, padding)) + ((0, 0),) * (rep_unit_keys.ndim - 2),
-            )
 
         results_jax = _chunked_panel_pfilter_internal(
             thetas_panel_repl,
@@ -949,7 +921,7 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         eta: dict[str, float] | float,
-        chunk_size: Union[int, str] = 1,
+        chunk_size: int = 1,
         optimizer: str = "Adam",
         alpha: float = 0.97,
         key: jax.Array | None = None,
@@ -976,9 +948,8 @@ class PanelEstimationMixin(Base):
             M (int): Number of training iterations.
             eta (dict[str, float] | float): Learning rate(s). Can be a float for a
                 global learning rate or a dictionary mapping parameter names to rates.
-            chunk_size (Union[int, str], optional): Number of units to process
-                per gradient calculation step. 'auto' will attempt to estimate
-                concurrency based on hardware.
+            chunk_size (int, optional): Number of units to process per
+                gradient calculation step.
             optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD', 'FullMatrixAdam'.
             alpha (float, optional): Learning rate decay factor per iteration.
             key (jax.Array, optional): JAX PRNG key. If None, uses the
@@ -1010,35 +981,7 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        # Determine chunk size similar to pfilter
-        # This is experimental and should maybe be removed
-        if chunk_size == "auto":
-            try:
-                import psutil
-
-                bytes_per_unit = (
-                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
-                )  # rough estimate
-                mem = psutil.virtual_memory()
-                avail = mem.available * 0.4
-                max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size = min(U, max_units)
-                try:
-                    device = jax.devices()[0]
-                    if device.platform == "gpu":
-                        avail = (
-                            device.memory_stats()["bytes_limit"]
-                            - device.memory_stats()["bytes_in_use"]
-                        )
-                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                        chunk_size = min(U, max_units)
-                except Exception:
-                    pass
-            except Exception:
-                chunk_size = max(1, U // 4)
-        else:
-            chunk_size = int(chunk_size)
-
+        chunk_size = int(chunk_size)
         if chunk_size < 1:
             chunk_size = 1
 

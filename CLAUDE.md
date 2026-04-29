@@ -26,8 +26,12 @@ pip install -r requirements.txt
 # Check that pytest is installed with the cov and xdist plugins
 pip list | grep pytest-
 
-# Install package in editable mode for development
+# Install pypomp in editable mode for development
 pip install -e .
+
+# statsmodels is needed for some tests; it is made accessible in 
+# .github/workflows/test-package.yml by  `pip install -e .[benchmarks]`
+pip install statsmodels
 ```
 
 ### Testing

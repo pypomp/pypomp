@@ -4,7 +4,7 @@ import pytest
 import pypomp as pp
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def simple_sir():
     """
     Build a simple SIR Pomp model for testing DPOP.
@@ -24,10 +24,12 @@ def simple_sir():
     key : jax.random.key
         Base random key for tests.
     """
-    model = pp.models.sir()
+
+    # Limit the number of time points so tests run fast    
+    model = pp.models.sir(delta_t=0.1,times=[0.2,0.4])
 
     # Keep J small so tests run fast
-    J = 2
+    J = 5
     ys = model.ys
     theta = model.theta
     covars = model.covars

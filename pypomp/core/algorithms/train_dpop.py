@@ -3,11 +3,14 @@ import jax
 from jax import jit
 import jax.numpy as jnp
 from typing import Callable
-from .dpop import _dpop_internal_mean  # DPOP mean negative log-likelihood per observation
+from .dpop import (
+    _dpop_internal_mean,
+)  # DPOP mean negative log-likelihood per observation
 
 # ----------------------------------------------------------------------
 # DPOP gradient helpers
 # ----------------------------------------------------------------------
+
 
 def _jgrad_dpop(
     theta_ests: jax.Array,
@@ -18,8 +21,8 @@ def _jgrad_dpop(
     times: jax.Array,
     J: int,  # static conceptually (number of particles)
     rinitializer: Callable,  # static conceptually
-    rprocess: Callable,      # static conceptually
-    dmeasure: Callable,      # static conceptually
+    rprocess: Callable,  # static conceptually
+    dmeasure: Callable,  # static conceptually
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     alpha: float,
@@ -63,8 +66,8 @@ def _jvg_dpop(
     times: jax.Array,
     J: int,  # static conceptually (number of particles)
     rinitializer: Callable,  # static conceptually
-    rprocess: Callable,      # static conceptually
-    dmeasure: Callable,      # static conceptually
+    rprocess: Callable,  # static conceptually
+    dmeasure: Callable,  # static conceptually
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     alpha: float,
@@ -106,6 +109,7 @@ def _jvg_dpop(
 # Unified DPOP optimizer: Adam or SGD, with optional per-parameter LR
 # and LR decay
 # ----------------------------------------------------------------------
+
 
 @partial(
     jit,

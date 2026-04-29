@@ -114,7 +114,7 @@ def negbin(
                 from scipy.optimize import minimize
                 from scipy.stats import nbinom
 
-                y = data.values
+                y = np.asarray(data.values)
                 if len(y) < 2:
                     continue
                 y_past = y[:-1]

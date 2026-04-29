@@ -14,84 +14,36 @@ def simple_sir_for_dpop():
     Build a small SIR Pomp model for testing the DPOP optimizers.
     """
     # Mirror the shrinkage in test_pomp_dpop.py::simple_sir to keep setup fast.
-    model = pp.models.sir(delta_t=0.1, times=[0.2, 0.4])
+    model = pp.models.sir(delta_t=0.1, times=np.array([0.2, 0.4]))
     return model
 
 
-def test_dpop_train_adam(simple_sir_for_dpop):
+@pytest.mark.parametrize(
+    "optimizer, decay, eta_type",
+    [
+        ("Adam", 0.0, "dict"),
+        ("SGD", 0.1, "dict"),
+        ("Adam", 0.1, "dict"),
+        ("SGD", 0.1, "scalar"),
+    ],
+)
+def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
     """
-    Test dpop_train with Adam optimizer.
+    Test dpop_train with various optimizer configurations.
     """
     model = simple_sir_for_dpop
-    eta = {name: 0.01 for name in model.canonical_param_names}
+    if eta_type == "dict":
+        eta = {name: 0.01 for name in model.canonical_param_names}
+    else:
+        eta = 0.01
+
     nll, theta_hist = model.dpop_train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
-        optimizer="Adam",
+        optimizer=optimizer,
         alpha=0.8,
-        process_weight_state="logw",
-        key=jax.random.key(42),
-    )
-    assert nll.shape == (M_DEFAULT + 1,)
-    assert theta_hist.shape[0] == M_DEFAULT + 1
-    assert jnp.all(jnp.isfinite(nll))
-
-
-def test_dpop_train_sgd(simple_sir_for_dpop):
-    """
-    Test dpop_train with SGD optimizer and decay.
-    """
-    model = simple_sir_for_dpop
-    eta = {name: 0.01 for name in model.canonical_param_names}
-    nll, theta_hist = model.dpop_train(
-        J=J_DEFAULT,
-        M=M_DEFAULT,
-        eta=eta,
-        optimizer="SGD",
-        alpha=0.8,
-        decay=0.1,
-        process_weight_state="logw",
-        key=jax.random.key(42),
-    )
-    assert nll.shape == (M_DEFAULT + 1,)
-    assert theta_hist.shape[0] == M_DEFAULT + 1
-    assert jnp.all(jnp.isfinite(nll))
-
-
-def test_dpop_train_adam_with_decay(simple_sir_for_dpop):
-    """
-    Test dpop_train with Adam optimizer and LR decay.
-    """
-    model = simple_sir_for_dpop
-    eta = {name: 0.01 for name in model.canonical_param_names}
-    nll, theta_hist = model.dpop_train(
-        J=J_DEFAULT,
-        M=M_DEFAULT,
-        eta=eta,
-        optimizer="Adam",
-        alpha=0.8,
-        decay=0.1,
-        process_weight_state="logw",
-        key=jax.random.key(42),
-    )
-    assert nll.shape == (M_DEFAULT + 1,)
-    assert theta_hist.shape[0] == M_DEFAULT + 1
-    assert jnp.all(jnp.isfinite(nll))
-
-
-def test_dpop_train_scalar_eta(simple_sir_for_dpop):
-    """
-    Test dpop_train with a scalar eta (uniform LR for all params).
-    """
-    model = simple_sir_for_dpop
-    nll, theta_hist = model.dpop_train(
-        J=J_DEFAULT,
-        M=M_DEFAULT,
-        eta=0.01,
-        optimizer="SGD",
-        alpha=0.8,
-        decay=0.1,
+        decay=decay,
         process_weight_state="logw",
         key=jax.random.key(42),
     )

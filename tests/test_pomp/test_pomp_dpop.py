@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import pytest
+import numpy as np
 import pypomp as pp
 
 
@@ -25,8 +26,8 @@ def simple_sir():
         Base random key for tests.
     """
 
-    # Limit the number of time points so tests run fast    
-    model = pp.models.sir(delta_t=0.1,times=[0.2,0.4])
+    # Limit the number of time points so tests run fast
+    model = pp.models.sir(delta_t=0.1, times=np.array([0.2, 0.4]))
 
     # Keep J small so tests run fast
     J = 5

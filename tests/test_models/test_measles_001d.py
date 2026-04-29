@@ -2,6 +2,8 @@ import pytest
 import pypomp as pp
 import jax
 import jax.numpy as jnp
+from typing import cast
+from pypomp.types import ParamDict
 
 BASE_THETA_001D = {
     "R0": 56.8,
@@ -30,6 +32,7 @@ def london_001d():
         theta=BASE_THETA_001D.copy(),
         clean=True,
         model="001d",
+        last_year=1951,  # Use less data for faster testing
     )
     return measles
 
@@ -79,7 +82,7 @@ def test_001d_par_trans_roundtrip(london_001d):
     from pypomp.models.measles.model_001d import to_est, from_est
 
     theta = BASE_THETA_001D.copy()
-    theta_jax = {k: jnp.array(v) for k, v in theta.items()}
+    theta_jax = cast(ParamDict, {k: jnp.array(v) for k, v in theta.items()})
     est = to_est(theta_jax)
     recovered = from_est(est)
     for k in theta:

@@ -1,7 +1,9 @@
 import jax
 import numpy as np
 import pytest
+from typing import cast
 
+from pypomp.types import ParamDict
 import pypomp as pp
 from pypomp.models.sir import (
     DEFAULT_THETA,
@@ -46,7 +48,7 @@ def test_sir_construct_explicit_args():
 
 
 def test_par_trans_roundtrip():
-    est = to_est(DEFAULT_THETA)
+    est = to_est(cast(ParamDict, DEFAULT_THETA))
     nat = from_est(est)
     for name, value in DEFAULT_THETA.items():
         assert float(nat[name]) == pytest.approx(value, rel=1e-5, abs=1e-6)

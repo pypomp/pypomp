@@ -18,8 +18,8 @@ def _get_version():
 
     try:
         return version("pypomp")
-    except PackageNotFoundError:
-        return "unknown"
+    except PackageNotFoundError:  # pragma: no cover
+        return "unknown"  # pragma: no cover
 
 
 __version__ = _get_version()

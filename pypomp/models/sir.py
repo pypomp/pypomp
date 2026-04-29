@@ -351,7 +351,7 @@ def sir(
     assert isinstance(sim_result, tuple)
     X_long, Y_long = sim_result
     y_sims = (
-        Y_long.loc[(Y_long["replicate"] == 0) & (Y_long["sim"] == 0)]
+        Y_long.loc[(Y_long["theta_idx"] == 0) & (Y_long["sim"] == 0)]
         .set_index("time")[["obs_0"]]
         .rename(columns={"obs_0": "reports"})
     )

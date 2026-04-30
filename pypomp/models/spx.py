@@ -49,7 +49,7 @@ theta = {
 statenames = ["V", "S"]
 
 
-def rinit(
+def _rinit(
     theta_: ParamDict,
     key: RNGKey,
     covars: CovarDict,
@@ -60,7 +60,7 @@ def rinit(
     return {"V": V_0, "S": S_0}
 
 
-def rproc(
+def _rproc(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -86,11 +86,10 @@ def rproc(
     V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
     # Feller condition to keep V positive
     V = jnp.maximum(V, 1e-32)
-    # Results must be returned as a dict
     return {"V": V, "S": S}
 
 
-def dmeas(
+def _dmeas(
     Y_: ObservationDict,
     X_: StateDict,
     theta_: ParamDict,
@@ -103,7 +102,7 @@ def dmeas(
     return jax.scipy.stats.norm.logpdf(y, mu - 0.5 * V, jnp.sqrt(V))
 
 
-def to_est(theta: ParamDict) -> ParamDict:
+def _to_est(theta: ParamDict) -> ParamDict:
     return {
         "mu": jnp.log(theta["mu"]),
         "kappa": jnp.log(theta["kappa"]),
@@ -114,7 +113,7 @@ def to_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def from_est(theta: ParamDict) -> ParamDict:
+def _from_est(theta: ParamDict) -> ParamDict:
     return {
         "mu": jnp.exp(theta["mu"]),
         "kappa": jnp.exp(theta["kappa"]),
@@ -152,10 +151,10 @@ def spx():
         t0=0.0,
         nstep=1,
         dt=None,
-        rinit=rinit,
-        rproc=rproc,
-        dmeas=dmeas,
+        rinit=_rinit,
+        rproc=_rproc,
+        dmeas=_dmeas,
         covars=covars,
         statenames=statenames,
-        par_trans=ParTrans(to_est=to_est, from_est=from_est),
+        par_trans=ParTrans(to_est=_to_est, from_est=_from_est),
     )

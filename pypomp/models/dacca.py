@@ -118,7 +118,7 @@ statenames = ["S", "I", "Y", "Mn", "R1", "R2", "R3", "count"]
 accumvars = ["Mn"]
 
 
-def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
+def _rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloat):
     S_0 = theta_["S_0"]
     I_0 = theta_["I_0"]
     Y_0 = theta_["Y_0"]
@@ -146,7 +146,7 @@ def rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFloa
     }
 
 
-def rproc(
+def _rproc(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -231,7 +231,7 @@ def rproc(
     }
 
 
-def rproc_gamma(
+def _rproc_gamma(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -338,7 +338,7 @@ def _dmeas_helper_tol(y, deaths, v, tol, ltol):
     return jnp.array([ltol])
 
 
-def dmeas(
+def _dmeas(
     Y_: ObservationDict,
     X_: StateDict,
     theta_: ParamDict,
@@ -364,7 +364,7 @@ def dmeas(
     return jnp.reshape(result, ())
 
 
-def rmeas(
+def _rmeas(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -377,7 +377,7 @@ def rmeas(
     return jax.random.normal(key) * v + deaths
 
 
-def to_est(theta: ParamDict) -> ParamDict:
+def _to_est(theta: ParamDict) -> ParamDict:
     IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
     IVPs = jnp.array([theta[k] for k in IVP_list])
     IVP_ests = jnp.log(IVPs / jnp.sum(IVPs))
@@ -398,7 +398,7 @@ def to_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def from_est(theta: ParamDict) -> ParamDict:
+def _from_est(theta: ParamDict) -> ParamDict:
     IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
     IVP_ests = jnp.exp(jnp.array([theta[k] for k in IVP_list]))
     IVPs = IVP_ests / jnp.sum(IVP_ests)
@@ -474,9 +474,8 @@ def dacca(
     Pomp
         A POMP model object representing the Dacca cholera model.
     """
-    # Local rproc and rproc_gamma are used
 
-    rproc_func = rproc_gamma if gamma else rproc
+    rproc_func = _rproc_gamma if gamma else _rproc
     if gamma:
         print(
             "Warning: Using overdispersed gamma white noise. Ensure this is intended behavior."
@@ -486,10 +485,10 @@ def dacca(
         raise ValueError("Cannot specify both dt and nstep")
 
     dacca_obj = Pomp(
-        rinit=rinit,
+        rinit=_rinit,
         rproc=rproc_func,
-        dmeas=dmeas,
-        rmeas=rmeas,
+        dmeas=_dmeas,
+        rmeas=_rmeas,
         ys=ys,
         t0=1891.0,
         nstep=nstep,
@@ -498,6 +497,6 @@ def dacca(
         theta=theta,
         covars=covars,
         statenames=statenames,
-        par_trans=ParTrans(to_est=to_est, from_est=from_est),
+        par_trans=ParTrans(to_est=_to_est, from_est=_from_est),
     )
     return dacca_obj

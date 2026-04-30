@@ -32,7 +32,7 @@ def _transform_thetas(A, C, Q, R):
 
 
 # TODO: Add custom starting position.
-def rinit(
+def _rinit(
     theta_: ParamDict,
     key: RNGKey,
     covars: CovarDict,
@@ -43,7 +43,7 @@ def rinit(
     return {"X1": result[0], "X2": result[1]}
 
 
-def rproc(
+def _rproc(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -57,7 +57,7 @@ def rproc(
     return {"X1": result[0], "X2": result[1]}
 
 
-def dmeas(
+def _dmeas(
     Y_: ObservationDict,
     X_: StateDict,
     theta_: ParamDict,
@@ -70,7 +70,7 @@ def dmeas(
     return jax.scipy.stats.multivariate_normal.logpdf(Y_array, X_array, R)
 
 
-def rmeas(
+def _rmeas(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -82,7 +82,7 @@ def rmeas(
     return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
 
 
-def to_est(theta: ParamDict) -> ParamDict:
+def _to_est(theta: ParamDict) -> ParamDict:
     new_theta = {**theta}
     for name in "ACQR":
         new_theta[f"{name}1"] = jnp.log(theta[f"{name}1"])
@@ -90,7 +90,7 @@ def to_est(theta: ParamDict) -> ParamDict:
     return new_theta
 
 
-def from_est(theta: ParamDict) -> ParamDict:
+def _from_est(theta: ParamDict) -> ParamDict:
     new_theta = {**theta}
     for name in "ACQR":
         new_theta[f"{name}1"] = jnp.exp(theta[f"{name}1"])
@@ -107,7 +107,7 @@ def LG(
     Q: jax.Array = jnp.array([[1, 2e-2], [2e-2, 1]]) / 100,
     R: jax.Array = jnp.array([[1, 0.1], [0.1, 1]]) / 10,
     key: jax.Array = jax.random.key(111),
-):
+) -> Pomp:
     """
     Initialize a Pomp object with the linear Gaussian model.
 
@@ -131,9 +131,7 @@ def LG(
 
     Returns
     -------
-    LG_obj : Pomp
-        A Pomp object initialized with the linear Gaussian model parameters and
-        the generated data.
+    A Pomp object initialized with the linear Gaussian model parameters and the generated data.
     """
     theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
     theta = dict(zip(theta_names, _transform_thetas(A, C, Q, R).tolist()))
@@ -143,10 +141,10 @@ def LG(
     )
 
     LG_obj_temp = Pomp(
-        rinit=rinit,
-        rproc=rproc,
-        dmeas=dmeas,
-        rmeas=rmeas,
+        rinit=_rinit,
+        rproc=_rproc,
+        dmeas=_dmeas,
+        rmeas=_rmeas,
         ys=ys_temp,
         t0=0.0,
         nstep=1,
@@ -154,7 +152,7 @@ def LG(
         theta=theta,
         covars=None,
         statenames=["X1", "X2"],
-        par_trans=ParTrans(to_est=to_est, from_est=from_est),
+        par_trans=ParTrans(to_est=_to_est, from_est=_from_est),
     )
     LG_obj = LG_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
     assert isinstance(LG_obj, Pomp)

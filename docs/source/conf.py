@@ -34,7 +34,7 @@ exclude_patterns: list[str] = []
 # Napoleon settings for docstring parsing
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
-napoleon_include_init_with_doc = False
+napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False
 napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = False
@@ -50,7 +50,13 @@ autodoc_default_options = {
     "undoc-members": True,
     "show-inheritance": True,
     "inherited-members": True,
+    "special-members": "__init__",
 }
+autodoc_member_order = "bysource"
+
+# Enable domain objects (classes, functions, methods) to appear in the floating right-sidebar TOC
+toc_object_entries = True
+toc_object_entries_show_parents = "hide"
 
 # Intersphinx mapping
 intersphinx_mapping = {

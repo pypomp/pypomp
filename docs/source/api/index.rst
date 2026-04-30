@@ -23,19 +23,6 @@ Model Components
    par_trans
    rw_sigma
 
-Estimation and Inference
-------------------------
-
-.. toctree::
-   :maxdepth: 2
-
-   mif
-   pfilter
-   train
-   mcap
-   simulate
-   mop
-
 Utilities
 ---------
 
@@ -44,6 +31,7 @@ Utilities
 
    maths
    random
+   mcap
 
 Example Models
 --------------

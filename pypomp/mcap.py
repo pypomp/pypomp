@@ -137,6 +137,35 @@ def _fit_local_quadratic(
 # MCAP result container
 @dataclass
 class MCAPResult:
+    """
+    Results of a Monte Carlo adjusted profile (MCAP) analysis.
+
+    Attributes
+    ----------
+    level : float
+        The confidence level of the profile likelihood confidence interval.
+    mle : float
+        The maximum likelihood estimate of the focal parameter, taken as the argmax of the smoothed profile.
+    ci : Tuple[Optional[float], Optional[float]]
+        The profile likelihood confidence interval (lower, upper).
+    delta : float
+        The log-likelihood threshold used to define the confidence interval, relative to the maximum.
+    se_stat : float
+        The standard error due to statistical uncertainty (sampling variance).
+    se_mc : float
+        The standard error due to Monte Carlo noise in the likelihood estimates.
+    se_total : float
+        The total standard error, calculated as the root sum of squares of se_stat and se_mc.
+    fit : Dict[str, FloatArray]
+        A dictionary containing the grid of parameters ('parameter'), the smoothed log-likelihood values ('smoothed'), and the local quadratic fit values ('quadratic').
+    quadratic_max : float
+        The parameter value that maximizes the local quadratic fit.
+    quadratic_coef : Dict[str, float]
+        The coefficients of the local quadratic fit: c - ax^2 + bx.
+    vcov : FloatArray
+        The variance-covariance matrix of the quadratic coefficients a and b.
+    """
+
     level: float
     mle: float
     ci: Tuple[Optional[float], Optional[float]]

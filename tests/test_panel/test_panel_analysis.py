@@ -1,15 +1,5 @@
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
-
-# Calling plt.show() under the Agg backend emits a benign UserWarning;
-# suppress it for the show=True branches we exercise here.
-pytestmark = pytest.mark.filterwarnings(
-    "ignore:FigureCanvasAgg is non-interactive:UserWarning"
-)
+import pandas as pd
+import pytest
 
 
 def test_simple_delegators(lg_panel_mp):
@@ -41,33 +31,49 @@ def test_plot_traces_empty_history(lg_panel_setup_some_shared, capsys):
 
 
 def test_plot_traces_shared(lg_panel_mp):
-    # show=True is safe under the Agg backend; covers the plt.show() branch.
+    pytest.importorskip("plotly")
     panel, _, _, _, _, _ = lg_panel_mp
-    g = panel.plot_traces(which="shared", show=True)
-    assert g is not None
-    plt.close("all")
+    fig = panel.plot_traces(which="shared", show=False)
+    assert fig is not None
+    assert hasattr(fig, "show")
 
 
 def test_plot_traces_unitLogLik(lg_panel_mp):
+    pytest.importorskip("plotly")
     panel, _, _, _, _, _ = lg_panel_mp
-    g = panel.plot_traces(which="unitLogLik", show=True)
-    assert g is not None
-    plt.close("all")
+    fig = panel.plot_traces(which="unitLogLik", show=False)
+    assert fig is not None
+    assert hasattr(fig, "show")
 
 
 def test_plot_traces_unit_param(lg_panel_mp):
+    pytest.importorskip("plotly")
     panel, _, _, _, _, _ = lg_panel_mp
     # Q1 is unit-specific (shared params are A1, C1 in the lg fixture).
-    g = panel.plot_traces(which="Q1", show=True)
-    assert g is not None
-    plt.close("all")
+    fig = panel.plot_traces(which="Q1", show=False)
+    assert fig is not None
+    assert hasattr(fig, "show")
 
 
-def test_plot_traces_invalid_which(lg_panel_mp):
-    panel, _, _, _, _, _ = lg_panel_mp
-    with pytest.raises(
-        ValueError, match="not found among unit-specific parameters"
-    ):
+    with pytest.raises(ValueError, match="not found among unit-specific parameters"):
         panel.plot_traces(which="nonexistent_param", show=False)
 
 
+def test_plot_panel_simulations(lg_panel_mp):
+    pytest.importorskip("plotly")
+    import jax
+
+    panel, _, _, _, _, _ = lg_panel_mp
+    key = jax.random.key(0)
+
+    # Test lines mode
+    fig_lines = panel.plot_simulations(nsim=2, mode="lines", key=key, show=False)
+    assert fig_lines is not None
+    # 2 units, each with 2 sims + 1 actual data = 3 traces per subplot
+    # (Though plotly might organize traces differently)
+    assert len(fig_lines.data) >= 6
+
+    # Test quantiles mode
+    fig_q = panel.plot_simulations(nsim=5, mode="quantiles", key=key, show=False)
+    assert fig_q is not None
+    assert any(d.fill == "toself" for d in fig_q.data)

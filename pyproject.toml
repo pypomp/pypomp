@@ -23,14 +23,13 @@ dependencies = [
     "xarray",
     "scipy",
     "typing_extensions",
-    "seaborn",
-    "matplotlib",
     "loess"
 ]
 
 [project.optional-dependencies]
 benchmarks = ["statsmodels"]
 tests = ["pytest", "pytest-xdist", "pandas-stubs", "scipy-stubs"]
+viz = ["plotly"]
 
 
 [project.urls]

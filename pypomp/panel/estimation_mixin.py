@@ -1,3 +1,4 @@
+from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import pandas as pd
@@ -5,7 +6,7 @@ import xarray as xr
 import numpy as np
 import time
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast, Callable
+from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
@@ -183,19 +184,44 @@ class PanelEstimationMixin(Base):
 
         return results
 
+    @overload
     def simulate(
         self,
         key: jax.Array,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        as_pomp: Literal[False] = False,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+
+    @overload
+    def simulate(
+        self,
+        key: jax.Array,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        *,
+        as_pomp: Literal[True],
+    ) -> "Base": ...
+
+    def simulate(
+        self,
+        key: jax.Array,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
-    ) -> Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], "Base"]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | Base:
         """
         Simulate the PanelPomp model.
 
@@ -258,6 +284,7 @@ class PanelEstimationMixin(Base):
 
         X_sims_long = pd.concat(X_sims_list)
         Y_sims_long = pd.concat(Y_sims_list)
+
         return X_sims_long, Y_sims_long
 
     def probe(
@@ -365,9 +392,9 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-
+ 
         new_key, old_key = self._update_fresh_key(key)
-
+ 
         n_theta_reps = theta_obj_in.num_replicates()
         unit_names = list(self.unit_objects.keys())
         U = len(unit_names)

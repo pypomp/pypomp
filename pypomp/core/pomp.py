@@ -5,20 +5,19 @@ This module implements the OOP structure for POMP models.
 import importlib
 from copy import deepcopy
 import time
-from typing import Callable
+from typing import Callable, Any
 import numpy as np
 import jax
 import jax.numpy as jnp
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import warnings
-from typing import Union
+from typing import Union, overload, Literal
+from .viz import plot_traces_internal, plot_simulations_internal
 
 from pypomp.types import ThetaInput
 from .metadata import ModelMetadata
-from .algorithms.mop import _mop_internal
-from .algorithms.dpop import _dpop_internal
+from .algorithms.mop import _vmapped_mop_internal
+from .algorithms.dpop import _vmapped_dpop_internal
 from .algorithms.mif import _jv_mif_internal
 from .algorithms.train import _vmapped_train_internal
 from .model_struct import RInit, RProc, DMeas, RMeas
@@ -407,7 +406,7 @@ class Pomp:
         key: jax.Array | None = None,
         theta: ThetaInput = None,
         alpha: float = 0.97,
-    ) -> list[jax.Array]:
+    ) -> jax.Array:
         """
         Runs the Measurement Off-Parameter (MOP) differentiable particle filter.
 
@@ -422,12 +421,9 @@ class Pomp:
                 Defaults to 0.97.
 
         Returns:
-            list[jax.Array]: The estimated log-likelihood(s) of the observed data given the model parameters. Always a list, even if only one theta is provided.
+            jax.Array: The estimated log-likelihood(s) of the observed data given the model parameters.
         """
         theta_obj = self._prepare_theta_input(theta)
-
-        theta_list = theta_obj.to_list()
-        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -436,32 +432,32 @@ class Pomp:
             raise ValueError("J should be greater than 0")
 
         new_key, old_key = self._update_fresh_key(key)
-        keys = jax.random.split(new_key, len(theta_list))
-        results = []
-        for theta_i, k in zip(theta_list_trans, keys):
-            results.append(
-                -_mop_internal(
-                    theta=jnp.array(
-                        [theta_i[name] for name in self.canonical_param_names]
-                    ),
-                    ys=jnp.array(self.ys),
-                    dt_array_extended=jnp.array(self._dt_array_extended),
-                    nstep_array=jnp.array(self._nstep_array),
-                    t0=self.t0,
-                    times=jnp.array(self.ys.index),
-                    J=J,
-                    rinitializer=self.rinit.struct_pf,
-                    rprocess_interp=self.rproc.struct_pf_interp,
-                    dmeasure=self.dmeas.struct_pf,
-                    covars_extended=jnp.array(self._covars_extended)
-                    if self._covars_extended is not None
-                    else None,
-                    accumvars=self.rproc.accumvars,
-                    alpha=alpha,
-                    key=k,
-                )
-            )
-        return results
+        n_reps = theta_obj.num_replicates()
+        keys = jax.random.split(new_key, n_reps)
+
+        theta_obj_trans = deepcopy(theta_obj)
+        theta_obj_trans.transform(self.par_trans, direction="to_est")
+        thetas_array = theta_obj_trans.to_jax_array(self.canonical_param_names)
+
+        results_jax = -_vmapped_mop_internal(
+            thetas_array,
+            jnp.array(self.ys),
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
+            self.t0,
+            jnp.array(self.ys.index),
+            J,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf_interp,
+            self.dmeas.struct_pf,
+            self.rproc.accumvars,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
+            alpha,
+            keys,
+        )
+        return results_jax
 
     def dpop(
         self,
@@ -470,7 +466,7 @@ class Pomp:
         theta: ThetaInput = None,
         alpha: float = 0.97,
         process_weight_state: str | None = None,
-    ) -> list[jax.Array]:
+    ) -> jax.Array:
         """
         Runs the DPOP (dynamics-penalized) differentiable particle filter.
 
@@ -497,12 +493,10 @@ class Pomp:
                 single observation interval (for example ``"logw"``).
 
         Returns:
-            list[jax.Array]: A list of negative DPOP log-likelihood
+            jax.Array: An array of negative DPOP log-likelihood
             estimates, one for each parameter vector in ``theta``.
         """
         theta_obj = self._prepare_theta_input(theta)
-        theta_list = theta_obj.to_list()
-        theta_list_trans = [self.par_trans.to_est(theta_i) for theta_i in theta_list]
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -510,9 +504,6 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        # ------------------------------------------------------------------
-        # No default: user must be explicit.
-        # ------------------------------------------------------------------
         if process_weight_state is None:
             raise ValueError(
                 "dpop requires a process-weight state. "
@@ -520,7 +511,6 @@ class Pomp:
                 "variable that accumulates the transition log-weight "
                 "(e.g. 'logw')."
             )
-
         try:
             process_weight_index = int(self.statenames.index(process_weight_state))
         except ValueError as exc:
@@ -529,38 +519,36 @@ class Pomp:
                 f"Available statenames are: {self.statenames}"
             ) from exc
 
-        # ------------------------------------------------------------------
-        # Run DPOP for each theta
-        # ------------------------------------------------------------------
         new_key, _ = self._update_fresh_key(key)
-        keys = jax.random.split(new_key, len(theta_list_trans))
-
-        results: list[jax.Array] = []
+        n_reps = theta_obj.num_replicates()
+        keys = jax.random.split(new_key, n_reps)
         ntimes = len(self.ys)
-        for theta_i, k in zip(theta_list_trans, keys):
-            results.append(
-                -_dpop_internal(
-                    theta=jnp.array(
-                        [theta_i[name] for name in self.canonical_param_names]
-                    ),
-                    ys=jnp.array(self.ys),
-                    dt_array_extended=self._dt_array_extended,
-                    nstep_array=self._nstep_array,
-                    t0=self.t0,
-                    times=jnp.array(self.ys.index),
-                    J=J,
-                    rinitializer=self.rinit.struct_pf,
-                    rprocess_interp=self.rproc.struct_pf_interp,
-                    dmeasure=self.dmeas.struct_pf,
-                    accumvars=self.rproc.accumvars,
-                    covars_extended=self._covars_extended,
-                    alpha=alpha,
-                    process_weight_index=process_weight_index,  # still an int internally
-                    ntimes=ntimes,
-                    key=k,
-                )
-            )
-        return results
+
+        theta_obj_trans = deepcopy(theta_obj)
+        theta_obj_trans.transform(self.par_trans, direction="to_est")
+        thetas_array = theta_obj_trans.to_jax_array(self.canonical_param_names)
+
+        results_jax = -_vmapped_dpop_internal(
+            thetas_array,
+            jnp.array(self.ys),
+            jnp.array(self._dt_array_extended),
+            jnp.array(self._nstep_array),
+            self.t0,
+            jnp.array(self.ys.index),
+            J,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf_interp,
+            self.dmeas.struct_pf,
+            self.rproc.accumvars,
+            jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
+            alpha,
+            process_weight_index,
+            ntimes,
+            keys,
+        )
+        return results_jax
 
     def pfilter(
         self,
@@ -841,9 +829,9 @@ class Pomp:
         for i in range(n_reps):
             # Prepend nan for the log-likelihood of the initial parameters
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
-            
+
             param_traces = theta_traces[i]  # shape: (M+1, n_params)
-            
+
             # Transform traces from estimation space to natural space
             param_traces = self.par_trans.transform_array(
                 param_traces, param_names, direction="from_est"
@@ -1219,6 +1207,27 @@ class Pomp:
         # 8) Return in user-friendly order: first NLL, then parameter trajectory.
         return nll_hist, theta_hist
 
+    @overload
+    def simulate(
+        self,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        as_pomp: Literal[False] = False,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+
+    @overload
+    def simulate(
+        self,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        *,
+        as_pomp: Literal[True],
+    ) -> "Pomp": ...
+
     def simulate(
         self,
         key: jax.Array | None = None,
@@ -1226,7 +1235,7 @@ class Pomp:
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
-    ) -> Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], "Pomp"]:
+    ) -> Union[tuple[pd.DataFrame, pd.DataFrame], "Pomp"]:
         """
         Simulates the evolution of a system over time using a Partially Observed
         Markov Process (POMP) model.
@@ -1476,7 +1485,7 @@ class Pomp:
         """
         self.theta.prune(n=n, refill=refill)
 
-    def plot_traces(self, show: bool = True) -> sns.FacetGrid | None:
+    def plot_traces(self, show: bool = True) -> Any:
         """
         Plot the parameter and log-likelihood traces from the entire result history.
         Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.
@@ -1485,66 +1494,45 @@ class Pomp:
         Args:
             show (bool): Whether to display the plot. Defaults to True.
         """
-
         traces = self.traces()
-        if traces.empty:
-            print("No trace data to plot.")
-            return None
-        # Melt the DataFrame to long format for FacetGrid
-        value_vars = [
-            col
-            for col in traces.columns
-            if col not in ["theta_idx", "iteration", "method"]
-        ]
-        df_long = traces.melt(
-            id_vars=["theta_idx", "iteration", "method"],
-            value_vars=value_vars,
-            var_name="variable",
-            value_name="value",
-        )
-        # Set up FacetGrid
-        g = sns.FacetGrid(
-            df_long,
-            col="variable",
-            sharex=True,
-            sharey=False,
-            hue="theta_idx",
-            col_wrap=3,
-            height=3.5,
-            aspect=1.2,
-            palette="tab10",
-        )
+        fig = plot_traces_internal(traces, title="Pomp Traces")
 
-        # Plot lines for mif/train, dots for pfilter
-        def facet_plot(data, color, **kwargs):
-            # Lines for mif/train
-            for rep, group in data.groupby("theta_idx"):
-                for method in ["mif", "train"]:
-                    sub = group[group["method"] == method]
-                    if len(sub) > 1:
-                        plt.plot(
-                            sub["iteration"], sub["value"], "-", color=color, alpha=0.8
-                        )
-                # Dots for pfilter
-                sub = group[group["method"] == "pfilter"]
-                if not sub.empty:
-                    plt.scatter(
-                        sub["iteration"],
-                        sub["value"],
-                        color=color,
-                        marker="o",
-                        edgecolor="k",
-                        zorder=3,
-                    )
+        if fig is not None and show:
+            fig.show()
+        return fig
 
-        g.map_dataframe(facet_plot)
-        g.add_legend(title="Replicate")
-        g.set_axis_labels("Iteration", "Value")
-        g.set_titles(col_template="{col_name}")
-        plt.tight_layout()
-        if show:
-            plt.show()
-        return g
+    def plot_simulations(
+        self,
+        key: jax.Array,
+        nsim: int = 20,
+        mode: str = "lines",
+        theta: ThetaInput = None,
+        show: bool = True,
+    ) -> Any:
+        """
+        Runs simulations and plots them against the true observation data.
+
+        Args:
+            key (jax.Array): JAX random key for simulation.
+            nsim (int): Number of simulations to perform. Defaults to 20.
+            mode (str): Plotting mode, either "lines" (individual sims) or "quantiles" (shaded region).
+                Defaults to "lines".
+            theta (ThetaInput, optional): Parameters to use for simulation. Defaults to the first replicate in self.theta.
+            show (bool): Whether to display the plot. Defaults to True.
+        """
+        if theta is None:
+            theta = (
+                self.theta.subset([0])
+                if self.theta and self.theta.num_replicates() > 1
+                else self.theta
+            )
+
+        _, sims = self.simulate(nsim=nsim, theta=theta, key=key)
+        fig = plot_simulations_internal(sims, self.ys, mode=mode)
+
+        if fig is not None and show:
+            fig.show()
+        return fig
 
     def print_summary(self):
         """

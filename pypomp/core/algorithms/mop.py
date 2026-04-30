@@ -174,3 +174,24 @@ def _mop_helper(
     weightsF = (weightsP + measurements - jax.lax.stop_gradient(measurements))[counts]
 
     return (t, particlesF, loglik, weightsF, counts, key, t_idx)
+
+
+_vmapped_mop_internal = jax.vmap(
+    _mop_internal,
+    in_axes=(
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        0,
+    ),
+)

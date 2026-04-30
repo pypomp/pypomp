@@ -1,7 +1,7 @@
+import jax
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from ..core.viz import plot_traces_internal, plot_panel_simulations_internal
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -13,6 +13,19 @@ class PanelAnalysisMixin(Base):
     """
     Handles results processing, pruning, and visualization for PanelPomp.
     """
+
+    @property
+    def ys(self) -> pd.DataFrame:
+        """
+        Returns a tidy DataFrame with the observations from all units.
+        """
+        ys_list = []
+        for unit, obj in self.unit_objects.items():
+            unit_ys = obj.ys.copy()
+            unit_ys.insert(0, "unit", unit)
+            unit_ys.insert(0, "time", unit_ys.index)
+            ys_list.append(unit_ys)
+        return pd.concat(ys_list).reset_index(drop=True)
 
     def prune(self, n: int = 1, refill: bool = True):
         """
@@ -89,7 +102,7 @@ class PanelAnalysisMixin(Base):
         """
         return self.results_history.traces()
 
-    def plot_traces(self, which: str = "shared", show: bool = True):
+    def plot_traces(self, which: str = "shared", show: bool = True) -> Any:
         """
         Plots the parameter and log-likelihood traces from the entire result history.
         """
@@ -97,7 +110,7 @@ class PanelAnalysisMixin(Base):
         assert isinstance(traces, pd.DataFrame)
         if traces.empty:
             print("No trace data to plot.")
-            return
+            return None
 
         value_cols = [
             c
@@ -121,169 +134,57 @@ class PanelAnalysisMixin(Base):
             if not has_shared_rows:
                 print("No shared rows to plot.")
                 return None
-            shared_vars = (["logLik"] if "logLik" in value_cols else []) + shared_params
-            if len(shared_vars) == 0:
-                print("No shared parameters or logLik to plot.")
-                return None
-
-            df_shared = traces.loc[
-                traces["unit"] == "shared",
-                ["theta_idx", "iteration", "method", *shared_vars],
+            df_plot = traces[traces["unit"] == "shared"]
+            title = "Shared Parameter Traces"
+        elif which == "unitLogLik":
+            df_plot = traces[traces["unit"] != "shared"][
+                ["theta_idx", "iteration", "method", "unit", "logLik"]
             ]
-            assert isinstance(df_shared, pd.DataFrame)
-            df_shared_long: pd.DataFrame = df_shared.melt(
-                id_vars=["theta_idx", "iteration", "method"],
-                value_vars=shared_vars,
-                var_name="variable",
-                value_name="value",
+            title = "Unit Log-Likelihood Traces"
+        else:
+            if which not in unit_params:
+                raise ValueError(
+                    f"'{which}' not found among unit-specific parameters: {unit_params}"
+                )
+            df_plot = traces[traces["unit"] != "shared"][
+                ["theta_idx", "iteration", "method", "unit", which]
+            ]
+            title = f"Unit Parameter Traces: {which}"
+
+        fig = plot_traces_internal(df_plot, title=title)
+
+        if fig is not None and show:
+            fig.show()
+        return fig
+
+    def plot_simulations(
+        self,
+        key: jax.Array,
+        nsim: int = 20,
+        mode: str = "lines",
+        theta: Any = None,
+        show: bool = True,
+    ) -> Any:
+        """
+        Runs simulations for the PanelPomp model and plots them against true data.
+
+        Args:
+            key (jax.Array): JAX random key for simulation.
+            nsim (int): Number of simulations to perform per parameter set.
+            mode (str): Plotting mode, either "lines" or "quantiles".
+            theta (PanelParameters, optional): Parameters to use. Defaults to self.theta.
+            show (bool): Whether to display the plot.
+        """
+        if theta is None:
+            theta = (
+                self.theta.subset([0])
+                if self.theta and self.theta.num_replicates() > 1
+                else self.theta
             )
 
-            g = sns.FacetGrid(
-                df_shared_long,
-                col="variable",
-                sharex=True,
-                sharey=False,
-                hue="theta_idx",
-                col_wrap=3,
-                height=3.5,
-                aspect=1.2,
-                palette="tab10",
-            )
+        _, sims = self.simulate(nsim=nsim, theta=theta, key=key)
+        fig = plot_panel_simulations_internal(sims, self.ys, mode=mode)
 
-            def facet_plot_shared(data, color, **kwargs):
-                for rep, group in data.groupby("theta_idx"):
-                    for method in ["mif", "train"]:
-                        sub = group[group["method"] == method]
-                        if len(sub) > 1:
-                            plt.plot(
-                                sub["iteration"],
-                                sub["value"],
-                                "-",
-                                color=color,
-                                alpha=0.8,
-                            )
-                    sub = group[group["method"] == "pfilter"]
-                    if not sub.empty:
-                        plt.scatter(
-                            sub["iteration"],
-                            sub["value"],
-                            color=color,
-                            marker="o",
-                            edgecolor="k",
-                            zorder=3,
-                        )
-
-            g.map_dataframe(facet_plot_shared)
-            g.add_legend(title="Replicate")
-            g.set_axis_labels("Iteration", "Value")
-            g.set_titles(col_template="{col_name}")
-            plt.tight_layout()
-            if show:
-                plt.show()
-            return g
-
-        if which == "unitLogLik":
-            df_ul = traces.loc[
-                traces["unit"] != "shared",
-                ["theta_idx", "iteration", "method", "unit", "logLik"],
-            ].rename(columns={"logLik": "value"})
-            df_ul = df_ul.loc[pd.notna(df_ul["value"])]
-            if bool(df_ul.empty):  # pragma: no cover
-                print("No unit-specific logLik data to plot.")
-                return None
-
-            g = sns.FacetGrid(
-                df_ul,
-                col="unit",
-                sharex=True,
-                sharey=False,
-                hue="theta_idx",
-                col_wrap=4,
-                height=3.2,
-                aspect=1.1,
-                palette="tab10",
-            )
-
-            def facet_plot_units_ll(data, color, **kwargs):
-                for rep, group in data.groupby("theta_idx"):
-                    for method in ["mif", "train"]:
-                        sub = group[group["method"] == method]
-                        if len(sub) > 1:
-                            plt.plot(
-                                sub["iteration"],
-                                sub["value"],
-                                "-",
-                                color=color,
-                                alpha=0.8,
-                            )
-                    sub = group[group["method"] == "pfilter"]
-                    if not sub.empty:
-                        plt.scatter(
-                            sub["iteration"],
-                            sub["value"],
-                            color=color,
-                            marker="o",
-                            edgecolor="k",
-                            zorder=3,
-                        )
-
-            g.map_dataframe(facet_plot_units_ll)
-            g.add_legend(title="Replicate")
-            g.set_axis_labels("Iteration", "logLik")
-            g.set_titles(col_template="{col_name}")
-            plt.tight_layout()
-            if show:
-                plt.show()
-            return g
-
-        if which not in unit_params:
-            raise ValueError(
-                f"'{which}' not found among unit-specific parameters: {unit_params}"
-            )
-
-        df_param = traces.loc[
-            :, ["theta_idx", "iteration", "method", "unit", which]
-        ].copy()
-        assert isinstance(df_param, pd.DataFrame)
-        df_param = df_param.loc[pd.notna(df_param[which])]
-        df_param = df_param.rename(columns={which: "value"})
-
-        g = sns.FacetGrid(
-            df_param,
-            col="unit",
-            sharex=True,
-            sharey=False,
-            hue="theta_idx",
-            col_wrap=4,
-            height=3.2,
-            aspect=1.1,
-            palette="tab10",
-        )
-
-        def facet_plot_units(data, color, **kwargs):
-            for rep, group in data.groupby("theta_idx"):
-                for method in ["mif", "train"]:
-                    sub = group[group["method"] == method]
-                    if len(sub) > 1:
-                        plt.plot(
-                            sub["iteration"], sub["value"], "-", color=color, alpha=0.8
-                        )
-                sub = group[group["method"] == "pfilter"]
-                if not sub.empty:
-                    plt.scatter(
-                        sub["iteration"],
-                        sub["value"],
-                        color=color,
-                        marker="o",
-                        edgecolor="k",
-                        zorder=3,
-                    )
-
-        g.map_dataframe(facet_plot_units)
-        g.add_legend(title="Replicate")
-        g.set_axis_labels("Iteration", which)
-        g.set_titles(col_template="{col_name}")
-        plt.tight_layout()
-        if show:
-            plt.show()
-        return g
+        if fig is not None and show:
+            fig.show()
+        return fig

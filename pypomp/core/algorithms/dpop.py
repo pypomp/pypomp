@@ -287,3 +287,26 @@ def _dpop_internal_mean(
         key=key,
     )
     return neg_ll / ntimes
+
+
+_vmapped_dpop_internal = jax.vmap(
+    _dpop_internal,
+    in_axes=(
+        0,  # theta
+        None,  # ys
+        None,  # dt_array_extended
+        None,  # nstep_array
+        None,  # t0
+        None,  # times
+        None,  # J
+        None,  # rinitializer
+        None,  # rprocess_interp
+        None,  # dmeasure
+        None,  # accumvars
+        None,  # covars_extended
+        None,  # alpha
+        None,  # process_weight_index
+        None,  # ntimes
+        0,  # key
+    ),
+)

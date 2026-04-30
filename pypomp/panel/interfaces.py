@@ -1,4 +1,5 @@
-from typing import Protocol
+from __future__ import annotations
+from typing import Protocol, Any, overload, Union, Literal
 import jax.numpy as jnp
 import pandas as pd
 import jax
@@ -17,7 +18,6 @@ class PanelPompInterface(Protocol):
     canonical_shared_param_names: list[str]
     canonical_unit_param_names: list[str]
 
-    # You can also add method signatures if Mixins call each other
     def _validate_params_and_units(
         self,
     ) -> None: ...
@@ -26,3 +26,42 @@ class PanelPompInterface(Protocol):
     ) -> jnp.ndarray: ...
 
     def get_unit_names(self) -> list[str]: ...
+
+    @overload
+    def simulate(
+        self,
+        key: jax.Array,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        as_pomp: Literal[False] = False,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+
+    @overload
+    def simulate(
+        self,
+        key: jax.Array,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        *,
+        as_pomp: Literal[True],
+    ) -> Any: ...
+
+    def simulate(
+        self,
+        key: jax.Array,
+        theta: PanelParameters
+        | dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | None = None,
+        times: jax.Array | None = None,
+        nsim: int = 1,
+        as_pomp: bool = False,
+    ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Any]: ...

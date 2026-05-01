@@ -319,7 +319,7 @@ class RProc(_ModelComponent):
 
     .. code-block:: python
 
-        import jax.random as random
+        from pypomp.random import fast_poisson
         from pypomp.types import StateDict, ParamDict, RNGKey, CovarDict, TimeFloat, StepSizeFloat
 
         def rproc(
@@ -334,7 +334,7 @@ class RProc(_ModelComponent):
             Returns the new state after time step `dt`.
             \"\"\"
             rate = params['beta'] * state['I']
-            n_events = random.poisson(key, rate * dt)
+            n_events = fast_poisson(key, rate * dt)
 
             new_S = state['S'] - n_events
             new_I = state['I'] + n_events
@@ -561,7 +561,7 @@ class RMeas(_ModelComponent):
     .. code-block:: python
 
         import jax.numpy as jnp
-        import jax.random as random
+        from pypomp.random import fast_poisson
         from pypomp.types import StateDict, ParamDict, RNGKey, CovarDict, TimeFloat
 
         def rmeas(
@@ -575,7 +575,7 @@ class RMeas(_ModelComponent):
             Returns simulated data array of shape (ydim,).
             \"\"\"
             mu = state['I'] * params['rho']
-            sim_cases = random.poisson(key, mu)
+            sim_cases = fast_poisson(key, mu)
 
             # Return array, e.g., [cases, deaths]
             return jnp.array([sim_cases])

@@ -65,11 +65,10 @@ class Pomp:
         class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
         adhere to the specifications.
 
-        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
-        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
-        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
-        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
-
+        - **State initialization simulator (rinit):** See :class:`~pypomp.core.model_struct.RInit`.
+        - **State transition simulator (rproc):** See :class:`~pypomp.core.model_struct.RProc`.
+        - **Measurement density (dmeas):** See :class:`~pypomp.core.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See :class:`~pypomp.core.model_struct.RMeas`.
     """
 
     ys: pd.DataFrame
@@ -158,10 +157,10 @@ class Pomp:
         class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
         adhere to the specifications.
 
-        - **State initialization simulator (rinit):** See [RInit](RInit) or :class:`~pypomp.model_struct.RInit`.
-        - **State transition simulator (rproc):** See [RProc](RProc) or :class:`~pypomp.model_struct.RProc`.
-        - **Measurement density (dmeas):** See [DMeas](DMeas) or :class:`~pypomp.model_struct.DMeas`.
-        - **Measurement simulator (rmeas):** See [RMeas](RMeas) or :class:`~pypomp.model_struct.RMeas`.
+        - **State initialization simulator (rinit):** See :class:`~pypomp.core.model_struct.RInit`.
+        - **State transition simulator (rproc):** See :class:`~pypomp.core.model_struct.RProc`.
+        - **Measurement density (dmeas):** See :class:`~pypomp.core.model_struct.DMeas`.
+        - **Measurement simulator (rmeas):** See :class:`~pypomp.core.model_struct.RMeas`.
 
         Args:
             ys (pd.DataFrame): The measurement data frame. The row index must contain

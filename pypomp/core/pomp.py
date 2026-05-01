@@ -49,13 +49,11 @@ class Pomp:
     partially observed. The class encapsulates the model components including the
     initial state distribution, process model, and measurement model.
 
-    The class provides methods for:
+    In particular, the class provides methods for:
 
     - Simulation of the model
 
     - Particle filtering
-
-    - Maximum likelihood estimation
 
     - Iterated filtering
 
@@ -370,7 +368,11 @@ class Pomp:
         param_bounds: dict[str, tuple[float, float]], n: int, key: jax.Array
     ) -> list[dict[str, float]]:
         """
-        Sample n sets of parameters from uniform distributions.
+        Samples multiple sets of parameters from independent uniform distributions.
+
+        This utility method generates random parameter vectors within specified lower and
+        upper bounds. It is commonly used to create initial parameter guesses or 'starting
+        points' for global optimization.
 
         Args:
             param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds
@@ -396,7 +398,11 @@ class Pomp:
 
     def print_metadata(self) -> None:
         """
-        Prints the creation and runtime environment metadata for this instance.
+        Displays technical metadata regarding the creation and runtime environment of this `Pomp` instance.
+
+        This includes information such as the timestamp of creation, the versions of key
+        dependencies, and other environment-specific details useful
+        for reproducibility and debugging.
         """
         self.metadata.print_metadata()
 
@@ -408,7 +414,16 @@ class Pomp:
         alpha: float = 0.97,
     ) -> jax.Array:
         """
-        Runs the Measurement Off-Parameter (MOP) differentiable particle filter.
+        Evaluates the Measurement Off-Parameter (MOP) differentiable particle filter.
+
+        Unlike the standard particle filter (`pfilter`), the MOP objective is specifically
+        designed to be fully differentiable with respect to the model parameters. This allows
+        for the computation of gradients and Hessians of the log-likelihood using
+        JAX's automatic differentiation capabilities.
+
+        This method evaluates the log-likelihood for the given parameter sets, but it is
+        primarily intended to be used as an objective function within gradient-based
+        optimization routines (e.g., `train`).
 
         Args:
             J (int): The number of particles.
@@ -421,7 +436,7 @@ class Pomp:
                 Defaults to 0.97.
 
         Returns:
-            jax.Array: The estimated log-likelihood(s) of the observed data given the model parameters.
+            jax.Array: An array of negative MOP log-likelihood estimates, one for each parameter vector in ``theta``.
         """
         theta_obj = self._prepare_theta_input(theta)
 
@@ -468,9 +483,10 @@ class Pomp:
         process_weight_state: str | None = None,
     ) -> jax.Array:
         """
-        Runs the DPOP (dynamics-penalized) differentiable particle filter.
+        Evaluates the Dynamics-Penalized Objective Profile (DPOP) differentiable particle filter.
 
-        This method is analogous to :meth:`mop`, but additionally
+        This method is analogous to :meth:`mop` as a fully differentiable objective function
+        for parameter estimation. However, it additionally
         incorporates a per-interval transition log-weight that is
         assumed to be stored in one of the state components.
 
@@ -564,7 +580,16 @@ class Pomp:
         track_time: bool = True,
     ) -> None:
         """
-        Instance method for the particle filtering algorithm.
+        Evaluates the likelihood of the model via the particle filter (bootstrap filter).
+
+        The particle filter (also known as Sequential Monte Carlo) estimates the log-likelihood
+        of the data given a specific set of parameters by propagating a swarm of particles
+        through the latent state space. It can also be used to estimate the latent states
+        over time (via filtering or prediction means).
+
+        This implementation leverages JAX to efficiently vectorize the algorithm across
+        multiple parameter sets simultaneously. Results are automatically stored in the
+        model's history and can be accessed using `self.results()`.
 
         Args:
             J (int): The number of particles
@@ -590,10 +615,9 @@ class Pomp:
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-           None. Updates self.results with a dictionary containing the log-likelihoods,
-           algorithmic parameters used. The conditional log-likelihoods (CLL),
-           effective sample size (ESS), filtered mean, and prediction mean at each time
-           point are also included if their respective boolean flags are set to True.
+            None. Updates `self.results_history` with a `PompPFilterResult` containing the log-likelihoods,
+            and optionally the conditional log-likelihoods (CLL), effective sample size (ESS),
+            filtered means, and prediction means if requested.
         """
         start_time = time.time()
 
@@ -732,9 +756,16 @@ class Pomp:
         track_time: bool = True,
     ) -> None:
         """
-        Instance method for conducting the iterated filtering (IF2) algorithm,
-        which uses the initialized instance parameters and calls the 'mif'
-        function.
+        Estimates model parameters by maximizing the marginal likelihood via the Iterated Filtering (IF2) algorithm.
+
+        The Iterated Filtering algorithm estimates maximum likelihood parameters by
+        introducing random perturbations to the parameters and sequentially filtering them
+        alongside the state variables. Over successive iterations (cooling cycles), the
+        perturbation variance is decayed, allowing the parameters to converge to their MLEs.
+
+        This implementation leverages JAX to efficiently vectorize the algorithm across
+        multiple initial parameter sets simultaneously. Results are automatically stored in
+        the model's history and can be accessed using `self.results()`.
 
         Args:
             J (int): The number of particles.
@@ -754,7 +785,8 @@ class Pomp:
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-            None. Updates self.results with traces (pandas DataFrames) containing log-likelihoods and parameter estimates averaged over particles, and theta.
+            None. Updates `self.results_history` with a `PompMIFResult` containing the log-likelihoods,
+            parameter traces, and diagnostic information from the Iterated Filtering (IF2) run.
         """
         start_time = time.time()
 
@@ -908,7 +940,17 @@ class Pomp:
         clip_norm: float | None = None,
     ) -> None:
         """
-        Instance method for conducting the MOP gradient-based iterative optimization method.
+        Optimizes model parameters using a differentiable particle filter and gradient-based methods.
+
+        This method performs Maximum Likelihood Estimation (MLE) by treating the particle filter
+        as a differentiable computational graph. It computes gradients of the log-likelihood
+        with respect to the parameters via reverse-mode automatic differentiation (using JAX),
+        and updates the parameters using first-order optimizers (e.g., Adam, SGD).
+
+        This implementation leverages JAX to efficiently vectorize the algorithm across
+        multiple initial parameter sets simultaneously.
+        Results are automatically stored in the model's history and can be accessed using
+        `self.results()`.
 
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
@@ -948,7 +990,8 @@ class Pomp:
             clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
-            None. Updates self.results with lists for logLik, thetas_out, and theta.
+            None. Updates `self.results_history` with a `PompTrainResult` containing the log-likelihoods,
+            parameter traces, and optimizer details from the training run.
         """
         start_time = time.time()
 
@@ -1084,7 +1127,11 @@ class Pomp:
         theta: ThetaInput = None,
     ) -> tuple[jax.Array, jax.Array]:
         """
-        Train on the DPOP objective using Adam or SGD with optional LR decay.
+        Optimizes model parameters using the DPOP differentiable particle filter and gradient-based methods.
+
+        This method trains the model parameters to maximize the DPOP objective function using
+        first-order optimizers like Adam or SGD, with optional learning rate decay. Gradients
+        are computed efficiently via JAX reverse-mode automatic differentiation.
 
         Parameters
         ----------
@@ -1237,8 +1284,14 @@ class Pomp:
         as_pomp: bool = False,
     ) -> Union[tuple[pd.DataFrame, pd.DataFrame], "Pomp"]:
         """
-        Simulates the evolution of a system over time using a Partially Observed
-        Markov Process (POMP) model.
+        Simulates the latent state and measurement processes of the POMP model.
+
+        This method propagates the system's latent state through time according to the
+        process model (`rproc`) and generates corresponding simulated observations from
+        the measurement model (`rmeas`).
+
+        This implementation leverages JAX to efficiently vectorize the simulations across
+        multiple parameter sets and simulation replicates simultaneously.
 
         Args:
             key (jax.Array, optional): The random key for random number generation.
@@ -1258,7 +1311,7 @@ class Pomp:
 
         Returns:
             If as_pomp is False:
-                tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values in dataframes.
+                tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values.
                 The columns are as follows:
                 - theta_idx: The index of the parameter set.
                 - sim: The index of the simulation.
@@ -1356,7 +1409,13 @@ class Pomp:
         theta: ThetaInput = None,
     ) -> pd.DataFrame:
         """
-        Evaluate probe statistics on the model's true data and simulated data.
+        Evaluates model diagnostics by comparing 'probes' (summary statistics) of real data against simulated data.
+
+        This method is useful for assessing model goodness-of-fit by checking if specific
+        features of the observed data (e.g., mean, autocorrelation, peak height) are
+        well-captured by simulations generated from the model's parameters. It calculates
+        the specified probe statistics for the original dataset and for multiple simulation
+        replicates, providing a basis for visual or formal comparison.
 
         Args:
             probes (dict[str, Callable[[pd.DataFrame], float]]): A dictionary of probe functions.
@@ -1424,7 +1483,12 @@ class Pomp:
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """
-        Returns a DataFrame with the results of the method run at the given index.
+        Returns a DataFrame with the results of the method run at the given index in the model's history.
+
+        This method provides a convenient way to access the outcome of previous runs
+        (e.g., `pfilter`, `mif`, or `train`). It returns a tidy DataFrame containing
+        the final log-likelihoods and parameter values for all replicates associated
+        with that specific run.
 
         Args:
             index (int): The index of the result to return. Defaults to -1 (the last result).
@@ -1476,8 +1540,12 @@ class Pomp:
 
     def prune(self, n: int = 1, refill: bool = True):
         """
-        Replace self.theta with a list of the top n thetas based on the most recent available log-likelihood estimates.
-        Optionally, refill the list to the previous length by repeating the top n thetas.
+        Filters the current set of parameter replicates to keep only the top `n` performers based on their most recent log-likelihood estimates.
+
+        This method is commonly used after an estimation run (like `pfilter` or `mif`) to
+        discard poorly performing parameter sets and focus subsequent computational effort
+        on the most promising candidates. If `refill` is enabled, the kept parameters are
+        duplicated to maintain the original number of replicates.
 
         Args:
             n (int): Number of top thetas to keep.
@@ -1510,7 +1578,12 @@ class Pomp:
         show: bool = True,
     ) -> Any:
         """
-        Runs simulations and plots them against the true observation data.
+        Generates an interactive plot comparing simulated trajectories from the model against the actual observed data.
+
+        This visualization helps assess whether the model (with its current parameters)
+        produces behavior that is qualitatively similar to the observed system. It can
+        display individual simulated paths ('lines') or confidence intervals ('quantiles')
+        to represent the distribution of possible outcomes.
 
         Args:
             key (jax.Array): JAX random key for simulation.
@@ -1536,7 +1609,12 @@ class Pomp:
 
     def print_summary(self):
         """
-        Print a summary of the Pomp object.
+        Prints a high-level summary of the POMP model instance and its estimation history.
+
+        The summary includes:
+        - Basic model statistics such as the number of observations, time steps, and parameters.
+        - The current number of parameter replicates stored in the object.
+        - A summary of the results history, listing the execution of estimation methods (e.g., pfilter, mif, train) and their corresponding performance metrics.
         """
         print("Basics:")
         print("-------")
@@ -1633,7 +1711,14 @@ class Pomp:
 
     @staticmethod
     def merge(*pomp_objs: "Pomp") -> "Pomp":
-        """Merge replications from multiple Pomp objects into a single object."""
+        """
+        Merges multiple `Pomp` objects into a single instance by combining their parameter replicates and results histories.
+
+        All provided `Pomp` objects must share the same structural components (e.g., state
+        names, parameter names, and model logic). The resulting object will contain the
+        union of all parameter sets and their corresponding estimation results, which is
+        particularly useful for consolidating parallelized simulation or estimation runs.
+        """
         if len(pomp_objs) == 0:
             raise ValueError("At least one Pomp object must be provided.")
         first = pomp_objs[0]

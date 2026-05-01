@@ -15,6 +15,19 @@ from copy import deepcopy
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
+    """
+    The PanelPomp class represents a panel of partially observed Markov process models.
+    It extends the single-unit POMP framework to handle multiple units that share
+    structural characteristics but may have distinct parameter values and observations.
+
+    In particular, the class provides methods for:
+
+    - Simulation of panel models
+    - Particle filtering for panel models
+    - Marginalized Panel Iterated Filtering (MPIF)
+    - Gradient descent via automatic differentiation
+    """
+
     unit_objects: dict[str, Pomp]
     theta: PanelParameters
     results_history: ResultsHistory

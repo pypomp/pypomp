@@ -231,3 +231,15 @@ class TestRWSigma:
         rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
         with pytest.raises(error):
             rw_sigma[param_name] = value
+
+    def test_cool(self):
+        rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
+        rw_sigma.cool(0.5)
+        assert rw_sigma.sigmas == {"param1": 0.05, "param2": 0.1}
+
+    def test_cool_invalid_factor(self):
+        rw_sigma = pp.RWSigma({"param1": 0.1}, [])
+        with pytest.raises(ValueError, match="factor should be between 0 and 1"):
+            rw_sigma.cool(1.1)
+        with pytest.raises(ValueError, match="factor should be between 0 and 1"):
+            rw_sigma.cool(-0.1)

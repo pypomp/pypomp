@@ -5,7 +5,7 @@ To ensure that **pypomp** operates at optimal speed and efficiency, it is import
 Pypomp's primary advantage is its performance, particularly on GPUs, and deviating from these guidelines may significantly degrade execution speed.
 
 Essential Guidelines
--------------------
+--------------------
 
 Using pypomp Random Variate Samplers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

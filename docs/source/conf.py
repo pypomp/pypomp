@@ -28,6 +28,8 @@ extensions = [
     "sphinx.ext.autosummary",
 ]
 
+autosummary_generate = True
+
 templates_path = ["_templates"]
 exclude_patterns: list[str] = []
 
@@ -46,11 +48,7 @@ napoleon_use_rtype = True
 
 # Autodoc settings
 autodoc_default_options = {
-    "members": True,
-    "undoc-members": True,
     "show-inheritance": True,
-    "inherited-members": True,
-    "special-members": "__init__",
 }
 autodoc_member_order = "bysource"
 

@@ -52,6 +52,58 @@ class Pomp:
     - Iterated filtering
 
     - Model training using a differentiable particle filter
+
+
+    **⚠️ IMPORTANT: Defining Model Components**
+
+    The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
+    functions. **You MUST read the documentation for each argument to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+    adhere to the specifications.
+
+    - **State initialization simulator (rinit):** See :ref:`rinit-tutorial`.
+    - **State transition simulator (rproc):** See :ref:`rproc-tutorial`.
+    - **Measurement density (dmeas):** See :ref:`dmeas-tutorial`.
+    - **Measurement simulator (rmeas):** See :ref:`rmeas-tutorial`.
+
+    Parameters
+    ----------
+    ys : pd.DataFrame
+        The measurement data frame. The row index must contain the observation times.
+    theta : ThetaInput
+        Initial parameter(s) for the model. Accepts:
+        - A single dictionary: dict[str, Numeric]
+        - A list of dictionaries: list[dict[str, Numeric]]
+        - An existing PompParameters object
+        Numeric values (e.g. jax.Array, int) are automatically coerced to
+        standard Python floats for internal storage. Vectorized methods
+        (like pfilter) will run in parallel over list/PompParameters inputs.
+    statenames : list[str]
+        List of all latent state variable names.
+    t0 : float
+        The initial time for the model (typically before the first observation).
+    rinit : Callable
+        Initial state simulator function.
+    rproc : Callable
+        Process simulator function (defining a single time step).
+    dmeas : Callable, optional
+        Measurement density function (log-likelihood).
+    rmeas : Callable, optional
+        Measurement simulator function.
+    par_trans : ParTrans, optional
+        Parameter transformation object used to move parameters
+        between the natural space and the estimation space. Defaults to the identity transformation.
+    covars : pd.DataFrame, optional
+        Time-varying covariates. The row index must contain the covariate times.
+    nstep : int, optional
+        The number of integration steps to take between observations.
+        Passed automatically to the `RProc` component. Must be None if `dt` is provided.
+    dt : float, optional
+        Fixed time step size for the process model.
+        Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
+    accumvars : tuple[str, ...], optional
+        Names of accumulator state variables (e.g., incidence tracking). These are reset to 0 at the start of each observation interval.
+    validate_logic : bool, optional
+        Whether to validate the logic of the model components.
     """
 
     ys: pd.DataFrame
@@ -131,49 +183,6 @@ class Pomp:
         covars: pd.DataFrame | None = None,
         validate_logic: bool = True,
     ):
-        """
-        Initializes and coordinates the components for a specific POMP model.
-
-        ⚠️ IMPORTANT: Defining Model Components
-        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
-        functions. **You MUST read the documentation for each argument to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
-        adhere to the specifications.
-
-        - **State initialization simulator (rinit):** See :ref:`rinit-tutorial`.
-        - **State transition simulator (rproc):** See :ref:`rproc-tutorial`.
-        - **Measurement density (dmeas):** See :ref:`dmeas-tutorial`.
-        - **Measurement simulator (rmeas):** See :ref:`rmeas-tutorial`.
-
-        Args:
-            ys (pd.DataFrame): The measurement data frame. The row index must contain
-                the observation times.
-            theta (ThetaInput): Initial parameter(s) for the model. Accepts:
-                - A single dictionary: dict[str, Numeric]
-                - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Numeric values (e.g. jax.Array, int) are automatically coerced to
-                standard Python floats for internal storage. Vectorized methods
-                (like pfilter) will run in parallel over list/PompParameters inputs.
-            statenames (list[str]): List of all latent state variable names.
-            t0 (float): The initial time for the model (typically before the first observation).
-            rinit (Callable): Initial state simulator function. Automatically wrapped into an `_RInit` object.
-            rproc (Callable): Process simulator function (defining a single time step).
-                Automatically wrapped into an `_RProc` object.
-            dmeas (Callable, optional): Measurement density function (log-likelihood).
-                Automatically wrapped into a `_DMeas` object.
-            rmeas (Callable, optional): Measurement simulator function. Automatically wrapped into an `_RMeas` object.
-            par_trans (ParTrans, optional): Parameter transformation object used to move parameters
-                between the natural space and the estimation space. Defaults to the identity transformation.
-            covars (pd.DataFrame, optional): Time-varying covariates. The row index must
-                contain the covariate times.
-            nstep (int, optional): The number of integration steps to take between observations.
-                Passed automatically to the `RProc` component. Must be None if `dt` is provided.
-            dt (float, optional): Fixed time step size for the process model.
-                Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
-            accumvars (tuple[str, ...], optional): Names of accumulator state variables (e.g.,
-                incidence tracking). These are reset to 0 at the start of each observation interval.
-            validate_logic (bool, optional): Whether to validate the logic of the model components.
-        """
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
         if covars is not None and not isinstance(covars, pd.DataFrame):

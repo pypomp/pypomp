@@ -26,6 +26,14 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
     - Particle filtering for panel models
     - Marginalized Panel Iterated Filtering (MPIF)
     - Gradient descent via automatic differentiation
+
+    Parameters
+    ----------
+    Pomp_dict : dict[str, Pomp]
+        A dictionary mapping unit names to Pomp objects. Each Pomp object represents a single unit in the panel data.
+        The keys are used as unit identifiers.
+    theta : PanelParameters | dict | list, optional
+        A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
     """
 
     unit_objects: dict[str, Pomp]
@@ -45,17 +53,6 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         | list[dict[str, pd.DataFrame | None]]
         | None = None,
     ):
-        """
-        Initializes a PanelPOMP model, which consists of multiple POMP models
-        (units) that share the same structure but may have different parameters
-        and observations.
-
-        Args:
-            Pomp_dict (dict[str, Pomp]): A dictionary mapping unit names to Pomp objects. Each Pomp object represents a single unit in the panel data.
-            The keys are used as unit identifiers.
-            theta: A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
-        """
-        # Convert inputs to PanelParameters
         if theta is not None:
             if isinstance(theta, PanelParameters):
                 self.theta = theta

@@ -9,12 +9,13 @@ import numpy as np
 
 class ParTrans:
     """
-    Class that handles the parameter transformation to and from the natural parameter space.
-
-    Attributes:
-        to_est: Function that transforms the parameters to the estimation parameter space.
-        from_est: Function that transforms the parameters from the estimation parameter space to the natural parameter space.
+    Handles parameter transformations between natural and estimation parameter spaces.
     """
+
+    to_est: Callable[[ParamDict], ParamDict]
+    """The parameter transformation function to the estimation parameter space."""
+    from_est: Callable[[ParamDict], ParamDict]
+    """The parameter transformation function from the estimation parameter space to the natural parameter space."""
 
     def __init__(
         self,

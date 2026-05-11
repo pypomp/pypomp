@@ -58,6 +58,18 @@ class PompParameters(ParameterSet):
     """
     Manages parameters for a standard Pomp model.
     Internal storage is a list of dictionaries.
+
+    Parameters
+    ----------
+    theta : ThetaInput
+        Parameters for the model. Accepts:
+        - A single dictionary: dict[str, Numeric]
+        - A list of dictionaries: list[dict[str, Numeric]]
+        - An existing PompParameters object
+    logLik : np.ndarray, optional
+        A numpy array of log-likelihoods.
+    estimation_scale : bool, optional
+        Whether the parameters are in the estimation scale. Defaults to False.
     """
 
     _params: list[dict[str, float]]
@@ -71,15 +83,6 @@ class PompParameters(ParameterSet):
         logLik: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
-        """
-        Args:
-            theta: Parameters for the model. Accepts:
-                   - A single dictionary: dict[str, Numeric]
-                   - A list of dictionaries: list[dict[str, Numeric]]
-                   - An existing PompParameters object
-            logLik: A numpy array of log-likelihoods.
-            estimation_scale: Whether the parameters are in the estimation scale.
-        """
         if theta is None:
             self._params = []
             self._logLik = np.full(0, np.nan)
@@ -419,6 +422,18 @@ class PanelParameters(ParameterSet):
     """
     Manages parameters for PanelPomp models.
     Internal storage is a list of dictionaries, always containing "shared" and "unit_specific" keys mapping to DataFrames (which may be empty).
+
+    Parameters
+    ----------
+    theta : PanelParameters | dict | list, optional
+        Parameters for the panel model. Accepts:
+        - A single dictionary with "shared" and "unit_specific" keys.
+        - A list of such dictionaries.
+        - An existing PanelParameters object.
+    logLik_unit : np.ndarray, optional
+        A numpy array of unit-specific log-likelihoods.
+    estimation_scale : bool, optional
+        Whether the parameters are in the estimation scale. Defaults to False.
     """
 
     _theta: list[dict[str, pd.DataFrame | None]]

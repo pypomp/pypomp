@@ -71,7 +71,7 @@ def _mif_internal(
         elif n_monitors >= 1:
             current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
             key_mon, *subkeys = jax.random.split(iter_key, n_monitors + 1)
-            loglik_m = jnp.mean(
+            loglik_m = -jnp.mean(
                 _vmapped_pfilter_internal(
                     current_theta_mean,
                     dt_array_extended,

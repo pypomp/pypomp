@@ -5,14 +5,18 @@ import numpy as np
 
 class RWSigma:
     """
-    Class for representing the random walk sigma parameters for the iterated filtering (IF2) algorithm.
-
-    Attributes:
-        sigmas (dict[str, float]): Dictionary mapping parameter names to sigma values.
-        init_names (list[str]): List of parameter names that are considered initial parameters.
-        not_init_names (list[str]): List of parameter names that are not considered initial parameters.
-        all_names (list[str]): List of all parameter names.
+    Represents the random walk standard deviation for the parameters of a model
+    used in the Iterated Filtering 2 (IF2) algorithm.
     """
+
+    sigmas: dict[str, float]
+    """Dictionary mapping parameter names to sigma values."""
+    init_names: list[str]
+    """List of parameter names that are considered initial parameters."""
+    not_init_names: list[str]
+    """List of parameter names that are not considered initial parameters."""
+    all_names: list[str]
+    """List of all parameter names."""
 
     def __init__(self, sigmas: dict[str, float], init_names: list[str] = []):
         self.sigmas, self.init_names, self.not_init_names, self.all_names = (

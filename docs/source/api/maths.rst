@@ -1,8 +1,12 @@
 Mathematical Utilities
 ======================
 
-.. automodule:: pypomp.maths
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. currentmodule:: pypomp.maths
 
+.. autosummary::
+   :toctree: generated/
+
+   ~logmeanexp
+   ~logmeanexp_se
+   ~expit
+   ~logit

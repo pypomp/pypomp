@@ -28,6 +28,7 @@ Contents
 .. toctree::
    :maxdepth: 2
 
+   model_components
    best_practices
    api/index
 

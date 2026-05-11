@@ -17,7 +17,7 @@ from .viz import plot_traces_internal, plot_simulations_internal
 from pypomp.types import ThetaInput
 from .metadata import ModelMetadata
 from pypomp import functional as F
-from .model_struct import RInit, RProc, DMeas, RMeas
+from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
 from .algorithms.helpers import _calc_ys_covars
 from .rw_sigma import RWSigma
@@ -69,16 +69,16 @@ class Pomp:
     t0: float
     """Initial time for the model (typically before the first observation)."""
 
-    rinit: RInit
+    rinit: _RInit
     """Simulator for the initial state distribution."""
 
-    rproc: RProc
+    rproc: _RProc
     """Process model simulator handling state transitions between observation times."""
 
-    dmeas: DMeas | None
+    dmeas: _DMeas | None
     """Measurement density used to evaluate the likelihood of observations."""
 
-    rmeas: RMeas | None
+    rmeas: _RMeas | None
     """Measurement simulator used to generate synthetic observations."""
 
     par_trans: ParTrans
@@ -136,14 +136,13 @@ class Pomp:
 
         ⚠️ IMPORTANT: Defining Model Components
         The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
-        functions. **You MUST read the documentation for each respective component
-        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
+        functions. **You MUST read the documentation for each argument to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
         adhere to the specifications.
 
-        - **State initialization simulator (rinit):** See :class:`~pypomp.core.model_struct.RInit`.
-        - **State transition simulator (rproc):** See :class:`~pypomp.core.model_struct.RProc`.
-        - **Measurement density (dmeas):** See :class:`~pypomp.core.model_struct.DMeas`.
-        - **Measurement simulator (rmeas):** See :class:`~pypomp.core.model_struct.RMeas`.
+        - **State initialization simulator (rinit):** See :ref:`rinit-tutorial`.
+        - **State transition simulator (rproc):** See :ref:`rproc-tutorial`.
+        - **Measurement density (dmeas):** See :ref:`dmeas-tutorial`.
+        - **Measurement simulator (rmeas):** See :ref:`rmeas-tutorial`.
 
         Args:
             ys (pd.DataFrame): The measurement data frame. The row index must contain
@@ -157,12 +156,12 @@ class Pomp:
                 (like pfilter) will run in parallel over list/PompParameters inputs.
             statenames (list[str]): List of all latent state variable names.
             t0 (float): The initial time for the model (typically before the first observation).
-            rinit (Callable): Initial state simulator function. Automatically wrapped into an [RInit](RInit) object.
+            rinit (Callable): Initial state simulator function. Automatically wrapped into an `_RInit` object.
             rproc (Callable): Process simulator function (defining a single time step).
-                Automatically wrapped into an [RProc](RProc) object.
+                Automatically wrapped into an `_RProc` object.
             dmeas (Callable, optional): Measurement density function (log-likelihood).
-                Automatically wrapped into a [DMeas](DMeas) object.
-            rmeas (Callable, optional): Measurement simulator function. Automatically wrapped into an [RMeas](RMeas) object.
+                Automatically wrapped into a `_DMeas` object.
+            rmeas (Callable, optional): Measurement simulator function. Automatically wrapped into an `_RMeas` object.
             par_trans (ParTrans, optional): Parameter transformation object used to move parameters
                 between the natural space and the estimation space. Defaults to the identity transformation.
             covars (pd.DataFrame, optional): Time-varying covariates. The row index must
@@ -225,7 +224,7 @@ class Pomp:
             self.covar_names = []
 
         self.par_trans = par_trans or ParTrans()
-        self.rinit = RInit(
+        self.rinit = _RInit(
             struct=rinit,
             statenames=self.statenames,
             param_names=self.canonical_param_names,
@@ -235,7 +234,7 @@ class Pomp:
         )
 
         if dmeas is not None:
-            self.dmeas = DMeas(
+            self.dmeas = _DMeas(
                 struct=dmeas,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
@@ -248,7 +247,7 @@ class Pomp:
             self.dmeas = None
 
         if rmeas is not None:
-            self.rmeas = RMeas(
+            self.rmeas = _RMeas(
                 struct=rmeas,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
@@ -278,7 +277,7 @@ class Pomp:
             order="linear",
         )
 
-        self.rproc = RProc(
+        self.rproc = _RProc(
             struct=rproc,
             statenames=self.statenames,
             param_names=self.canonical_param_names,
@@ -1628,10 +1627,10 @@ class Pomp:
         if "_rinit_func_name" in state:
             module = importlib.import_module(state["_rinit_module"])
             obj = getattr(module, state["_rinit_func_name"])
-            if isinstance(obj, RInit):
+            if isinstance(obj, _RInit):
                 self.rinit = obj
             else:
-                self.rinit = RInit(
+                self.rinit = _RInit(
                     struct=obj,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
@@ -1643,7 +1642,7 @@ class Pomp:
         if "_rproc_func_name" in state:
             module = importlib.import_module(state["_rproc_module"])
             obj = getattr(module, state["_rproc_func_name"])
-            if isinstance(obj, RProc):
+            if isinstance(obj, _RProc):
                 self.rproc = obj
             else:
                 kwargs = {}
@@ -1655,7 +1654,7 @@ class Pomp:
                     kwargs["nstep"] = state["_rproc_nstep"]
                 if state["_rproc_accumvars"] is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
-                self.rproc = RProc(
+                self.rproc = _RProc(
                     struct=obj,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
@@ -1676,10 +1675,10 @@ class Pomp:
         if "_dmeas_func_name" in state:
             module = importlib.import_module(state["_dmeas_module"])
             obj = getattr(module, state["_dmeas_func_name"])
-            if isinstance(obj, DMeas):
+            if isinstance(obj, _DMeas):
                 self.dmeas = obj
             else:
-                self.dmeas = DMeas(
+                self.dmeas = _DMeas(
                     struct=obj,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
@@ -1692,10 +1691,10 @@ class Pomp:
         if "_rmeas_func_name" in state:
             module = importlib.import_module(state["_rmeas_module"])
             obj = getattr(module, state["_rmeas_func_name"])
-            if isinstance(obj, RMeas):
+            if isinstance(obj, _RMeas):
                 self.rmeas = obj
             else:
-                self.rmeas = RMeas(
+                self.rmeas = _RMeas(
                     struct=obj,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,

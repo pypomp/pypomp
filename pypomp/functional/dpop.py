@@ -25,7 +25,7 @@ def dpop(
     single observation interval by the user-specified process
     model. At the beginning of each interval, the corresponding
     state component should be reset to zero (this is naturally
-    handled by ``accumvars`` in :class:`pypomp.core.model_struct.RProc`).
+    handled by ``accumvars``).
 
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.

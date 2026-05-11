@@ -19,7 +19,6 @@ Model Components
 .. toctree::
    :maxdepth: 2
 
-   model_struct
    par_trans
    rw_sigma
 

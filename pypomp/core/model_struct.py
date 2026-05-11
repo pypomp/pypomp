@@ -212,7 +212,7 @@ class _ModelComponent:
 # --- Concrete Implementations ---
 
 
-class RInit(_ModelComponent):
+class _RInit(_ModelComponent):
     """
     Defines the initialization process for the state variables at time t0.
 
@@ -262,10 +262,10 @@ class RInit(_ModelComponent):
 
     def _validate_output(self, result):
         if not isinstance(result, dict):
-            raise TypeError(f"RInit must return a dict, got {type(result)}")
+            raise TypeError(f"rinit function must return a dict, got {type(result)}")
         missing = set(self.statenames) - set(result.keys())
         if missing:
-            raise ValueError(f"RInit output missing state keys: {missing}")
+            raise ValueError(f"rinit function output missing state keys: {missing}")
 
     def _make_wrapper(self, user_func):
         # Capture variables in closure
@@ -291,7 +291,7 @@ class RInit(_ModelComponent):
         return wrapped
 
 
-class RProc(_ModelComponent):
+class _RProc(_ModelComponent):
     """
     Defines the process model (state transitions) of the system.
 
@@ -404,10 +404,10 @@ class RProc(_ModelComponent):
 
     def _validate_output(self, result):
         if not isinstance(result, dict):
-            raise TypeError(f"RProc must return a dict, got {type(result)}")
+            raise TypeError(f"rproc function must return a dict, got {type(result)}")
         missing = set(self.statenames) - set(result.keys())
         if missing:
-            raise ValueError(f"RProc output missing state keys: {missing}")
+            raise ValueError(f"rproc function output missing state keys: {missing}")
 
     def _make_wrapper(self, user_func):
         pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
@@ -442,7 +442,7 @@ class RProc(_ModelComponent):
         )
 
 
-class DMeas(_ModelComponent):
+class _DMeas(_ModelComponent):
     """
     Defines the measurement density (likelihood) model.
 
@@ -501,7 +501,7 @@ class DMeas(_ModelComponent):
         ) and jnp.ndim(result) == 0
         if not (isinstance(result, (int, float, np.number)) or is_jax_scalar):
             raise TypeError(
-                f"DMeas must return a scalar (float or 0-d array). Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
+                f"dmeas function must return a scalar (float or 0-d array). Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
             )
 
     def _make_wrapper(self, user_func):
@@ -534,7 +534,7 @@ class DMeas(_ModelComponent):
         return wrapped
 
 
-class RMeas(_ModelComponent):
+class _RMeas(_ModelComponent):
     """
     Defines the measurement simulation model (observation process).
 
@@ -609,14 +609,16 @@ class RMeas(_ModelComponent):
 
     def _validate_output(self, result):
         if not hasattr(result, "shape"):
-            raise TypeError(f"RMeas must return a JAX array, got {type(result)}")
+            raise TypeError(
+                f"rmeas function must return a JAX array, got {type(result)}"
+            )
 
         if self.ydim == 1 and result.shape == ():
             return
 
         if result.shape != (self.ydim,):
             raise ValueError(
-                f"RMeas output shape {result.shape} does not match ydim {self.ydim} "
+                f"rmeas function output shape {result.shape} does not match ydim {self.ydim} "
                 f"(derived from y_names={self.y_names})."
             )
 

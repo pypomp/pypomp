@@ -59,7 +59,7 @@ def _dpop_internal(
     The process log-weight is expected to be accumulated over a single
     observation interval by the process model. At the beginning of
     each interval the corresponding state component should be reset to
-    zero (this is naturally handled via ``accumvars`` in ``RProc``).
+    zero (this is handled by ``accumvars``).
 
     Args:
         theta: Parameter vector in estimation space.
@@ -73,7 +73,7 @@ def _dpop_internal(
         rprocess_interp: Vectorized time-interpolated process model.
         dmeasure: Vectorized measurement log-density.
         accumvars: Indices of accumulated state variables (as passed to
-            ``RProc``). This argument is only forwarded to the process
+            ``rproc``). This argument is only forwarded to the process
             model and is not interpreted directly here.
         covars_extended: Precomputed covariates on the internal time
             grid, or None if no covariates are used.

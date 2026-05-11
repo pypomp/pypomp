@@ -2,19 +2,7 @@ Parameters
 ==========
 
 .. currentmodule:: pypomp.core.parameters
-
-.. autoclass:: ParameterSet
-   :no-members:
-
-.. rubric:: Methods
-.. autosummary::
-   :toctree: generated/
-
-   ~ParameterSet.to_jax_array
-   ~ParameterSet.num_replicates
-   ~ParameterSet.subset
-   ~ParameterSet.get_param_names
-
+   
 .. autoclass:: PompParameters
    :no-members:
 

@@ -12,6 +12,7 @@ Core Classes
    pomp
    panelpomp
    parameters
+   results
 
 Model Components
 ----------------

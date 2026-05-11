@@ -392,9 +392,9 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
- 
+
         new_key, old_key = self._update_fresh_key(key)
- 
+
         n_theta_reps = theta_obj_in.num_replicates()
         unit_names = list(self.unit_objects.keys())
         U = len(unit_names)
@@ -570,6 +570,7 @@ class PanelEstimationMixin(Base):
             None,
         ] = None,
         thresh: float = 0,
+        n_monitors: int = 0,
         block: bool = True,
         vmap_chunk_size: int | None = None,
     ) -> None:
@@ -584,8 +585,11 @@ class PanelEstimationMixin(Base):
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
             theta (PanelParameters | dict | list, optional): Initial parameter estimates.
                 If None, uses `self.theta`.
-            thresh (float, optional): Resampling threshold for the particle filter.
-            block (bool, optional): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF) (currently only block=True is supported).
+            thresh (float): Resampling threshold for the particle filter.
+            n_monitors (int): Number of particle filter runs to average for
+                log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
+                filter).
+            block (bool): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF) (currently only block=True is supported).
             vmap_chunk_size (int, optional): (Experimental) If set, process units in parallel via
                 jax.vmap in chunks of this size instead of sequentially. Shared
                 parameters are independently perturbed per unit and averaged across
@@ -712,6 +716,10 @@ class PanelEstimationMixin(Base):
                 thresh,
                 keys,
                 vmap_chunk_size,
+                rep_unit.rinit.struct_pf,
+                rep_unit.rproc.struct_pf_interp,
+                rep_unit.dmeas.struct_pf,
+                n_monitors,
             )
             shared_array_f, unit_array_f, shared_traces, unit_traces = res
             if padding > 0:
@@ -745,6 +753,10 @@ class PanelEstimationMixin(Base):
                     U,
                     thresh,
                     keys,
+                    rep_unit.rinit.struct_pf,
+                    rep_unit.rproc.struct_pf_interp,
+                    rep_unit.dmeas.struct_pf,
+                    n_monitors,
                 )
             )
 
@@ -823,6 +835,7 @@ class PanelEstimationMixin(Base):
             rw_sd=rw_sd,
             a=a,
             thresh=thresh,
+            n_monitors=n_monitors,
             block=block,
             logLiks=xr.DataArray(
                 np.concatenate(

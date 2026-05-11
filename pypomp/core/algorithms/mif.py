@@ -8,6 +8,8 @@ from .helpers import _resampler_thetas
 from .helpers import _no_resampler_thetas
 from .helpers import _geometric_cooling
 
+from .pfilter import _vmapped_pfilter_internal
+
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
@@ -30,6 +32,10 @@ def _mif_internal(
     J: int,  # static
     thresh: float,
     key: jax.Array,
+    rinitializer_pf: Callable,  # static
+    rprocess_pf: Callable,  # static
+    dmeasure_pf: Callable,  # static
+    n_monitors: int,  # static
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     times = times.astype(float)
     all_keys = jax.random.split(key, num=M + 1)
@@ -39,7 +45,7 @@ def _mif_internal(
         current_theta_Jd = carry
         m, iter_key = scan_inputs
 
-        next_theta_Jd, loglik_m = _perfilter_internal(
+        next_theta_Jd, loglik_per = _perfilter_internal(
             m,
             current_theta_Jd,
             iter_key,
@@ -59,6 +65,37 @@ def _mif_internal(
             thresh=thresh,
             a=a,
         )
+
+        if n_monitors == 0:
+            loglik_m = loglik_per
+        elif n_monitors >= 1:
+            current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
+            key_mon, *subkeys = jax.random.split(iter_key, n_monitors + 1)
+            loglik_m = jnp.mean(
+                _vmapped_pfilter_internal(
+                    current_theta_mean,
+                    dt_array_extended,
+                    nstep_array,
+                    t0,
+                    times,
+                    ys,
+                    J,
+                    rinitializer_pf,
+                    rprocess_pf,
+                    dmeasure_pf,
+                    accumvars,
+                    covars_extended,
+                    thresh,
+                    jnp.array(subkeys),
+                    False,
+                    False,
+                    False,
+                    False,
+                )["neg_loglik"]
+            )
+        else:
+            loglik_m = jnp.array(jnp.nan)
+
         return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), loglik_m)
 
     init_carry = theta_Jd
@@ -82,10 +119,12 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,),
+    in_axes=(1,) + (None,) * 16 + (0,) + (None,) * 4,
 )
 
-_jv_mif_internal = jit(_vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15))
+_jv_mif_internal = jit(
+    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15, 18, 19, 20, 21)
+)
 
 
 def _perfilter_internal(
@@ -291,6 +330,10 @@ def _panel_mif_internal(
     U: int,
     thresh: float,
     key: jax.Array,
+    rinitializer_pf: Callable,
+    rprocess_pf: Callable,
+    dmeasure_pf: Callable,
+    n_monitors: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compiled Panel IF2 across M iterations and U units.
@@ -383,6 +426,10 @@ def _panel_mif_internal(
                 J,
                 thresh,
                 subkey,
+                rinitializer_pf,
+                rprocess_pf,
+                dmeasure_pf,
+                n_monitors,
             )
             nLL_u = nLL_u[0]
             # skips initial parameters from output:
@@ -488,7 +535,7 @@ def _panel_mif_internal(
 
 
 _vmapped_panel_mif_internal = jax.vmap(
-    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,))
+    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,) + (None,) * 4)
 )
 
 _jv_panel_mif_internal = jit(
@@ -500,6 +547,10 @@ _jv_panel_mif_internal = jit(
         15,  # M
         17,  # J
         18,  # U
+        21,  # rinitializer_pf
+        22,  # rprocess_pf
+        23,  # dmeasure_pf
+        24,  # n_monitors
     ),
 )
 
@@ -528,6 +579,10 @@ def _panel_mif_internal_vmap(
     thresh: float,
     key: jax.Array,
     vmap_chunk_size: int,  # static
+    rinitializer_pf: Callable,
+    rprocess_pf: Callable,
+    dmeasure_pf: Callable,
+    n_monitors: int,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Panel IF2 with chunked vmap over units instead of sequential scan.
@@ -646,6 +701,10 @@ def _panel_mif_internal_vmap(
                     J,
                     thresh,
                     key_u,
+                    rinitializer_pf,
+                    rprocess_pf,
+                    dmeasure_pf,
+                    n_monitors,
                 )
                 nLL_u = nLL_u[0]
                 updated_thetas_u = updated_final_thetas_u  # (J, n_params)
@@ -757,7 +816,8 @@ def _panel_mif_internal_vmap(
 
 
 _vmapped_panel_mif_internal_vmap = jax.vmap(
-    _panel_mif_internal_vmap, in_axes=((0, 0) + (None,) * 19 + (0,) + (None,))
+    _panel_mif_internal_vmap,
+    in_axes=((0, 0) + (None,) * 19 + (0,) + (None,) + (None,) * 4),
 )
 
 _jv_panel_mif_internal_vmap = jit(
@@ -770,5 +830,9 @@ _jv_panel_mif_internal_vmap = jit(
         18,  # J
         19,  # U
         22,  # vmap_chunk_size
+        23,  # rinitializer_pf
+        24,  # rprocess_pf
+        25,  # dmeasure_pf
+        26,  # n_monitors
     ),
 )

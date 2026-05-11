@@ -752,6 +752,7 @@ class Pomp:
         key: jax.Array | None = None,
         theta: ThetaInput = None,
         thresh: float = 0,
+        n_monitors: int = 0,
         track_time: bool = True,
     ) -> None:
         """
@@ -780,8 +781,11 @@ class Pomp:
                 - An existing PompParameters object
                 Providing a list or PompParameters object enables faster, vectorized
                 execution across all parameter sets.
-            thresh (float, optional): Resampling threshold. Defaults to 0.
-            track_time (bool, optional): Boolean flag controlling whether to track the
+            thresh (float): Resampling threshold. Defaults to 0.
+            n_monitors (int): Number of particle filter runs to average for
+                log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
+                filter).
+            track_time (bool): Boolean flag controlling whether to track the
                 execution time.
         Returns:
             None. Updates `self.results_history` with a `PompMIFResult` containing the log-likelihoods,
@@ -844,6 +848,10 @@ class Pomp:
             J,
             thresh,
             keys,
+            self.rinit.struct_pf,
+            self.rproc.struct_pf_interp,
+            self.dmeas.struct_pf,
+            n_monitors,
         )
 
         nLLs = jax.device_get(nLLs_jax)
@@ -914,6 +922,7 @@ class Pomp:
             rw_sd=rw_sd,
             a=a,
             thresh=thresh,
+            n_monitors=n_monitors,
         )
 
         self.results_history.add(result)

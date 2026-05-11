@@ -393,6 +393,7 @@ class PompMIFResult(PompBaseResult):
     rw_sd: RWSigma | None = None
     a: float = 0.0
     thresh: float = 0.0
+    n_monitors: int = 0
 
     def __post_init__(self):
         """Set method to mif."""
@@ -408,6 +409,7 @@ class PompMIFResult(PompBaseResult):
             or self.M != other.M
             or self.a != other.a
             or self.thresh != other.thresh
+            or self.n_monitors != other.n_monitors
         ):
             return False
 
@@ -479,6 +481,7 @@ class PompMIFResult(PompBaseResult):
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
         print(f"Resampling threshold: {self.thresh}")
+        print(f"Number of monitors: {self.n_monitors}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
@@ -501,6 +504,7 @@ class PompMIFResult(PompBaseResult):
                 or result.M != first.M
                 or result.a != first.a
                 or result.thresh != first.thresh
+                or result.n_monitors != first.n_monitors
             ):
                 raise ValueError(
                     "All PompMIFResult objects must have the same J, M, a, and thresh."
@@ -537,6 +541,7 @@ class PompMIFResult(PompBaseResult):
             rw_sd=first.rw_sd,
             a=first.a,
             thresh=first.thresh,
+            n_monitors=first.n_monitors,
         )
 
 
@@ -998,6 +1003,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
     rw_sd: RWSigma | None = None
     a: float = 0.0
     thresh: float = 0.0
+    n_monitors: int = 0
     block: bool = True
 
     def __post_init__(self):
@@ -1014,6 +1020,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
             or self.M != other.M
             or self.a != other.a
             or self.thresh != other.thresh
+            or self.n_monitors != other.n_monitors
             or self.block != other.block
         ):
             return False
@@ -1111,6 +1118,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
         print(f"Number of iterations (M): {self.M}")
         print(f"Cooling fraction (a): {self.a}")
         print(f"Resampling threshold: {self.thresh}")
+        print(f"Number of monitors: {self.n_monitors}")
         print(f"Block: {self.block}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
@@ -1136,6 +1144,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
                 or result.M != first.M
                 or result.a != first.a
                 or result.thresh != first.thresh
+                or result.n_monitors != first.n_monitors
                 or result.block != first.block
             ):
                 raise ValueError(
@@ -1195,6 +1204,7 @@ class PanelPompMIFResult(PanelPompBaseResult):
             rw_sd=first.rw_sd,
             a=first.a,
             thresh=first.thresh,
+            n_monitors=first.n_monitors,
             block=first.block,
         )
 

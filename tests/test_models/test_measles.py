@@ -148,9 +148,6 @@ def test_measles_mif(london, default_rw_sd):
     )
 
 
-def test_measles_mop(london):
-    measles = london
-    measles.mop(J=DEFAULT_J, key=DEFAULT_KEY)
 
 
 def test_measles_clean():

@@ -45,22 +45,6 @@ def test_001d_pfilter(london_001d):
     london_001d.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
 
 
-def test_001d_mop(london_001d):
-    london_001d.mop(J=DEFAULT_J, key=DEFAULT_KEY)
-
-
-def test_001d_dpop(london_001d):
-    vals = london_001d.dpop(
-        J=DEFAULT_J,
-        key=DEFAULT_KEY,
-        alpha=0.9,
-        process_weight_state="logw",
-    )
-    nll = vals[0]
-    assert nll.shape == ()
-    assert jnp.isfinite(nll.item())
-
-
 def test_001d_dpop_train(london_001d):
     eta = {name: 0.01 for name in london_001d.canonical_param_names}
     nll, theta_hist = london_001d.dpop_train(

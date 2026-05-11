@@ -16,14 +16,9 @@ from .viz import plot_traces_internal, plot_simulations_internal
 
 from pypomp.types import ThetaInput
 from .metadata import ModelMetadata
-from .algorithms.mop import _vmapped_mop_internal
-from .algorithms.dpop import _vmapped_dpop_internal
-from .algorithms.mif import _jv_mif_internal
-from .algorithms.train import _vmapped_train_internal
+from pypomp import functional as F
 from .model_struct import RInit, RProc, DMeas, RMeas
 import xarray as xr
-from .algorithms.simulate import _jv_simulate_internal
-from .algorithms.pfilter import _vmapped_pfilter_internal2
 from .algorithms.helpers import _calc_ys_covars
 from .rw_sigma import RWSigma
 from .par_trans import ParTrans
@@ -36,10 +31,9 @@ from .results import (
 from .parameters import PompParameters
 from pypomp.maths import logmeanexp
 from pypomp import benchmarks
+from pypomp.functional.structs import PompStruct
 
 
-# TODO: use just one doc link for each model component class
-# currently need one for VSCode and one for Sphinx
 class Pomp:
     """
     A class representing a Partially Observed Markov Process (POMP) model.
@@ -58,17 +52,6 @@ class Pomp:
     - Iterated filtering
 
     - Model training using a differentiable particle filter
-
-    ⚠️ IMPORTANT: Defining Model Components
-        The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
-        functions. **You MUST read the documentation for each respective component
-        class to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
-        adhere to the specifications.
-
-        - **State initialization simulator (rinit):** See :class:`~pypomp.core.model_struct.RInit`.
-        - **State transition simulator (rproc):** See :class:`~pypomp.core.model_struct.RProc`.
-        - **Measurement density (dmeas):** See :class:`~pypomp.core.model_struct.DMeas`.
-        - **Measurement simulator (rmeas):** See :class:`~pypomp.core.model_struct.RMeas`.
     """
 
     ys: pd.DataFrame
@@ -362,6 +345,33 @@ class Pomp:
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
+    def to_struct(self) -> PompStruct:
+        """
+        Exports the static data and compiled simulator functions into a lightweight
+        JAX PyTree (PompStruct) for use with the functional API (pypomp.functional).
+
+        Returns:
+            PompStruct: The compiled structural representation of the model.
+        """
+        return PompStruct(
+            ys=jnp.array(self.ys),
+            dt_array_extended=jnp.array(self._dt_array_extended),
+            nstep_array=jnp.array(self._nstep_array),
+            t0=self.t0,
+            times=jnp.array(self.ys.index),
+            covars_extended=jnp.array(self._covars_extended)
+            if self._covars_extended is not None
+            else None,
+            accumvars=self.rproc.accumvars,
+            rinit_pf=self.rinit.struct_pf,
+            rproc_pf=self.rproc.struct_pf_interp,
+            dmeas_pf=self.dmeas.struct_pf if self.dmeas is not None else None,
+            rinit_per=self.rinit.struct_per,
+            rproc_per=self.rproc.struct_per_interp,
+            dmeas_per=self.dmeas.struct_per if self.dmeas is not None else None,
+            rmeas_pf=self.rmeas.struct_pf if self.rmeas is not None else None,
+        )
+
     @staticmethod
     def sample_params(
         param_bounds: dict[str, tuple[float, float]], n: int, key: jax.Array
@@ -404,166 +414,6 @@ class Pomp:
         for reproducibility and debugging.
         """
         self.metadata.print_metadata()
-
-    def mop(
-        self,
-        J: int,
-        key: jax.Array | None = None,
-        theta: ThetaInput = None,
-        alpha: float = 0.97,
-    ) -> jax.Array:
-        """
-        Evaluates the Measurement Off-Parameter (MOP) differentiable particle filter.
-
-        Unlike the standard particle filter (`pfilter`), the MOP objective is specifically
-        designed to be fully differentiable with respect to the model parameters. This allows
-        for the computation of gradients and Hessians of the log-likelihood using
-        JAX's automatic differentiation capabilities.
-
-        This method evaluates the log-likelihood for the given parameter sets, but it is
-        primarily intended to be used as an objective function within gradient-based
-        optimization routines (e.g., `train`).
-
-        Args:
-            J (int): The number of particles.
-            key (jax.Array, optional): The random key for reproducibility.
-                Defaults to self.fresh_key.
-            theta (ThetaInput, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Accepts dict, list, or PompParameters.
-                Numeric values are automatically coerced to Python floats.
-            alpha (float, optional): Cooling factor for the random perturbations.
-                Defaults to 0.97.
-
-        Returns:
-            jax.Array: An array of negative MOP log-likelihood estimates, one for each parameter vector in ``theta``.
-        """
-        theta_obj = self._prepare_theta_input(theta)
-
-        if self.dmeas is None:
-            raise ValueError("self.dmeas cannot be None")
-
-        if J < 1:
-            raise ValueError("J should be greater than 0")
-
-        new_key, old_key = self._update_fresh_key(key)
-        n_reps = theta_obj.num_replicates()
-        keys = jax.random.split(new_key, n_reps)
-
-        theta_obj_trans = deepcopy(theta_obj)
-        theta_obj_trans.transform(self.par_trans, direction="to_est")
-        thetas_array = theta_obj_trans.to_jax_array(self.canonical_param_names)
-
-        results_jax = -_vmapped_mop_internal(
-            thetas_array,
-            jnp.array(self.ys),
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
-            self.t0,
-            jnp.array(self.ys.index),
-            J,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.dmeas.struct_pf,
-            self.rproc.accumvars,
-            jnp.array(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
-            alpha,
-            keys,
-        )
-        return results_jax
-
-    def dpop(
-        self,
-        J: int,
-        key: jax.Array | None = None,
-        theta: ThetaInput = None,
-        alpha: float = 0.97,
-        process_weight_state: str | None = None,
-    ) -> jax.Array:
-        """
-        Evaluates the Dynamics-Penalized Objective Profile (DPOP) differentiable particle filter.
-
-        This method is analogous to :meth:`mop` as a fully differentiable objective function
-        for parameter estimation. However, it additionally
-        incorporates a per-interval transition log-weight that is
-        assumed to be stored in one of the state components.
-
-        The process log-weight is expected to be accumulated over a
-        single observation interval by the user-specified process
-        model. At the beginning of each interval, the corresponding
-        state component should be reset to zero (this is naturally
-        handled by ``accumvars`` in :class:`RProc`).
-
-        Args:
-            J: Number of particles.
-            key: Optional random key. If None, ``self.fresh_key`` is
-                used and updated internally.
-            theta (ThetaInput, optional): Optional parameter dictionary, list, or
-                PompParameters object. If None, ``self.theta`` is used.
-                Numeric values are automatically coerced to Python floats.
-            alpha: Cooling factor for the particle weights.
-            process_weight_state: Name of the state component that
-                stores the accumulated transition log-weight over a
-                single observation interval (for example ``"logw"``).
-
-        Returns:
-            jax.Array: An array of negative DPOP log-likelihood
-            estimates, one for each parameter vector in ``theta``.
-        """
-        theta_obj = self._prepare_theta_input(theta)
-
-        if self.dmeas is None:
-            raise ValueError("self.dmeas cannot be None")
-
-        if J < 1:
-            raise ValueError("J should be greater than 0")
-
-        if process_weight_state is None:
-            raise ValueError(
-                "dpop requires a process-weight state. "
-                "Please provide `process_weight_state` as the name of the state "
-                "variable that accumulates the transition log-weight "
-                "(e.g. 'logw')."
-            )
-        try:
-            process_weight_index = int(self.statenames.index(process_weight_state))
-        except ValueError as exc:
-            raise ValueError(
-                f"Unknown process_weight_state '{process_weight_state}'. "
-                f"Available statenames are: {self.statenames}"
-            ) from exc
-
-        new_key, _ = self._update_fresh_key(key)
-        n_reps = theta_obj.num_replicates()
-        keys = jax.random.split(new_key, n_reps)
-        ntimes = len(self.ys)
-
-        theta_obj_trans = deepcopy(theta_obj)
-        theta_obj_trans.transform(self.par_trans, direction="to_est")
-        thetas_array = theta_obj_trans.to_jax_array(self.canonical_param_names)
-
-        results_jax = -_vmapped_dpop_internal(
-            thetas_array,
-            jnp.array(self.ys),
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
-            self.t0,
-            jnp.array(self.ys.index),
-            J,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.dmeas.struct_pf,
-            self.rproc.accumvars,
-            jnp.array(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
-            alpha,
-            process_weight_index,
-            ntimes,
-            keys,
-        )
-        return results_jax
 
     def pfilter(
         self,
@@ -651,21 +501,10 @@ class Pomp:
             thetas_array = jax.device_put(thetas_array, sharding_spec)
             rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
 
-        results_jax = _vmapped_pfilter_internal2(
+        results_jax = F.pfilter(
+            self.to_struct(),
             thetas_array,
-            np.asarray(self._dt_array_extended),
-            np.asarray(self._nstep_array),
-            self.t0,
-            np.asarray(self.ys.index),
-            np.asarray(self.ys),
             J,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.dmeas.struct_pf,
-            self.rproc.accumvars,
-            np.asarray(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
             thresh,
             rep_keys,
             CLL,
@@ -678,9 +517,8 @@ class Pomp:
 
         del results_jax
 
-        neg_logliks = results["neg_loglik"]
-
-        logLik_da = xr.DataArray(-neg_logliks, dims=["theta_idx", "rep"])
+        logLiks = results["logLik"]
+        logLik_da = xr.DataArray(logLiks, dims=["theta_idx", "rep"])
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -722,7 +560,7 @@ class Pomp:
 
         del results
 
-        logLik_estimates = logmeanexp(-neg_logliks, axis=-1, ignore_nan=False)
+        logLik_estimates = logmeanexp(logLiks, axis=-1, ignore_nan=False)
         theta_obj_in.logLik = logLik_estimates
         self.theta = theta_obj_in
 
@@ -827,30 +665,16 @@ class Pomp:
             )
             theta_tiled = jax.device_put(theta_tiled, sharding_spec)
 
-        nLLs_jax, theta_traces_jax, final_thetas_jax = _jv_mif_internal(
+        nLLs_jax, theta_traces_jax, final_thetas_jax = F.mif(
+            self.to_struct(),
             theta_tiled,
-            np.asarray(self._dt_array_extended),
-            np.asarray(self._nstep_array),
-            self.t0,
-            np.asarray(self.ys.index),
-            np.asarray(self.ys),
-            self.rinit.struct_per,
-            self.rproc.struct_per_interp,
-            self.dmeas.struct_per,
             sigmas_array,
             sigmas_init_array,
-            self.rproc.accumvars,
-            np.asarray(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
             M,
             a,
             J,
             thresh,
             keys,
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.dmeas.struct_pf,
             n_monitors,
         )
 
@@ -953,7 +777,7 @@ class Pomp:
         This method performs Maximum Likelihood Estimation (MLE) by treating the particle filter
         as a differentiable computational graph. It computes gradients of the log-likelihood
         with respect to the parameters via reverse-mode automatic differentiation (using JAX),
-        and updates the parameters using first-order optimizers (e.g., Adam, SGD).
+        and updates the parameters using optimizers (e.g., Adam, SGD).
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple initial parameter sets simultaneously.
@@ -1026,20 +850,9 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        nLLs, theta_ests = _vmapped_train_internal(
+        nLLs, theta_ests = F.train(
+            self.to_struct(),
             theta_array,
-            jnp.array(self.ys),
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
-            self.t0,
-            jnp.array(self.ys.index),
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.dmeas.struct_pf,
-            self.rproc.accumvars,
-            jnp.array(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
             J,
             optimizer,
             M,
@@ -1060,7 +873,9 @@ class Pomp:
         theta_ests_natural = np.stack(
             [
                 self.par_trans.transform_array(
-                    theta_ests[i], self.canonical_param_names, direction="from_est"
+                    np.asarray(theta_ests[i]),
+                    self.canonical_param_names,
+                    direction="from_est",
                 )
                 for i in range(n_reps)
             ],
@@ -1092,7 +907,7 @@ class Pomp:
             )
             for i in range(n_reps)
         ]
-        logLik_estimates = -nLLs
+        logLik_estimates = np.asarray(-nLLs)
         self.theta = PompParameters(theta, logLik=logLik_estimates)
 
         if track_time is True:
@@ -1177,19 +992,13 @@ class Pomp:
         """
         from .algorithms.train_dpop import dpop_train as _dpop_train
 
-        # 1) Update fresh_key.
         new_key, _ = self._update_fresh_key(key)
-
-        # 2) Decide which theta to use as initial point.
         theta_obj = self._prepare_theta_input(theta)
         theta_nat = theta_obj.to_list()[0]
-
-        # 3) Map initial theta to estimation space in canonical order.
         param_names = self.canonical_param_names
         theta_est_dict = self.par_trans.to_est(theta_nat)
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
 
-        # 4) Convert eta to JAX array in canonical order.
         if isinstance(eta, (int, float)):
             eta_array = jnp.full(len(param_names), float(eta))
         else:
@@ -1200,7 +1009,6 @@ class Pomp:
                 )
             eta_array = jnp.array([eta[name] for name in param_names])
 
-        # 5) Extract internal quantities from the Pomp object.
         ys_array = jnp.array(self.ys.values)
         dt_array_extended = self._dt_array_extended
         nstep_array = self._nstep_array
@@ -1217,7 +1025,6 @@ class Pomp:
         accumvars = self.rproc.accumvars
         covars_extended = self._covars_extended
 
-        # 6) Determine process_weight_index.
         if process_weight_state is None:
             raise ValueError(
                 "dpop_train requires a process-weight state. "
@@ -1234,7 +1041,6 @@ class Pomp:
                 f"{self.statenames}"
             ) from e
 
-        # 7) Call the low-level dpop_train.
         ntimes = len(self.ys)
         theta_hist, nll_hist = _dpop_train(
             theta_init=theta_init,
@@ -1259,7 +1065,6 @@ class Pomp:
             decay=decay,
         )
 
-        # 8) Return in user-friendly order: first NLL, then parameter trajectory.
         return nll_hist, theta_hist
 
     @overload
@@ -1348,22 +1153,12 @@ class Pomp:
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, thetas_array.shape[0])
         times_array = jnp.array(self.ys.index) if times is None else times
-        X_sims, Y_sims = _jv_simulate_internal(
-            self.rinit.struct_pf,
-            self.rproc.struct_pf_interp,
-            self.rmeas.struct_pf,
+        X_sims, Y_sims = F.simulate(
+            self.to_struct(),
             thetas_array,
-            self.t0,
-            times_array,
-            jnp.array(self._dt_array_extended),
-            jnp.array(self._nstep_array),
-            self.rmeas.ydim,
-            jnp.array(self._covars_extended)
-            if self._covars_extended is not None
-            else None,
-            self.rproc.accumvars,
             nsim,
             keys,
+            times=times_array,
         )
 
         def _to_long(
@@ -1371,11 +1166,9 @@ class Pomp:
             times_vec: Union[jax.Array, np.ndarray, pd.Index],
             prefix: str,
         ) -> pd.DataFrame:
-            vals = np.asarray(arr)  # (n_theta, n_time, n_feat, n_sim)
-            n_theta_l, n_time_l, n_feat_l, n_sim_l = vals.shape
-            flat = np.transpose(vals, (0, 3, 1, 2)).reshape(
-                n_theta_l * n_sim_l * n_time_l, n_feat_l
-            )
+            vals = np.asarray(arr)  # (n_theta, n_sim, n_time, n_feat)
+            n_theta_l, n_sim_l, n_time_l, n_feat_l = vals.shape
+            flat = vals.reshape(n_theta_l * n_sim_l * n_time_l, n_feat_l)
             theta_idx_l = np.repeat(np.arange(n_theta_l), n_sim_l * n_time_l)
             sim_idx_l = np.tile(np.repeat(np.arange(n_sim_l), n_time_l), n_theta_l)
             time_vals_l = np.tile(

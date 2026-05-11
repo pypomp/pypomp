@@ -277,7 +277,7 @@ def _panel_train_internal(
             curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
-            loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
+            neg_loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
                 c_s,
                 c_u,
                 unit_param_permutations_c[chunk_idx],
@@ -286,7 +286,7 @@ def _panel_train_internal(
                 iter_keys_c[chunk_idx],
                 curr_alpha,
             )
-            loglik *= ylen
+            neg_loglik *= ylen
 
             # Adjusts for jnp.sum(res) / (chunk_size * n_obs) in _chunk_obj()
             g_u = g_u * chunk_size
@@ -300,11 +300,11 @@ def _panel_train_internal(
 
             c_s = c_s + (curr_eta_factor * eta_shared / n_chunks) * dir_s
             c_u = c_u + (curr_eta_factor * eta_spec) * dir_u
-            return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
+            return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
 
         (
             (final_s, final_m_s, final_v_s, final_step),
-            (chunk_lls, new_u_c, new_m_u_c, new_v_u_c),
+            (chunk_neg_logliks, new_u_c, new_m_u_c, new_v_u_c),
         ) = jax.lax.scan(
             chunk_scan_step,
             (shared_ests, m_s, v_s, global_step),
@@ -321,7 +321,7 @@ def _panel_train_internal(
             final_step,
         )
         unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
-        return new_carry, (jnp.mean(chunk_lls), final_s, unit_flat)
+        return new_carry, (jnp.mean(chunk_neg_logliks), final_s, unit_flat)
 
     if optimizer == "FullMatrixAdam":
         init_v_s = jnp.zeros((shared_array.shape[-1], shared_array.shape[-1]))
@@ -340,11 +340,11 @@ def _panel_train_internal(
         0,
     )
 
-    _, (logliks, shared_copies, unit_copies) = jax.lax.scan(
+    _, (neg_logliks, shared_copies, unit_copies) = jax.lax.scan(
         iteration_scan_step, initial_carry, jnp.arange(M)
     )
 
-    loglik_init = (
+    neg_loglik_init = (
         _chunked_panel_mop_internal(
             shared_array,
             unit_array,
@@ -367,11 +367,11 @@ def _panel_train_internal(
         * ylen
     )
 
-    logliks = jnp.concatenate((jnp.array([loglik_init]), logliks))
+    neg_logliks = jnp.concatenate((jnp.array([neg_loglik_init]), neg_logliks))
     shared_copies = jnp.concatenate((shared_array[None, :], shared_copies), axis=0)
     unit_copies = jnp.concatenate((unit_array[None, :, :], unit_copies), axis=0)
 
-    return logliks, shared_copies, unit_copies
+    return neg_logliks, shared_copies, unit_copies
 
 
 _vmapped_panel_train_internal = jax.vmap(
@@ -453,7 +453,7 @@ def _train_internal(
 
         if n_monitors == 1:
             key, subkey = jax.random.split(key)
-            loglik, grad = _jvg_mop(
+            neg_loglik, grad = _jvg_mop(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
@@ -469,7 +469,7 @@ def _train_internal(
                 alpha=curr_alpha,
                 key=subkey,
             )
-            loglik *= ylen
+            neg_loglik *= ylen
         else:
             key, subkey = jax.random.split(key)
             grad = _jgrad_mop(
@@ -489,9 +489,9 @@ def _train_internal(
                 key=subkey,
             )
             if n_monitors > 0:
-                # TODO: need to handle parameter transformations correctly when n_monitors > 1; currently, pfilter will not transform the parameters back to the natural scale, so the logLiks should be incorrect.
+                # TODO: need to handle parameter transformations correctly when n_monitors > 1; currently, pfilter will not transform the parameters back to the natural scale, so the negative log-likelihoods should be incorrect.
                 key, *subkeys = jax.random.split(key, n_monitors + 1)
-                loglik = jnp.mean(
+                neg_loglik = jnp.mean(
                     _vmapped_pfilter_internal(
                         theta_ests,
                         dt_array_extended,
@@ -514,7 +514,7 @@ def _train_internal(
                     )["neg_loglik"]
                 )
             else:
-                loglik = jnp.array(jnp.nan)
+                neg_loglik = jnp.array(jnp.nan)
 
         if clip_norm is not None:
             grad = jnp.clip(grad, -clip_norm, clip_norm)
@@ -673,7 +673,7 @@ def _train_internal(
 
             eta_scalar = _line_search(
                 _obj_neg_loglik,
-                curr_obj=loglik,
+                curr_obj=neg_loglik,
                 pt=theta_ests,
                 grad=grad,
                 direction=direction,
@@ -703,7 +703,7 @@ def _train_internal(
             v_adam,
         )
 
-        return new_carry, (loglik, theta_ests)
+        return new_carry, (neg_loglik, theta_ests)
 
     hess = jnp.eye(theta_ests.shape[-1])  # default one
     prev_grad = jnp.zeros_like(theta_ests)
@@ -721,16 +721,16 @@ def _train_internal(
         v_adam,
     )
 
-    _, (logliks_history, Acopies_history) = jax.lax.scan(
+    _, (neg_logliks_history, Acopies_history) = jax.lax.scan(
         scan_step,
         initial_carry,
         jnp.arange(M),
     )
 
-    logliks = jnp.concatenate((jnp.array([jnp.nan]), logliks_history))
+    neg_logliks = jnp.concatenate((jnp.array([jnp.nan]), neg_logliks_history))
     Acopies = jnp.concatenate((theta_ests[jnp.newaxis, ...], Acopies_history))
 
-    return logliks, Acopies
+    return neg_logliks, Acopies
 
 
 # Map over theta and key

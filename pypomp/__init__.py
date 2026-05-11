@@ -10,7 +10,7 @@ from .panel.panel import PanelPomp
 
 from .mcap import mcap
 
-from . import random, models, benchmarks, types, maths
+from . import random, models, benchmarks, types, maths, functional
 
 
 def _get_version():
@@ -42,4 +42,5 @@ __all__ = [
     "random",
     "types",
     "maths",
+    "functional",
 ]

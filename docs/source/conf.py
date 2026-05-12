@@ -20,6 +20,8 @@ release = "0.4.5.1"
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
+today_fmt = "%B %d, %Y"
+
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",

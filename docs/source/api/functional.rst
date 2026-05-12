@@ -11,7 +11,7 @@ PompStruct
 ----------
 
 To use the functional API, you must first export your model's structural data and compiled functions into a :class:`~pypomp.functional.structs.PompStruct`. 
-This can be done using the :meth:`pypomp.core.pomp.Pomp.to_struct` method.
+This can be done using the :meth:`~pypomp.core.pomp.Pomp.to_struct` method.
 
 .. currentmodule:: pypomp.functional
 

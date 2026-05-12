@@ -17,9 +17,13 @@ class BaseResult(ABC):
     """Base class for all result types."""
 
     method: str
+    """The name of the method that produced this result (e.g., 'pfilter', 'mif')."""
     execution_time: float | None
+    """Total execution time in seconds."""
     key: jax.Array
+    """The JAX random key used for this execution."""
     timestamp: pd.Timestamp = field(default_factory=pd.Timestamp.now)
+    """The date and time when the result was created."""
 
     def __post_init__(self):
         """Post-initialization hook."""
@@ -101,6 +105,7 @@ class PompBaseResult(BaseResult):
     """Base class for Pomp results."""
 
     theta: list[dict] = field(default_factory=list)
+    """The list of parameter sets used for the computation."""
 
     def __eq__(self, other) -> bool:  # type: ignore[override]
         """
@@ -123,6 +128,7 @@ class PanelPompBaseResult(BaseResult):
     """Base class for PanelPomp results."""
 
     theta: "PanelParameters | None" = None
+    """The panel parameter object used for the computation."""
 
     def __eq__(self, other) -> bool:  # type: ignore[override]
         """
@@ -147,13 +153,21 @@ class PompPFilterResult(PompBaseResult):
     """Result from Pomp.pfilter() method."""
 
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihoods for each parameter set and replicate."""
     J: int = 0
+    """The number of particles used for filtering."""
     reps: int = 1
+    """The number of replicates for each parameter set."""
     thresh: float = 0.0
+    """The resampling threshold used by the filter."""
     CLL_da: xr.DataArray | None = None
+    """Conditional log-likelihoods for each unit and time point."""
     ESS_da: xr.DataArray | None = None
+    """Effective Sample Size for each unit and time point."""
     filter_mean: xr.DataArray | None = None
+    """The mean of the filtering distribution for each state variable."""
     prediction_mean: xr.DataArray | None = None
+    """The mean of the predictive distribution for each state variable."""
 
     def __post_init__(self):
         """Set method to pfilter."""
@@ -388,12 +402,19 @@ class PompMIFResult(PompBaseResult):
     """Result from Pomp.mif() method."""
 
     traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))  # type: ignore[assignment]
+    """Parameter traces and log-likelihoods across iterations."""
     J: int = 0
+    """The number of particles used for filtering."""
     M: int = 0
+    """The number of iterations performed."""
     rw_sd: RWSigma | None = None
+    """The random walk standard deviations for parameter perturbation."""
     a: float = 0.0
+    """The cooling fraction used."""
     thresh: float = 0.0
+    """The resampling threshold used."""
     n_monitors: int = 0
+    """The number of particle filters used to estimate log-likelihoods at each iteration."""
 
     def __post_init__(self):
         """Set method to mif."""
@@ -550,17 +571,29 @@ class PompTrainResult(PompBaseResult):
     """Result from Pomp.train() method."""
 
     traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))  # type: ignore[assignment]
+    """Parameter traces and log-likelihoods across iterations."""
     optimizer: str = "SGD"
+    """The name of the optimizer used (e.g., 'SGD', 'ADAM')."""
     J: int = 0
+    """The number of particles used for filtering."""
     M: int = 0
+    """The number of iterations performed."""
     eta: dict[str, float] = field(default_factory=lambda: {})
+    """The learning rates for each parameter."""
     alpha: float = 0.97
+    """The discount factor for the gradient moving average."""
     thresh: int = 0
+    """The resampling threshold used."""
     ls: bool = False
+    """Whether line search was enabled."""
     c: float = 0.1
+    """The Armijo constant used for line search."""
     max_ls_itn: int = 10
+    """The maximum number of line search iterations per step."""
     eta_cooling: float = 1.0
+    """The cooling factor for the learning rate."""
     alpha_cooling: float = 1.0
+    """The cooling factor for the discount factor."""
 
     def __post_init__(self):
         """Set method to train."""
@@ -733,14 +766,23 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     """Result from PanelPomp.pfilter() method."""
 
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihoods for each parameter set, replicate, and unit."""
     J: int = 0
+    """The number of particles used for filtering."""
     reps: int = 1
+    """The number of replicates for each parameter set."""
     thresh: float = 0.0
+    """The resampling threshold used."""
     theta: "PanelParameters | None" = None
+    """The panel parameters used for the computation."""
     CLL_da: xr.DataArray | None = None
+    """Conditional log-likelihoods for each unit and time point."""
     ESS_da: xr.DataArray | None = None
+    """Effective Sample Size for each unit and time point."""
     filter_mean: xr.DataArray | None = None
+    """The mean of the filtering distribution for each state variable."""
     prediction_mean: xr.DataArray | None = None
+    """The mean of the predictive distribution for each state variable."""
 
     def __post_init__(self):
         """Set method to pfilter."""
@@ -995,16 +1037,27 @@ class PanelPompMIFResult(PanelPompBaseResult):
     """Result from PanelPomp.mif() method."""
 
     shared_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Traces of shared parameters across iterations."""
     unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Traces of unit-specific parameters across iterations."""
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihoods for each parameter set and unit at the final iteration."""
     theta: "PanelParameters | None" = None
+    """The starting panel parameters for the optimization."""
     J: int = 0
+    """The number of particles used for filtering."""
     M: int = 0
+    """The number of iterations performed."""
     rw_sd: RWSigma | None = None
+    """The random walk standard deviations for parameter perturbation."""
     a: float = 0.0
+    """The cooling fraction used."""
     thresh: float = 0.0
+    """The resampling threshold used."""
     n_monitors: int = 0
+    """The number of particle filters to run for log-likelihood estimation at each iteration."""
     block: bool = True
+    """Whether the block-MIF algorithm was used."""
 
     def __post_init__(self):
         """Set method to mif."""
@@ -1214,16 +1267,27 @@ class PanelPompTrainResult(PanelPompBaseResult):
     """Result from PanelPomp.train() method."""
 
     shared_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Traces of shared parameters across iterations."""
     unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Traces of unit-specific parameters across iterations."""
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihoods for each parameter set and unit at the final iteration."""
     theta: "PanelParameters | None" = None
+    """The starting panel parameters for the optimization."""
     optimizer: str = "SGD"
+    """The name of the optimizer used."""
     J: int = 0
+    """The number of particles used for filtering."""
     M: int = 0
+    """The number of iterations performed."""
     eta: dict[str, float] | float = field(default_factory=lambda: {})
+    """The learning rates for each parameter."""
     alpha: float = 0.97
+    """The discount factor for the gradient moving average."""
     eta_cooling: float = 1.0
+    """The cooling factor for the learning rate."""
     alpha_cooling: float = 1.0
+    """The cooling factor for the discount factor."""
 
     def __post_init__(self):
         self.method = "train"
@@ -1438,6 +1502,7 @@ class ResultsHistory:
     """Container class for managing result history."""
 
     _entries: list[BaseResult] = field(default_factory=list)
+    """Internal list of result objects."""
 
     def __init__(self):
         self._entries = []

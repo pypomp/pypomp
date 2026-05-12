@@ -35,20 +35,18 @@ In addition, if your model requires sampling from a given distribution multiple 
 Vectorizing Across Replicates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Some methods such as :meth:`pypomp.Pomp.pfilter`, :meth:`pypomp.Pomp.mif`, and :meth:`pypomp.Pomp.train` accept a collection of parameter sets, ``theta``, as an argument and are designed to process the collection simultaneously. 
-
-By passing multiple parameter sets directly into ``theta``, these methods automatically vectorize operations across the replicates. 
-This can result in execution speeds up to `R` times faster, where `R` is the number of parameter sets passed in ``theta``. 
+Some methods such as :meth:`~pypomp.core.pomp.Pomp.pfilter`, :meth:`~pypomp.core.pomp.Pomp.mif`, and :meth:`~pypomp.core.pomp.Pomp.train` accept a collection of parameter sets, ``theta``, as an argument and are designed to process the collection simultaneously. 
+In most cases, this approach is far more efficient than processing each parameter set individually. 
 Furthermore, the results of these vectorized operations are stored efficiently within the object, reducing both RAM and disk memory usage. 
-This also simplifies downstream analysis, as methods like :meth:`pypomp.Pomp.results` can return a single tidy data frame encompassing all replicates.
+This also simplifies downstream analysis, as methods like :meth:`~pypomp.core.pomp.Pomp.results` can return a single tidy data frame encompassing all replicates.
 
-Creating a separate :class:`pypomp.Pomp` or :class:`pypomp.PanelPomp` object for each parameter set negates these performance and structural advantages, so it is generally not recommended.
+Creating a separate :class:`~pypomp.core.pomp.Pomp` or :class:`~pypomp.panel.panel.PanelPomp` object for each parameter set negates these performance and structural advantages, so it is generally not recommended.
 
 Optimizing CPU Performance
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When using JAX on CPUs, parallelizing across individual particles can be inefficient due to inter-core communication overhead (e.g., utilizing 36 cores may only be as fast as using 2 cores). 
-To resolve this, **pypomp** functions like :meth:`pypomp.Pomp.mif` and :meth:`pypomp.Pomp.pfilter` are optimized to force parallelization across replications instead.
+To resolve this, **pypomp** functions like :meth:`~pypomp.core.pomp.Pomp.mif` and :meth:`~pypomp.core.pomp.Pomp.pfilter` are optimized to force parallelization across replications instead.
 
 For this optimization to take effect, you must manually set the number of JAX devices to match your available CPU cores **before** importing JAX. 
 You can do this by adding the following snippet at the beginning of your script:
@@ -68,3 +66,5 @@ You can do this by adding the following snippet at the beginning of your script:
             )
 
 The current implementation is experimental and subject to change.
+
+As an alternative to the above, you can use the functions under ``pypomp.functional`` (see :doc:`api/functional`), which are flexible, JAX-compatible implementations of the core methods.

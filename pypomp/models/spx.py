@@ -77,14 +77,14 @@ def _rproc(
         theta_["rho"],
     )
     y_prev = covars["y_prev"]
-    # Wiener process generation (Gaussian noise)
+
     dZ = random.normal(key)
     dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
-    # dWv with correlation
+
     dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
     S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
     V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
-    # Feller condition to keep V positive
+
     V = jnp.maximum(V, 1e-32)
     return {"V": V, "S": S}
 

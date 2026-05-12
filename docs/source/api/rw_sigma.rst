@@ -1,5 +1,5 @@
 Random Walk Standard Deviation
-=================
+==============================
 
 .. currentmodule:: pypomp.core.rw_sigma
 

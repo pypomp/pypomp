@@ -489,7 +489,6 @@ def _train_internal(
                 key=subkey,
             )
             if n_monitors > 0:
-                # TODO: need to handle parameter transformations correctly when n_monitors > 1; currently, pfilter will not transform the parameters back to the natural scale, so the negative log-likelihoods should be incorrect.
                 key, *subkeys = jax.random.split(key, n_monitors + 1)
                 neg_loglik = jnp.mean(
                     _vmapped_pfilter_internal(
@@ -511,6 +510,7 @@ def _train_internal(
                         False,
                         False,
                         False,
+                        True,
                     )["neg_loglik"]
                 )
             else:
@@ -667,6 +667,7 @@ def _train_internal(
                     ESS=False,
                     filter_mean=False,
                     prediction_mean=False,
+                    should_trans=True,
                 )["neg_loglik"]
 
                 return jnp.squeeze(neg_loglik)

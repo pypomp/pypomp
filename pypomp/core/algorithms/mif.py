@@ -45,7 +45,7 @@ def _mif_internal(
         current_theta_Jd = carry
         m, iter_key = scan_inputs
 
-        next_theta_Jd, loglik_per = _perfilter_internal(
+        next_theta_Jd, neg_loglik_per = _perfilter_internal(
             m,
             current_theta_Jd,
             iter_key,
@@ -66,12 +66,10 @@ def _mif_internal(
             a=a,
         )
 
-        if n_monitors == 0:
-            loglik_m = loglik_per
-        elif n_monitors >= 1:
+        if n_monitors >= 1:
             current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
             key_mon, *subkeys = jax.random.split(iter_key, n_monitors + 1)
-            loglik_m = -jnp.mean(
+            neg_loglik_m = jnp.mean(
                 _vmapped_pfilter_internal(
                     current_theta_mean,
                     dt_array_extended,
@@ -91,17 +89,18 @@ def _mif_internal(
                     False,
                     False,
                     False,
+                    True,
                 )["neg_loglik"]
             )
         else:
-            loglik_m = jnp.array(jnp.nan)
+            neg_loglik_m = neg_loglik_per
 
-        return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), loglik_m)
+        return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), neg_loglik_m)
 
     init_carry = theta_Jd
     scan_xs = (jnp.arange(M), m_keys)
 
-    final_theta_Jd, (thetas_history_mean, logliks_history) = jax.lax.scan(
+    final_theta_Jd, (thetas_history_mean, neg_logliks_history) = jax.lax.scan(
         f=mif_scan_body,
         init=init_carry,
         xs=scan_xs,
@@ -111,10 +110,10 @@ def _mif_internal(
     thetas_traces_Md = jnp.concatenate(
         [jnp.mean(theta_Jd, axis=0)[None, :], thetas_history_mean], axis=0
     )
-    # logliks_M: (M,)
-    logliks_M = logliks_history
+    # neg_logliks_M: (M,)
+    neg_logliks_M = neg_logliks_history
 
-    return logliks_M, thetas_traces_Md, final_theta_Jd
+    return neg_logliks_M, thetas_traces_Md, final_theta_Jd
 
 
 _vmapped_mif_internal = jax.vmap(

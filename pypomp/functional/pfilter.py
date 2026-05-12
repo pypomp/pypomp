@@ -63,6 +63,7 @@ def pfilter(
         ESS,
         filter_mean,
         prediction_mean,
+        False,
     )
     results["logLik"] = -results.pop("neg_loglik")
     return results

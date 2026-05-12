@@ -22,6 +22,7 @@ SHOULD_TRANS = False  # Should transformations be applied to the parameters?
         "ESS",
         "filter_mean",
         "prediction_mean",
+        "should_trans",
     ),
 )
 def _pfilter_internal(
@@ -43,6 +44,7 @@ def _pfilter_internal(
     ESS: bool = False,  # static
     filter_mean: bool = False,  # static
     prediction_mean: bool = False,  # static
+    should_trans: bool = False,  # static
 ) -> dict[str, jax.Array]:
     """
     Internal function for particle the filtering algorithm, which calls the function
@@ -53,7 +55,7 @@ def _pfilter_internal(
     times = times.astype(float)
     key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
     covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
+    particlesF = rinitializer(theta, keys, covars0, t0, should_trans)
     norm_weights = jnp.log(jnp.ones(J) / J)
     counts = jnp.ones(J).astype(int)
     loglik = 0.0
@@ -88,6 +90,7 @@ def _pfilter_internal(
         ESS=ESS,
         filter_mean=filter_mean,
         prediction_mean=prediction_mean,
+        should_trans=should_trans,
     )
     (
         t,
@@ -145,6 +148,7 @@ def _pfilter_internal(
         "ESS",
         "filter_mean",
         "prediction_mean",
+        "should_trans",
     ),
 )
 def _mapped_pfilter_internal_reps(
@@ -166,6 +170,7 @@ def _mapped_pfilter_internal_reps(
     ESS: bool = False,
     filter_mean: bool = False,
     prediction_mean: bool = False,
+    should_trans: bool = False,
 ) -> dict[str, jax.Array]:
     def body(key):
         return _pfilter_internal(
@@ -187,6 +192,7 @@ def _mapped_pfilter_internal_reps(
             ESS,
             filter_mean,
             prediction_mean,
+            should_trans,
         )
 
     return jax.lax.map(body, keys)
@@ -195,13 +201,13 @@ def _mapped_pfilter_internal_reps(
 # Map over key
 _vmapped_pfilter_internal = jax.vmap(
     _pfilter_internal,
-    in_axes=(None,) * 13 + (0,) + (None,) * 4,
+    in_axes=(None,) * 13 + (0,) + (None,) * 5,
 )
 
 # Map over theta and lax.map over key
 _vmapped_pfilter_internal2 = jax.vmap(
     _mapped_pfilter_internal_reps,
-    in_axes=(0,) + (None,) * 12 + (0,) + (None,) * 4,
+    in_axes=(0,) + (None,) * 12 + (0,) + (None,) * 5,
 )
 
 _panel_pfilter_vmap = jax.vmap(
@@ -225,6 +231,7 @@ _panel_pfilter_vmap = jax.vmap(
         None,  # ESS
         None,  # filter_mean
         None,  # prediction_mean
+        None,  # should_trans
     ),
 )
 
@@ -242,6 +249,7 @@ _panel_pfilter_vmap = jax.vmap(
         "ESS",
         "filter_mean",
         "prediction_mean",
+        "should_trans",
     ),
 )
 def _chunked_panel_pfilter_internal(
@@ -264,6 +272,7 @@ def _chunked_panel_pfilter_internal(
     ESS: bool = False,
     filter_mean: bool = False,
     prediction_mean: bool = False,
+    should_trans: bool = False,
 ) -> dict[str, jax.Array]:
     n_reps, U, n_params = thetas.shape
     n_chunks = U // chunk_size
@@ -303,6 +312,7 @@ def _chunked_panel_pfilter_internal(
                 ESS,
                 filter_mean,
                 prediction_mean,
+                should_trans,
             )
             return carry, res
 
@@ -316,7 +326,7 @@ def _chunked_panel_pfilter_internal(
     return jax.vmap(process_rep)(thetas_c, keys_c)
 
 
-@partial(jit, static_argnums=(5, 6, 7, 8, 9))
+@partial(jit, static_argnums=(6, 7, 8, 9, 10, 14))
 def _pfilter_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
@@ -332,6 +342,7 @@ def _pfilter_internal_mean(
     covars_extended: jax.Array | None,
     thresh: float,
     key: jax.Array,
+    should_trans: bool = False,
 ) -> jax.Array:
     """
     Internal function for calculating the particle filter estimate of the negative log
@@ -358,6 +369,7 @@ def _pfilter_internal_mean(
             ESS=False,
             filter_mean=False,
             prediction_mean=False,
+            should_trans=should_trans,
         )["neg_loglik"]
         / ys.shape[0]
     )
@@ -391,6 +403,7 @@ def _pfilter_helper(
     ESS: bool,
     filter_mean: bool,
     prediction_mean: bool,
+    should_trans: bool,
     accumvars: tuple[int, ...] | None,
 ) -> tuple[
     jax.Array,
@@ -437,12 +450,12 @@ def _pfilter_helper(
         t_idx,
         nstep,
         accumvars,
-        SHOULD_TRANS,
+        should_trans,
     )
     t = times[i]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
-    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS)
+    measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, should_trans)
 
     if len(measurements.shape) > 1:
         measurements = measurements.sum(axis=-1)

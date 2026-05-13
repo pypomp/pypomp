@@ -430,7 +430,7 @@ def dacca(
     the underlying disease dynamics and a measurement model for observed deaths.
 
     Arguments
-    ----------
+    ---------
     dt : float, optional
         Time step size for the process model. Determines the number of sub-steps per observation interval for the process model.
     nstep : int, optional

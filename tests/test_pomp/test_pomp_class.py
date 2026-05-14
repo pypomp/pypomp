@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import pandas as pd
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def setup():
     LG = pp.models.LG()
     rw_sd = pp.RWSigma(
@@ -35,7 +35,7 @@ def model(setup):
     return LG, setup
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def neapolitan_setup(setup):
     LG = setup["LG"]
     p = setup

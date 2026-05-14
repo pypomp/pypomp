@@ -23,7 +23,8 @@ dependencies = [
     "xarray",
     "scipy",
     "typing_extensions",
-    "loess"
+    "loess",
+    "cloudpickle"
 ]
 
 [project.optional-dependencies]

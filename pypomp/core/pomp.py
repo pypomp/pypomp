@@ -3,6 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 import importlib
+import cloudpickle
 from copy import deepcopy
 import time
 from typing import Callable, Any
@@ -1581,29 +1582,26 @@ class Pomp:
         """
         state = self.__dict__.copy()
 
-        # Store function names and parameters instead of the wrapped objects
+        # Use cloudpickle to store model functions by-value. This ensures that
+        # the unpickling environment does not require the original source modules.
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
-            state["_rinit_func_name"] = original_func.__name__
-            state["_rinit_module"] = original_func.__module__
+            state["_rinit_func_bytes"] = cloudpickle.dumps(original_func)
 
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
-            state["_rproc_func_name"] = original_func.__name__
+            state["_rproc_func_bytes"] = cloudpickle.dumps(original_func)
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_nstep"] = getattr(self.rproc, "nstep", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
-            state["_rproc_module"] = original_func.__module__
 
         if self.dmeas is not None and hasattr(self.dmeas, "struct"):
             original_func = self.dmeas.original_func
-            state["_dmeas_func_name"] = original_func.__name__
-            state["_dmeas_module"] = original_func.__module__
+            state["_dmeas_func_bytes"] = cloudpickle.dumps(original_func)
 
         if self.rmeas is not None and hasattr(self.rmeas, "struct"):
             original_func = self.rmeas.original_func
-            state["_rmeas_func_name"] = original_func.__name__
-            state["_rmeas_module"] = original_func.__module__
+            state["_rmeas_func_bytes"] = cloudpickle.dumps(original_func)
 
         # Store JAX key as raw bits (key is not picklable directly)
         if self.fresh_key is not None:
@@ -1628,19 +1626,46 @@ class Pomp:
 
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:
-            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+            try:
+                self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+            except Exception as e:
+                warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
+                self.fresh_key = None
         elif "fresh_key" not in self.__dict__:
             self.fresh_key = None
 
+        def _load_func(prefix: str) -> Any:
+            func_bytes_key = f"_{prefix}_func_bytes"
+            func_name_key = f"_{prefix}_func_name"
+            module_key = f"_{prefix}_module"
+
+            try:
+                # Modern approach (by-value): Uses cloudpickle bytes to remove
+                # environment dependencies.
+                if func_bytes_key in state:
+                    return cloudpickle.loads(state[func_bytes_key])
+
+                # Legacy approach (by-reference): Provided for backward compatibility
+                # with objects pickled in older versions of pypomp.
+                elif func_name_key in state:
+                    module = importlib.import_module(state[module_key])
+                    return getattr(module, state[func_name_key])
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to reconstruct {prefix} function: {e}. "
+                    f"The model may be unusable for simulations or estimation.",
+                    UserWarning,
+                )
+            return None
+
         # Reconstruct rinit
-        if "_rinit_func_name" in state:
-            module = importlib.import_module(state["_rinit_module"])
-            obj = getattr(module, state["_rinit_func_name"])
-            if isinstance(obj, _RInit):
-                self.rinit = obj
+        obj_rinit = _load_func("rinit")
+        if obj_rinit is not None:
+            if isinstance(obj_rinit, _RInit):
+                self.rinit = obj_rinit
             else:
                 self.rinit = _RInit(
-                    struct=obj,
+                    struct=obj_rinit,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -1648,47 +1673,41 @@ class Pomp:
                 )
 
         # Reconstruct rproc
-        if "_rproc_func_name" in state:
-            module = importlib.import_module(state["_rproc_module"])
-            obj = getattr(module, state["_rproc_func_name"])
-            if isinstance(obj, _RProc):
-                self.rproc = obj
+        obj_rproc = _load_func("rproc")
+        if obj_rproc is not None:
+            if isinstance(obj_rproc, _RProc):
+                self.rproc = obj_rproc
             else:
                 kwargs = {}
-                if state["_rproc_dt"] is not None:
+                if state.get("_rproc_dt") is not None:
                     kwargs["dt"] = state["_rproc_dt"]
-                # If nstep is provided, but dt is not, use nstep. This prevents an error
-                # being thrown by RProc when both are not None.
-                if state["_rproc_nstep"] is not None and state["_rproc_dt"] is None:
+                if (
+                    state.get("_rproc_nstep") is not None
+                    and state.get("_rproc_dt") is None
+                ):
                     kwargs["nstep"] = state["_rproc_nstep"]
-                if state["_rproc_accumvars"] is not None:
+                if state.get("_rproc_accumvars") is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = _RProc(
-                    struct=obj,
+                    struct=obj_rproc,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
                     **kwargs,
                 )
-                # Restore nstep if it was set (even if dt was originally provided)
-                # This handles the case where rebuild_interp set nstep after initial construction
-                if "_rproc_nstep" in state and state["_rproc_nstep"] is not None:
-                    # If dt is None, nstep was already set via kwargs
-                    # If dt is not None but nstep was stored, it means rebuild_interp set it
-                    # In that case, restore it directly (bypassing RProc validation)
-                    if state["_rproc_dt"] is not None:
+                if state.get("_rproc_nstep") is not None:
+                    if state.get("_rproc_dt") is not None:
                         self.rproc.nstep = state["_rproc_nstep"]
 
         # Reconstruct dmeas
-        if "_dmeas_func_name" in state:
-            module = importlib.import_module(state["_dmeas_module"])
-            obj = getattr(module, state["_dmeas_func_name"])
-            if isinstance(obj, _DMeas):
-                self.dmeas = obj
+        obj_dmeas = _load_func("dmeas")
+        if obj_dmeas is not None:
+            if isinstance(obj_dmeas, _DMeas):
+                self.dmeas = obj_dmeas
             else:
                 self.dmeas = _DMeas(
-                    struct=obj,
+                    struct=obj_dmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -1697,14 +1716,13 @@ class Pomp:
                 )
 
         # Reconstruct rmeas
-        if "_rmeas_func_name" in state:
-            module = importlib.import_module(state["_rmeas_module"])
-            obj = getattr(module, state["_rmeas_func_name"])
-            if isinstance(obj, _RMeas):
-                self.rmeas = obj
+        obj_rmeas = _load_func("rmeas")
+        if obj_rmeas is not None:
+            if isinstance(obj_rmeas, _RMeas):
+                self.rmeas = obj_rmeas
             else:
                 self.rmeas = _RMeas(
-                    struct=obj,
+                    struct=obj_rmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -1712,7 +1730,11 @@ class Pomp:
                     y_names=list(self.ys.columns) if hasattr(self, "ys") else None,
                 )
 
-        # Set rmeas or dmeas to None if not set
+        # Set defaults if reconstruction failed or was missing
+        if not hasattr(self, "rinit"):
+            self.rinit = None  # type: ignore
+        if not hasattr(self, "rproc"):
+            self.rproc = None  # type: ignore
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
@@ -1720,15 +1742,19 @@ class Pomp:
 
         # Clean up temporary state variables
         for key in [
+            "_rinit_func_bytes",
             "_rinit_func_name",
             "_rinit_module",
+            "_rproc_func_bytes",
             "_rproc_func_name",
             "_rproc_dt",
             "_rproc_nstep",
             "_rproc_accumvars",
             "_rproc_module",
+            "_dmeas_func_bytes",
             "_dmeas_func_name",
             "_dmeas_module",
+            "_rmeas_func_bytes",
             "_rmeas_func_name",
             "_rmeas_module",
             "_fresh_key_data",

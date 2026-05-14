@@ -9,3 +9,4 @@ scipy
 typing_extensions
 loess
 statsmodels
+cloudpickle

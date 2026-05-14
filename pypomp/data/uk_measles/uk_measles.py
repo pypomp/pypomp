@@ -17,9 +17,13 @@ for file in os.listdir(raw_location):
 # conversion from numeric to date to produce dates which are not all spaced 7
 # days apart, so we instead assign dates by adding multiples of 7 days to the
 # first date.
-dates = pd.to_datetime("1944-01-07") + 7 * pd.to_timedelta(
-    np.arange(0, len(urr["measles_urban"]), 1), unit="D"
-)
+if "measles_urban" in urr:
+    dates = pd.to_datetime("1944-01-07") + 7 * pd.to_timedelta(
+        np.arange(0, len(urr["measles_urban"]), 1), unit="D"
+    )
+else:
+    raise ValueError("No measles data found")
+assert isinstance(dates, pd.Series)
 
 measles = pd.concat([urr["measles_rural"], urr["measles_urban"]], axis=1)
 measles = pd.concat([measles, pd.DataFrame({"date": dates})], axis=1)

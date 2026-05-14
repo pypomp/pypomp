@@ -1,12 +1,21 @@
-from .poissoninvf import fast_approx_rpoisson
-from .binominvf import fast_approx_rbinom, fast_approx_rmultinom
-from .gammainvf import fast_approx_rgamma
-from .nbinom import fast_approx_rnbinom
+"""
+JAX-compatible random variable samplers optimized for GPUs.
+"""
+
+from . import poisson, binom, gamma, nbinom, _dtype_helpers
+
+fast_poisson = poisson.fast_poisson
+fast_binomial = binom.fast_binomial
+fast_multinomial = binom.fast_multinomial
+fast_gamma = gamma.fast_gamma
+fast_nbinomial = nbinom.fast_nbinomial
 
 __all__ = [
-    "fast_approx_rpoisson",
-    "fast_approx_rbinom",
-    "fast_approx_rmultinom",
-    "fast_approx_rgamma",
-    "fast_approx_rnbinom",
+    "fast_poisson",
+    "fast_binomial",
+    "fast_multinomial",
+    "fast_gamma",
+    "fast_nbinomial",
 ]
+
+del poisson, binom, gamma, nbinom, _dtype_helpers

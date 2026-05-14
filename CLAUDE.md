@@ -20,6 +20,20 @@ pip install -r requirements.txt
 # Do not overwrite an existing environment.
 ```
 
+### Additional Environment Setup for Testing
+
+```bash
+# Check that pytest is installed with the cov and xdist plugins
+pip list | grep pytest-
+
+# Install pypomp in editable mode for development
+pip install -e .
+
+# statsmodels is needed for some tests; it is made accessible in 
+# .github/workflows/test-package.yml by  `pip install -e .[benchmarks]`
+pip install statsmodels
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -29,15 +43,15 @@ pytest
 pytest --cov
 
 # Run specific test file
-pytest test/test_pomp/test_pomp_pfilter.py
+pytest tests/test_pomp/test_pomp_pfilter.py
 
 # Run specific test function
-pytest test/test_pomp/test_pomp_pfilter.py::test_class_basic_default
+pytest tests/test_pomp/test_pomp_pfilter.py::test_class_basic_default
 
 # Run tests for a specific module (e.g., pomp, panel, models)
-pytest test/test_pomp/
-pytest test/test_panel/
-pytest test/test_models/
+pytest tests/test_pomp/
+pytest tests/test_panel/
+pytest tests/test_models/
 ```
 
 ### Linting
@@ -49,11 +63,6 @@ ruff check .
 pyright
 ```
 
-### Building
-```bash
-# Install package in editable mode for development
-pip install -e .
-```
 
 ## Architecture Overview
 
@@ -157,7 +166,7 @@ The package includes several example models for testing and demonstration:
 ### Test Structure
 
 ```
-test/
+tests/
 ├── test_core.py                  # Foundation tests
 ├── test_util.py                  # Utility function tests
 ├── test_ParTrans.py             # Parameter transformation tests

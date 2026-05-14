@@ -1,37 +1,14 @@
 Example Models
 ==============
 
-pypomp includes several example models:
+**pypomp** includes several example models:
 
-Dacca Model
------------
+.. currentmodule:: pypomp.models
 
-.. automodule:: pypomp.dacca
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autosummary::
+   :toctree: generated/
 
-SPX Model
----------
-
-.. automodule:: pypomp.spx
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-UK Measles Model
-----------------
-
-.. automodule:: pypomp.measles.measlesPomp
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Linear Gaussian Model
----------------------
-
-.. automodule:: pypomp.LG
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
+   ~dacca
+   ~spx
+   UKMeasles.Pomp
+   ~LG

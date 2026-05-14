@@ -12,6 +12,7 @@ Core Classes
    pomp
    panelpomp
    parameters
+   results
 
 Model Components
 ----------------
@@ -19,22 +20,9 @@ Model Components
 .. toctree::
    :maxdepth: 2
 
-   model_struct
    par_trans
    rw_sigma
-
-Estimation and Inference
-------------------------
-
-.. toctree::
-   :maxdepth: 2
-
-   mif
-   pfilter
-   train
-   mcap
-   simulate
-   mop
+   functional
 
 Utilities
 ---------
@@ -42,8 +30,9 @@ Utilities
 .. toctree::
    :maxdepth: 2
 
-   util
+   maths
    random
+   mcap
 
 Example Models
 --------------

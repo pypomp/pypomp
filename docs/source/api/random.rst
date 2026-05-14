@@ -15,8 +15,18 @@ In the context of distribution simulators (random number samplers), this occurs 
 
 
 
-.. automodule:: pypomp.random
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Random Variate Generators
+-------------------------
+
+.. currentmodule:: pypomp.random
+
+.. autosummary::
+   :toctree: generated/
+
+   fast_poisson
+   fast_binomial
+   fast_multinomial
+   fast_gamma
+   fast_nbinomial
+
 

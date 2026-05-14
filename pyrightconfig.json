@@ -3,7 +3,5 @@
     "**/.venv"
   ],
   "typeCheckingMode": "standard",
-  "venvPath": ".",
-  "venv": ".venv",
   "pythonVersion": "3.12"
 }

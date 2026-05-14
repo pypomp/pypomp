@@ -1,31 +1,54 @@
 PanelPomp Class
 ===============
 
-.. automodule:: pypomp.panelPomp.panelPomp_class
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. currentmodule:: pypomp.panel.panel
 
-PanelPomp Mixins
-----------------
+.. autoclass:: PanelPomp
+   :no-members:
 
-.. automodule:: pypomp.panelPomp.analysis_mixin
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
-.. automodule:: pypomp.panelPomp.estimation_mixin
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. rubric:: Attributes
+.. autosummary::
+   :toctree: generated/
 
-.. automodule:: pypomp.panelPomp.validation_mixin
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   ~PanelPomp.ys
+   ~PanelPomp.unit_objects
+   ~PanelPomp.theta
+   ~PanelPomp.results_history
+   ~PanelPomp.fresh_key
+   ~PanelPomp.metadata
+   ~PanelPomp.canonical_param_names
+   ~PanelPomp.canonical_shared_param_names
+   ~PanelPomp.canonical_unit_param_names
 
-.. automodule:: pypomp.panelPomp.interfaces
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. rubric:: Core Algorithmic Methods
+.. autosummary::
+   :toctree: generated/
 
+   ~PanelPomp.simulate
+   ~PanelPomp.pfilter
+   ~PanelPomp.mif
+   ~PanelPomp.train
+
+.. rubric:: Supporting Methods
+.. autosummary::
+   :toctree: generated/
+
+   ~PanelPomp.get_unit_names
+   ~PanelPomp.get_unit_parameters
+   ~PanelPomp.sample_params
+   ~PanelPomp.prune
+   ~PanelPomp.mix_and_match
+   ~PanelPomp.results
+   ~PanelPomp.CLL
+   ~PanelPomp.ESS
+   ~PanelPomp.time
+   ~PanelPomp.traces
+   ~PanelPomp.probe
+   ~PanelPomp.arma
+   ~PanelPomp.negbin
+   ~PanelPomp.plot_traces
+   ~PanelPomp.plot_simulations
+   ~PanelPomp.print_metadata
+   ~PanelPomp.print_summary
+   ~PanelPomp.merge

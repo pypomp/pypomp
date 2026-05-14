@@ -13,12 +13,14 @@ sys.path.insert(0, os.path.abspath("../.."))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "pypomp"
-copyright = "2025, pypomp team"
+copyright = "2026, pypomp team"
 author = "pypomp team"
-release = "0.4.4.4"
+release = "0.4.5.1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
+
+today_fmt = "%B %d, %Y"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -28,13 +30,15 @@ extensions = [
     "sphinx.ext.autosummary",
 ]
 
+autosummary_generate = True
+
 templates_path = ["_templates"]
-exclude_patterns = []
+exclude_patterns: list[str] = []
 
 # Napoleon settings for docstring parsing
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
-napoleon_include_init_with_doc = False
+napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False
 napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = False
@@ -43,14 +47,17 @@ napoleon_use_admonition_for_references = False
 napoleon_use_ivar = False
 napoleon_use_param = True
 napoleon_use_rtype = True
+napoleon_custom_sections = [("Model Parameters", "params")]
 
 # Autodoc settings
 autodoc_default_options = {
-    "members": True,
-    "undoc-members": True,
     "show-inheritance": True,
-    "inherited-members": True,
 }
+autodoc_member_order = "bysource"
+
+# Enable domain objects (classes, functions, methods) to appear in the floating right-sidebar TOC
+toc_object_entries = True
+toc_object_entries_show_parents = "hide"
 
 # Intersphinx mapping
 intersphinx_mapping = {

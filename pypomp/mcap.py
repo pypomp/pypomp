@@ -42,17 +42,33 @@ def _loess_smooth_1d(
         # degenerate predictor: return flat line at mean(y)
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
-    
-    res = loess_1d(
-        x,
-        y,
-        xnew=grid,
-        degree=int(degree),
-        frac=float(span),
-        rotate=False,
-    )
+    try:
+        res = loess_1d(
+            x,
+            y,
+            xnew=grid,
+            degree=int(degree),
+            frac=float(span),
+            rotate=False,
+        )
+    except np.linalg.LinAlgError:
+        # loess_1d can fail with LinAlgError if the internal robust iterations
+        # encounter mad=0 (perfect fit), leading to inf weights that clip to 0.
+        # Retrying with a tiny sigy forces it to avoid mad-based scaling.
+        # TODO: This is just a bandaid so GitHub Actions will pass the CI tests for
+        # now. Figure out a more permanent solution.
+        print("LinAlgError in loess_1d, retrying with 1e-10 sigy")
+        res = loess_1d(
+            x,
+            y,
+            xnew=grid,
+            degree=int(degree),
+            frac=float(span),
+            rotate=False,
+            sigy=np.full_like(y, 1e-10),
+        )
 
-    _, y_sm, _ = res
+    y_sm = res[1]
     return y_sm.astype(float, copy=False)
 
 
@@ -121,17 +137,42 @@ def _fit_local_quadratic(
 # MCAP result container
 @dataclass
 class MCAPResult:
+    """
+    Results of a Monte Carlo adjusted profile (MCAP) analysis.
+    """
+
     level: float
+    """The confidence level of the profile likelihood confidence interval."""
+
     mle: float
+    """The maximum likelihood estimate of the focal parameter, taken as the argmax of the smoothed profile."""
+
     ci: Tuple[Optional[float], Optional[float]]
+    """The profile likelihood confidence interval (lower, upper)."""
+
     delta: float
+    """The log-likelihood threshold used to define the confidence interval, relative to the maximum."""
+
     se_stat: float
+    """The standard error due to statistical uncertainty (sampling variance)."""
+
     se_mc: float
+    """The standard error due to Monte Carlo noise in the likelihood estimates."""
+
     se_total: float
+    """The total standard error, calculated as the root sum of squares of se_stat and se_mc."""
+
     fit: Dict[str, FloatArray]
+    """A dictionary containing the grid of parameters ('parameter'), the smoothed log-likelihood values ('smoothed'), and the local quadratic fit values ('quadratic')."""
+
     quadratic_max: float
+    """The parameter value that maximizes the local quadratic fit."""
+
     quadratic_coef: Dict[str, float]
+    """The coefficients of the local quadratic fit: c - ax^2 + bx."""
+
     vcov: FloatArray
+    """The variance-covariance matrix of the quadratic coefficients a and b."""
 
 
 def mcap(
@@ -207,6 +248,7 @@ def mcap(
     # CI from smoothed profile
     diff = float(np.nanmax(y_sm)) - y_sm
     inside = diff < delta
+    ci: tuple[float | None, float | None]
     if not np.any(inside):
         ci = (None, None)
     else:

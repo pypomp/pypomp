@@ -23,9 +23,9 @@ def simple():
 def test_train_basic(optimizer, simple):
     """Test basic train functionality with per-parameter learning rates."""
     LG, ys, covars, theta, J, key, M = simple
-    eta_dict = {param: 0.2 for param in LG.canonical_param_names}
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
-    LG.train(J=J, M=M, eta=eta_dict, optimizer=optimizer, scale=True, key=key)
+    LG.train(J=J, M=M, eta=eta, optimizer=optimizer, scale=True, key=key)
 
     GD_out = LG.results_history[-1]
     traces = GD_out.traces_da
@@ -41,12 +41,12 @@ def test_train_basic(optimizer, simple):
 def test_train_with_line_search(simple):
     """Test train with line search enabled."""
     LG, ys, covars, theta, J, key, M = simple
-    eta_dict = {param: 0.2 for param in LG.canonical_param_names}
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
     LG.train(
         J=J,
         M=M,
-        eta=eta_dict,
+        eta=eta,
         optimizer="SGD",
         scale=True,
         ls=True,
@@ -63,20 +63,20 @@ def test_train_with_line_search(simple):
 def test_train_validation(simple):
     """Test train input validation."""
     LG, ys, covars, theta, J, key, M = simple
-    eta_dict = {param: 0.2 for param in LG.canonical_param_names}
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
     # Invalid J should raise ValueError
     with pytest.raises(ValueError):
-        LG.train(J=0, M=M, eta=eta_dict, scale=True, key=key)
+        LG.train(J=0, M=M, eta=eta, scale=True, key=key)
 
     # Wrong eta keys should raise ValueError
-    wrong_eta = {"wrong_param": 0.1, "another_wrong": 0.2}
-    with pytest.raises(ValueError, match="eta keys.*must match parameter names"):
+    wrong_eta = pp.LearningRate({"wrong_param": 0.1, "another_wrong": 0.2})
+    with pytest.raises(ValueError, match="Parameter '.*' not found"):
         LG.train(J=J, M=M, eta=wrong_eta, key=key)
 
     # Missing eta keys should raise ValueError
-    partial_eta = {LG.canonical_param_names[0]: 0.1}
-    with pytest.raises(ValueError, match="eta keys.*must match parameter names"):
+    partial_eta = pp.LearningRate({LG.canonical_param_names[0]: 0.1})
+    with pytest.raises(ValueError, match="Parameter '.*' not found"):
         LG.train(J=J, M=M, eta=partial_eta, key=key)
 
     # Wrong theta keys should raise an error
@@ -85,17 +85,15 @@ def test_train_validation(simple):
         ValueError,
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
-        LG.train(J=J, M=M, eta=eta_dict, key=key, theta=bad_theta)
+        LG.train(J=J, M=M, eta=eta, key=key, theta=bad_theta)
 
 
 def test_train_param_order_invariance(simple):
     """Test that parameter order doesn't affect results."""
     LG, ys, covars, theta, J, key, M = simple
-    eta_dict = {param: 0.2 for param in LG.canonical_param_names}
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
-    LG.train(
-        J=J, M=M, eta=eta_dict, optimizer="Newton", scale=True, key=key, theta=theta
-    )
+    LG.train(J=J, M=M, eta=eta, optimizer="Newton", scale=True, key=key, theta=theta)
     out1 = LG.results_history[-1].traces_da.values
 
     # Permute theta parameter order
@@ -106,7 +104,7 @@ def test_train_param_order_invariance(simple):
     LG.train(
         J=J,
         M=M,
-        eta=eta_dict,
+        eta=eta,
         optimizer="Newton",
         scale=True,
         key=key,
@@ -122,14 +120,15 @@ def test_different_learning_rates(simple):
     params = LG.canonical_param_names
 
     # Run with uniform learning rates
-    eta_uniform = {param: 0.1 for param in params}
+    eta_uniform = pp.LearningRate({param: 0.1 for param in params})
     LG.train(J=J, M=M, eta=eta_uniform, optimizer="SGD", key=key)
     out_uniform = LG.results_history[-1].traces_da.values
 
     # Run with varied learning rates
-    eta_varied = {params[0]: 0.05, params[1]: 0.2}
+    eta_varied_dict = {params[0]: 0.05, params[1]: 0.2}
     for p in params[2:]:
-        eta_varied[p] = 0.1
+        eta_varied_dict[p] = 0.1
+    eta_varied = pp.LearningRate(eta_varied_dict)
 
     LG.train(J=J, M=M, eta=eta_varied, optimizer="SGD", key=key)
     out_varied = LG.results_history[-1].traces_da.values
@@ -142,7 +141,9 @@ def test_train_clipping(simple):
     """Test that gradient clipping correctly limits parameter updates."""
     LG, _, _, theta, J, key, _ = simple
     M = 1
-    eta = {param: 10.0 for param in LG.canonical_param_names}  # Large learning rate
+    eta = pp.LearningRate(
+        {param: 10.0 for param in LG.canonical_param_names}
+    )  # Large learning rate
 
     LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=None)
     p0 = (

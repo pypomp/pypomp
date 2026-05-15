@@ -39,7 +39,7 @@ def _train_and_get_result(seed: int, optimizer: str = "Adam"):
     panel.train(
         J=2,
         M=2,
-        eta=0.01,
+        eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
         theta=deepcopy(panel.theta),
         optimizer=optimizer,
         key=jax.random.key(seed),
@@ -80,8 +80,9 @@ def test_merge_empty_args_raises():
 
 def test_merge_wrong_type_raises(two_compatible_results):
     r1, _ = two_compatible_results
+
     with pytest.raises(TypeError, match="must be of type PanelPompTrainResult"):
-        PanelPompTrainResult.merge(r1, "not_a_result")
+        PanelPompTrainResult.merge(r1, "not_a_result")  # type: ignore
 
 
 def test_merge_mismatched_optimizer_raises():

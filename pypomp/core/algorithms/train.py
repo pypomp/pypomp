@@ -153,7 +153,6 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "n_obs",
         "U",
         "clip_norm",
-        "eta_cooling",
         "alpha_cooling",
     ),
 )
@@ -179,7 +178,6 @@ def _panel_train_internal(
     eta_shared: jax.Array,
     eta_spec: jax.Array,
     alpha: float,
-    eta_cooling: float,
     alpha_cooling: float,
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
@@ -273,7 +271,6 @@ def _panel_train_internal(
             c_u = unit_ests_c[chunk_idx]
             c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
 
-            curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
             curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
@@ -298,8 +295,8 @@ def _panel_train_internal(
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
-            c_s = c_s + (curr_eta_factor * eta_shared / n_chunks) * dir_s
-            c_u = c_u + (curr_eta_factor * eta_spec) * dir_u
+            c_s = c_s + (eta_shared[i] / n_chunks) * dir_s
+            c_u = c_u + eta_spec[i] * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
 
         (
@@ -376,7 +373,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 16,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 15,
 )
 
 
@@ -397,7 +394,6 @@ _vmapped_panel_train_internal = jax.vmap(
         "alpha",
         "n_monitors",
         "clip_norm",
-        "eta_cooling",
         "alpha_cooling",
     ),
 )
@@ -424,7 +420,6 @@ def _train_internal(
     ls: bool,  # static
     alpha: float | jax.Array,
     key: jax.Array,
-    eta_cooling: float,
     alpha_cooling: float,
     n_monitors: int,  # static
     clip_norm: float | None = None,
@@ -448,7 +443,6 @@ def _train_internal(
             v_adam,
         ) = carry
 
-        curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
         curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         if n_monitors == 1:
@@ -580,7 +574,7 @@ def _train_internal(
                     lambda __: -grad,
                     operand=None,
                 )
-                s_k = jnp.mean(eta) * prev_direction  # Use mean for BFGS
+                s_k = jnp.mean(eta[i]) * prev_direction  # Use mean for BFGS
                 y_k = grad - prev_grad
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
 
@@ -679,17 +673,17 @@ def _train_internal(
                 grad=grad,
                 direction=direction,
                 k=i + 1,
-                eta=jnp.mean(eta),  # TODO: use a better solution
+                eta=jnp.mean(eta[i]),
                 xi=10,
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
                 stoch=False,
             )
-            theta_ests = theta_ests + (curr_eta_factor * eta_scalar) * direction
+            theta_ests = theta_ests + (eta_scalar) * direction
 
         else:
-            theta_ests = theta_ests + (curr_eta_factor * eta) * direction
+            theta_ests = theta_ests + eta[i] * direction
 
         prev_grad = grad
         prev_hess = hess
@@ -737,7 +731,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 4,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
 )
 
 

@@ -427,7 +427,9 @@ def compare_rbinom2(
             # Add jitter to reduce overplotting
             np.random.seed(seed)
             x_jitter = np.random.normal(
-                0, np.ptp(x_data) * jitter_scale, size=len(x_data)
+                0,
+                np.ptp(x_data) * jitter_scale,
+                size=x_data.size,  # type: ignore
             )
             y_jitter = np.random.normal(
                 0, np.ptp(sorted_approx) * jitter_scale, size=len(sorted_approx)
@@ -623,8 +625,8 @@ def compare_rnbinom_and_scipy(
 
             ax_qq.scatter(theo_quants, sample_quants, alpha=0.6, s=15, color="C0")
             limit = [
-                min(min(theo_quants), min(sample_quants)),
-                max(max(theo_quants), max(sample_quants)),
+                np.minimum(np.min(theo_quants), np.min(sample_quants)),
+                np.maximum(np.max(theo_quants), np.max(sample_quants)),
             ]
             ax_qq.plot(limit, limit, "r--", alpha=0.7)
 
@@ -678,8 +680,8 @@ def rpoisson_goodness_of_fit():
         current_exp = 0
 
         for i in range(len(observed)):
-            current_obs += observed[i]
-            current_exp += expected[i]
+            current_obs += observed[i]  # type: ignore
+            current_exp += expected[i]  # type: ignore
             if current_exp >= min_expected or i == len(observed) - 1:
                 if current_exp > 0:  # Only add if expected > 0
                     combined_observed.append(current_obs)

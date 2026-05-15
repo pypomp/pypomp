@@ -46,7 +46,7 @@ def test_001d_pfilter(london_001d):
 
 
 def test_001d_dpop_train(london_001d):
-    eta = {name: 0.01 for name in london_001d.canonical_param_names}
+    eta = pp.LearningRate({name: 0.01 for name in london_001d.canonical_param_names})
     nll, theta_hist = london_001d.dpop_train(
         J=DEFAULT_J,
         M=2,

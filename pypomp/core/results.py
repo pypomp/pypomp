@@ -6,6 +6,7 @@ import numpy as np
 import jax
 
 from .rw_sigma import RWSigma
+from .learning_rate import LearningRate
 from .parameters import PanelParameters
 
 
@@ -578,8 +579,8 @@ class PompTrainResult(PompBaseResult):
     """The number of particles used for filtering."""
     M: int = 0
     """The number of iterations performed."""
-    eta: dict[str, float] = field(default_factory=lambda: {})
-    """The learning rates for each parameter."""
+    eta: LearningRate | None = None
+    """The learning rate object."""
     alpha: float = 0.97
     """The discount factor for the gradient moving average."""
     thresh: int = 0
@@ -590,8 +591,6 @@ class PompTrainResult(PompBaseResult):
     """The Armijo constant used for line search."""
     max_ls_itn: int = 10
     """The maximum number of line search iterations per step."""
-    eta_cooling: float = 1.0
-    """The cooling factor for the learning rate."""
     alpha_cooling: float = 1.0
     """The cooling factor for the discount factor."""
 
@@ -614,7 +613,6 @@ class PompTrainResult(PompBaseResult):
             "ls",
             "c",
             "max_ls_itn",
-            "eta_cooling",
             "alpha_cooling",
         ]
         for name in scalar_fields:
@@ -676,7 +674,7 @@ class PompTrainResult(PompBaseResult):
         )
 
     def print_summary(self):
-        """Print summary of train result."""
+        """Print summary of training result."""
         print(f"Method: {self.method}")
         print(f"Number of parameter sets: {len(self.theta)}")
         print(f"Optimizer: {self.optimizer}")
@@ -689,7 +687,6 @@ class PompTrainResult(PompBaseResult):
         if self.ls:
             print(f"Armijo constant (c): {self.c}")
             print(f"Max line search iterations: {self.max_ls_itn}")
-        print(f"Cooling factor for eta: {self.eta_cooling}")
         print(f"Cooling factor for alpha: {self.alpha_cooling}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
@@ -756,7 +753,6 @@ class PompTrainResult(PompBaseResult):
             ls=first.ls,
             c=first.c,
             max_ls_itn=first.max_ls_itn,
-            eta_cooling=first.eta_cooling,
             alpha_cooling=first.alpha_cooling,
         )
 
@@ -1280,12 +1276,10 @@ class PanelPompTrainResult(PanelPompBaseResult):
     """The number of particles used for filtering."""
     M: int = 0
     """The number of iterations performed."""
-    eta: dict[str, float] | float = field(default_factory=lambda: {})
-    """The learning rates for each parameter."""
+    eta: LearningRate | None = None
+    """The learning rate object."""
     alpha: float = 0.97
     """The discount factor for the gradient moving average."""
-    eta_cooling: float = 1.0
-    """The cooling factor for the learning rate."""
     alpha_cooling: float = 1.0
     """The cooling factor for the discount factor."""
 
@@ -1303,7 +1297,6 @@ class PanelPompTrainResult(PanelPompBaseResult):
             or self.M != other.M
             or self.eta != other.eta
             or self.alpha != other.alpha
-            or self.eta_cooling != other.eta_cooling
             or self.alpha_cooling != other.alpha_cooling
         ):
             return False
@@ -1410,7 +1403,6 @@ class PanelPompTrainResult(PanelPompBaseResult):
         print(f"Number of iterations (M): {self.M}")
         print(f"Learning rate (eta): {self.eta}")
         print(f"Discount factor (alpha): {self.alpha}")
-        print(f"Cooling factor for eta: {self.eta_cooling}")
         print(f"Cooling factor for alpha: {self.alpha_cooling}")
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
@@ -1439,11 +1431,10 @@ class PanelPompTrainResult(PanelPompBaseResult):
                 or result.M != first.M
                 or result.eta != first.eta
                 or result.alpha != first.alpha
-                or result.eta_cooling != first.eta_cooling
                 or result.alpha_cooling != first.alpha_cooling
             ):
                 raise ValueError(
-                    "All PanelPompTrainResult objects must have the same optimizer, J, M, eta, alpha, eta_cooling, and alpha_cooling."
+                    "All PanelPompTrainResult objects must have the same optimizer, J, M, eta, alpha, and alpha_cooling."
                 )
 
         merged_theta = (
@@ -1493,7 +1484,6 @@ class PanelPompTrainResult(PanelPompBaseResult):
             M=first.M,
             eta=first.eta,
             alpha=first.alpha,
-            eta_cooling=first.eta_cooling,
             alpha_cooling=first.alpha_cooling,
         )
 

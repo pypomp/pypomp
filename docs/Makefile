@@ -18,6 +18,9 @@ help:
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
+open:
+	open build/html/index.html
+
 clean:
 	@rm -rf $(BUILDDIR)/*
 	@rm -rf $(SOURCEDIR)/api/generated/*

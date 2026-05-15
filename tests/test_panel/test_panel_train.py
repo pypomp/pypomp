@@ -2,7 +2,6 @@ from copy import deepcopy
 import jax
 import pandas as pd
 import pytest
-from typing import cast
 import numpy as np
 import pypomp as pp
 from pypomp.core.results import PanelPompTrainResult
@@ -49,7 +48,7 @@ def test_panel_train(chunk_size, optimizer):
     panel.train(
         J=J,
         M=M,
-        eta=0.01,
+        eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
         theta=deepcopy(panel.theta),
         chunk_size=chunk_size,
         optimizer=optimizer,
@@ -79,7 +78,7 @@ def test_panel_train_clipping():
     panel.train(
         J=J,
         M=M,
-        eta=eta,
+        eta=pp.LearningRate({n: eta for n in panel.canonical_param_names}),
         key=key,
         theta=deepcopy(theta_init),
         clip_norm=None,
@@ -98,7 +97,7 @@ def test_panel_train_clipping():
     panel.train(
         J=J,
         M=M,
-        eta=eta,
+        eta=pp.LearningRate({n: eta for n in panel.canonical_param_names}),
         key=key,
         theta=deepcopy(theta_init),
         clip_norm=1e-5,

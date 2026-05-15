@@ -22,6 +22,7 @@ from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
 from .algorithms.helpers import _calc_ys_covars
 from .rw_sigma import RWSigma
+from .learning_rate import LearningRate
 from .par_trans import ParTrans
 from .results import (
     ResultsHistory,
@@ -764,7 +765,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: dict[str, float],
+        eta: LearningRate,
         key: jax.Array | None = None,
         theta: ThetaInput = None,
         optimizer: str = "Adam",
@@ -774,7 +775,6 @@ class Pomp:
         ls: bool = False,
         c: float = 0.1,
         max_ls_itn: int = 10,
-        eta_cooling: float = 1.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
         track_time: bool = True,
@@ -796,7 +796,7 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (dict[str, float]): Learning rates per parameter as a dictionary.
+            eta (LearningRate): Learning rates per parameter as a LearningRate object.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (ThetaInput, optional): Parameters involved in the POMP model.
@@ -822,7 +822,6 @@ class Pomp:
 
                 max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
 
-            eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
             alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
@@ -846,13 +845,11 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        if set(eta.keys()) != set(self.canonical_param_names):
-            raise ValueError(
-                f"eta keys {set(eta.keys())} must match parameter names {set(self.canonical_param_names)}"
-            )
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
 
-        # Convert eta dict to JAX array in canonical order
-        eta_array = jnp.array([eta[param] for param in self.canonical_param_names])
+        # Convert eta to JAX array in canonical order
+        eta_array = eta.to_array(self.canonical_param_names, M)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
@@ -873,7 +870,6 @@ class Pomp:
             ls,
             alpha,
             keys,
-            eta_cooling,
             alpha_cooling,
             n_monitors,
             clip_norm,
@@ -940,7 +936,6 @@ class Pomp:
             ls=ls,
             c=c,
             max_ls_itn=max_ls_itn,
-            eta_cooling=eta_cooling,
             alpha_cooling=alpha_cooling,
         )
 
@@ -950,7 +945,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: dict[str, float] | float,
+        eta: LearningRate,
         optimizer: str = "Adam",
         alpha: float = 0.8,
         decay: float = 0.0,
@@ -971,10 +966,8 @@ class Pomp:
             Number of particles.
         M : int
             Number of gradient steps.
-        eta : dict[str, float] or float
-            Learning rates. Either a dict of per-parameter learning rates
-            keyed by parameter name, or a scalar float applied uniformly
-            to all parameters.
+        eta : LearningRate
+            Learning rates per parameter as a LearningRate object.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
         alpha : float, default 0.8
@@ -1008,15 +1001,12 @@ class Pomp:
         theta_est_dict = self.par_trans.to_est(theta_nat)
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
 
-        if isinstance(eta, (int, float)):
-            eta_array = jnp.full(len(param_names), float(eta))
-        else:
-            if set(eta.keys()) != set(param_names):
-                raise ValueError(
-                    f"eta keys {set(eta.keys())} must match parameter names "
-                    f"{set(param_names)}"
-                )
-            eta_array = jnp.array([eta[name] for name in param_names])
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
+
+        # For now, dpop_train only uses a constant learning rate across iterations
+        # Extract the first row of the schedule
+        eta_array = eta.to_array(param_names, M)[0]
 
         ys_array = jnp.array(self.ys.values)
         dt_array_extended = self._dt_array_extended

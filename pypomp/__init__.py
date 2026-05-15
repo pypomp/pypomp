@@ -6,6 +6,7 @@ from .core.parameters import PanelParameters, PompParameters
 from .core.par_trans import ParTrans
 from .core.pomp import Pomp
 from .core.rw_sigma import RWSigma
+from .core.learning_rate import LearningRate
 from .panel.panel import PanelPomp
 
 from .mcap import mcap
@@ -34,6 +35,7 @@ __all__ = [
     "Pomp",
     "PompParameters",
     "RWSigma",
+    "LearningRate",
     # Inference / Algorithms
     "mcap",
     # Submodules

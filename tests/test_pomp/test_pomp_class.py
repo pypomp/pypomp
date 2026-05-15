@@ -42,7 +42,10 @@ def neapolitan_setup(setup):
     LG.pfilter(J=p["J"], reps=1, key=p["key"])
     LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
     LG.train(
-        J=p["J"], M=1, eta={n: 0.2 for n in LG.canonical_param_names}, key=p["key"]
+        J=p["J"],
+        M=1,
+        eta=pp.LearningRate({n: 0.2 for n in LG.canonical_param_names}),
+        key=p["key"],
     )
     return LG, setup
 
@@ -83,7 +86,10 @@ def test_theta_carryover(model, method):
         LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
     else:
         LG.train(
-            J=p["J"], M=1, eta={n: 0.2 for n in LG.canonical_param_names}, key=p["key"]
+            J=p["J"],
+            M=1,
+            eta=pp.LearningRate({n: 0.2 for n in LG.canonical_param_names}),
+            key=p["key"],
         )
 
     assert theta_order == list(LG.theta[0].keys())
@@ -190,7 +196,11 @@ def test_merge(setup):
     for obj, k in [(LG1, k1), (LG2, k2)]:
         obj.pfilter(theta=p["theta"], J=p["J"], reps=1, key=k)
         obj.mif(J=p["J"], M=p["M"], rw_sd=p["rw_sd"], a=p["a"])
-        obj.train(J=p["J"], M=1, eta={n: 0.2 for n in obj.canonical_param_names})
+        obj.train(
+            J=p["J"],
+            M=1,
+            eta=pp.LearningRate({n: 0.2 for n in obj.canonical_param_names}),
+        )
 
     merged = pp.Pomp.merge(LG1, LG2)
     assert len(merged.theta) == len(LG1.theta) + len(LG2.theta)

@@ -17,7 +17,6 @@ def train(
     ls: bool,
     alpha: float | jax.Array,
     keys: jax.Array,
-    eta_cooling: float,
     alpha_cooling: float,
     n_monitors: int,
     clip_norm: float | None = None,
@@ -42,7 +41,7 @@ def train(
         J (int): Number of particles.
         optimizer (str): Optimizer choice.
         M (int): Number of iterations.
-        eta (jax.Array): Learning rates array. Shape (n_params,).
+        eta (jax.Array): Learning rates array. Shape (M, n_params).
         c (float): Armijo condition constant.
         max_ls_itn (int): Max line search iterations.
         thresh (float): Resampling threshold.
@@ -50,7 +49,6 @@ def train(
         ls (bool): Whether to use line search.
         alpha (float | jax.Array): Alpha parameter.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
-        eta_cooling (float): Eta cooling factor.
         alpha_cooling (float): Alpha cooling factor.
         n_monitors (int): Number of monitors.
         clip_norm (float | None): Gradient clipping norm.
@@ -83,7 +81,6 @@ def train(
         ls,
         alpha,
         keys,
-        eta_cooling,
         alpha_cooling,
         n_monitors,
         clip_norm,

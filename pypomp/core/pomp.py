@@ -1407,7 +1407,7 @@ class Pomp:
             fig.show()
         return fig
 
-    def print_summary(self):
+    def print_summary(self, n: int = 5):
         """
         Prints a high-level summary of the POMP model instance and its estimation history.
 
@@ -1423,7 +1423,7 @@ class Pomp:
         print(f"Number of parameters: {self.theta.num_params()}")
         print(f"Number of parameter sets: {self.theta.num_replicates()}")
         print()
-        self.results_history.print_summary()
+        self.results_history.print_summary(n=n)
 
     def __eq__(self, other):
         """

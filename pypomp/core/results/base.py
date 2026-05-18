@@ -160,7 +160,7 @@ class BaseResult(ABC):
         """Return traces DataFrame for this result."""
         return pd.DataFrame()
 
-    def print_summary(self):
+    def print_summary(self, n: int = 5):
         """Print a summary of this result."""
         print(f"Method: {self.method}")
         for label, attr in self._summary_config:
@@ -174,9 +174,9 @@ class BaseResult(ABC):
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
-            print("\nTop 5 Results:")
+            print(f"\nTop {n} Results:")
             sort_col = "shared logLik" if "shared logLik" in df.columns else "logLik"
-            print(df.sort_values(sort_col, ascending=False).head(5).to_string())
+            print(df.sort_values(sort_col, ascending=False).head(n).to_string())
 
     @property
     @abstractmethod

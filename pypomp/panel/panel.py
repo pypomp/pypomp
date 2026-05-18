@@ -83,7 +83,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         self.metadata.print_metadata()
 
-    def print_summary(self):
+    def print_summary(self, n: int = 5):
         """
         Print a summary of the PanelPomp object.
         """
@@ -100,7 +100,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         )
         print(f"Number of parameter sets: {self.theta.num_replicates()}")
         print()
-        self.results_history.print_summary()
+        self.results_history.print_summary(n=n)
 
     def __eq__(self, other):
         """

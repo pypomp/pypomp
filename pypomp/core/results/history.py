@@ -32,7 +32,7 @@ class ResultsHistory:
         df.index.name = "history_index"
         return df
 
-    def print_summary(self):
+    def print_summary(self, n: int = 5):
         """Print a summary of the results history."""
         print("Results History:")
         print("----------------")
@@ -40,12 +40,9 @@ class ResultsHistory:
             print("No results recorded yet.")
             return
         for i, entry in enumerate(self._entries):
-            time_str = (
-                f"{entry.execution_time:.2f}s"
-                if entry.execution_time is not None
-                else "N/A"
-            )
-            print(f"[{i}] {entry.method} (Time: {time_str})")
+            print(f"[{i}] {entry.method.upper()} Result:")
+            entry.print_summary(n=n)
+            print()
 
     def __eq__(self, other: Any) -> bool:
         """Structural equality for history."""

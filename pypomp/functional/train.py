@@ -20,6 +20,9 @@ def train(
     alpha_cooling: float,
     n_monitors: int,
     clip_norm: float | None = None,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ) -> tuple[jax.Array, jax.Array]:
     """
     This is a pure functional implementation of the optimization algorithm, intended
@@ -52,6 +55,9 @@ def train(
         alpha_cooling (float): Alpha cooling factor.
         n_monitors (int): Number of monitors.
         clip_norm (float | None): Gradient clipping norm.
+        beta1 (float): Exponential decay rate for first moment estimates.
+        beta2 (float): Exponential decay rate for second moment estimates.
+        epsilon (float): Small constant for numerical stability.
 
     Returns:
         tuple[jax.Array, jax.Array]:
@@ -84,4 +90,7 @@ def train(
         alpha_cooling,
         n_monitors,
         clip_norm,
+        beta1,
+        beta2,
+        epsilon,
     )

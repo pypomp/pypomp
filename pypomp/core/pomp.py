@@ -24,12 +24,8 @@ from .algorithms.helpers import _calc_ys_covars
 from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .par_trans import ParTrans
-from .results import (
-    ResultsHistory,
-    PompPFilterResult,
-    PompMIFResult,
-    PompTrainResult,
-)
+from .optimizer import Optimizer, Adam
+from .results import ResultsHistory, PompPFilterResult, PompMIFResult, PompTrainResult
 from .parameters import PompParameters
 from pypomp.maths import logmeanexp
 from pypomp import benchmarks
@@ -768,17 +764,12 @@ class Pomp:
         eta: LearningRate,
         key: jax.Array | None = None,
         theta: ThetaInput = None,
-        optimizer: str = "Adam",
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         thresh: int = 0,
-        scale: bool = False,
-        ls: bool = False,
-        c: float = 0.1,
-        max_ls_itn: int = 10,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
         track_time: bool = True,
-        clip_norm: float | None = None,
     ) -> None:
         """
         Optimizes model parameters using a differentiable particle filter and gradient-based methods.
@@ -806,28 +797,19 @@ class Pomp:
                 - An existing PompParameters object
                 Providing a list or PompParameters object enables faster, vectorized
                 execution across all parameter sets.
-            optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", "BFGS", and "FullMatrixAdam".
-                Note: options other than "Adam" and "SGD" might be quite slow. The "Adam" option itself can take ~3x longer per iteration than mif does.
+            optimizer (Optimizer, optional): The optimizer configuration object to use
+                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.Newton()`, `pp.FullMatrixAdam()`, etc.).
+                Defaults to `pp.Adam()`. Hyperparameters like learning rate scaling, line search
+                (`scale`, `ls`, `c`, `max_ls_itn`), gradient clipping (`clip_norm`), or Adam beta values
+                are configured directly inside the optimizer instance.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
-            scale (bool, optional): Boolean flag controlling whether to normalize the
-                search direction.
-            ls (bool, optional): Boolean flag controlling whether to use the line
-                search algorithm. Note: the line search algorithm can be quite slow.
-            Line Search Parameters (only used when ls=True):
-
-                c (float, optional): The Armijo condition constant for line search which controls how much the negative log-likelihood needs to decrease before the line search algorithm continues.
-
-                max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
-
             alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
-            clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
             None. Updates `self.results_history` with a `PompTrainResult` containing the log-likelihoods,
@@ -856,11 +838,21 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
+        c = optimizer.c
+        max_ls_itn = optimizer.max_ls_itn
+        clip_norm = optimizer.clip_norm
+        scale = optimizer.scale
+        ls = optimizer.ls
+
         nLLs, theta_ests = F.train(
             self.to_struct(),
             theta_array,
             J,
-            optimizer,
+            opt_name,
             M,
             eta_array,
             c,
@@ -873,6 +865,9 @@ class Pomp:
             alpha_cooling,
             n_monitors,
             clip_norm,
+            beta1,
+            beta2,
+            epsilon,
         )
 
         theta_ests_natural = np.stack(
@@ -933,9 +928,6 @@ class Pomp:
             eta=eta,
             alpha=alpha,
             thresh=thresh,
-            ls=ls,
-            c=c,
-            max_ls_itn=max_ls_itn,
             alpha_cooling=alpha_cooling,
         )
 

@@ -182,6 +182,9 @@ def _panel_train_internal(
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
     clip_norm: float | None = None,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -199,16 +202,13 @@ def _panel_train_internal(
     )
 
     def _adam_step(m, v, grad, step):
-        beta1, beta2, eps = 0.9, 0.999, 1e-8
         m_new = beta1 * m + (1 - beta1) * grad
         v_new = beta2 * v + (1 - beta2) * (grad**2)
         m_hat = m_new / (1 - beta1**step)
         v_hat = v_new / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + eps), m_new, v_new
+        return -m_hat / (jnp.sqrt(v_hat) + epsilon), m_new, v_new
 
     def _full_matrix_adam_step_single(m, v, grad, step):
-        beta1, beta2, eps = 0.9, 0.999, 1e-4
-
         m_new = beta1 * m + (1 - beta1) * grad
         m_hat = m_new / (1 - beta1**step)
 
@@ -216,7 +216,7 @@ def _panel_train_internal(
         F_hat = F_t / (1 - beta2**step)
 
         eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + eps)
+        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
         F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
 
         direction = -F_inv_sqrt @ m_hat
@@ -373,7 +373,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 15,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
 )
 
 
@@ -423,6 +423,9 @@ def _train_internal(
     alpha_cooling: float,
     n_monitors: int,  # static
     clip_norm: float | None = None,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -598,10 +601,6 @@ def _train_internal(
             direction = -grad
 
         elif optimizer == "Adam":
-            beta1 = 0.9
-            beta2 = 0.999
-            epsilon = 1e-8
-
             m_adam = beta1 * m_adam + (1 - beta1) * grad
             v_adam = beta2 * v_adam + (1 - beta2) * (grad**2)
             m_hat = m_adam / (1 - beta1 ** (i + 1))
@@ -609,10 +608,6 @@ def _train_internal(
             direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
 
         elif optimizer == "FullMatrixAdam":
-            beta1 = 0.9
-            beta2 = 0.999
-            epsilon = 1e-4
-
             m_adam = beta1 * m_adam + (1 - beta1) * grad
             m_hat = m_adam / (1 - beta1 ** (i + 1))
 
@@ -731,7 +726,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 3,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 6,
 )
 
 

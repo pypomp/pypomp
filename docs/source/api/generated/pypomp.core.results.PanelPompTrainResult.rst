@@ -34,11 +34,11 @@
       ~PanelPompTrainResult.alpha
       ~PanelPompTrainResult.alpha_cooling
       ~PanelPompTrainResult.eta
-      ~PanelPompTrainResult.optimizer
       ~PanelPompTrainResult.theta
       ~PanelPompTrainResult.shared_traces
       ~PanelPompTrainResult.unit_traces
       ~PanelPompTrainResult.logLiks
+      ~PanelPompTrainResult.optimizer
       ~PanelPompTrainResult.method
       ~PanelPompTrainResult.execution_time
       ~PanelPompTrainResult.key

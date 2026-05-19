@@ -41,8 +41,12 @@ def _get_lg_panel():
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])
-@pytest.mark.parametrize("optimizer", ["Adam", "FullMatrixAdam"])
-def test_panel_train(chunk_size, optimizer):
+@pytest.mark.parametrize(
+    "opt_instance",
+    [pp.Adam(), pp.FullMatrixAdam()],
+    ids=["Adam", "FullMatrixAdam"],
+)
+def test_panel_train(chunk_size, opt_instance):
     panel = _get_lg_panel()
     J, M = 2, 2
     panel.train(
@@ -51,7 +55,7 @@ def test_panel_train(chunk_size, optimizer):
         eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
         theta=deepcopy(panel.theta),
         chunk_size=chunk_size,
-        optimizer=optimizer,
+        optimizer=opt_instance,
         key=jax.random.key(1),
     )
 
@@ -81,10 +85,10 @@ def test_panel_train_clipping():
         eta=pp.LearningRate({n: eta for n in panel.canonical_param_names}),
         key=key,
         theta=deepcopy(theta_init),
-        clip_norm=None,
-        optimizer="SGD",
+        optimizer=pp.SGD(clip_norm=None),
     )
     res_no_clip = panel.results_history[-1]
+    assert isinstance(res_no_clip, PanelPompTrainResult)
     shared_vars = panel.canonical_shared_param_names
     p0 = res_no_clip.shared_traces.sel(
         theta_idx=0, iteration=0, variable=shared_vars
@@ -100,10 +104,10 @@ def test_panel_train_clipping():
         eta=pp.LearningRate({n: eta for n in panel.canonical_param_names}),
         key=key,
         theta=deepcopy(theta_init),
-        clip_norm=1e-5,
-        optimizer="SGD",
+        optimizer=pp.SGD(clip_norm=1e-5),
     )
     res_clip = panel.results_history[-1]
+    assert isinstance(res_clip, PanelPompTrainResult)
     p1_clip = res_clip.shared_traces.sel(
         theta_idx=0, iteration=1, variable=shared_vars
     ).values

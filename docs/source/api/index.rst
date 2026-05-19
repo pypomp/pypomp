@@ -23,6 +23,7 @@ Model Components
    par_trans
    rw_sigma
    learning_rate
+   optimizers
    functional
 
 Utilities

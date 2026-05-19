@@ -18,14 +18,22 @@ def simple():
 
 
 @pytest.mark.parametrize(
-    "optimizer", ["SGD", "Newton", "WeightedNewton", "BFGS", "Adam", "FullMatrixAdam"]
+    "opt_instance",
+    [
+        pp.SGD(scale=True),
+        pp.Newton(scale=True),
+        pp.WeightedNewton(scale=True),
+        pp.BFGS(scale=True),
+        pp.Adam(scale=True),
+        pp.FullMatrixAdam(scale=True),
+    ],
 )
-def test_train_basic(optimizer, simple):
+def test_train_basic(opt_instance, simple):
     """Test basic train functionality with per-parameter learning rates."""
     LG, ys, covars, theta, J, key, M = simple
     eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
-    LG.train(J=J, M=M, eta=eta, optimizer=optimizer, scale=True, key=key)
+    LG.train(J=J, M=M, eta=eta, optimizer=opt_instance, key=key)
 
     GD_out = LG.results_history[-1]
     traces = GD_out.traces_da
@@ -36,6 +44,10 @@ def test_train_basic(optimizer, simple):
     for param in LG.theta.to_list()[0].keys():
         assert param in list(traces.coords["variable"].values)
     assert all(isinstance(v, float) for v in LG.theta[0].values())
+    from pypomp.core.optimizer import Optimizer
+
+    assert isinstance(GD_out.optimizer, Optimizer)
+    assert GD_out.optimizer.__class__.__name__ == opt_instance.__class__.__name__
 
 
 def test_train_with_line_search(simple):
@@ -47,9 +59,7 @@ def test_train_with_line_search(simple):
         J=J,
         M=M,
         eta=eta,
-        optimizer="SGD",
-        scale=True,
-        ls=True,
+        optimizer=pp.SGD(scale=True, ls=True),
         n_monitors=1,
         key=key,
     )
@@ -58,6 +68,7 @@ def test_train_with_line_search(simple):
     traces = GD_out.traces_da
     assert traces.sel(theta_idx=0).shape == (M + 1, len(LG.theta[0]) + 1)
     assert "logLik" in list(traces.coords["variable"].values)
+    assert GD_out.optimizer.ls is True
 
 
 def test_train_validation(simple):
@@ -67,7 +78,7 @@ def test_train_validation(simple):
 
     # Invalid J should raise ValueError
     with pytest.raises(ValueError):
-        LG.train(J=0, M=M, eta=eta, scale=True, key=key)
+        LG.train(J=0, M=M, eta=eta, optimizer=pp.SGD(scale=True), key=key)
 
     # Wrong eta keys should raise ValueError
     wrong_eta = pp.LearningRate({"wrong_param": 0.1, "another_wrong": 0.2})
@@ -93,7 +104,7 @@ def test_train_param_order_invariance(simple):
     LG, ys, covars, theta, J, key, M = simple
     eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
-    LG.train(J=J, M=M, eta=eta, optimizer="Newton", scale=True, key=key, theta=theta)
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.Newton(scale=True), key=key, theta=theta)
     out1 = LG.results_history[-1].traces_da.values
 
     # Permute theta parameter order
@@ -105,8 +116,7 @@ def test_train_param_order_invariance(simple):
         J=J,
         M=M,
         eta=eta,
-        optimizer="Newton",
-        scale=True,
+        optimizer=pp.Newton(scale=True),
         key=key,
         theta=permuted_theta,
     )
@@ -121,7 +131,7 @@ def test_different_learning_rates(simple):
 
     # Run with uniform learning rates
     eta_uniform = pp.LearningRate({param: 0.1 for param in params})
-    LG.train(J=J, M=M, eta=eta_uniform, optimizer="SGD", key=key)
+    LG.train(J=J, M=M, eta=eta_uniform, optimizer=pp.SGD(), key=key)
     out_uniform = LG.results_history[-1].traces_da.values
 
     # Run with varied learning rates
@@ -130,7 +140,7 @@ def test_different_learning_rates(simple):
         eta_varied_dict[p] = 0.1
     eta_varied = pp.LearningRate(eta_varied_dict)
 
-    LG.train(J=J, M=M, eta=eta_varied, optimizer="SGD", key=key)
+    LG.train(J=J, M=M, eta=eta_varied, optimizer=pp.SGD(), key=key)
     out_varied = LG.results_history[-1].traces_da.values
 
     # Results should differ
@@ -145,7 +155,7 @@ def test_train_clipping(simple):
         {param: 10.0 for param in LG.canonical_param_names}
     )  # Large learning rate
 
-    LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=None)
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.SGD(clip_norm=None), key=key, theta=theta)
     p0 = (
         LG.results_history[-1]
         .traces_da.sel(theta_idx=0, iteration=0, variable=LG.canonical_param_names)
@@ -158,7 +168,7 @@ def test_train_clipping(simple):
     )
     diff_no_clip = np.linalg.norm(p1_no_clip - p0)
 
-    LG.train(J=J, M=M, eta=eta, optimizer="SGD", key=key, theta=theta, clip_norm=1e-5)
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.SGD(clip_norm=1e-5), key=key, theta=theta)
     p1_clip = (
         LG.results_history[-1]
         .traces_da.sel(theta_idx=0, iteration=1, variable=LG.canonical_param_names)

@@ -7,6 +7,14 @@ from .core.par_trans import ParTrans
 from .core.pomp import Pomp
 from .core.rw_sigma import RWSigma
 from .core.learning_rate import LearningRate
+from .core.optimizer import (
+    SGD,
+    Adam,
+    FullMatrixAdam,
+    BFGS,
+    Newton,
+    WeightedNewton,
+)
 from .panel.panel import PanelPomp
 
 from .mcap import mcap
@@ -36,6 +44,12 @@ __all__ = [
     "PompParameters",
     "RWSigma",
     "LearningRate",
+    "SGD",
+    "Adam",
+    "FullMatrixAdam",
+    "BFGS",
+    "Newton",
+    "WeightedNewton",
     # Inference / Algorithms
     "mcap",
     # Submodules

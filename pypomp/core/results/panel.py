@@ -9,6 +9,7 @@ from ...maths import logmeanexp
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
 from ..parameters import PanelParameters
+from ..optimizer import Optimizer, Adam
 
 
 @dataclass(eq=False)
@@ -245,8 +246,8 @@ class PanelPompTrainResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
     """Unit-specific parameter traces across iterations."""
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     """Log-likelihoods for each unit across iterations."""
-    optimizer: str = "SGD"
-    """The name of the optimizer used (e.g., 'SGD', 'ADAM')."""
+    optimizer: Optimizer = field(default_factory=Adam)
+    """The optimizer used for training."""
     J: int = 0
     """The number of particles used for filtering."""
     M: int = 0

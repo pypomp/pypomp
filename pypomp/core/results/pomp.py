@@ -7,6 +7,7 @@ from .base import BaseResult, PompEstimationTracesMixin, _merge_results
 from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
+from ..optimizer import Optimizer, Adam
 
 
 @dataclass(eq=False)
@@ -174,8 +175,8 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
 
     traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))  # type: ignore[assignment]
     """Parameter traces and log-likelihoods across iterations."""
-    optimizer: str = "SGD"
-    """The name of the optimizer used (e.g., 'SGD', 'ADAM')."""
+    optimizer: Optimizer = field(default_factory=Adam)
+    """The optimizer used for training."""
     J: int = 0
     """The number of particles used for filtering."""
     M: int = 0
@@ -186,12 +187,6 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """The discount factor for the gradient moving average."""
     thresh: int = 0
     """The resampling threshold used."""
-    ls: bool = False
-    """Whether line search was enabled."""
-    c: float = 0.1
-    """The Armijo constant used for line search."""
-    max_ls_itn: int = 10
-    """The maximum number of line search iterations per step."""
     alpha_cooling: float = 1.0
     """The cooling factor for the discount factor."""
 
@@ -208,16 +203,8 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
             ("Learning rate (eta)", "eta"),
             ("Discount factor (alpha)", "alpha"),
             ("Resampling threshold", "thresh"),
-            ("Line search", "ls"),
+            ("Cooling factor for alpha", "alpha_cooling"),
         ]
-        if self.ls:
-            config.extend(
-                [
-                    ("Armijo constant (c)", "c"),
-                    ("Max line search iterations", "max_ls_itn"),
-                ]
-            )
-        config.append(("Cooling factor for alpha", "alpha_cooling"))
         return config
 
     @staticmethod
@@ -232,9 +219,6 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
                 "eta",
                 "alpha",
                 "thresh",
-                "ls",
-                "c",
-                "max_ls_itn",
                 "alpha_cooling",
                 "method",
             ],

@@ -34,7 +34,9 @@ def _build_lg_panel():
     return pp.PanelPomp(Pomp_dict={"unit1": lg1, "unit2": lg2}, theta=theta)
 
 
-def _train_and_get_result(seed: int, optimizer: str = "Adam"):
+def _train_and_get_result(seed: int, optimizer=None):
+    if optimizer is None:
+        optimizer = pp.Adam()
     panel = _build_lg_panel()
     panel.train(
         J=2,
@@ -86,8 +88,8 @@ def test_merge_wrong_type_raises(two_compatible_results):
 
 
 def test_merge_mismatched_optimizer_raises():
-    r1 = _train_and_get_result(seed=0, optimizer="Adam")
-    r2 = _train_and_get_result(seed=1, optimizer="FullMatrixAdam")
+    r1 = _train_and_get_result(seed=0, optimizer=pp.Adam())
+    r2 = _train_and_get_result(seed=1, optimizer=pp.FullMatrixAdam())
     with pytest.raises(ValueError, match="same optimizer"):
         PanelPompTrainResult.merge(r1, r2)
 

@@ -217,6 +217,26 @@ class LearningRate:
                 return False
         return True
 
+    def __str__(self) -> str:
+        rate_strs = []
+        for name, val in self.rates.items():
+            if isinstance(val, (int, float, np.number)):
+                rate_strs.append(f"'{name}': {val:.4g}")
+            elif isinstance(val, np.ndarray):
+                if val.size == 0:
+                    rate_strs.append(f"'{name}': []")
+                elif val.size <= 5:
+                    vals_str = ", ".join(f"{x:.4g}" for x in val)
+                    rate_strs.append(f"'{name}': [{vals_str}]")
+                else:
+                    rate_strs.append(f"'{name}': [{val[0]:.4g} ... {val[-1]:.4g}] (len={val.size})")
+            else:
+                rate_strs.append(f"'{name}': {val}")
+        
+        indented_rates = "\n    ".join(rate_strs)
+        return f"LearningRate(\n    {indented_rates}\n)"
+
+
     def __repr__(self) -> str:
-        params = list(self.rates.keys())
-        return f"LearningRate(parameters={params})"
+        return self.__str__()
+

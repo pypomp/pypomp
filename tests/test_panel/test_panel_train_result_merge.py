@@ -118,3 +118,7 @@ def test_train_result_print_summary(two_compatible_results, capsys):
     assert "Optimizer" in out
     assert "Number of particles" in out
     assert "Number of iterations" in out
+    assert "beta1=0.9" in out
+    assert "epsilon=1e-08" in out or "epsilon=1e-8" in out
+    assert "Learning rate (eta): LearningRate(" in out
+    assert "'A1': 0.01" in out

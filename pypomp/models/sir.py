@@ -16,11 +16,7 @@ from pypomp.types import ParamDict
 from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
-
-
-# ---------------------------------------------------------------------
-# State names and default parameters
-# ---------------------------------------------------------------------
+from pypomp.random.nbinom import fast_nbinomial
 
 STATENAMES = ["S", "I", "R", "cases", "W", "logw"]
 
@@ -41,11 +37,7 @@ DEFAULT_THETA = {
 }
 
 
-# ---------------------------------------------------------------------
 # Periodic B-spline basis (from pomp's C implementation)
-# ---------------------------------------------------------------------
-
-
 def _bspline_eval(x, knots, i, degree, deriv=0):
     if deriv > degree:
         return 0.0
@@ -109,11 +101,6 @@ def precompute_bspline_covars(times, t0, period=1.0, nbasis=3, degree=3):
     return pd.DataFrame(basis_data, index=pd.Index(t_grid, name="time"))
 
 
-# ---------------------------------------------------------------------
-# Parameter transformations
-# ---------------------------------------------------------------------
-
-
 def to_est(theta: ParamDict) -> ParamDict:
     SIR_0 = jnp.array([theta["S_0"], theta["I_0"], theta["R_0"]])
     SIR_0 = SIR_0 / jnp.sum(SIR_0)
@@ -155,11 +142,6 @@ def from_est(theta: ParamDict) -> ParamDict:
     }
 
 
-# ---------------------------------------------------------------------
-# Model components: rinit, rproc, dmeas, rmeas
-# ---------------------------------------------------------------------
-
-
 def rinit(theta_, key, covars=None, t0=None):
     pop = theta_["pop"]
     S_0 = theta_["S_0"]
@@ -173,11 +155,9 @@ def rinit(theta_, key, covars=None, t0=None):
 
 
 def rproc(X_, theta_, key, covars, t, dt):
-    # Unpack state
     S, I, R = X_["S"], X_["I"], X_["R"]
     cases, W, logw = X_["cases"], X_["W"], X_["logw"]
 
-    # Unpack parameters
     gamma = theta_["gamma"]
     mu = theta_["mu"]
     iota = theta_["iota"]
@@ -185,7 +165,6 @@ def rproc(X_, theta_, key, covars, t, dt):
     beta_sd = theta_["beta_sd"]
     pop = theta_["pop"]
 
-    # Seasonal transmission
     seas_1, seas_2, seas_3 = (
         covars["seas_1"],
         covars["seas_2"],
@@ -193,43 +172,38 @@ def rproc(X_, theta_, key, covars, t, dt):
     )
     beta = beta1 * seas_1 + beta2 * seas_2 + beta3 * seas_3
 
-    # Gamma white noise
     key, subkey = jax.random.split(key)
     shape = dt / (beta_sd**2 + 1e-10)
     dW = fast_gamma(subkey, shape) * (beta_sd**2)
 
-    # Transition rates
     rate_foi = (iota + beta * I * dW / dt) / pop
 
-    # Split keys
-    key, k1, k2, k3, k4 = jax.random.split(key, 5)
+    key, k1, k_trans = jax.random.split(key, 3)
 
-    # Births: Poisson
     births = fast_poisson(k1, mu * pop * dt)
 
-    # S transitions
     S_int = jnp.maximum(jnp.round(S), 0.0)
-    rates_S = jnp.array([rate_foi, mu])
-    trans_S, lp_S, _ = sample_and_log_prob(S_int, rates_S, dt, k2)
-    infections, deaths_S = trans_S[0], trans_S[1]
-
-    # I transitions
     I_int = jnp.maximum(jnp.round(I), 0.0)
-    rates_I = jnp.array([gamma, mu])
-    trans_I, lp_I, _ = sample_and_log_prob(I_int, rates_I, dt, k3)
-    recoveries, deaths_I = trans_I[0], trans_I[1]
-
-    # R transitions
     R_int = jnp.maximum(jnp.round(R), 0.0)
-    rates_R = jnp.array([mu])
-    trans_R, lp_R, _ = sample_and_log_prob(R_int, rates_R, dt, k4)
-    deaths_R = trans_R[0]
 
-    # Accumulate process log-density
-    logw_step = lp_S + lp_I + lp_R
+    N = jnp.stack([S_int, I_int, R_int])
+    rates = jnp.stack(
+        [jnp.array([rate_foi, mu]), jnp.array([gamma, mu]), jnp.array([mu, 0.0])]
+    )
+
+    keys_compartments = jax.random.split(k_trans, 3)
+    # Should manually vectorize sample_and_log_prob
+    trans, lps, _ = jax.vmap(sample_and_log_prob, in_axes=(0, 0, None, 0))(
+        N, rates, dt, keys_compartments
+    )
+
+    infections, deaths_S = trans[0, 0], trans[0, 1]
+    recoveries, deaths_I = trans[1, 0], trans[1, 1]
+    deaths_R = trans[2, 0]
+
+    logw_step = jnp.sum(lps)
     logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
 
-    # Update state
     S_new = S + births - infections - deaths_S
     I_new = I + infections - recoveries - deaths_I
     R_new = R + recoveries - deaths_R
@@ -269,18 +243,9 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     mu = jnp.maximum(cases * rho, 1e-10)
     size = 1.0 / k
 
-    # Negative binomial as Gamma-Poisson mixture
-    key1, key2 = jax.random.split(key)
-    scale = mu / size
-    gamma_sample = jax.random.gamma(key1, size) * scale
-    reports = jax.random.poisson(key2, gamma_sample)
+    reports = fast_nbinomial(key, n=size, mu=mu)
 
     return jnp.array([reports], dtype=float)
-
-
-# ---------------------------------------------------------------------
-# Constructor function
-# ---------------------------------------------------------------------
 
 
 def sir(
@@ -348,32 +313,10 @@ def sir(
         covars=covars,
     )
 
-    # Simulate data
     key = jax.random.key(seed)
-    sim_result = sir_temp.simulate(key=key, nsim=1)
-    assert isinstance(sim_result, tuple)
-    X_long, Y_long = sim_result
-    y_sims = (
-        Y_long.loc[(Y_long["theta_idx"] == 0) & (Y_long["sim"] == 0)]
-        .set_index("time")[["obs_0"]]
-        .rename(columns={"obs_0": "reports"})
-    )
+    sim_pomp = sir_temp.simulate(key=key, nsim=1, as_pomp=True)
 
-    # Final Pomp object with simulated data
-    return Pomp(
-        ys=y_sims,
-        theta=theta,
-        statenames=STATENAMES,
-        t0=t0,
-        rinit=rinit,
-        rproc=rproc,
-        dmeas=dmeas,
-        rmeas=rmeas,
-        par_trans=par_trans,
-        nstep=20,
-        accumvars=accumvars,
-        covars=covars,
-    )
+    return sim_pomp
 
 
 def get_process_weight_index():

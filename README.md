@@ -10,6 +10,15 @@ Documentation is on [readthedocs](https://pypomp.readthedocs.io/).
 Additional [quantitative tests](https://pypomp.github.io/quant) provide performance evaluation and technical examples. 
 
 
+### Installation
+
+Install `pypomp` using `pip`:
+
+```bash
+pip install pypomp
+```
+
+
 ### Expected users
 
 1. Scientists wanting to perform data analysis on a dynamic system via a POMP model, also called a state-space model (SSM) or hidden Markov model (HMM).

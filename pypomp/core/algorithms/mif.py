@@ -36,16 +36,17 @@ def _mif_internal(
     rprocess_pf: Callable,  # static
     dmeasure_pf: Callable,  # static
     n_monitors: int,  # static
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+    return_ancestry: bool = False,  # static
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     times = times.astype(float)
     all_keys = jax.random.split(key, num=M + 1)
     m_keys = all_keys[1:]
 
     def mif_scan_body(carry, scan_inputs):
-        current_theta_Jd = carry
+        current_theta_Jd, current_ancestry = carry
         m, iter_key = scan_inputs
 
-        next_theta_Jd, neg_loglik_per = _perfilter_internal(
+        next_theta_Jd, neg_loglik_per, ancestry = _perfilter_internal(
             m,
             current_theta_Jd,
             iter_key,
@@ -64,6 +65,7 @@ def _mif_internal(
             covars_extended=covars_extended,
             thresh=thresh,
             a=a,
+            return_ancestry=return_ancestry,
         )
 
         if n_monitors >= 1:
@@ -95,15 +97,25 @@ def _mif_internal(
         else:
             neg_loglik_m = neg_loglik_per
 
-        return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), neg_loglik_m)
+        return (next_theta_Jd, ancestry), (
+            jnp.mean(next_theta_Jd, axis=0),
+            neg_loglik_m,
+        )
 
-    init_carry = theta_Jd
+    if return_ancestry:
+        init_ancestry = jnp.arange(J)
+    else:
+        init_ancestry = jnp.zeros((0,), dtype=jnp.int32)
+
+    init_carry = (theta_Jd, init_ancestry)
     scan_xs = (jnp.arange(M), m_keys)
 
-    final_theta_Jd, (thetas_history_mean, neg_logliks_history) = jax.lax.scan(
-        f=mif_scan_body,
-        init=init_carry,
-        xs=scan_xs,
+    (final_theta_Jd, final_ancestry), (thetas_history_mean, neg_logliks_history) = (
+        jax.lax.scan(
+            f=mif_scan_body,
+            init=init_carry,
+            xs=scan_xs,
+        )
     )
 
     # thetas_traces_Md: (M+1, n_theta)
@@ -113,16 +125,16 @@ def _mif_internal(
     # neg_logliks_M: (M,)
     neg_logliks_M = neg_logliks_history
 
-    return neg_logliks_M, thetas_traces_Md, final_theta_Jd
+    return neg_logliks_M, thetas_traces_Md, final_theta_Jd, final_ancestry
 
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,) + (None,) * 4,
+    in_axes=(1,) + (None,) * 16 + (0,) + (None,) * 5,
 )
 
 _jv_mif_internal = jit(
-    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15, 18, 19, 20, 21)
+    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15, 18, 19, 20, 21, 22)
 )
 
 
@@ -145,7 +157,8 @@ def _perfilter_internal(
     covars_extended: jax.Array | None,
     thresh: float,
     a: float,
-) -> tuple[jax.Array, jax.Array]:
+    return_ancestry: bool,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Internal function for one iteration of the perturbed particle filtering algorithm.
     """
@@ -181,6 +194,10 @@ def _perfilter_internal(
         step_keys_raw,
     )
 
+    if return_ancestry:
+        ancestry = jnp.arange(J)
+    else:
+        ancestry = jnp.zeros((0,), dtype=jnp.int32)
     init_state = (
         t0,
         particlesF_Jx,
@@ -189,6 +206,7 @@ def _perfilter_internal(
         norm_weights,
         counts,
         0,
+        ancestry,
     )
 
     def scan_body(carry, xs):
@@ -202,9 +220,10 @@ def _perfilter_internal(
             covars_extended=covars_extended,
             dt_array_extended=dt_array_extended,
             thresh=thresh,
+            return_ancestry=return_ancestry,
         )
 
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx), _ = (
+    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx, ancestry), _ = (
         jax.lax.scan(
             f=scan_body,
             init=init_state,
@@ -212,7 +231,7 @@ def _perfilter_internal(
         )
     )
 
-    return thetas_Jd, -loglik
+    return thetas_Jd, -loglik, ancestry
 
 
 def _perfilter_helper(
@@ -224,6 +243,7 @@ def _perfilter_helper(
         jax.Array,
         jax.Array,
         int,
+        jax.Array,
     ],
     xs: tuple[
         jax.Array,
@@ -239,6 +259,7 @@ def _perfilter_helper(
     covars_extended: jax.Array | None,
     dt_array_extended: jax.Array,
     thresh: float,
+    return_ancestry: bool,
 ) -> tuple[
     tuple[
         jax.Array,
@@ -248,13 +269,14 @@ def _perfilter_helper(
         jax.Array,
         jax.Array,
         int,
+        jax.Array,
     ],
     None,
 ]:
     """
     Runs one iteration of the perturbed particle filtering algorithm.
     """
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx) = carry
+    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx, ancestry) = carry
     (y, time, nstep, cooling_factor, step_key) = xs
     J = len(particlesF_Jx)
 
@@ -304,7 +326,24 @@ def _perfilter_helper(
         *(counts, particlesP_Jx, norm_weights, thetas_Jd, key_resample),
     )
 
-    return (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx), None
+    if return_ancestry:
+        step_indices = jax.lax.cond(
+            oddr > thresh,
+            lambda: counts,
+            lambda: jnp.arange(J),
+        )
+        ancestry = ancestry[step_indices]
+
+    return (
+        t,
+        particlesF_Jx,
+        thetas_Jd,
+        loglik,
+        norm_weights,
+        counts,
+        t_idx,
+        ancestry,
+    ), None
 
 
 def _panel_mif_internal(
@@ -333,6 +372,7 @@ def _panel_mif_internal(
     rprocess_pf: Callable,
     dmeasure_pf: Callable,
     n_monitors: int,
+    block: bool,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compiled Panel IF2 across M iterations and U units.
@@ -397,12 +437,12 @@ def _panel_mif_internal(
                 )
             else:
                 thetas_u_panel_order = jnp.zeros((J, 0))
+
             thetas_u = thetas_u_panel_order[:, unit_param_perm_u]
-
-            subkey = unit_key
-
             sigmas_u = sigmas[unit_param_perm_u]
             sigmas_init_u = sigmas_init[unit_param_perm_u]
+
+            subkey = unit_key
 
             sigmas_init_u_cooled = (
                 _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init_u
@@ -411,7 +451,7 @@ def _panel_mif_internal(
                 _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
             )
 
-            nLL_u, _, updated_final_thetas_u = _mif_internal(
+            nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
                 thetas_u,
                 dt_array_extended,
                 nstep_array,
@@ -434,6 +474,7 @@ def _panel_mif_internal(
                 rprocess_pf,
                 dmeasure_pf,
                 n_monitors,
+                return_ancestry=not block,
             )
             nLL_u = nLL_u[0]
             # skips initial parameters from output:
@@ -448,6 +489,8 @@ def _panel_mif_internal(
 
             if n_spec > 0:
                 updated_spec_u = updated_thetas_panel[:, n_shared:].T
+                if not block:
+                    unit_array_m_carry = unit_array_m_carry[:, ancestry_u, :]
                 new_unit_array_carry = unit_array_m_carry.at[:, :, u_idx].set(
                     updated_spec_u
                 )
@@ -540,7 +583,7 @@ def _panel_mif_internal(
 
 
 _vmapped_panel_mif_internal = jax.vmap(
-    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,) + (None,) * 4)
+    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,) + (None,) * 5)
 )
 
 _jv_panel_mif_internal = jit(
@@ -556,6 +599,7 @@ _jv_panel_mif_internal = jit(
         22,  # rprocess_pf
         23,  # dmeasure_pf
         24,  # n_monitors
+        25,  # block
     ),
 )
 
@@ -588,6 +632,7 @@ def _panel_mif_internal_vmap(
     rprocess_pf: Callable,
     dmeasure_pf: Callable,
     n_monitors: int,
+    block: bool,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Panel IF2 with chunked vmap over units instead of sequential scan.
@@ -656,6 +701,7 @@ def _panel_mif_internal_vmap(
             ) = chunk_inputs
 
             start_idx = chunk_idx * vmap_chunk_size
+            u_indices = start_idx + jnp.arange(vmap_chunk_size)
 
             if n_spec > 0:
                 # unit_array_m_carry: (n_spec, J, U_padded)
@@ -672,7 +718,7 @@ def _panel_mif_internal_vmap(
                 unit_arr_chunk = jnp.zeros((vmap_chunk_size, 0, J))
 
             def process_one_unit(
-                unit_arr_single, perm, ys_u, covars_u_dummy, key_u, inv_perm
+                unit_arr_single, perm, ys_u, covars_u_dummy, key_u, inv_perm, u_idx
             ):
                 covars_u = None if covars_per_unit is None else covars_u_dummy
 
@@ -682,8 +728,8 @@ def _panel_mif_internal_vmap(
                     )
                 else:
                     thetas_u_panel_order = jnp.zeros((J, 0))
-                thetas_u = thetas_u_panel_order[:, perm]
 
+                thetas_u = thetas_u_panel_order[:, perm]
                 sigmas_u = sigmas[perm]
                 sigmas_init_u = sigmas_init[perm]
 
@@ -695,7 +741,7 @@ def _panel_mif_internal_vmap(
                     _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
                 )
 
-                nLL_u, _, updated_final_thetas_u = _mif_internal(
+                nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
                     thetas_u,
                     dt_array_extended,
                     nstep_array,
@@ -718,6 +764,7 @@ def _panel_mif_internal_vmap(
                     rprocess_pf,
                     dmeasure_pf,
                     n_monitors,
+                    return_ancestry=not block,
                 )
                 nLL_u = nLL_u[0]
                 updated_thetas_u = updated_final_thetas_u  # (J, n_params)
@@ -731,8 +778,16 @@ def _panel_mif_internal_vmap(
 
                 if n_spec > 0:
                     updated_spec_u = updated_thetas_panel[:, n_shared:].T
+                    if block:
+                        updated_spec_ret = updated_spec_u
+                    else:
+                        resampled_spec_all = unit_array_m_carry[:, ancestry_u, :]
+                        updated_spec_ret = resampled_spec_all.at[:, :, u_idx].set(
+                            updated_spec_u
+                        )
                 else:
                     updated_spec_u = unit_arr_single
+                    updated_spec_ret = unit_arr_single
 
                 loglik_u = -nLL_u
 
@@ -743,7 +798,7 @@ def _panel_mif_internal_vmap(
                 else:
                     traces_u = jnp.array([loglik_u])
 
-                return new_shared, updated_spec_u, loglik_u, traces_u
+                return new_shared, updated_spec_ret, loglik_u, traces_u
 
             new_shareds, new_specs, logliks, traces = jax.vmap(process_one_unit)(
                 unit_arr_chunk,
@@ -752,9 +807,10 @@ def _panel_mif_internal_vmap(
                 covars_chunk_dummy,
                 key_chunk,
                 inv_perm_chunk,
+                u_indices,
             )
             # new_shareds: (vmap_chunk_size, n_shared, J)
-            # new_specs: (vmap_chunk_size, n_spec, J)
+            # new_specs: (vmap_chunk_size, n_spec, J) if block else (vmap_chunk_size, n_spec, J, U)
             # logliks: (vmap_chunk_size,)
             # traces: (vmap_chunk_size, n_spec+1)
 
@@ -766,12 +822,20 @@ def _panel_mif_internal_vmap(
                 avg_shared = shared_array_c
 
             if n_spec > 0:
-                new_specs_t = jnp.moveaxis(new_specs, 0, 2)
-                new_unit_array_carry = jax.lax.dynamic_update_slice(
-                    unit_array_m_carry,
-                    new_specs_t,
-                    (0, 0, start_idx),
-                )
+                if block:
+                    new_specs_t = jnp.moveaxis(new_specs, 0, 2)
+                    new_unit_array_carry = jax.lax.dynamic_update_slice(
+                        unit_array_m_carry,
+                        new_specs_t,
+                        (0, 0, start_idx),
+                    )
+                else:
+                    mask_exp = mask_chunk[
+                        :, None, None, None
+                    ]  # (vmap_chunk_size, 1, 1, 1)
+                    n_real = jnp.maximum(mask_chunk.sum(), 1.0)
+                    avg_specs = jnp.sum(new_specs * mask_exp, axis=0) / n_real
+                    new_unit_array_carry = avg_specs
             else:
                 new_unit_array_carry = unit_array_m_carry
 
@@ -842,7 +906,7 @@ def _panel_mif_internal_vmap(
 
 _vmapped_panel_mif_internal_vmap = jax.vmap(
     _panel_mif_internal_vmap,
-    in_axes=((0, 0) + (None,) * 19 + (0,) + (None,) + (None,) * 4),
+    in_axes=((0, 0) + (None,) * 19 + (0,) + (None,) + (None,) * 5),
 )
 
 _jv_panel_mif_internal_vmap = jit(
@@ -859,5 +923,6 @@ _jv_panel_mif_internal_vmap = jit(
         24,  # rprocess_pf
         25,  # dmeasure_pf
         26,  # n_monitors
+        27,  # block
     ),
 )

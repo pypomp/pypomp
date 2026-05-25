@@ -43,7 +43,7 @@ def mif(
             Parameter trace history: Shape (n_reps, M+1, n_params).
             Final particle swarm: Shape (n_reps, J, n_params).
     """
-    return _jv_mif_internal(
+    res = _jv_mif_internal(
         thetas_array,
         struct.dt_array_extended,
         struct.nstep_array,
@@ -66,4 +66,6 @@ def mif(
         struct.rproc_pf,
         struct.dmeas_pf,
         n_monitors,
+        False,
     )
+    return res[0], res[1], res[2]

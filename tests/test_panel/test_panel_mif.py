@@ -64,7 +64,7 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
     original_theta = deepcopy(panel.theta)
     reordered_theta = deepcopy(panel.theta)
     reordered_theta.theta = list(reversed(reordered_theta.theta))
-    
+
     for t_dict in reordered_theta.theta:
         if t_dict["shared"] is not None:
             t_dict["shared"] = t_dict["shared"].iloc[::-1]
@@ -140,78 +140,87 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
         )
 
 
-def test_mif_shared_vs_unit_specific_single_unit_consistency(measles_panel_setup_pomps_module, measles_rw_sd):
+def test_mif_shared_vs_unit_specific_single_unit_consistency(
+    measles_panel_setup_pomps_module, measles_rw_sd
+):
     """
     Test that MIF produces equivalent results for a single-unit panel whether
     parameters are marked as shared or unit-specific.
     """
     london, _, AK_mles = measles_panel_setup_pomps_module
-    
+
     # Force London to have a different canonical parameter order from the panel
     # by re-initializing its parameters with reversed key order
     london_params_orig = AK_mles["London"].to_dict()
-    reversed_london_params = {k: london_params_orig[k] for k in reversed(list(london_params_orig.keys()))}
+    reversed_london_params = {
+        k: london_params_orig[k] for k in reversed(list(london_params_orig.keys()))
+    }
     london.theta = reversed_london_params
-    
+
     # Define some parameters to toggle between shared and unit-specific
     toggled_params = ["gamma", "cohort"]
-    
+
     # Use original order for Panel DataFrames to ensure mismatch with London
     london_params = london_params_orig
     shared_df = pd.DataFrame(
         {p: [london_params[p]] for p in toggled_params},
         index=pd.Index(toggled_params),
-        columns=pd.Index(["shared"])
+        columns=pd.Index(["shared"]),
     )
     specific_params = [p for p in london_params if p not in toggled_params]
     specific_df = pd.DataFrame(
         {p: [london_params[p]] for p in specific_params},
         index=pd.Index(specific_params),
-        columns=pd.Index(["London"])
+        columns=pd.Index(["London"]),
     )
-    
+
     panel_shared = pp.PanelPomp(
         Pomp_dict={"London": london},
-        theta={"shared": shared_df, "unit_specific": specific_df}
+        theta={"shared": shared_df, "unit_specific": specific_df},
     )
-    
+
     # 2. Setup Panel with toggled parameters as UNIT-SPECIFIC
     all_specific_df = pd.DataFrame(
         {p: [london_params[p]] for p in london_params},
         index=pd.Index(list(london_params.keys())),
-        columns=pd.Index(["London"])
+        columns=pd.Index(["London"]),
     )
-    
+
     panel_specific = pp.PanelPomp(
         Pomp_dict={"London": london},
-        theta={"shared": None, "unit_specific": all_specific_df}
+        theta={"shared": None, "unit_specific": all_specific_df},
     )
-    
+
     J, M, a = 2, 3, 0.5
     key = jax.random.key(42)
-    
+
     # Run MIF on both
     panel_shared.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
     res_shared = panel_shared.results_history[-1]
-    
+
     panel_specific.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
     res_specific = panel_specific.results_history[-1]
-    
+
+    from pypomp.core.results.panel import PanelPompMIFResult
+
+    assert isinstance(res_shared, PanelPompMIFResult)
+    assert isinstance(res_specific, PanelPompMIFResult)
+
     # Verify log-likelihoods match
     assert jnp.allclose(res_shared.logLiks.values, res_specific.logLiks.values), (
         f"Log-likelihoods differed:\n"
         f"shared: {res_shared.logLiks.values}\n"
         f"specific: {res_specific.logLiks.values}"
     )
-    
+
     # Verify traces match for toggled parameters
     # In res_shared, they are in shared_traces
     # In res_specific, they are in unit_traces
-    
+
     for p in toggled_params:
         trace_shared = res_shared.shared_traces.sel(variable=p).values
         trace_specific = res_specific.unit_traces.sel(variable=p, unit="London").values
-        
+
         assert jnp.allclose(trace_shared, trace_specific, equal_nan=True), (
             f"Traces for parameter '{p}' differed:\n"
             f"shared_traces version: {trace_shared}\n"
@@ -264,3 +273,23 @@ def test_mif_vmap_with_padding(lg_panel_setup_some_shared):
 
     check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
 
+
+def test_pif(lg_panel_setup_some_shared):
+    """Test sequential PIF (block=False)."""
+    panel, rw_sd, key = lg_panel_setup_some_shared
+    J, M, a = 2, 2, 0.5
+    theta_orig = deepcopy(panel.theta)
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, block=False)
+
+    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+
+
+def test_pif_vmap(lg_panel_setup_some_shared):
+    """Test parallel vmap PIF (block=False)."""
+    panel, rw_sd, key = lg_panel_setup_some_shared
+    J, M, a = 2, 2, 0.5
+    U = len(panel.unit_objects)
+    theta_orig = deepcopy(panel.theta)
+    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=U, block=False)
+
+    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)

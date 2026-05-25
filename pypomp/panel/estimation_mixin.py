@@ -591,7 +591,7 @@ class PanelEstimationMixin(Base):
             n_monitors (int): Number of particle filter runs to average for
                 log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
                 filter).
-            block (bool): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF) (currently only block=True is supported).
+            block (bool): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF). Uses Panel Iterated Filtering (PIF) if False.
             vmap_chunk_size (int, optional): (Experimental) If set, process units in parallel via
                 jax.vmap in chunks of this size instead of sequentially. Shared
                 parameters are independently perturbed per unit and averaged across
@@ -617,8 +617,6 @@ class PanelEstimationMixin(Base):
             raise ValueError("M should be greater than 0.")
         if a < 0 or a > 1:
             raise ValueError("a should be between 0 and 1.")
-        if block is False:
-            raise NotImplementedError("block=False is not supported yet.")
 
         unit_names = self.get_unit_names()
         U = len(unit_names)
@@ -722,6 +720,7 @@ class PanelEstimationMixin(Base):
                 rep_unit.rproc.struct_pf_interp,
                 rep_unit.dmeas.struct_pf,
                 n_monitors,
+                block,
             )
             shared_array_f, unit_array_f, shared_traces, unit_traces = res
             if padding > 0:
@@ -759,6 +758,7 @@ class PanelEstimationMixin(Base):
                     rep_unit.rproc.struct_pf_interp,
                     rep_unit.dmeas.struct_pf,
                     n_monitors,
+                    block,
                 )
             )
 

@@ -33,14 +33,10 @@
       ~PompTrainResult.M
       ~PompTrainResult.alpha
       ~PompTrainResult.alpha_cooling
-      ~PompTrainResult.c
-      ~PompTrainResult.eta_cooling
-      ~PompTrainResult.ls
-      ~PompTrainResult.max_ls_itn
-      ~PompTrainResult.optimizer
+      ~PompTrainResult.eta
       ~PompTrainResult.thresh
       ~PompTrainResult.traces_da
-      ~PompTrainResult.eta
+      ~PompTrainResult.optimizer
       ~PompTrainResult.theta
       ~PompTrainResult.method
       ~PompTrainResult.execution_time

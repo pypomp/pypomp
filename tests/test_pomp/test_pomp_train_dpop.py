@@ -33,9 +33,9 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
     """
     model = simple_sir_for_dpop
     if eta_type == "dict":
-        eta = {name: 0.01 for name in model.canonical_param_names}
+        eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
     else:
-        eta = 0.01
+        eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
 
     nll, theta_hist = model.dpop_train(
         J=J_DEFAULT,
@@ -61,7 +61,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
 
     J = J_DEFAULT
     M = M_DEFAULT
-    eta = {name: 0.01 for name in model.canonical_param_names}
+    eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
 
     # First run: default theta ordering
     key1 = jax.random.key(123)

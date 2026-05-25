@@ -14,6 +14,8 @@ from ..core.algorithms.mif import _jv_panel_mif_internal, _jv_panel_mif_internal
 from ..core.algorithms.train import _vmapped_panel_train_internal
 from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
 from ..core.rw_sigma import RWSigma
+from ..core.learning_rate import LearningRate
+from ..core.optimizer import Optimizer, Adam
 from ..core.results import (
     PanelPompPFilterResult,
     PanelPompMIFResult,
@@ -853,9 +855,9 @@ class PanelEstimationMixin(Base):
         self,
         J: int,
         M: int,
-        eta: dict[str, float] | float,
+        eta: LearningRate,
         chunk_size: int = 1,
-        optimizer: str = "Adam",
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         key: jax.Array | None = None,
         theta: Union[
@@ -864,9 +866,7 @@ class PanelEstimationMixin(Base):
             list[dict[str, pd.DataFrame | None]],
             None,
         ] = None,
-        eta_cooling: float = 1.0,
         alpha_cooling: float = 1.0,
-        clip_norm: float | None = None,
     ):
         """
         Estimate parameters using chunked gradient-descent optimization (SGD/Adam).
@@ -879,19 +879,19 @@ class PanelEstimationMixin(Base):
         Args:
             J (int): Number of particles per unit.
             M (int): Number of training iterations.
-            eta (dict[str, float] | float): Learning rate(s). Can be a float for a
-                global learning rate or a dictionary mapping parameter names to rates.
+            eta (LearningRate): Learning rates per parameter as a LearningRate object.
             chunk_size (int, optional): Number of units to process per
                 gradient calculation step.
-            optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD', 'FullMatrixAdam'.
+            optimizer (Optimizer, optional): The optimizer configuration object to use
+                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.FullMatrixAdam()`, etc.). Defaults to `pp.Adam()`.
+                Hyperparameters like gradient clipping (`clip_norm`) or Adam beta values are
+                configured directly inside the optimizer instance.
             alpha (float, optional): Learning rate decay factor per iteration.
             key (jax.Array, optional): JAX PRNG key. If None, uses the
                 `fresh_key` attribute.
             theta (PanelParameters, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
-            eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
             alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
-            clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
             None: Updates `self.theta` and appends result to `self.results_history`.
@@ -997,15 +997,11 @@ class PanelEstimationMixin(Base):
                 axis=0,
             )
 
-        eta_dict = (
-            eta
-            if isinstance(eta, dict)
-            else {p: eta for p in self.canonical_param_names}
-        )
-        eta_shared = jnp.array(
-            [eta_dict.get(p, 0.0) for p in shared_index], dtype=float
-        )
-        eta_spec = jnp.array([eta_dict.get(p, 0.0) for p in spec_index], dtype=float)
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
+
+        eta_shared = eta.to_array(shared_index, M)
+        eta_spec = eta.to_array(spec_index, M)
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
@@ -1014,6 +1010,12 @@ class PanelEstimationMixin(Base):
 
         keys = jax.random.split(key, n_reps * M * U)
         keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
+
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
+        clip_norm = optimizer.clip_norm
 
         (
             logliks_history,
@@ -1036,16 +1038,18 @@ class PanelEstimationMixin(Base):
             dmeasures,
             accumvars,
             chunk_size,
-            optimizer,
+            opt_name,
             M,
             eta_shared,
             eta_spec,
             alpha,
-            eta_cooling,
             alpha_cooling,
             n_obs,
             U,
             clip_norm,
+            beta1,
+            beta2,
+            epsilon,
         )
 
         shared_traces_in = None
@@ -1168,7 +1172,6 @@ class PanelEstimationMixin(Base):
             eta=eta,
             optimizer=optimizer,
             alpha=alpha,
-            eta_cooling=eta_cooling,
             alpha_cooling=alpha_cooling,
         )
 

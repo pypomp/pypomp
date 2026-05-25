@@ -26,8 +26,8 @@ def lg_with_mif_result():
 @pytest.fixture(scope="module")
 def lg_with_train_result():
     LG = pp.models.LG()
-    eta = {n: 0.01 for n in LG.canonical_param_names}
-    LG.train(J=2, M=2, eta=eta, optimizer="SGD", key=jax.random.key(0))
+    eta = pp.LearningRate({n: 0.01 for n in LG.canonical_param_names})
+    LG.train(J=2, M=2, eta=eta, optimizer=pp.SGD(), key=jax.random.key(0))
     res = LG.results_history[-1]
     assert isinstance(res, PompTrainResult)
     return res

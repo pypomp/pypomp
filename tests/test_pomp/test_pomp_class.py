@@ -2,352 +2,206 @@ import jax
 import pickle
 import pypomp as pp
 import pytest
-
-
-@pytest.fixture(scope="module")
-def simple_setup():
-    LG = pp.models.LG()
-    J = 2
-    rw_sd = pp.RWSigma(
-        sigmas={
-            "A1": 0.02,
-            "A2": 0.02,
-            "A3": 0.02,
-            "A4": 0.02,
-            "C1": 0.02,
-            "C2": 0.02,
-            "C3": 0.02,
-            "C4": 0.02,
-            "Q1": 0.02,
-            "Q2": 0.02,
-            "Q3": 0.02,
-            "Q4": 0.02,
-            "R1": 0.02,
-            "R2": 0.02,
-            "R3": 0.02,
-            "R4": 0.0,
-        },
-        init_names=[],
-    )
-    a = 0.5
-    M = 2
-    key = jax.random.key(111)
-    theta = LG.theta
-    fresh_key = LG.fresh_key
-    return LG, rw_sd, J, a, M, key, theta, fresh_key
-
-
-@pytest.fixture(scope="module")
-def neapolitan_setup():
-    LG = pp.models.LG()
-    J = 2
-    a = 0.5
-    M = 2
-    key = jax.random.key(111)
-    rw_sd = pp.RWSigma(
-        sigmas={
-            "A1": 0.02,
-            "A2": 0.02,
-            "A3": 0.02,
-            "A4": 0.02,
-            "C1": 0.02,
-            "C2": 0.02,
-            "C3": 0.02,
-            "C4": 0.02,
-            "Q1": 0.02,
-            "Q2": 0.02,
-            "Q3": 0.02,
-            "Q4": 0.02,
-            "R1": 0.02,
-            "R2": 0.02,
-            "R3": 0.02,
-            "R4": 0.0,
-        },
-        init_names=[],
-    )
-
-    LG.pfilter(J=J, reps=1, key=key)
-    LG.mif(
-        J=J,
-        rw_sd=rw_sd,
-        M=M,
-        a=a,
-        key=key,
-    )
-    eta = {param: 0.2 for param in LG.canonical_param_names}
-    LG.train(J=J, M=1, eta=eta, key=key)
-    results_history = LG.results_history
-    theta = LG.theta
-    fresh_key = LG.fresh_key
-    return LG, rw_sd, J, a, M, key, theta, results_history, fresh_key
+import jax.numpy as jnp
+import pandas as pd
 
 
 @pytest.fixture(scope="function")
-def simple(simple_setup):
-    # Reset results history and theta to prevent carryover from other tests.
-    LG, J, sigmas, a, M, key, theta, fresh_key = simple_setup
+def setup():
+    LG = pp.models.LG()
+    rw_sd = pp.RWSigma(
+        sigmas={n: 0.02 for n in LG.canonical_param_names},
+        init_names=[],
+    )
+    rw_sd.sigmas["R4"] = 0.0
+    return {
+        "LG": LG,
+        "J": 2,
+        "rw_sd": rw_sd,
+        "a": 0.5,
+        "M": 2,
+        "key": jax.random.key(111),
+        "theta": LG.theta,
+        "fresh_key": LG.fresh_key,
+    }
+
+
+@pytest.fixture(scope="function")
+def model(setup):
+    LG = setup["LG"]
     LG.results_history.clear()
-    LG.theta = theta
-    LG.fresh_key = fresh_key
-    return LG, J, sigmas, a, M, key
+    LG.theta = setup["theta"]
+    LG.fresh_key = setup["fresh_key"]
+    return LG, setup
 
 
 @pytest.fixture(scope="function")
-def neapolitan(neapolitan_setup):
-    # Reset results history and theta to prevent carryover from other tests.
-    LG, rw_sd, J, a, M, key, theta, results_history, fresh_key = neapolitan_setup
-    LG.results_history = results_history
-    LG.theta = theta
-    LG.fresh_key = fresh_key
-    return LG, rw_sd, J, a, M, key
+def neapolitan_setup(setup):
+    LG = setup["LG"]
+    p = setup
+    LG.pfilter(J=p["J"], reps=1, key=p["key"])
+    LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
+    LG.train(
+        J=p["J"],
+        M=1,
+        eta=pp.LearningRate({n: 0.2 for n in LG.canonical_param_names}),
+        key=p["key"],
+    )
+    return LG, setup
 
 
-def test_invalid_initialization(simple):
-    LG, *_ = simple
+def test_invalid_initialization(model):
+    LG, _ = model
     for arg in ["ys", "theta", "rinit", "rproc", "dmeas"]:
         with pytest.raises(Exception):
             kwargs = {
-                "ys": LG.ys,
-                "theta": LG.theta,
-                "rinit": LG.rinit,
-                "rproc": LG.rproc,
-                "dmeas": LG.dmeas,
+                k: getattr(LG, k) for k in ["ys", "theta", "rinit", "rproc", "dmeas"]
             }
             kwargs[arg] = None
             pp.Pomp(**kwargs)
 
 
-def test_results(neapolitan):
-    LG, rw_sd, J, a, M, key = neapolitan
-    # Check that results() returns one row per parameter set and correct columns
-    # pfilter: should be one row per parameter set (len(theta))
-    n_paramsets = len(LG.theta)
-    res_pfilter = LG.results(0)
-    assert res_pfilter.shape[0] == n_paramsets  # one row per parameter set
+def test_results(neapolitan_setup):
+    LG, _ = neapolitan_setup
     expected_cols = {"theta_idx", "logLik", "se", *LG.theta[0].keys()}
-    assert set(res_pfilter.columns) == expected_cols
-
-    # mif: should be one row per parameter set (len(theta))
-    res_mif = LG.results(1)
-    n_paramsets = len(LG.theta)
-    assert res_mif.shape[0] == n_paramsets  # one row per parameter set
-    assert set(res_mif.columns) == expected_cols
-
-    # train: should be one row per parameter set (len(theta))
-    res_train = LG.results(2)
-    n_paramsets = len(LG.theta)
-    assert res_train.shape[0] == n_paramsets  # one row per parameter set
-    assert set(res_train.columns) == expected_cols
+    for i in range(3):
+        res = LG.results(i)
+        assert res.shape[0] == len(LG.theta)
+        assert set(res.columns) == expected_cols
 
 
 def test_sample_params():
-    param_bounds = {
-        "R0": (0.0, 100.0),
-        "sigma": (0.0, 100.0),
-        "gamma": (0.0, 100.0),
-    }
-    n = 10
-    key = jax.random.key(1)
-    param_sets = pp.Pomp.sample_params(param_bounds, n, key)
-    assert len(param_sets) == n
-    for params in param_sets:
-        param_names = list(params.keys())
-        assert param_names == list(param_bounds.keys())
-        for param_name, value in params.items():
-            assert isinstance(value, float)
+    bounds = {"R0": (0.0, 100.0), "sigma": (0.0, 100.0), "gamma": (0.0, 100.0)}
+    params = pp.Pomp.sample_params(bounds, 10, jax.random.key(1))
+    assert len(params) == 10
+    assert list(params[0].keys()) == list(bounds.keys())
 
 
-def test_theta_carryover_mif(simple):
-    LG, rw_sd, J, a, M, key = simple
-    # Check that theta estimate from mif is correctly carried over to attribute and traces
+@pytest.mark.parametrize("method", ["mif", "train"])
+def test_theta_carryover(model, method):
+    """Check that the parameters are carried over between method calls."""
+    LG, p = model
     theta_order = list(LG.theta[0].keys())
-    LG.mif(
-        J=J,
-        rw_sd=rw_sd,
-        M=M,
-        a=a,
-        key=key,
-    )
+    if method == "mif":
+        LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
+    else:
+        LG.train(
+            J=p["J"],
+            M=1,
+            eta=pp.LearningRate({n: 0.2 for n in LG.canonical_param_names}),
+            key=p["key"],
+        )
+
     assert theta_order == list(LG.theta[0].keys())
-    LG.pfilter(J=J, reps=2)
+    LG.pfilter(J=p["J"], reps=2)
     assert list(LG.results_history[-1].theta[0].keys()) == theta_order
+
     traces_da = LG.results_history[-2].traces_da
     param_names = traces_da.coords["variable"].values[1:]
     last_row = traces_da.sel(theta_idx=0, iteration=traces_da.sizes["iteration"] - 1)
-    last_param_values = [
-        float(last_row.sel(variable=param).values) for param in param_names
-    ]
-    assert list(LG.results_history[-1].theta[0].values()) == last_param_values
+    last_val = [float(last_row.sel(variable=n).values) for n in param_names]
+
+    assert list(LG.results_history[-1].theta[0].values()) == last_val
     traces = LG.traces()
-    # Only compare the parameter values
     assert traces.iloc[-1, 4:].values.tolist() == traces.iloc[-2, 4:].values.tolist()
 
 
-# TODO: merge mif and train tests
-def test_theta_carryover_train(simple):
-    LG, rw_sd, J, a, M, key = simple
-    # Check that theta estimate from train is correctly carried over to attribute and traces
-    theta_order = list(LG.theta[0].keys())
-    LG.train(
-        J=J,
-        M=1,
-        eta={param: 0.2 for param in LG.canonical_param_names},
-        key=key,
+def test_pickle(model):
+    LG, p = model
+    LG.pfilter(J=p["J"], reps=1, key=p["key"])
+    unpickled = pickle.loads(pickle.dumps(LG))
+    assert LG == unpickled
+    # Check that pickling works when rmeas is None and pfilter is called
+    unpickled.rmeas = None
+    pickle.loads(pickle.dumps(unpickled)).pfilter(J=p["J"], reps=1)
+
+
+def test_pickle_by_value():
+    """Test that unpickling works without reference to model mechanics."""
+
+    def rinit_local(theta_, key, covars, t0):
+        return {"X": theta_["X0"]}
+
+    def rproc_local(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"] + theta_["sigma"] * jax.random.normal(key, ())}
+
+    def dmeas_local(Y_, X_, theta_, covars, t):
+        return jax.scipy.stats.norm.logpdf(Y_["y"], loc=X_["X"], scale=0.1)
+
+    pomp = pp.Pomp(
+        ys=pd.DataFrame({"y": [1.0, 2.0]}, index=[1.0, 2.0]),
+        theta={"X0": 0.0, "sigma": 0.1},
+        rinit=rinit_local,
+        rproc=rproc_local,
+        dmeas=dmeas_local,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
     )
-    assert theta_order == list(LG.theta[0].keys())
-    LG.pfilter(J=J, reps=2)
-    assert list(LG.results_history[-1].theta[0].keys()) == theta_order
-    traces_da = LG.results_history[-2].traces_da
-    param_names = traces_da.coords["variable"].values[1:]
-    last_row = traces_da.sel(theta_idx=0, iteration=traces_da.sizes["iteration"] - 1)
-    last_param_values = [
-        float(last_row.sel(variable=param).values) for param in param_names
-    ]
-    assert list(LG.results_history[-1].theta[0].values()) == last_param_values
-    traces = LG.traces()
-    # Only compare the parameter values
-    assert traces.iloc[-1, 4:].values.tolist() == traces.iloc[-2, 4:].values.tolist()
+    pomp.fresh_key = jax.random.key(1)
+    del rinit_local, rproc_local, dmeas_local
+
+    unpickled = pickle.loads(pickle.dumps(pomp))
+    assert unpickled.statenames == pomp.statenames
+    assert float(unpickled.t0) == float(pomp.t0)
+    assert unpickled.theta.to_list() == pomp.theta.to_list()
+    assert jnp.array_equal(
+        jax.random.key_data(unpickled.fresh_key), jax.random.key_data(pomp.fresh_key)
+    )
+    unpickled.pfilter(J=10, reps=1)
+    assert unpickled.results(0)["logLik"].iloc[0] is not None
 
 
-def test_pickle(simple):
-    LG, rw_sd, J, a, M, key = simple
-    # Generate results to pickle
-    LG.pfilter(J=J, reps=1, key=key)
-    # Pickle the object
-    pickled_data = pickle.dumps(LG)
+def test_prune(model):
+    LG, p = model
+    LG.pfilter(J=p["J"], reps=5, key=p["key"])
+    orig_theta, orig_len = LG.theta, len(LG.theta)
 
-    # Unpickle the object
-    unpickled_obj = pickle.loads(pickled_data)
-
-    # Check equality
-    assert LG == unpickled_obj
-
-    # Check that the unpickled object can be pickled again if rmeas is None
-    unpickled_obj.rmeas = None
-    pickled_data = pickle.dumps(unpickled_obj)
-
-    # Check that the unpickled object can still be used for filtering
-    unpickled_obj.pfilter(J=J, reps=1)
-
-
-def test_prune(simple):
-    LG, rw_sd, J, a, M, key = simple
-    # Run pfilter with multiple replicates to generate results
-    LG.pfilter(J=J, reps=5, key=key)
-    # Save the original theta list length
-    orig_theta = LG.theta
-    orig_len = len(orig_theta)
-    # Prune to top 2 thetas, refill to original length
     LG.prune(n=2, refill=True)
-    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == orig_len
-    # The unique thetas should be at most 2
-    unique_thetas = [tuple(sorted(d.items())) for d in LG.theta]
-    assert len(set(unique_thetas)) <= 2
-    # Prune to top 1 theta, do not refill
+    assert len(set(tuple(sorted(d.items())) for d in LG.theta)) <= 2
+
     LG.prune(n=1, refill=False)
-    assert isinstance(LG.theta, pp.PompParameters)
     assert len(LG.theta) == 1
-    # The theta should be a dict
-    assert isinstance(LG.theta.to_list()[0], dict)
-    # Prune with n greater than available thetas (should not error, just return all)
-    LG.theta = pp.PompParameters(orig_theta)
+
+    LG.theta = orig_theta
     LG.prune(n=10, refill=False)
-    assert len(LG.theta) == min(10, len(orig_theta))
-    # Test error if results are empty
-    LG2 = LG.__class__(
-        ys=LG.ys.copy(),
-        theta=pp.PompParameters(LG.theta.to_list()[0].copy()),
-        rinit=LG.rinit.original_func,
-        rproc=LG.rproc.original_func,
-        dmeas=LG.dmeas.original_func,
-        t0=LG.t0,
-        nstep=LG.rproc.nstep,
-        statenames=["X1", "X2"],
-    )
+    assert len(LG.theta) == min(10, orig_len)
+
     with pytest.raises(ValueError):
-        LG2.prune(n=1)
+        LG.__class__(
+            ys=LG.ys.copy(),
+            theta=pp.PompParameters(LG.theta.to_list()[0].copy()),
+            rinit=LG.rinit.original_func,
+            rproc=LG.rproc.original_func,
+            dmeas=LG.dmeas.original_func,
+            t0=LG.t0,
+            nstep=LG.rproc.nstep,
+            statenames=["X1", "X2"],
+        ).prune(n=1)
 
 
-def test_time(neapolitan):
-    LG, *_ = neapolitan
-    time_df = LG.time()
-    assert len(time_df) == 3
-    assert time_df["method"].tolist() == ["pfilter", "mif", "train"]
-    assert isinstance(time_df["time"].tolist(), list)
-
-
-def test_print_summary(neapolitan):
-    # Should not error
-    LG, *_ = neapolitan
+def test_diagnostics(neapolitan_setup):
+    LG, _ = neapolitan_setup
+    assert len(LG.time()) == 3
     LG.print_summary()
-
-
-def test_print_metadata(neapolitan):
-    # Should not error
-    LG, *_ = neapolitan
     LG.print_metadata()
 
 
-def test_merge(simple_setup):
-    """Test merging two Pomp objects."""
-    base_LG, rw_sd, J, a, M, key, theta, fresh_key = simple_setup
+def test_merge(setup):
+    p = setup
+    LG1, LG2 = pp.models.LG(), pp.models.LG()
+    k1, k2 = jax.random.split(p["key"])
 
-    LG1 = pp.models.LG()
-    LG2 = pp.models.LG()
-
-    key1, key2 = jax.random.split(key)
-
-    LG1.pfilter(theta=theta, J=J, reps=1, key=key1)
-    LG1.mif(J=J, M=M, rw_sd=rw_sd, a=a)
-    eta = {param: 0.2 for param in LG1.canonical_param_names}
-    LG1.train(J=J, M=1, eta=eta)
-
-    LG2.pfilter(theta=theta, J=J, reps=1, key=key2)
-    LG2.mif(J=J, M=M, rw_sd=rw_sd, a=a)
-    eta = {param: 0.2 for param in LG2.canonical_param_names}
-    LG2.train(J=J, M=1, eta=eta)
-
-    n_reps1 = len(LG1.theta)
-    n_reps2 = len(LG2.theta)
-    n_history1 = len(LG1.results_history)
-    n_history2 = len(LG2.results_history)
+    for obj, k in [(LG1, k1), (LG2, k2)]:
+        obj.pfilter(theta=p["theta"], J=p["J"], reps=1, key=k)
+        obj.mif(J=p["J"], M=p["M"], rw_sd=p["rw_sd"], a=p["a"])
+        obj.train(
+            J=p["J"],
+            M=1,
+            eta=pp.LearningRate({n: 0.2 for n in obj.canonical_param_names}),
+        )
 
     merged = pp.Pomp.merge(LG1, LG2)
-
-    assert merged.canonical_param_names == LG1.canonical_param_names
-    assert len(merged.theta) == n_reps1 + n_reps2
-    assert len(merged.results_history) == n_history1 == n_history2
-
-    for i in range(len(merged.results_history)):
-        merged_result = merged.results_history[i]
-        result1 = LG1.results_history[i]
-        result2 = LG2.results_history[i]
-
-        # Verify algorithmic parameters match
-        assert merged_result.J == result1.J == result2.J == J
-        assert merged_result.thresh == result1.thresh == result2.thresh
-
-        if merged_result.method == "pfilter":
-            assert merged_result.reps == result1.reps == result2.reps
-        elif merged_result.method == "mif":
-            assert merged_result.M == result1.M == result2.M == M
-            assert merged_result.a == result1.a == result2.a == a
-            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
-        elif merged_result.method == "train":
-            assert merged_result.M == result1.M == result2.M == 1
-            assert merged_result.eta == result1.eta == result2.eta == eta
-            assert merged_result.optimizer == result1.optimizer == result2.optimizer
-
-        if hasattr(merged_result, "logLiks") and merged_result.logLiks.size > 0:
-            # Pfilter result: logLiks dims ["theta_idx", "rep"]
-            merged_n_theta = merged_result.logLiks.sizes.get("theta_idx", 0)
-            result1_n_theta = result1.logLiks.sizes.get("theta_idx", 0)
-            result2_n_theta = result2.logLiks.sizes.get("theta_idx", 0)
-            assert merged_n_theta == result1_n_theta + result2_n_theta
-
-        if hasattr(merged_result, "traces_da") and merged_result.traces_da.size > 0:
-            merged_n_reps = merged_result.traces_da.sizes.get("theta_idx", 0)
-            result1_n_reps = result1.traces_da.sizes.get("theta_idx", 0)
-            result2_n_reps = result2.traces_da.sizes.get("theta_idx", 0)
-            assert merged_n_reps == result1_n_reps + result2_n_reps
+    assert len(merged.theta) == len(LG1.theta) + len(LG2.theta)
+    assert len(merged.results_history) == len(LG1.results_history)

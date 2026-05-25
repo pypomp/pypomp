@@ -34,12 +34,14 @@ def _build_lg_panel():
     return pp.PanelPomp(Pomp_dict={"unit1": lg1, "unit2": lg2}, theta=theta)
 
 
-def _train_and_get_result(seed: int, optimizer: str = "Adam"):
+def _train_and_get_result(seed: int, optimizer=None):
+    if optimizer is None:
+        optimizer = pp.Adam()
     panel = _build_lg_panel()
     panel.train(
         J=2,
         M=2,
-        eta=0.01,
+        eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
         theta=deepcopy(panel.theta),
         optimizer=optimizer,
         key=jax.random.key(seed),
@@ -80,13 +82,14 @@ def test_merge_empty_args_raises():
 
 def test_merge_wrong_type_raises(two_compatible_results):
     r1, _ = two_compatible_results
+
     with pytest.raises(TypeError, match="must be of type PanelPompTrainResult"):
-        PanelPompTrainResult.merge(r1, "not_a_result")
+        PanelPompTrainResult.merge(r1, "not_a_result")  # type: ignore
 
 
 def test_merge_mismatched_optimizer_raises():
-    r1 = _train_and_get_result(seed=0, optimizer="Adam")
-    r2 = _train_and_get_result(seed=1, optimizer="FullMatrixAdam")
+    r1 = _train_and_get_result(seed=0, optimizer=pp.Adam())
+    r2 = _train_and_get_result(seed=1, optimizer=pp.FullMatrixAdam())
     with pytest.raises(ValueError, match="same optimizer"):
         PanelPompTrainResult.merge(r1, r2)
 
@@ -115,3 +118,7 @@ def test_train_result_print_summary(two_compatible_results, capsys):
     assert "Optimizer" in out
     assert "Number of particles" in out
     assert "Number of iterations" in out
+    assert "beta1=0.9" in out
+    assert "epsilon=1e-08" in out or "epsilon=1e-8" in out
+    assert "Learning rate (eta): LearningRate(" in out
+    assert "'A1': 0.01" in out

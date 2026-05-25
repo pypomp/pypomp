@@ -153,7 +153,6 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "n_obs",
         "U",
         "clip_norm",
-        "eta_cooling",
         "alpha_cooling",
     ),
 )
@@ -179,11 +178,13 @@ def _panel_train_internal(
     eta_shared: jax.Array,
     eta_spec: jax.Array,
     alpha: float,
-    eta_cooling: float,
     alpha_cooling: float,
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
     clip_norm: float | None = None,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -201,16 +202,13 @@ def _panel_train_internal(
     )
 
     def _adam_step(m, v, grad, step):
-        beta1, beta2, eps = 0.9, 0.999, 1e-8
         m_new = beta1 * m + (1 - beta1) * grad
         v_new = beta2 * v + (1 - beta2) * (grad**2)
         m_hat = m_new / (1 - beta1**step)
         v_hat = v_new / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + eps), m_new, v_new
+        return -m_hat / (jnp.sqrt(v_hat) + epsilon), m_new, v_new
 
     def _full_matrix_adam_step_single(m, v, grad, step):
-        beta1, beta2, eps = 0.9, 0.999, 1e-4
-
         m_new = beta1 * m + (1 - beta1) * grad
         m_hat = m_new / (1 - beta1**step)
 
@@ -218,7 +216,7 @@ def _panel_train_internal(
         F_hat = F_t / (1 - beta2**step)
 
         eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + eps)
+        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
         F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
 
         direction = -F_inv_sqrt @ m_hat
@@ -273,7 +271,6 @@ def _panel_train_internal(
             c_u = unit_ests_c[chunk_idx]
             c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
 
-            curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
             curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
@@ -298,8 +295,8 @@ def _panel_train_internal(
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
-            c_s = c_s + (curr_eta_factor * eta_shared / n_chunks) * dir_s
-            c_u = c_u + (curr_eta_factor * eta_spec) * dir_u
+            c_s = c_s + (eta_shared[i] / n_chunks) * dir_s
+            c_u = c_u + eta_spec[i] * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
 
         (
@@ -376,7 +373,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 16,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
 )
 
 
@@ -397,7 +394,6 @@ _vmapped_panel_train_internal = jax.vmap(
         "alpha",
         "n_monitors",
         "clip_norm",
-        "eta_cooling",
         "alpha_cooling",
     ),
 )
@@ -424,10 +420,12 @@ def _train_internal(
     ls: bool,  # static
     alpha: float | jax.Array,
     key: jax.Array,
-    eta_cooling: float,
     alpha_cooling: float,
     n_monitors: int,  # static
     clip_norm: float | None = None,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
@@ -448,7 +446,6 @@ def _train_internal(
             v_adam,
         ) = carry
 
-        curr_eta_factor = _cosine_cooling(i, M, eta_cooling)
         curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         if n_monitors == 1:
@@ -580,7 +577,7 @@ def _train_internal(
                     lambda __: -grad,
                     operand=None,
                 )
-                s_k = jnp.mean(eta) * prev_direction  # Use mean for BFGS
+                s_k = jnp.mean(eta[i]) * prev_direction  # Use mean for BFGS
                 y_k = grad - prev_grad
                 rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
 
@@ -604,10 +601,6 @@ def _train_internal(
             direction = -grad
 
         elif optimizer == "Adam":
-            beta1 = 0.9
-            beta2 = 0.999
-            epsilon = 1e-8
-
             m_adam = beta1 * m_adam + (1 - beta1) * grad
             v_adam = beta2 * v_adam + (1 - beta2) * (grad**2)
             m_hat = m_adam / (1 - beta1 ** (i + 1))
@@ -615,10 +608,6 @@ def _train_internal(
             direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
 
         elif optimizer == "FullMatrixAdam":
-            beta1 = 0.9
-            beta2 = 0.999
-            epsilon = 1e-4
-
             m_adam = beta1 * m_adam + (1 - beta1) * grad
             m_hat = m_adam / (1 - beta1 ** (i + 1))
 
@@ -679,17 +668,17 @@ def _train_internal(
                 grad=grad,
                 direction=direction,
                 k=i + 1,
-                eta=jnp.mean(eta),  # TODO: use a better solution
+                eta=jnp.mean(eta[i]),
                 xi=10,
                 tau=max_ls_itn,
                 c=c,
                 frac=0.5,
                 stoch=False,
             )
-            theta_ests = theta_ests + (curr_eta_factor * eta_scalar) * direction
+            theta_ests = theta_ests + (eta_scalar) * direction
 
         else:
-            theta_ests = theta_ests + (curr_eta_factor * eta) * direction
+            theta_ests = theta_ests + eta[i] * direction
 
         prev_grad = grad
         prev_hess = hess
@@ -737,7 +726,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 4,
+    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 6,
 )
 
 

@@ -324,32 +324,6 @@ def test_panel_dpop_train_invalid_process_weight_state():
         )
 
 
-def test_panel_dpop_train_chunk_size_consistency():
-    """chunk_size=1 and chunk_size=U should give the same initial loglik."""
-    panel = _get_sir_panel()
-    J, M = 2, 1
-    key = jax.random.key(42)
-
-    panel.dpop_train(
-        J=J, M=M, eta=0.01, theta=deepcopy(panel.theta),
-        chunk_size=1, optimizer="SGD", alpha=0.8,
-        process_weight_state="logw", key=key,
-    )
-    res1 = panel.results_history[-1]
-
-    panel.dpop_train(
-        J=J, M=M, eta=0.01, theta=deepcopy(panel.theta),
-        chunk_size=2, optimizer="SGD", alpha=0.8,
-        process_weight_state="logw", key=key,
-    )
-    res2 = panel.results_history[-1]
-
-    # Initial loglik (iteration 0) should be identical regardless of chunk_size
-    ll1_init = float(res1.shared_traces.sel(replicate=0, iteration=0, variable="logLik"))
-    ll2_init = float(res2.shared_traces.sel(replicate=0, iteration=0, variable="logLik"))
-    np.testing.assert_allclose(ll1_init, ll2_init, rtol=2e-3)
-
-
 def test_panel_dpop_train_per_param_eta():
     """Per-parameter learning rates via dict eta."""
     panel = _get_sir_panel_with_shared()

@@ -18,6 +18,7 @@ import jax.numpy as jnp
 from jax.scipy.special import gammaln
 
 from pypomp.random.binom import fast_multinomial as fast_rmultinomial
+from pypomp.types import Numeric
 
 
 def _euler_multinomial_probs(
@@ -62,10 +63,10 @@ def _euler_multinomial_probs(
 
 
 def _multinomial_logpmf(
-    counts: jnp.ndarray,
-    n: jnp.ndarray,
-    probs: jnp.ndarray,
-) -> jnp.ndarray:
+    counts: jax.Array,
+    n: Numeric,
+    probs: jax.Array,
+) -> jax.Array:
     """
     Multinomial log-pmf:
 
@@ -90,11 +91,11 @@ def _multinomial_logpmf(
 
 def reulermultinom(
     key: jax.Array,
-    n: jnp.ndarray,
-    rates: jnp.ndarray,
+    n: Numeric,
+    rates: jax.Array,
     dt: float,
     shape=(),
-) -> jnp.ndarray:
+) -> jax.Array:
     """
     Draw multinomial Euler increments for a single compartment.
 
@@ -136,11 +137,11 @@ def reulermultinom(
 
 
 def deulermultinom(
-    x: jnp.ndarray,
-    n: jnp.ndarray,
-    rates: jnp.ndarray,
+    x: jax.Array,
+    n: Numeric,
+    rates: jax.Array,
     dt: float,
-) -> jnp.ndarray:
+) -> jax.Array:
     """
     Evaluate the log-probability of a given multinomial Euler increment.
 
@@ -173,11 +174,11 @@ def deulermultinom(
 
 
 def sample_and_log_prob(
-    N: jnp.ndarray,
-    rates: jnp.ndarray,
+    N: Numeric,
+    rates: jax.Array,
     dt: float,
     key: jax.Array,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jax.Array]:
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
     """
     Draw Euler-multinomial increments and return both the sample and its log-prob.
 

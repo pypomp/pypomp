@@ -94,8 +94,8 @@ def test_train_traces_transformed(simple_pomp_with_transform):
     # Run train with M=0 (no iterations) - parameters should be transformed
     # to estimation space, remain unchanged (no optimization), and transformed
     # back to natural scale
-    eta = {param: 0.2 for param in LG.canonical_param_names}
-    LG.train(J=2, M=0, eta=eta, optimizer="Newton", key=jax.random.key(42))
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+    LG.train(J=2, M=0, eta=eta, optimizer=pp.Newton(), key=jax.random.key(42))
 
     # Check that parameters are unchanged
     for rep_idx in range(len(LG.theta)):

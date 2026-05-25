@@ -3,6 +3,7 @@ This module implements the OOP structure for POMP models.
 """
 
 import importlib
+import cloudpickle
 from copy import deepcopy
 import time
 from typing import Callable, Any
@@ -22,7 +23,9 @@ import xarray as xr
 from .algorithms.helpers import _calc_ys_covars
 from .algorithms.pfilter import _pfilter_internal, _vmapped_pfilter_internal
 from .rw_sigma import RWSigma
+from .learning_rate import LearningRate
 from .par_trans import ParTrans
+from .optimizer import Optimizer, Adam
 from .results import (
     ResultsHistory,
     PompPFilterResult,
@@ -766,21 +769,15 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: dict[str, float],
+        eta: LearningRate,
         key: jax.Array | None = None,
         theta: ThetaInput = None,
-        optimizer: str = "Adam",
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         thresh: int = 0,
-        scale: bool = False,
-        ls: bool = False,
-        c: float = 0.1,
-        max_ls_itn: int = 10,
-        eta_cooling: float = 1.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
         track_time: bool = True,
-        clip_norm: float | None = None,
     ) -> None:
         """
         Optimizes model parameters using a differentiable particle filter and gradient-based methods.
@@ -798,7 +795,7 @@ class Pomp:
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (dict[str, float]): Learning rates per parameter as a dictionary.
+            eta (LearningRate): Learning rates per parameter as a LearningRate object.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (ThetaInput, optional): Parameters involved in the POMP model.
@@ -808,29 +805,19 @@ class Pomp:
                 - An existing PompParameters object
                 Providing a list or PompParameters object enables faster, vectorized
                 execution across all parameter sets.
-            optimizer (str, optional): The gradient-based iterative optimization method
-                to use. Options include "Adam", "SGD", "Newton", "WeightedNewton", "BFGS", and "FullMatrixAdam".
-                Note: options other than "Adam" and "SGD" might be quite slow. The "Adam" option itself can take ~3x longer per iteration than mif does.
+            optimizer (Optimizer, optional): The optimizer configuration object to use
+                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.Newton()`, `pp.FullMatrixAdam()`, etc.).
+                Defaults to `pp.Adam()`. Hyperparameters like learning rate scaling, line search
+                (`scale`, `ls`, `c`, `max_ls_itn`), gradient clipping (`clip_norm`), or Adam beta values
+                are configured directly inside the optimizer instance.
             alpha (float, optional): Discount factor for MOP.
             thresh (int, optional): Threshold value to determine whether to resample
                 particles.
-            scale (bool, optional): Boolean flag controlling whether to normalize the
-                search direction.
-            ls (bool, optional): Boolean flag controlling whether to use the line
-                search algorithm. Note: the line search algorithm can be quite slow.
-            Line Search Parameters (only used when ls=True):
-
-                c (float, optional): The Armijo condition constant for line search which controls how much the negative log-likelihood needs to decrease before the line search algorithm continues.
-
-                max_ls_itn (int, optional): Maximum number of iterations for the line search algorithm.
-
-            eta_cooling (float, optional): Cooling factor for the learning rate (eta) using cosine decay. This represents the factor by which the original learning rate is multiplied by the end of training. Defaults to 1.0 (no cooling).
             alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
             n_monitors (int, optional): Number of particle filter runs to average for
                 log-likelihood estimation.
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
-            clip_norm (float, optional): Clips gradient to [-clip_norm, clip_norm]. If None, no clipping is applied.
 
         Returns:
             None. Updates `self.results_history` with a `PompTrainResult` containing the log-likelihoods,
@@ -848,24 +835,32 @@ class Pomp:
         if J < 1:
             raise ValueError("J should be greater than 0")
 
-        if set(eta.keys()) != set(self.canonical_param_names):
-            raise ValueError(
-                f"eta keys {set(eta.keys())} must match parameter names {set(self.canonical_param_names)}"
-            )
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
 
-        # Convert eta dict to JAX array in canonical order
-        eta_array = jnp.array([eta[param] for param in self.canonical_param_names])
+        # Convert eta to JAX array in canonical order
+        eta_array = eta.to_array(self.canonical_param_names, M)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
+        c = optimizer.c
+        max_ls_itn = optimizer.max_ls_itn
+        clip_norm = optimizer.clip_norm
+        scale = optimizer.scale
+        ls = optimizer.ls
+
         nLLs, theta_ests = F.train(
             self.to_struct(),
             theta_array,
             J,
-            optimizer,
+            opt_name,
             M,
             eta_array,
             c,
@@ -875,10 +870,12 @@ class Pomp:
             ls,
             alpha,
             keys,
-            eta_cooling,
             alpha_cooling,
             n_monitors,
             clip_norm,
+            beta1,
+            beta2,
+            epsilon,
         )
 
         theta_ests_natural = np.stack(
@@ -939,10 +936,6 @@ class Pomp:
             eta=eta,
             alpha=alpha,
             thresh=thresh,
-            ls=ls,
-            c=c,
-            max_ls_itn=max_ls_itn,
-            eta_cooling=eta_cooling,
             alpha_cooling=alpha_cooling,
         )
 
@@ -952,7 +945,7 @@ class Pomp:
         self,
         J: int,
         M: int,
-        eta: dict[str, float] | float,
+        eta: LearningRate,
         optimizer: str = "Adam",
         alpha: float = 0.8,
         decay: float = 0.0,
@@ -973,10 +966,8 @@ class Pomp:
             Number of particles.
         M : int
             Number of gradient steps.
-        eta : dict[str, float] or float
-            Learning rates. Either a dict of per-parameter learning rates
-            keyed by parameter name, or a scalar float applied uniformly
-            to all parameters.
+        eta : LearningRate
+            Learning rates per parameter as a LearningRate object.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
         alpha : float, default 0.8
@@ -1010,15 +1001,12 @@ class Pomp:
         theta_est_dict = self.par_trans.to_est(theta_nat)
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
 
-        if isinstance(eta, (int, float)):
-            eta_array = jnp.full(len(param_names), float(eta))
-        else:
-            if set(eta.keys()) != set(param_names):
-                raise ValueError(
-                    f"eta keys {set(eta.keys())} must match parameter names "
-                    f"{set(param_names)}"
-                )
-            eta_array = jnp.array([eta[name] for name in param_names])
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
+
+        # For now, dpop_train only uses a constant learning rate across iterations
+        # Extract the first row of the schedule
+        eta_array = eta.to_array(param_names, M)[0]
 
         ys_array = jnp.array(self.ys.values)
         dt_array_extended = self._dt_array_extended
@@ -1782,7 +1770,7 @@ class Pomp:
             fig.show()
         return fig
 
-    def print_summary(self):
+    def print_summary(self, n: int = 5):
         """
         Prints a high-level summary of the POMP model instance and its estimation history.
 
@@ -1798,7 +1786,7 @@ class Pomp:
         print(f"Number of parameters: {self.theta.num_params()}")
         print(f"Number of parameter sets: {self.theta.num_replicates()}")
         print()
-        self.results_history.print_summary()
+        self.results_history.print_summary(n=n)
 
     def __eq__(self, other):
         """
@@ -1947,29 +1935,26 @@ class Pomp:
         """
         state = self.__dict__.copy()
 
-        # Store function names and parameters instead of the wrapped objects
+        # Use cloudpickle to store model functions by-value. This ensures that
+        # the unpickling environment does not require the original source modules.
         if hasattr(self.rinit, "struct"):
             original_func = self.rinit.original_func
-            state["_rinit_func_name"] = original_func.__name__
-            state["_rinit_module"] = original_func.__module__
+            state["_rinit_func_bytes"] = cloudpickle.dumps(original_func)
 
         if hasattr(self.rproc, "struct"):
             original_func = self.rproc.original_func
-            state["_rproc_func_name"] = original_func.__name__
+            state["_rproc_func_bytes"] = cloudpickle.dumps(original_func)
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_nstep"] = getattr(self.rproc, "nstep", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
-            state["_rproc_module"] = original_func.__module__
 
         if self.dmeas is not None and hasattr(self.dmeas, "struct"):
             original_func = self.dmeas.original_func
-            state["_dmeas_func_name"] = original_func.__name__
-            state["_dmeas_module"] = original_func.__module__
+            state["_dmeas_func_bytes"] = cloudpickle.dumps(original_func)
 
         if self.rmeas is not None and hasattr(self.rmeas, "struct"):
             original_func = self.rmeas.original_func
-            state["_rmeas_func_name"] = original_func.__name__
-            state["_rmeas_module"] = original_func.__module__
+            state["_rmeas_func_bytes"] = cloudpickle.dumps(original_func)
 
         # Store JAX key as raw bits (key is not picklable directly)
         if self.fresh_key is not None:
@@ -1994,19 +1979,46 @@ class Pomp:
 
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:
-            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+            try:
+                self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+            except Exception as e:
+                warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
+                self.fresh_key = None
         elif "fresh_key" not in self.__dict__:
             self.fresh_key = None
 
+        def _load_func(prefix: str) -> Any:
+            func_bytes_key = f"_{prefix}_func_bytes"
+            func_name_key = f"_{prefix}_func_name"
+            module_key = f"_{prefix}_module"
+
+            try:
+                # Modern approach (by-value): Uses cloudpickle bytes to remove
+                # environment dependencies.
+                if func_bytes_key in state:
+                    return cloudpickle.loads(state[func_bytes_key])
+
+                # Legacy approach (by-reference): Provided for backward compatibility
+                # with objects pickled in older versions of pypomp.
+                elif func_name_key in state:
+                    module = importlib.import_module(state[module_key])
+                    return getattr(module, state[func_name_key])
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to reconstruct {prefix} function: {e}. "
+                    f"The model may be unusable for simulations or estimation.",
+                    UserWarning,
+                )
+            return None
+
         # Reconstruct rinit
-        if "_rinit_func_name" in state:
-            module = importlib.import_module(state["_rinit_module"])
-            obj = getattr(module, state["_rinit_func_name"])
-            if isinstance(obj, _RInit):
-                self.rinit = obj
+        obj_rinit = _load_func("rinit")
+        if obj_rinit is not None:
+            if isinstance(obj_rinit, _RInit):
+                self.rinit = obj_rinit
             else:
                 self.rinit = _RInit(
-                    struct=obj,
+                    struct=obj_rinit,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -2014,47 +2026,41 @@ class Pomp:
                 )
 
         # Reconstruct rproc
-        if "_rproc_func_name" in state:
-            module = importlib.import_module(state["_rproc_module"])
-            obj = getattr(module, state["_rproc_func_name"])
-            if isinstance(obj, _RProc):
-                self.rproc = obj
+        obj_rproc = _load_func("rproc")
+        if obj_rproc is not None:
+            if isinstance(obj_rproc, _RProc):
+                self.rproc = obj_rproc
             else:
                 kwargs = {}
-                if state["_rproc_dt"] is not None:
+                if state.get("_rproc_dt") is not None:
                     kwargs["dt"] = state["_rproc_dt"]
-                # If nstep is provided, but dt is not, use nstep. This prevents an error
-                # being thrown by RProc when both are not None.
-                if state["_rproc_nstep"] is not None and state["_rproc_dt"] is None:
+                if (
+                    state.get("_rproc_nstep") is not None
+                    and state.get("_rproc_dt") is None
+                ):
                     kwargs["nstep"] = state["_rproc_nstep"]
-                if state["_rproc_accumvars"] is not None:
+                if state.get("_rproc_accumvars") is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = _RProc(
-                    struct=obj,
+                    struct=obj_rproc,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
                     **kwargs,
                 )
-                # Restore nstep if it was set (even if dt was originally provided)
-                # This handles the case where rebuild_interp set nstep after initial construction
-                if "_rproc_nstep" in state and state["_rproc_nstep"] is not None:
-                    # If dt is None, nstep was already set via kwargs
-                    # If dt is not None but nstep was stored, it means rebuild_interp set it
-                    # In that case, restore it directly (bypassing RProc validation)
-                    if state["_rproc_dt"] is not None:
+                if state.get("_rproc_nstep") is not None:
+                    if state.get("_rproc_dt") is not None:
                         self.rproc.nstep = state["_rproc_nstep"]
 
         # Reconstruct dmeas
-        if "_dmeas_func_name" in state:
-            module = importlib.import_module(state["_dmeas_module"])
-            obj = getattr(module, state["_dmeas_func_name"])
-            if isinstance(obj, _DMeas):
-                self.dmeas = obj
+        obj_dmeas = _load_func("dmeas")
+        if obj_dmeas is not None:
+            if isinstance(obj_dmeas, _DMeas):
+                self.dmeas = obj_dmeas
             else:
                 self.dmeas = _DMeas(
-                    struct=obj,
+                    struct=obj_dmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -2063,14 +2069,13 @@ class Pomp:
                 )
 
         # Reconstruct rmeas
-        if "_rmeas_func_name" in state:
-            module = importlib.import_module(state["_rmeas_module"])
-            obj = getattr(module, state["_rmeas_func_name"])
-            if isinstance(obj, _RMeas):
-                self.rmeas = obj
+        obj_rmeas = _load_func("rmeas")
+        if obj_rmeas is not None:
+            if isinstance(obj_rmeas, _RMeas):
+                self.rmeas = obj_rmeas
             else:
                 self.rmeas = _RMeas(
-                    struct=obj,
+                    struct=obj_rmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -2078,7 +2083,11 @@ class Pomp:
                     y_names=list(self.ys.columns) if hasattr(self, "ys") else None,
                 )
 
-        # Set rmeas or dmeas to None if not set
+        # Set defaults if reconstruction failed or was missing
+        if not hasattr(self, "rinit"):
+            self.rinit = None  # type: ignore
+        if not hasattr(self, "rproc"):
+            self.rproc = None  # type: ignore
         if not hasattr(self, "rmeas"):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
@@ -2086,15 +2095,19 @@ class Pomp:
 
         # Clean up temporary state variables
         for key in [
+            "_rinit_func_bytes",
             "_rinit_func_name",
             "_rinit_module",
+            "_rproc_func_bytes",
             "_rproc_func_name",
             "_rproc_dt",
             "_rproc_nstep",
             "_rproc_accumvars",
             "_rproc_module",
+            "_dmeas_func_bytes",
             "_dmeas_func_name",
             "_dmeas_module",
+            "_rmeas_func_bytes",
             "_rmeas_func_name",
             "_rmeas_module",
             "_fresh_key_data",

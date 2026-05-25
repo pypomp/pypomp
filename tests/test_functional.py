@@ -72,7 +72,6 @@ def test_train_functional(model_setup):
         ls=False,
         alpha=0.0,
         keys=keys,
-        eta_cooling=1.0,
         alpha_cooling=1.0,
         n_monitors=1,
     )

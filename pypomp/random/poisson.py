@@ -316,6 +316,7 @@ def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
     return flat_res.reshape(u_arr.shape)
 
 
+@partial(jax.jit, static_argnames=["dtype"])
 def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array:
     """
     Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
@@ -341,18 +342,14 @@ def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array
             f"dtype argument to `fast_poisson` must be an integer dtype, got {dtype}"
         )
 
-    # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
     dtype = _get_available_dtype(dtype)
     assert dtype is not None
 
-    # Determine the appropriate float dtype for internal computations
-    # Use float64 if the integer dtype is 64-bit, otherwise float32
     if dtypes.issubdtype(dtype, np.int64):
         float_dtype = jnp.float64
     else:
         float_dtype = jnp.float32
 
-    # Get the float dtype that JAX actually uses
     float_dtype = _get_available_dtype(float_dtype)
     assert float_dtype is not None
 

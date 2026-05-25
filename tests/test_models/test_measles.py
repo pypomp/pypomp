@@ -148,8 +148,6 @@ def test_measles_mif(london, default_rw_sd):
     )
 
 
-
-
 def test_measles_clean():
     data = pp.models.UKMeasles.subset(clean=True)
     london_cleaned = np.isnan(

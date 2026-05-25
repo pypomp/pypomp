@@ -17,6 +17,7 @@
       ~ResultsHistory.ESS
       ~ResultsHistory.__init__
       ~ResultsHistory.add
+      ~ResultsHistory.append
       ~ResultsHistory.clear
       ~ResultsHistory.last
       ~ResultsHistory.merge

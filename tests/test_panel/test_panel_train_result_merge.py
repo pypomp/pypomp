@@ -12,7 +12,7 @@ from pypomp.core.results import PanelPompTrainResult
 def _build_lg_panel():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()
-    shared_names = ["A1", "C1"]
+    shared_names = ["A11", "C11"]
     unit_specific_names = [
         n for n in lg1.canonical_param_names if n not in shared_names
     ]
@@ -121,4 +121,4 @@ def test_train_result_print_summary(two_compatible_results, capsys):
     assert "beta1=0.9" in out
     assert "epsilon=1e-08" in out or "epsilon=1e-8" in out
     assert "Learning rate (eta): LearningRate(" in out
-    assert "'A1': 0.01" in out
+    assert "'A11': 0.01" in out

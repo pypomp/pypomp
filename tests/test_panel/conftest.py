@@ -155,7 +155,7 @@ def lg_panel_setup_some_shared_module():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()
     # Create PanelParameters with some shared and some unit-specific
-    shared_names = ["A1", "C1"]
+    shared_names = ["A11", "C11"]
     unit_specific_names = [
         n for n in lg1.canonical_param_names if n not in shared_names
     ]

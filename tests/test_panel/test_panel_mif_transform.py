@@ -15,11 +15,9 @@ from pypomp.types import ParamDict
 @pytest.fixture
 def panel_pomp_with_transform():
     """Create a simple PanelPomp model with custom ParTrans."""
-    # Create two simple LG models for the panel
     LG1 = pp.models.LG()
     LG2 = pp.models.LG()
 
-    # Define transformations
     def to_est(theta: ParamDict) -> ParamDict:
         result = {}
         for k, v in theta.items():
@@ -38,18 +36,13 @@ def panel_pomp_with_transform():
                 result[k] = v
         return result
 
-    # Set transformations on both models
     LG1.par_trans = pp.ParTrans(to_est, from_est)
     LG2.par_trans = pp.ParTrans(to_est, from_est)
 
-    # Get initial values from one of the LG models to ensure consistency
-    # LG models have all parameters: A1-A4, C1-C4, Q1-Q4, R1-R4
-    # Use values from LG1 for all parameters
     theta_base = LG1.theta.to_list()[0]
 
-    # Create panel with shared parameters (A and C matrices) and unit-specific (Q and R)
-    shared_param_names = ["A1", "A2", "A3", "A4", "C1", "C2", "C3", "C4"]
-    unit_param_names = ["Q1", "Q2", "Q3", "Q4", "R1", "R2", "R3", "R4"]
+    shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
+    unit_param_names = ["Q11", "Q12", "Q22", "R11", "R12", "R22"]
 
     shared_params = pd.DataFrame(
         index=pd.Index(shared_param_names),
@@ -82,8 +75,6 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
     """
     panel = panel_pomp_with_transform
 
-    # Capture initial parameters in natural space before running mif
-    # Deep copy to avoid mutations during mif
     panel_shared = [
         panel.theta.theta[i].get("shared")
         for i in range(len(panel.theta.theta))
@@ -99,13 +90,9 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
         [df.copy() for df in panel_unit_specific] if panel_unit_specific else None
     )
 
-    # Get canonical param names before running mif
     shared_names = panel.canonical_shared_param_names
     unit_names = panel.canonical_unit_param_names
 
-    # Set up mif parameters with zero random walk standard deviation
-    # This means parameters should be transformed to perturbation scale,
-    # remain unchanged, and then transformed back to natural scale
     all_param_names = list(shared_names) + list(unit_names)
     rw_sd = pp.RWSigma(
         sigmas={k: 0.0 for k in all_param_names},
@@ -114,7 +101,6 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
 
     panel.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
 
-    # Extract final parameters from theta
     final_shared = [
         panel.theta.theta[i].get("shared")
         for i in range(len(panel.theta.theta))
@@ -128,9 +114,7 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
     final_shared = final_shared if final_shared else None
     final_unit_specific = final_unit_specific if final_unit_specific else None
 
-    # Check that shared parameters are unchanged
     if initial_shared is not None and final_shared is not None:
-        # Compare initial and final shared parameters
         for rep_idx in range(len(final_shared)):
             initial_df = initial_shared[rep_idx]
             final_df = final_shared[rep_idx]
@@ -148,9 +132,7 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
                     "with rw_sd=0"
                 )
 
-    # Check that unit-specific parameters are unchanged
     if initial_unit_specific is not None and final_unit_specific is not None:
-        # Compare initial and final unit-specific parameters
         for rep_idx in range(len(final_unit_specific)):
             initial_df = initial_unit_specific[rep_idx]
             final_df = final_unit_specific[rep_idx]

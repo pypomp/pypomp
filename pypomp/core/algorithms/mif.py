@@ -370,11 +370,11 @@ def _panel_mif_internal(
         def unit_scan_fn(inner_carry, unit_inputs):
             (
                 shared_array_u,
+                unit_array_m_carry,
                 sum_loglik_u,
             ) = inner_carry
 
             (
-                unit_array_u_m_single,  # (n_spec, J)
                 unit_param_perm_u,
                 ys_u,
                 covars_u_dummy,
@@ -386,6 +386,11 @@ def _panel_mif_internal(
             covars_u = None if covars_per_unit is None else covars_u_dummy
 
             # Build per-unit thetas: (J, n_params) in unit's canonical order
+            if n_spec > 0:
+                unit_array_u_m_single = unit_array_m_carry[:, :, u_idx]
+            else:
+                unit_array_u_m_single = jnp.zeros((0, J))
+
             if (n_shared + n_spec) > 0:
                 thetas_u_panel_order = jnp.concatenate(
                     [shared_array_u.T, unit_array_u_m_single.T], axis=1
@@ -443,8 +448,12 @@ def _panel_mif_internal(
 
             if n_spec > 0:
                 updated_spec_u = updated_thetas_panel[:, n_shared:].T
+                new_unit_array_carry = unit_array_m_carry.at[:, :, u_idx].set(
+                    updated_spec_u
+                )
             else:
                 updated_spec_u = unit_array_u_m_single
+                new_unit_array_carry = unit_array_m_carry
 
             loglik_u = -nLL_u
             sum_loglik_u = sum_loglik_u + loglik_u
@@ -458,18 +467,17 @@ def _panel_mif_internal(
 
             new_inner_carry = (
                 new_shared_array,
+                new_unit_array_carry,
                 sum_loglik_u,
             )
 
-            scan_outputs = (updated_spec_u, unit_traces_u_m_local)
+            scan_outputs = unit_traces_u_m_local
 
             return new_inner_carry, scan_outputs
 
         unit_keys = jax.random.split(iter_key, num=U)
 
-        # unit_array_m: (n_spec, J, U) -> we want to scan over U
         unit_scan_seq = (
-            jnp.moveaxis(unit_array_m, 2, 0) if n_spec > 0 else jnp.zeros((U, 0, J)),
             unit_param_permutations,
             ys_per_unit,
             covars_per_unit
@@ -482,10 +490,11 @@ def _panel_mif_internal(
 
         initial_inner_carry = (
             shared_array_m,
+            unit_array_m,
             sum_loglik_iter,
         )
 
-        final_inner_carry, (unit_array_m_new_seq, unit_traces_m_new_seq) = jax.lax.scan(
+        final_inner_carry, unit_traces_m_new_seq = jax.lax.scan(
             f=unit_scan_fn,
             init=initial_inner_carry,
             xs=unit_scan_seq,
@@ -493,12 +502,9 @@ def _panel_mif_internal(
 
         (
             shared_array_m,
+            unit_array_m,
             sum_loglik_iter,
         ) = final_inner_carry
-
-        # unit_array_m_new_seq: (U, n_spec, J) -> move back to (n_spec, J, U)
-        if n_spec > 0:
-            unit_array_m = jnp.moveaxis(unit_array_m_new_seq, 0, 2)
 
         # unit_traces_m_new_seq: (U, n_spec + 1) -> (n_spec + 1, U)
         unit_traces_m_row = jnp.moveaxis(unit_traces_m_new_seq, 0, 1)
@@ -637,18 +643,10 @@ def _panel_mif_internal_vmap(
             (n_chunks, vmap_chunk_size) + unit_keys.shape[1:]
         )
 
-        # Reshape unit_array for chunking: (n_spec, J, U) -> (n_chunks, vmap_chunk_size, n_spec, J)
-        if n_spec > 0:
-            unit_array_chunked = jnp.moveaxis(unit_array_m, 2, 0).reshape(
-                n_chunks, vmap_chunk_size, n_spec, J
-            )
-        else:
-            unit_array_chunked = jnp.zeros((n_chunks, vmap_chunk_size, 0, J))
-
         def chunk_scan_body(chunk_carry, chunk_inputs):
-            shared_array_c = chunk_carry
+            shared_array_c, unit_array_m_carry = chunk_carry
             (
-                unit_arr_chunk,
+                chunk_idx,
                 perm_chunk,
                 ys_chunk,
                 covars_chunk_dummy,
@@ -656,6 +654,22 @@ def _panel_mif_internal_vmap(
                 inv_perm_chunk,
                 mask_chunk,
             ) = chunk_inputs
+
+            start_idx = chunk_idx * vmap_chunk_size
+
+            if n_spec > 0:
+                # unit_array_m_carry: (n_spec, J, U_padded)
+                # Slice size is static: (n_spec, J, vmap_chunk_size)
+                # start_indices: (0, 0, start_idx)
+                sliced_val = jax.lax.dynamic_slice(
+                    unit_array_m_carry,
+                    (0, 0, start_idx),
+                    (n_spec, J, vmap_chunk_size),
+                )
+                # Then transpose to match process_one_unit input: (vmap_chunk_size, n_spec, J)
+                unit_arr_chunk = jnp.moveaxis(sliced_val, 2, 0)
+            else:
+                unit_arr_chunk = jnp.zeros((vmap_chunk_size, 0, J))
 
             def process_one_unit(
                 unit_arr_single, perm, ys_u, covars_u_dummy, key_u, inv_perm
@@ -751,12 +765,25 @@ def _panel_mif_internal_vmap(
             else:
                 avg_shared = shared_array_c
 
+            if n_spec > 0:
+                new_specs_t = jnp.moveaxis(new_specs, 0, 2)
+                new_unit_array_carry = jax.lax.dynamic_update_slice(
+                    unit_array_m_carry,
+                    new_specs_t,
+                    (0, 0, start_idx),
+                )
+            else:
+                new_unit_array_carry = unit_array_m_carry
+
             sum_loglik_chunk = jnp.sum(logliks * mask_chunk)
 
-            return avg_shared, (new_specs, traces, sum_loglik_chunk)
+            new_chunk_carry = (avg_shared, new_unit_array_carry)
+            scan_outputs = (traces, sum_loglik_chunk)
+
+            return new_chunk_carry, scan_outputs
 
         chunk_scan_xs = (
-            unit_array_chunked,
+            jnp.arange(n_chunks),
             perms_chunked,
             ys_chunked,
             covars_chunked
@@ -767,19 +794,18 @@ def _panel_mif_internal_vmap(
             mask_chunked,
         )
 
-        final_shared, (all_specs, all_traces, chunk_logliks) = jax.lax.scan(
-            chunk_scan_body, shared_array_m, chunk_scan_xs
+        initial_chunk_carry = (shared_array_m, unit_array_m)
+
+        final_chunk_carry, (all_traces, chunk_logliks) = jax.lax.scan(
+            chunk_scan_body, initial_chunk_carry, chunk_scan_xs
         )
-        # all_specs: (n_chunks, vmap_chunk_size, n_spec, J)
-        # all_traces: (n_chunks, vmap_chunk_size, n_spec+1)
-        # chunk_logliks: (n_chunks,)
 
-        shared_array_m = final_shared
+        (
+            shared_array_m,
+            unit_array_m,
+        ) = final_chunk_carry
+
         sum_loglik_iter = chunk_logliks.sum()
-
-        # Reassemble unit array: (n_chunks, vmap_chunk_size, n_spec, J) -> (n_spec, J, U)
-        if n_spec > 0:
-            unit_array_m = jnp.moveaxis(all_specs.reshape(U, n_spec, J), 0, 2)
 
         # all_traces: (n_chunks, vmap_chunk_size, n_spec+1) -> (U, n_spec+1) -> (n_spec+1, U)
         unit_traces_m_row = jnp.moveaxis(all_traces.reshape(U, -1), 0, 1)

@@ -74,7 +74,7 @@ def _abc_internal(
     * ``theta_trace``: shape ``(Nabc + 1, d)``.
     * ``accepts``: scalar count of accepted proposals.
     """
-    eps2 = jnp.asarray(epsilon, dtype=jnp.float32) ** 2
+    eps2 = jnp.asarray(epsilon, dtype=theta_arr.dtype) ** 2
 
     def _sim_distance(theta: jax.Array, sim_key: jax.Array) -> jax.Array:
         _, Y = _simulate_internal(

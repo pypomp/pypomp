@@ -178,11 +178,12 @@ class MVNRWAdaptive:
 
     def init_state(self, theta_arr: jax.Array) -> AdaptiveState:
         d = theta_arr.shape[-1]
+        dt = theta_arr.dtype
         return AdaptiveState(
-            scaling=jnp.array(1.0),
-            theta_mean=jnp.zeros(d),
-            covmat_emp=jnp.zeros((d, d)),
-            initialized=jnp.array(0.0),
+            scaling=jnp.asarray(1.0, dtype=dt),
+            theta_mean=jnp.zeros(d, dtype=dt),
+            covmat_emp=jnp.zeros((d, d), dtype=dt),
+            initialized=jnp.asarray(0.0, dtype=dt),
         )
 
     def step(
@@ -194,8 +195,9 @@ class MVNRWAdaptive:
         accepts: jax.Array,
     ) -> tuple[jax.Array, AdaptiveState]:
         d = theta_arr.shape[-1]
-        nf = jnp.maximum(n.astype(jnp.float32), 1.0)
-        af = accepts.astype(jnp.float32)
+        dt = theta_arr.dtype
+        nf = jnp.maximum(n.astype(dt), 1.0)
+        af = accepts.astype(dt)
 
         # Lazy-seed theta_mean on the very first call.
         seeded_mean = jnp.where(
@@ -205,7 +207,7 @@ class MVNRWAdaptive:
         # ---- Phase 1: scale adaptation (if n >= scale_start and accepts < shape_start) ----
         accept_rate = af / nf
         cool = self.scale_cooling ** jnp.maximum(
-            n.astype(jnp.float32) - self.scale_start, 0.0
+            n.astype(dt) - self.scale_start, 0.0
         )
         scale_factor = jnp.exp(cool * (accept_rate - self.target))
         scaling_p1 = jnp.minimum(state.scaling * scale_factor, self.max_scaling)
@@ -237,7 +239,7 @@ class MVNRWAdaptive:
             scaling=scaling_new,
             theta_mean=new_mean,
             covmat_emp=new_cov_emp,
-            initialized=jnp.array(1.0),
+            initialized=jnp.asarray(1.0, dtype=theta_arr.dtype),
         )
         return theta_proposed, new_state
 
@@ -280,7 +282,7 @@ def mvn_diag_rw(rw_sd: dict[str, float]) -> MVNDiagRW:
     if not rw_sd:
         raise ValueError("rw_sd must contain at least one positive entry.")
     param_names = tuple(rw_sd.keys())
-    sd_arr = jnp.asarray([rw_sd[p] for p in param_names], dtype=jnp.float32)
+    sd_arr = jnp.asarray([rw_sd[p] for p in param_names])
     return MVNDiagRW(sd_arr=sd_arr, param_names=param_names)
 
 
@@ -301,7 +303,7 @@ def mvn_rw(rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
         raise ValueError("rw_var must be a square matrix.")
     if rw_var.shape[0] != len(param_names):
         raise ValueError("rw_var dimensions must match len(param_names).")
-    chol = jnp.asarray(np.linalg.cholesky(rw_var), dtype=jnp.float32)
+    chol = jnp.asarray(np.linalg.cholesky(rw_var))
     return MVNRWFull(chol=chol, param_names=tuple(param_names))
 
 
@@ -318,7 +320,7 @@ def _expand_proposal(proposal, canonical_names):
     name_to_idx = {n: i for i, n in enumerate(names)}
 
     if isinstance(proposal, MVNDiagRW):
-        full_sd = jnp.zeros(d, dtype=jnp.float32)
+        full_sd = jnp.zeros(d)
         for i_local, p in enumerate(proposal.param_names):
             if p not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p!r} not in model.")
@@ -329,7 +331,7 @@ def _expand_proposal(proposal, canonical_names):
         # Build full covariance from proposal's chol then re-cholesky.  The
         # block (rows/cols in proposal) is filled, all others stay zero.
         sub_cov = proposal.chol @ proposal.chol.T  # (k, k)
-        full_cov = jnp.zeros((d, d), dtype=jnp.float32)
+        full_cov = jnp.zeros((d, d))
         for i_local, p_i in enumerate(proposal.param_names):
             if p_i not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p_i!r} not in model.")
@@ -342,7 +344,7 @@ def _expand_proposal(proposal, canonical_names):
         return MVNRWFull(chol=full_chol, param_names=names)
 
     if isinstance(proposal, MVNRWAdaptive):
-        full_var = jnp.zeros((d, d), dtype=jnp.float32)
+        full_var = jnp.zeros((d, d))
         for i_local, p_i in enumerate(proposal.param_names):
             if p_i not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p_i!r} not in model.")
@@ -418,7 +420,7 @@ def mvn_rw_adaptive(
         raise ValueError("target must be in (0, 1).")
 
     return MVNRWAdaptive(
-        init_rw_var=jnp.asarray(init_var, dtype=jnp.float32),
+        init_rw_var=jnp.asarray(init_var),
         param_names=names,
         scale_start=int(scale_start),
         scale_cooling=float(scale_cooling),

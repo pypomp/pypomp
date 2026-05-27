@@ -1160,7 +1160,6 @@ class Pomp:
         theta_dicts = theta_obj_in.to_list()
         theta_array = jnp.asarray(
             [[float(td[p]) for p in canonical_names] for td in theta_dicts],
-            dtype=jnp.float32,
         )
 
         # --- Per-chain PRNG keys ---
@@ -1300,9 +1299,7 @@ class Pomp:
 
         # --- Build a single jit-static probe function and observed probes ---
         probe_names = sorted(probes.keys())
-        scale_arr = jnp.asarray(
-            [float(scale[k]) for k in probe_names], dtype=jnp.float32
-        )
+        scale_arr = jnp.asarray([float(scale[k]) for k in probe_names])
 
         # Closure over `probes` -- distinct dicts will trigger re-tracing,
         # which is acceptable for a per-call wrapper.
@@ -1311,7 +1308,7 @@ class Pomp:
                 [jnp.asarray(probes[k](y_arr)).reshape(()) for k in probe_names]
             )
 
-        obs_y_arr = jnp.asarray(self.ys.values, dtype=jnp.float32)
+        obs_y_arr = jnp.asarray(self.ys.values)
         obs_probes = probe_fn(obs_y_arr)
 
         # --- Extract model internals ---
@@ -1334,7 +1331,6 @@ class Pomp:
         theta_dicts = theta_obj_in.to_list()
         theta_array = jnp.asarray(
             [[float(td[p]) for p in canonical_names] for td in theta_dicts],
-            dtype=jnp.float32,
         )
 
         keys = jax.random.split(new_key, n_chains)

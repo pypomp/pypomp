@@ -145,6 +145,7 @@ def dpop_train(
     eta: jax.Array | None = None,
     optimizer: str = "Adam",  # static
     decay: float = 0.0,
+    beta1: float = 0.9,
 ) -> tuple[jax.Array, jax.Array]:
     """
     Train on the DPOP objective with Adam or SGD, optional LR decay.
@@ -220,7 +221,6 @@ def dpop_train(
         eta_scaled = eta * lr_scale
 
         if optimizer == "Adam":
-            beta1 = 0.9
             beta2 = 0.999
             eps = 1e-8
             # Update biased moments (m is 0-indexed iteration)

@@ -945,6 +945,7 @@ class Pomp:
         M: int,
         eta: LearningRate,
         optimizer: str = "Adam",
+        beta1: float = 0.9,
         alpha: float = 0.8,
         decay: float = 0.0,
         process_weight_state: str | None = None,
@@ -968,6 +969,10 @@ class Pomp:
             Learning rates per parameter as a LearningRate object.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
+        beta1 : float, default 0.9
+            Adam first-moment (momentum) coefficient. Set to 0.0 to disable
+            momentum (e.g. for the high-variance alpha=0 arm, matching the
+            dmop/IFAD convention). Ignored when optimizer="SGD".
         alpha : float, default 0.8
             DPOP discount / cooling factor.
         decay : float, default 0.0
@@ -1060,6 +1065,7 @@ class Pomp:
             eta=eta_array,
             optimizer=optimizer,
             decay=decay,
+            beta1=beta1,
         )
 
         return nll_hist, theta_hist

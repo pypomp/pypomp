@@ -1184,6 +1184,7 @@ class PanelEstimationMixin(Base):
         eta: dict[str, float] | float,
         chunk_size: Union[int, str] = 1,
         optimizer: str = "Adam",
+        beta1: float = 0.9,
         alpha: float = 0.97,
         decay: float = 0.0,
         process_weight_state: str | None = None,
@@ -1211,6 +1212,10 @@ class PanelEstimationMixin(Base):
             chunk_size (Union[int, str], optional): Number of units to process
                 per gradient calculation step.
             optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD'.
+            beta1 (float, optional): Adam first-moment (momentum) coefficient.
+                Default 0.9. Set to 0.0 to disable momentum (e.g. for the
+                high-variance alpha=0 arm, matching the dmop/IFAD convention).
+                Ignored when optimizer='SGD'.
             alpha (float, optional): DPOP discount / cooling factor.
             decay (float, optional): Learning-rate decay coefficient. At iteration m,
                 the effective learning rate is ``eta / (1 + decay * m)``.
@@ -1432,6 +1437,7 @@ class PanelEstimationMixin(Base):
             process_weight_index,
             ntimes,
             decay,
+            beta1,
         )
 
         shared_traces_in = None

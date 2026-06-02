@@ -163,8 +163,8 @@ def _panel_dpop_train_internal(
     chunk_size: int,
     optimizer: str,
     M: int,
-    eta_shared: jax.Array,
-    eta_spec: jax.Array,
+    eta_shared: jax.Array,   # (M, n_shared) per-iteration LR schedule
+    eta_spec: jax.Array,     # (M, n_spec)   per-iteration LR schedule
     alpha: float,
     n_obs: int,     # ys.shape[1]
     U: int,         # ys.shape[0]
@@ -235,8 +235,8 @@ def _panel_dpop_train_internal(
         # Learning rate decay
         i_f = i.astype(jnp.float32)
         lr_scale = 1.0 / (1.0 + decay * i_f)
-        eta_shared_scaled = eta_shared * lr_scale
-        eta_spec_scaled = eta_spec * lr_scale
+        eta_shared_scaled = eta_shared[i] * lr_scale
+        eta_spec_scaled = eta_spec[i] * lr_scale
 
         def chunk_scan_step(chunk_carry, chunk_idx):
             c_s, c_m_s, c_v_s, c_step = chunk_carry

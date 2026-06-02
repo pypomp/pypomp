@@ -966,7 +966,9 @@ class Pomp:
         M : int
             Number of gradient steps.
         eta : LearningRate
-            Learning rates per parameter as a LearningRate object.
+            Per-parameter learning rates as a LearningRate object. A full
+            per-iteration schedule is applied (row m used at iteration m), so
+            ``LearningRate(rates).cosine_decay(0.05, M)`` works as expected.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
         beta1 : float, default 0.9
@@ -1007,9 +1009,9 @@ class Pomp:
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
 
-        # For now, dpop_train only uses a constant learning rate across iterations
-        # Extract the first row of the schedule
-        eta_array = eta.to_array(param_names, M)[0]
+        # Full (M, p) per-iteration LR schedule (e.g. from
+        # LearningRate(...).cosine_decay(...)); the kernel indexes row m.
+        eta_array = eta.to_array(param_names, M)
 
         ys_array = jnp.array(self.ys.values)
         dt_array_extended = self._dt_array_extended

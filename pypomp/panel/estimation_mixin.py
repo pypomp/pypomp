@@ -1181,7 +1181,7 @@ class PanelEstimationMixin(Base):
         self,
         J: int,
         M: int,
-        eta: dict[str, float] | float,
+        eta: "LearningRate | dict[str, float] | float",
         chunk_size: Union[int, str] = 1,
         optimizer: str = "Adam",
         beta1: float = 0.9,
@@ -1207,8 +1207,12 @@ class PanelEstimationMixin(Base):
         Args:
             J (int): Number of particles per unit.
             M (int): Number of training iterations.
-            eta (dict[str, float] | float): Learning rate(s). Can be a float for a
-                global learning rate or a dictionary mapping parameter names to rates.
+            eta (LearningRate | dict[str, float] | float): Learning rate(s). A
+                LearningRate gives a full per-iteration schedule, e.g.
+                ``LearningRate(rates).cosine_decay(0.05, M)``; a dict maps param
+                names to constant rates; a float is one global constant rate. For
+                the dict/float forms the scalar ``decay`` still applies reciprocal
+                LR decay; for a LearningRate the schedule is used as-is.
             chunk_size (Union[int, str], optional): Number of units to process
                 per gradient calculation step.
             optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD'.
@@ -1387,15 +1391,28 @@ class PanelEstimationMixin(Base):
                 axis=0,
             )
 
-        eta_dict = (
-            eta
-            if isinstance(eta, dict)
-            else {p: eta for p in self.canonical_param_names}
-        )
-        eta_shared = jnp.array(
-            [eta_dict.get(p, 0.0) for p in shared_index], dtype=float
-        )
-        eta_spec = jnp.array([eta_dict.get(p, 0.0) for p in spec_index], dtype=float)
+        if isinstance(eta, LearningRate):
+            # Full (M, p) per-iteration schedule (e.g. cosine_decay)
+            eta_shared = eta.to_array(shared_index, M)
+            eta_spec = eta.to_array(spec_index, M)
+        else:
+            # Constant dict/float -> broadcast to an (M, p) schedule; the scalar
+            # `decay` (reciprocal) is still applied per-iteration in the kernel.
+            eta_dict = (
+                eta
+                if isinstance(eta, dict)
+                else {p: eta for p in self.canonical_param_names}
+            )
+            eta_shared_vec = jnp.array(
+                [eta_dict.get(p, 0.0) for p in shared_index], dtype=float
+            )
+            eta_spec_vec = jnp.array(
+                [eta_dict.get(p, 0.0) for p in spec_index], dtype=float
+            )
+            eta_shared = jnp.broadcast_to(
+                eta_shared_vec, (M, eta_shared_vec.shape[0])
+            )
+            eta_spec = jnp.broadcast_to(eta_spec_vec, (M, eta_spec_vec.shape[0]))
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0

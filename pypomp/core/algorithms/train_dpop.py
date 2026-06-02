@@ -158,8 +158,9 @@ def dpop_train(
     ----------
     theta_init : jax.Array, shape (p,)
         Initial parameter vector in estimation space.
-    eta : jax.Array, shape (p,) or None
-        Per-parameter learning rates. If None, defaults to 0.01 for all.
+    eta : jax.Array, shape (M, p) or None
+        Per-iteration, per-parameter learning-rate schedule (row m used at
+        iteration m). If None, defaults to a constant 0.01 for all.
     optimizer : str
         "Adam" or "SGD".
     decay : float
@@ -177,7 +178,7 @@ def dpop_train(
     """
     p = theta_init.shape[0]
     if eta is None:
-        eta = jnp.full(p, 0.01)
+        eta = jnp.full((M, p), 0.01)
 
     theta_history = jnp.zeros((M + 1, p))
     nll_history = jnp.zeros(M + 1)
@@ -218,7 +219,7 @@ def dpop_train(
         # Learning rate decay
         m_f = m.astype(jnp.float32)
         lr_scale = 1.0 / (1.0 + decay * m_f)
-        eta_scaled = eta * lr_scale
+        eta_scaled = eta[m] * lr_scale
 
         if optimizer == "Adam":
             beta2 = 0.999

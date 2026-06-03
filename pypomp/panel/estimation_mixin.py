@@ -1278,6 +1278,15 @@ class PanelEstimationMixin(Base):
 
         if chunk_size < 1:
             chunk_size = 1
+        chunk_size = min(chunk_size, U)
+        if U % chunk_size != 0:
+            original_chunk_size = chunk_size
+            chunk_size = max(d for d in range(chunk_size, 0, -1) if U % d == 0)
+            warnings.warn(
+                "chunk_size does not divide the number of units; "
+                f"using chunk_size={chunk_size} instead of {original_chunk_size}.",
+                UserWarning,
+            )
 
         # Determine process_weight_index
         if process_weight_state is None:

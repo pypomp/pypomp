@@ -38,6 +38,26 @@ def _get_sir_panel():
     return panel
 
 
+def _get_sir_panel_n_units(n_units):
+    """Build a SIR panel with all parameters unit-specific."""
+    import pandas as pd
+
+    pomps = {f"unit{i + 1}": pp.models.sir(seed=100 + i) for i in range(n_units)}
+    first = next(iter(pomps.values()))
+    param_names = first.canonical_param_names
+    unit_specific = pd.DataFrame(
+        {
+            unit: [pomp.theta[0][p] for p in param_names]
+            for unit, pomp in pomps.items()
+        },
+        index=pd.Index(param_names),
+    )
+    theta = pp.PanelParameters(
+        theta=[{"shared": None, "unit_specific": unit_specific}]
+    )
+    return pp.PanelPomp(Pomp_dict=pomps, theta=theta)
+
+
 def _get_sir_panel_with_shared():
     """Build a panel of 2 SIR units with shared and unit-specific params."""
     sir1 = pp.models.sir(seed=100)
@@ -122,6 +142,26 @@ def test_panel_dpop_train_sgd():
     res = panel.results_history[-1]
     assert isinstance(res, PanelPompDpopTrainResult)
     assert res.optimizer == "SGD"
+
+
+@pytest.mark.parametrize("chunk_size", [2, 5], ids=["nondivisor", "larger_than_U"])
+def test_panel_dpop_train_adjusts_nondividing_chunk_size(chunk_size):
+    panel = _get_sir_panel_n_units(3)
+    panel.dpop_train(
+        J=2,
+        M=1,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=chunk_size,
+        optimizer="Adam",
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, PanelPompDpopTrainResult)
+    assert res.unit_traces.shape[3] == 3
 
 
 def test_panel_dpop_train_with_decay():

@@ -4,6 +4,7 @@ This module implements the OOP structure for PanelPOMP models.
 
 import jax
 import pandas as pd
+from typing import cast
 from pypomp.core.pomp import Pomp
 from .validation_mixin import PanelValidationMixin
 from .estimation_mixin import PanelEstimationMixin
@@ -221,7 +222,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         self.__dict__.update(state)
 
         if "_fresh_key_data" in state:
-            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+            self.fresh_key = cast(
+                jax.Array, jax.random.wrap_key_data(state["_fresh_key_data"])
+            )
         elif "fresh_key" not in self.__dict__:
             self.fresh_key = None
         self.__dict__.pop("_fresh_key_data", None)

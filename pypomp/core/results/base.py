@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, fields
 from abc import ABC, abstractmethod
-from typing import Any, Sequence, TypeVar, Type
+from typing import Any, Sequence, TypeVar, Type, cast
 import pandas as pd
 import xarray as xr
 import numpy as np
@@ -134,7 +134,7 @@ class BaseResult(ABC):
         """Custom unpickling: reconstruct JAX key from raw bits."""
         vars(self).update(state)
         if "_key_data" in state:
-            self.key = jax.random.wrap_key_data(state["_key_data"])
+            self.key = cast(jax.Array, jax.random.wrap_key_data(state["_key_data"]))
         vars(self).pop("_key_data", None)
 
     @abstractmethod
@@ -217,7 +217,7 @@ class PompEstimationTracesMixin:
         )
         cols = ["theta_idx", "iteration", "method", "logLik"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df[cols + other_cols]
+        return df.loc[:, cols + other_cols].copy()
 
 
 class PanelPompEstimationTracesMixin:
@@ -245,7 +245,7 @@ class PanelPompEstimationTracesMixin:
             s_df = s_df.drop(columns=["iteration"])
         u_df = u_df.join(s_df, on="theta_idx").reset_index()
         cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"]
-        return u_df[cols + [c for c in u_df.columns if c not in cols]]
+        return u_df.loc[:, cols + [c for c in u_df.columns if c not in cols]].copy()
 
     def traces(self: Any) -> pd.DataFrame:
         """Return panel result formatted as traces (long format)."""
@@ -288,4 +288,4 @@ class PanelPompEstimationTracesMixin:
 
         cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df[cols + other_cols]
+        return df.loc[:, cols + other_cols].copy()

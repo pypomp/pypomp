@@ -6,7 +6,7 @@ import importlib
 import cloudpickle
 from copy import deepcopy
 import time
-from typing import Callable, Any
+from typing import Callable, Any, cast
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -1623,7 +1623,9 @@ class Pomp:
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:
             try:
-                self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+                self.fresh_key = cast(
+                    jax.Array, jax.random.wrap_key_data(state["_fresh_key_data"])
+                )
             except Exception as e:
                 warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
                 self.fresh_key = None

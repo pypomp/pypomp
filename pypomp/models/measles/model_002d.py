@@ -28,6 +28,8 @@ Parameters:
 - S_0, E_0, I_0, R_0: Initial state proportions
 """
 
+from typing import cast
+
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
@@ -67,7 +69,7 @@ def log_cdf_diff(zh, zl):
 def _log_cdf_diff_jvp(primals, tangents):
     zh, zl = primals
     tzh, tzl = tangents
-    y = log_cdf_diff(zh, zl)
+    y = cast(jax.Array, log_cdf_diff(zh, zl))
     lphi_h = _log_phi(zh)
     lphi_l = _log_phi(zl)
 
@@ -231,7 +233,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
     # Replace NaN y before computing z (prevents NaN propagation through jnp.where)
     y_is_nan = jnp.isnan(y_raw)
-    y = jnp.where(y_is_nan, 0.0, y_raw)
+    y = cast(jax.Array, jnp.where(y_is_nan, 0.0, y_raw))
 
     # Mean and variance
     Cpos = jnp.maximum(C, 0.0)
@@ -245,7 +247,9 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     z_lo = (y - 0.5 - m) / s
 
     # Use custom JVP log_cdf_diff for gradient stability
-    ll_box = jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
+    ll_box = cast(
+        jax.Array, jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
+    )
 
     loglik = jnp.maximum(ll_box, jnp.log(tol))
 

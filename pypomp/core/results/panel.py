@@ -70,20 +70,20 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         )
 
         if self.theta is not None:
-            shared = [
-                t.get("shared")
-                for t in self.theta._theta
-                if t.get("shared") is not None
-            ]
+            shared: list[pd.DataFrame] = []
+            for t in self.theta._theta:
+                shared_df = t.get("shared")
+                if shared_df is not None:
+                    shared.append(shared_df)
             if shared:
                 df = df.join(
                     pd.concat(shared, axis=1).T.reset_index(drop=True), on="theta_idx"
                 )
-            unit_spec = [
-                t.get("unit_specific")
-                for t in self.theta._theta
-                if t.get("unit_specific") is not None
-            ]
+            unit_spec: list[pd.DataFrame] = []
+            for t in self.theta._theta:
+                unit_specific_df = t.get("unit_specific")
+                if unit_specific_df is not None:
+                    unit_spec.append(unit_specific_df)
             if unit_spec:
                 u_params = (
                     pd.concat(unit_spec, keys=range(len(unit_spec)))
@@ -140,22 +140,22 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         )
 
         if self.theta is not None:
-            shared = [
-                t.get("shared")
-                for t in self.theta._theta
-                if t.get("shared") is not None
-            ]
+            shared: list[pd.DataFrame] = []
+            for t in self.theta._theta:
+                shared_df = t.get("shared")
+                if shared_df is not None:
+                    shared.append(shared_df)
             if shared:
                 p_s = pd.concat(shared, axis=1).T.set_axis(reps, axis=0)
                 df_s, df_u = (
                     df_s.join(p_s, on="theta_idx"),
                     df_u.join(p_s, on="theta_idx"),
                 )
-            unit_spec = [
-                t.get("unit_specific")
-                for t in self.theta._theta
-                if t.get("unit_specific") is not None
-            ]
+            unit_spec: list[pd.DataFrame] = []
+            for t in self.theta._theta:
+                unit_specific_df = t.get("unit_specific")
+                if unit_specific_df is not None:
+                    unit_spec.append(unit_specific_df)
             if unit_spec:
                 p_u = pd.concat(unit_spec, keys=reps).stack().unstack(level=1)
                 p_u.index.names = ["theta_idx", "unit"]
@@ -174,7 +174,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         df = df.assign(method="pfilter", iteration=0)
         cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df[cols + other_cols]
+        return df.loc[:, cols + other_cols].copy()
 
     @staticmethod
     def merge(*results: "PanelPompPFilterResult") -> "PanelPompPFilterResult":
@@ -295,7 +295,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
     optimizer: str = "Adam"
     J: int = 0
     M: int = 0
-    eta: dict[str, float] | float = field(default_factory=lambda: {})
+    eta: LearningRate | dict[str, float] | float = field(default_factory=lambda: {})
     alpha: float = 0.97
     process_weight_state: str | None = None
     decay: float = 0.0
@@ -499,4 +499,3 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
             process_weight_state=first.process_weight_state,
             decay=first.decay,
         )
-

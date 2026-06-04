@@ -1,13 +1,13 @@
-from typing import Any
+from typing import Any, cast
 import pandas as pd
 import numpy as np
 
 
 def _check_plotly():
     try:
-        import plotly.graph_objects as go
-        import plotly.express as px
-        from plotly.subplots import make_subplots
+        import plotly.graph_objects as go  # pyright: ignore[reportMissingImports]
+        import plotly.express as px  # pyright: ignore[reportMissingImports]
+        from plotly.subplots import make_subplots  # pyright: ignore[reportMissingImports]
 
         return go, px, make_subplots
     except ImportError:
@@ -30,13 +30,16 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
     id_vars = ["theta_idx", "iteration", "method", "unit"]
     present_id_vars = [col for col in id_vars if col in traces.columns]
     value_vars = [col for col in traces.columns if col not in id_vars]
-    df_long = traces.melt(
-        id_vars=present_id_vars,
-        value_vars=value_vars,
-        var_name="variable",
-        value_name="value",
+    df_long = cast(
+        pd.DataFrame,
+        traces.melt(
+            id_vars=present_id_vars,
+            value_vars=value_vars,
+            var_name="variable",
+            value_name="value",
+        ),
     )
-    df_long = df_long.dropna(subset=["value"])
+    df_long = cast(pd.DataFrame, df_long.dropna(subset=["value"]))
 
     if df_long.empty:
         print("No valid trace data to plot.")
@@ -49,7 +52,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
         facet_col = "unit"
         facet_values = units
         subplot_titles = [str(u) for u in units]
-        plot_df = df_long
+        plot_df: pd.DataFrame = df_long
     else:
         facet_col = "variable"
         facet_values = variables
@@ -80,17 +83,23 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
         row = (i // cols) + 1
         col = (i % cols) + 1
 
-        facet_data = plot_df[plot_df[facet_col] == facet_val]
+        facet_data = cast(
+            pd.DataFrame, plot_df.loc[plot_df[facet_col] == facet_val]
+        )
 
         for theta_idx in theta_indices:
-            theta_data = facet_data[facet_data["theta_idx"] == theta_idx]
+            theta_data = cast(
+                pd.DataFrame, facet_data.loc[facet_data["theta_idx"] == theta_idx]
+            )
             if theta_data.empty:
                 continue
 
             color = color_map[theta_idx]
 
             for method in ["mif", "train"]:
-                sub = theta_data[theta_data["method"] == method]
+                sub = cast(
+                    pd.DataFrame, theta_data.loc[theta_data["method"] == method]
+                )
                 if len(sub) > 1:
                     fig.add_trace(
                         Scatter(
@@ -105,7 +114,9 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
                         col=col,
                     )
 
-            sub = theta_data[theta_data["method"] == "pfilter"]
+            sub = cast(
+                pd.DataFrame, theta_data.loc[theta_data["method"] == "pfilter"]
+            )
             if not sub.empty:
                 fig.add_trace(
                     Scatter(
@@ -171,7 +182,7 @@ def plot_simulations_internal(
 
         if mode == "lines":
             for sim_idx in sims["sim"].unique():
-                sub = sims[sims["sim"] == sim_idx]
+                sub = cast(pd.DataFrame, sims.loc[sims["sim"] == sim_idx])
                 fig.add_trace(
                     Scatter(
                         x=sub["time"],
@@ -279,12 +290,12 @@ def plot_panel_simulations_internal(
         row = (i // cols) + 1
         col = (i % cols) + 1
 
-        u_sims = sims[sims["unit"] == unit]
-        u_obs = obs[obs["unit"] == unit]
+        u_sims = cast(pd.DataFrame, sims.loc[sims["unit"] == unit])
+        u_obs = cast(pd.DataFrame, obs.loc[obs["unit"] == unit])
 
         if mode == "lines":
             for sim_idx in u_sims["sim"].unique():
-                sub = u_sims[u_sims["sim"] == sim_idx]
+                sub = cast(pd.DataFrame, u_sims.loc[u_sims["sim"] == sim_idx])
                 fig.add_trace(
                     Scatter(
                         x=sub["time"],

@@ -6,7 +6,7 @@ import xarray as xr
 import numpy as np
 import time
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
+from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal, Any
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
@@ -338,7 +338,7 @@ class PanelEstimationMixin(Base):
                 )
 
         for grp_key, group in y_sims.groupby(["unit", "theta_idx", "sim"]):
-            unit_name, replicate_id, sim_id = grp_key
+            unit_name, replicate_id, sim_id = cast(tuple[Any, Any, Any], grp_key)
             obj = self.unit_objects[str(unit_name)]
             df = pd.DataFrame(group.drop(columns=["unit", "theta_idx", "sim", "time"]))
             df.index = pd.Index(group["time"])
@@ -1259,34 +1259,39 @@ class PanelEstimationMixin(Base):
                 mem = psutil.virtual_memory()
                 avail = mem.available * 0.4
                 max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size = min(U, max_units)
+                chunk_size_value = min(U, max_units)
                 try:
                     device = jax.devices()[0]
                     if device.platform == "gpu":
-                        avail = (
-                            device.memory_stats()["bytes_limit"]
-                            - device.memory_stats()["bytes_in_use"]
-                        )
-                        max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                        chunk_size = min(U, max_units)
+                        memory_stats = device.memory_stats()
+                        if memory_stats is not None:
+                            avail = (
+                                memory_stats["bytes_limit"]
+                                - memory_stats["bytes_in_use"]
+                            )
+                            max_units = max(1, int(avail * 0.4 / bytes_per_unit))
+                            chunk_size_value = min(U, max_units)
                 except Exception:
                     pass
             except Exception:
-                chunk_size = max(1, U // 4)
+                chunk_size_value = max(1, U // 4)
         else:
-            chunk_size = int(chunk_size)
+            chunk_size_value = int(chunk_size)
 
-        if chunk_size < 1:
-            chunk_size = 1
-        chunk_size = min(chunk_size, U)
-        if U % chunk_size != 0:
-            original_chunk_size = chunk_size
-            chunk_size = max(d for d in range(chunk_size, 0, -1) if U % d == 0)
+        if chunk_size_value < 1:
+            chunk_size_value = 1
+        chunk_size_value = min(chunk_size_value, U)
+        if U % chunk_size_value != 0:
+            original_chunk_size = chunk_size_value
+            chunk_size_value = max(
+                d for d in range(chunk_size_value, 0, -1) if U % d == 0
+            )
             warnings.warn(
                 "chunk_size does not divide the number of units; "
-                f"using chunk_size={chunk_size} instead of {original_chunk_size}.",
+                f"using chunk_size={chunk_size_value} instead of {original_chunk_size}.",
                 UserWarning,
             )
+        chunk_size = chunk_size_value
 
         # Determine process_weight_index
         if process_weight_state is None:

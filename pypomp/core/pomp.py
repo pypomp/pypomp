@@ -6,7 +6,7 @@ import importlib
 import cloudpickle
 from copy import deepcopy
 import time
-from typing import Callable, Any
+from typing import Callable, Any, cast
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -22,6 +22,7 @@ from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
 from .algorithms.helpers import _calc_ys_covars
 from .algorithms.pfilter import _pfilter_internal, _vmapped_pfilter_internal
+from .algorithms.bif import _bif_deconvolution_diag
 from .algorithms.pmcmc import _vmapped_pmcmc_internal
 from .algorithms.abc import _vmapped_abc_internal
 from ..proposals import _expand_proposal
@@ -33,6 +34,7 @@ from .results import (
     ResultsHistory,
     PompPFilterResult,
     PompMIFResult,
+    PompBIFResult,
     PompTrainResult,
     PompPMCMCResult,
     PompABCResult,
@@ -769,6 +771,240 @@ class Pomp:
             a=a,
             thresh=thresh,
             n_monitors=n_monitors,
+        )
+
+        self.results_history.add(result)
+
+    def bif(
+        self,
+        J: int,
+        M: int,
+        perturb_sd: RWSigma,
+        rw_sd: RWSigma | None = None,
+        a: float = 0.1,
+        dprior: Callable | None = None,
+        key: jax.Array | None = None,
+        theta: ThetaInput = None,
+        thresh: float = 0,
+        n_monitors: int = 0,
+        track_time: bool = True,
+    ) -> None:
+        """
+        Bayesian iterated filtering via fixed-kernel cloud deconvolution.
+
+        BIF runs a perturbed filtering recursion in the estimation parameter
+        scale, using a fixed initial perturbation kernel at the start of each
+        outer iteration. The final parameter cloud is then reweighted by a
+        leave-one-out Gaussian deconvolution estimate. Parameters with zero
+        ``perturb_sd`` are treated as fixed and are excluded from the
+        deconvolution kernel.
+
+        Args:
+            J: Number of particles in the parameter cloud.
+            M: Number of Stage 1 outer iterations.
+            perturb_sd: Fixed initial perturbation standard deviations. These
+                define the diagonal deconvolution kernel ``Q`` in estimation
+                scale. At least one entry must be positive.
+            rw_sd: Optional within-trajectory random-walk standard deviations.
+                These are geometrically cooled by ``a`` across Stage 1. If
+                ``None``, no within-trajectory random walk is used.
+            a: Geometric cooling fraction for the within-trajectory random
+                walk. The fixed initial perturbation is not cooled.
+            dprior: Pure-JAX log prior on the estimation-scale parameter
+                vector. If ``None``, a flat improper prior is used.
+            key: JAX PRNG key. Defaults to ``self.fresh_key``.
+            theta: Starting parameter values. Multiple parameter sets run as
+                independent Stage 1 starts and are pooled for deconvolution.
+            thresh: Adaptive resampling threshold.
+            n_monitors: Number of monitoring particle filters per iteration.
+                Use 0 to store the perturbed-filter objective.
+            track_time: Whether to store execution time.
+        """
+        start_time = time.time()
+
+        if self.dmeas is None:
+            raise ValueError("self.dmeas cannot be None")
+        if J < 1:
+            raise ValueError("J must be >= 1.")
+        if M < 1:
+            raise ValueError("M must be >= 1.")
+        if not isinstance(perturb_sd, RWSigma):
+            raise TypeError("perturb_sd must be a RWSigma object.")
+        if rw_sd is not None and not isinstance(rw_sd, RWSigma):
+            raise TypeError("rw_sd must be a RWSigma object or None.")
+
+        param_names = self.canonical_param_names
+
+        def sigma_array(obj: RWSigma, name: str) -> jax.Array:
+            sigma_names = list(obj.all_names)
+            if set(sigma_names) != set(param_names):
+                raise ValueError(
+                    f"{name}.sigmas keys must match canonical_param_names up to reordering. "
+                    f"Got {sorted(sigma_names)}, expected {sorted(param_names)}."
+                )
+            return jnp.asarray([obj.sigmas[p] for p in param_names])
+
+        perturb_sigmas_array = sigma_array(perturb_sd, "perturb_sd")
+        if rw_sd is None:
+            rw_sd = RWSigma({p: 0.0 for p in param_names})
+        rw_sigmas_array = sigma_array(rw_sd, "rw_sd")
+
+        perturb_sigmas_np = np.asarray(perturb_sigmas_array, dtype=float)
+        active_idx = np.where(perturb_sigmas_np > 0)[0]
+        if len(active_idx) == 0:
+            raise ValueError("At least one perturb_sd entry must be positive.")
+        active_params = [param_names[i] for i in active_idx]
+
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_list_in = theta_obj_in.to_list()
+        n_reps = theta_obj_in.num_replicates()
+        if J * n_reps <= 1:
+            raise ValueError("BIF deconvolution requires at least two cloud samples.")
+
+        new_key, old_key = self._update_fresh_key(key)
+        theta_obj_est = deepcopy(theta_obj_in)
+        theta_obj_est.transform(self.par_trans, direction="to_est")
+        theta_array = theta_obj_est.to_jax_array(param_names)
+        theta_tiled = jnp.tile(theta_array, (J, 1, 1))
+        keys = jax.random.split(new_key, n_reps)
+
+        _dprior: Callable = dprior if dprior is not None else _flat_dprior
+
+        nLLs_jax, theta_traces_jax, final_thetas_jax = F.bif(
+            self.to_struct(),
+            theta_tiled,
+            rw_sigmas_array,
+            perturb_sigmas_array,
+            M,
+            a,
+            J,
+            thresh,
+            keys,
+            _dprior,
+            n_monitors,
+        )
+
+        nLLs = jax.device_get(nLLs_jax)
+        theta_traces = jax.device_get(theta_traces_jax)
+        final_thetas_est = jax.device_get(final_thetas_jax)
+
+        del nLLs_jax, theta_traces_jax, final_thetas_jax
+
+        n_params = len(param_names)
+        trace_vars = ["logLik"] + param_names
+        trace_data = np.zeros((n_reps, M + 1, len(trace_vars)), dtype=float)
+        for i in range(n_reps):
+            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
+            param_traces = self.par_trans.transform_array(
+                theta_traces[i],
+                param_names,
+                direction="from_est",
+            )
+            trace_data[i, :, 0] = logliks_with_nan
+            trace_data[i, :, 1:] = param_traces
+
+        traces_da = xr.DataArray(
+            trace_data,
+            dims=["theta_idx", "iteration", "variable"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "iteration": np.arange(M + 1),
+                "variable": trace_vars,
+            },
+        )
+
+        flat_cloud_est = final_thetas_est.reshape(n_reps * J, n_params)
+        flat_cloud_nat = self.par_trans.transform_array(
+            flat_cloud_est,
+            param_names,
+            direction="from_est",
+        )
+        final_thetas_nat = flat_cloud_nat.reshape(n_reps, J, n_params)
+
+        cloud_active = flat_cloud_est[:, active_idx]
+        sd_active = perturb_sigmas_np[active_idx]
+        log_Hf_jax, weights_jax, ess_jax = _bif_deconvolution_diag(
+            jnp.asarray(cloud_active),
+            jnp.asarray(sd_active),
+        )
+        log_Hf = np.asarray(jax.device_get(log_Hf_jax), dtype=float)
+        weights = np.asarray(jax.device_get(weights_jax), dtype=float)
+        ess = float(jax.device_get(ess_jax))
+
+        sample_idx = np.arange(n_reps * J)
+        sample_theta_idx = np.repeat(np.arange(n_reps), J)
+        sample_particle = np.tile(np.arange(J), n_reps)
+        sample_coords = {
+            "sample": sample_idx,
+            "theta_idx": ("sample", sample_theta_idx),
+            "particle": ("sample", sample_particle),
+        }
+
+        cloud_da = xr.DataArray(
+            final_thetas_nat,
+            dims=["theta_idx", "particle", "variable"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "particle": np.arange(J),
+                "variable": param_names,
+            },
+        )
+        cloud_est_da = xr.DataArray(
+            final_thetas_est,
+            dims=["theta_idx", "particle", "variable"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "particle": np.arange(J),
+                "variable": param_names,
+            },
+        )
+        posterior_da = xr.DataArray(
+            flat_cloud_nat,
+            dims=["sample", "variable"],
+            coords={"sample": sample_idx, "variable": param_names},
+        )
+        weights_da = xr.DataArray(
+            weights,
+            dims=["sample"],
+            coords=sample_coords,
+        )
+        log_Hf_da = xr.DataArray(
+            log_Hf,
+            dims=["sample"],
+            coords=sample_coords,
+        )
+
+        posterior_mean = {
+            p: float(np.sum(weights * flat_cloud_nat[:, i]))
+            for i, p in enumerate(param_names)
+        }
+        self.theta = PompParameters(posterior_mean)
+
+        if track_time is True:
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
+
+        result = PompBIFResult(
+            method="bif",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_list_in,
+            traces_da=traces_da,
+            cloud_da=cloud_da,
+            cloud_est_da=cloud_est_da,
+            posterior_da=posterior_da,
+            weights_da=weights_da,
+            log_Hf_da=log_Hf_da,
+            J=J,
+            M=M,
+            perturb_sd=perturb_sd,
+            rw_sd=rw_sd,
+            a=a,
+            thresh=thresh,
+            n_monitors=n_monitors,
+            active_params=active_params,
+            ess=ess,
         )
 
         self.results_history.add(result)
@@ -1943,7 +2179,12 @@ class Pomp:
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:
             try:
-                self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+                self.fresh_key = cast(
+                    jax.Array,
+                    jax.random.wrap_key_data(
+                        cast(jax.Array, state["_fresh_key_data"])
+                    ),
+                )
             except Exception as e:
                 warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
                 self.fresh_key = None

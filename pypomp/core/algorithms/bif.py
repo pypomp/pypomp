@@ -179,9 +179,7 @@ def _bif_perfilter_internal(
     step_keys_raw = all_keys[1:]
 
     perfilter_scan_xs = (
-        ys,
-        times,
-        nstep_array,
+        time_indices,
         cooling_factors,
         step_keys_raw,
     )
@@ -207,6 +205,9 @@ def _bif_perfilter_internal(
             accumvars=accumvars,
             covars_extended=covars_extended,
             dt_array_extended=dt_array_extended,
+            nstep_array=nstep_array,
+            times=times,
+            ys=ys,
             thresh=thresh,
             n_obs=len(ys),
         )
@@ -230,13 +231,7 @@ def _bif_perfilter_helper(
         jax.Array,
         int,
     ],
-    xs: tuple[
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-    ],
+    xs: tuple[jax.Array, jax.Array, jax.Array],
     rprocesses_interp: Callable,
     dmeasures: Callable,
     dprior: Callable,
@@ -244,6 +239,9 @@ def _bif_perfilter_helper(
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
     dt_array_extended: jax.Array,
+    nstep_array: jax.Array,
+    times: jax.Array,
+    ys: jax.Array,
     thresh: float,
     n_obs: int,
 ) -> tuple[
@@ -259,7 +257,7 @@ def _bif_perfilter_helper(
     None,
 ]:
     (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx) = carry
-    (y, time, nstep, cooling_factor, step_key) = xs
+    (obs_idx, cooling_factor, step_key) = xs
     J = len(particlesF_Jx)
 
     key_perturb, key_process, key_resample = jax.random.split(step_key, 3)
@@ -271,7 +269,7 @@ def _bif_perfilter_helper(
 
     _, keys = _keys_helper(key=key_process, J=J, covars=covars_extended)
 
-    nstep = nstep.astype(int)
+    nstep = nstep_array[obs_idx].astype(int)
 
     particlesP_Jx, t_idx = rprocesses_interp(
         particlesF_Jx,
@@ -285,12 +283,14 @@ def _bif_perfilter_helper(
         accumvars,
         SHOULD_TRANS,
     )
-    t = time
+    t = times[obs_idx]
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
 
     measurements = jnp.nan_to_num(
-        dmeasures(y, particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
+        dmeasures(
+            ys[obs_idx], particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS
+        ).squeeze(),
         nan=jnp.log(1e-18),
     )
     if len(measurements.shape) > 1:

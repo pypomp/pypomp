@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 import xarray as xr
 import numpy as np
+from typing import cast
 
 from .base import BaseResult, PompEstimationTracesMixin, _merge_results
 from ...maths import logmeanexp, logmeanexp_se
@@ -174,6 +175,163 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
         )
 
 
+def _weighted_quantile(
+    values: np.ndarray,
+    weights: np.ndarray,
+    quantiles: np.ndarray,
+) -> np.ndarray:
+    order = np.argsort(values)
+    values_sorted = values[order]
+    weights_sorted = weights[order]
+    cdf = np.cumsum(weights_sorted)
+    cdf = cdf / cdf[-1]
+    return np.interp(quantiles, cdf, values_sorted)
+
+
+@dataclass(eq=False)
+class PompBIFResult(PompBaseResult):
+    """Result from Pomp.bif()."""
+
+    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Stage 1 parameter traces and log-likelihoods."""
+    cloud_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Final Stage 1 cloud on the natural parameter scale."""
+    cloud_est_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Final Stage 1 cloud on the estimation parameter scale."""
+    posterior_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Flattened weighted cloud on the natural parameter scale."""
+    weights_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Stage 2 normalized deconvolution weights."""
+    log_Hf_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Leave-one-out log-smoothed-cloud density estimates."""
+    J: int = 0
+    """The number of particles used in Stage 1."""
+    M: int = 0
+    """The number of Stage 1 iterations."""
+    perturb_sd: RWSigma | None = None
+    """Fixed initial-perturbation standard deviations defining Q."""
+    rw_sd: RWSigma | None = None
+    """Within-trajectory random-walk standard deviations."""
+    a: float = 0.0
+    """Cooling fraction for the within-trajectory random walk."""
+    thresh: float = 0.0
+    """The resampling threshold used."""
+    n_monitors: int = 0
+    """The number of particle filters used to monitor likelihood."""
+    active_params: list[str] = field(default_factory=list)
+    """Parameters with positive fixed perturbation standard deviation."""
+    ess: float = 0.0
+    """Effective sample size of the Stage 2 deconvolution weights."""
+
+    def __post_init__(self):
+        self.method = "bif"
+
+    @property
+    def n_samples(self) -> int:
+        if self.weights_da.size == 0:
+            return 0
+        return int(self.weights_da.sizes.get("sample", 0))
+
+    @property
+    def _summary_config(self) -> list[tuple[str, str]]:
+        return [
+            ("Number of parameter sets", "theta"),
+            ("Number of particles (J)", "J"),
+            ("Number of iterations (M)", "M"),
+            ("Number of weighted samples", "n_samples"),
+            ("Deconvolution ESS", "ess"),
+            ("Active parameters", "active_params"),
+        ]
+
+    def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        """Return weighted posterior samples on the natural parameter scale."""
+        if self.posterior_da.size == 0 or self.weights_da.size == 0:
+            return pd.DataFrame()
+
+        variables = cast(list[str], list(self.posterior_da.coords["variable"].values))
+        df = pd.DataFrame(
+            np.asarray(self.posterior_da.values),
+            columns=pd.Index(variables),
+        )
+        df.insert(0, "sample", np.arange(len(df)))
+
+        if "theta_idx" in self.weights_da.coords:
+            df.insert(1, "theta_idx", np.asarray(self.weights_da.coords["theta_idx"]))
+        if "particle" in self.weights_da.coords:
+            df.insert(2, "particle", np.asarray(self.weights_da.coords["particle"]))
+
+        df["weight"] = np.asarray(self.weights_da.values)
+        if self.log_Hf_da.size > 0:
+            df["log_Hf"] = np.asarray(self.log_Hf_da.values)
+
+        if ignore_nan:
+            df = df.dropna()
+        return cast(pd.DataFrame, df)
+
+    def weighted_summary(
+        self,
+        quantiles: tuple[float, ...] = (0.025, 0.5, 0.975),
+    ) -> pd.DataFrame:
+        """Return weighted means, standard deviations, and quantiles."""
+        if self.posterior_da.size == 0 or self.weights_da.size == 0:
+            return pd.DataFrame()
+
+        values = np.asarray(self.posterior_da.values)
+        weights = np.asarray(self.weights_da.values, dtype=float)
+        weights = weights / np.sum(weights)
+        variables = cast(list[str], list(self.posterior_da.coords["variable"].values))
+        qs = np.asarray(quantiles, dtype=float)
+
+        rows = []
+        for i, name in enumerate(variables):
+            vals = values[:, i]
+            mean = float(np.sum(weights * vals))
+            sd = float(np.sqrt(np.sum(weights * (vals - mean) ** 2)))
+            qvals = _weighted_quantile(vals, weights, qs)
+            row = {"parameter": name, "mean": mean, "sd": sd}
+            row.update({f"q{q:g}": float(v) for q, v in zip(qs, qvals)})
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def traces(self) -> pd.DataFrame:
+        """Return Stage 1 traces as a tidy DataFrame."""
+        if self.traces_da.size == 0:
+            return pd.DataFrame()
+        df = (
+            self.traces_da.to_dataset(dim="variable")
+            .to_dataframe()
+            .reset_index()
+            .assign(method=self.method)
+        )
+        cols = ["theta_idx", "iteration", "method", "logLik"]
+        other_cols = [c for c in df.columns if c not in cols]
+        return cast(pd.DataFrame, df[cols + other_cols])
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame({"ess": [self.ess], "n_samples": [self.n_samples]})
+
+    def print_summary(self, n: int = 5):
+        print(f"Method: {self.method}")
+        print(f"Number of parameter sets: {len(self.theta)}")
+        print(f"Number of particles (J): {self.J}")
+        print(f"Number of iterations (M): {self.M}")
+        print(f"Number of weighted samples: {self.n_samples}")
+        print(f"Deconvolution ESS: {self.ess}")
+        print(f"Active parameters: {self.active_params}")
+        print(f"Execution time: {self.execution_time} seconds")
+        summary = self.weighted_summary()
+        if not summary.empty:
+            print(f"\nWeighted summary (first {n} rows):")
+            print(summary.head(n).to_string(index=False))
+
+    @staticmethod
+    def merge(*results: "PompBIFResult") -> "PompBIFResult":
+        raise NotImplementedError("Merging PompBIFResult is not yet implemented.")
+
+
 @dataclass(eq=False)
 class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """Result from Pomp.train() method."""
@@ -280,7 +438,7 @@ class PompPMCMCResult(PompBaseResult):
         df = df[cols]
         if ignore_nan:
             df = df.dropna()
-        return df
+        return cast(pd.DataFrame, df)
 
     def traces(self) -> pd.DataFrame:
         """Return a trace DataFrame compatible with :class:`ResultsHistory`."""
@@ -410,7 +568,7 @@ class PompABCResult(PompBaseResult):
         df = df[cols]
         if ignore_nan:
             df = df.dropna()
-        return df
+        return cast(pd.DataFrame, df)
 
     def traces(self) -> pd.DataFrame:
         """Return a trace DataFrame compatible with :class:`ResultsHistory`."""

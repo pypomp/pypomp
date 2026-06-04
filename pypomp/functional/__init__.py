@@ -4,6 +4,7 @@ from .mif import mif, panel_mif
 from .pfilter import pfilter, panel_pfilter
 from .mop import mop
 from .dpop import dpop
+from .bif import bif
 from .simulate import simulate
 from .train import train, panel_train
 from .pmcmc import pmcmc
@@ -19,6 +20,7 @@ __all__ = [
     "panel_pfilter",
     "mop",
     "dpop",
+    "bif",
     "simulate",
     "train",
     "panel_train",

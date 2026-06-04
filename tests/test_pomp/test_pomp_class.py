@@ -205,3 +205,29 @@ def test_merge(setup):
     merged = pp.Pomp.merge(LG1, LG2)
     assert len(merged.theta) == len(LG1.theta) + len(LG2.theta)
     assert len(merged.results_history) == len(LG1.results_history)
+
+
+def test_traces(neapolitan_setup):
+    LG, p = neapolitan_setup
+    traces = LG.traces()
+    assert isinstance(traces, pd.DataFrame)
+
+    expected_cols = {
+        "theta_idx",
+        "iteration",
+        "method",
+        "logLik",
+        *LG.canonical_param_names,
+    }
+    assert expected_cols.issubset(set(traces.columns))
+
+    methods = traces["method"].unique().tolist()
+    assert "pfilter" in methods
+    assert "mif" in methods
+    assert "train" in methods
+
+    for theta_idx in traces["theta_idx"].unique():
+        sub_df = traces[traces["theta_idx"] == theta_idx]
+        iterations = sub_df["iteration"].tolist()
+        assert iterations == sorted(iterations)
+        assert max(iterations) > 0

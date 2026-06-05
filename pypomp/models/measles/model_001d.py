@@ -2,7 +2,7 @@
 
 Gradient stability fixes:
 1. rproc: Use jax.random.gamma instead of fast_gamma (stable reparameterization)
-2. rproc: Use sample_and_log_prob instead of rmultinomial + deulermultinom (unified gradient path)
+2. rproc: Use a score-only Euler multinomial log-weight for DPOP
 3. dmeas: Use custom JVP for log_cdf_diff (prevents 0 * inf = NaN in extreme z regions)
 4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
 """
@@ -11,7 +11,8 @@ import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
-from pypomp.models.ctmc_multinom import sample_and_log_prob
+from pypomp.models.ctmc_multinom import _euler_multinomial_probs
+from pypomp.random.binom import fast_multinomial
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
 from pypomp.types import ParamDict
@@ -75,6 +76,29 @@ def _log_cdf_diff_jvp(primals, tangents):
 def log_cdf_single(z):
     """log Φ(z)，使用相同的 stable JVP 路径"""
     return log_cdf_diff(z, -jnp.inf)
+
+
+def _sample_and_score_log_prob(N, rates, dt, key):
+    """Draw an Euler-multinomial increment and return its DPOP score surrogate."""
+    probs = _euler_multinomial_probs(rates, dt)
+    N = jnp.asarray(N, dtype=probs.dtype)
+    sample_full = fast_multinomial(
+        key, jax.lax.stop_gradient(N), jax.lax.stop_gradient(probs)
+    )
+    counts = jax.lax.stop_gradient(sample_full)
+    probs_safe = jnp.clip(probs, 1.0e-12, 1.0)
+    logw_score = jnp.sum(counts * jnp.log(probs_safe))
+    key, _ = jax.random.split(key)
+    return counts[1:], logw_score, key
+
+
+def _sample_poisson_and_score_log_prob(lam, key):
+    """Draw a Poisson increment and return its DPOP score surrogate."""
+    sample = fast_poisson(key, jax.lax.stop_gradient(lam)).astype(jnp.float32)
+    count = jax.lax.stop_gradient(sample)
+    lam_safe = jnp.clip(lam, 1.0e-12)
+    logw_score = count * jnp.log(lam_safe) - lam
+    return count, logw_score
 
 
 # =========================================================================
@@ -172,21 +196,26 @@ def rproc(X_, theta_, key, covars, t, dt):
     dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     # Poisson births
-    births = fast_poisson(keys[1], br * dt).astype(jnp.float32)
+    births, lp_birth = _sample_poisson_and_score_log_prob(br * dt, keys[1])
 
     # Transition rates for Euler-multinomial steps
     rates_S = jnp.array([foi * dw / dt, mu])
     rates_E = jnp.array([sigma, mu])
     rates_I = jnp.array([gamma, mu])
 
-    # FIX 2: Use sample_and_log_prob for unified gradient path
     key_proc = keys[2]
-    (StoE, StoDeath), lp_S, key_proc = sample_and_log_prob(S, rates_S, dt, key_proc)
-    (EtoI, EtoDeath), lp_E, key_proc = sample_and_log_prob(E, rates_E, dt, key_proc)
-    (ItoR, ItoDeath), lp_I, key_proc = sample_and_log_prob(I, rates_I, dt, key_proc)
+    (StoE, StoDeath), lp_S, key_proc = _sample_and_score_log_prob(
+        S, rates_S, dt, key_proc
+    )
+    (EtoI, EtoDeath), lp_E, key_proc = _sample_and_score_log_prob(
+        E, rates_E, dt, key_proc
+    )
+    (ItoR, ItoDeath), lp_I, key_proc = _sample_and_score_log_prob(
+        I, rates_I, dt, key_proc
+    )
 
     # Accumulate process log-density
-    logw_step = lp_S + lp_E + lp_I
+    logw_step = lp_birth + lp_S + lp_E + lp_I
     logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
     logw = logw + logw_step
 

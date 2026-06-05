@@ -1470,12 +1470,13 @@ class PanelEstimationMixin(Base):
             decay,
             beta1,
         )
+        logliks_trace = -np.array(logliks_history)
 
         shared_traces_in = None
         unit_traces_in = None
 
         if len(shared_index) > 0:
-            shared_ll_expanded = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_ll_expanded = np.expand_dims(logliks_trace, axis=-1)
             shared_traces_in = np.concatenate(
                 [shared_ll_expanded, np.array(shared_history)], axis=-1
             )
@@ -1499,7 +1500,7 @@ class PanelEstimationMixin(Base):
                     "Both shared_traces and unit_traces are None; cannot build traces."
                 )
             n_reps = unit_traces.shape[0]
-            shared_ll = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_ll = np.expand_dims(logliks_trace, axis=-1)
             shared_traces = shared_ll
             shared_index = []
 
@@ -1513,18 +1514,18 @@ class PanelEstimationMixin(Base):
 
         shared_da = xr.DataArray(
             shared_traces,
-            dims=["replicate", "iteration", "variable"],
+            dims=["theta_idx", "iteration", "variable"],
             coords={
-                "replicate": jnp.arange(shared_traces.shape[0]),
+                "theta_idx": jnp.arange(shared_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": shared_vars,
             },
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["replicate", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "variable", "unit"],
             coords={
-                "replicate": jnp.arange(unit_traces.shape[0]),
+                "theta_idx": jnp.arange(unit_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
                 "variable": unit_vars,
                 "unit": unit_names,
@@ -1580,9 +1581,9 @@ class PanelEstimationMixin(Base):
             unit_traces=unit_da,
             logLiks=xr.DataArray(
                 np.full((n_reps, U + 1), np.nan),
-                dims=["replicate", "unit"],
+                dims=["theta_idx", "unit"],
                 coords={
-                    "replicate": jnp.arange(n_reps),
+                    "theta_idx": jnp.arange(n_reps),
                     "unit": ["shared"] + unit_names,
                 },
             ),

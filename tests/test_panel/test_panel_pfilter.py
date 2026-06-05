@@ -1,6 +1,8 @@
 import xarray as xr
 import numpy as np
+import jax
 from copy import deepcopy
+from pypomp.core.results.panel import PanelPompPFilterResult
 
 
 def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
@@ -131,3 +133,31 @@ def test_pfilter_chunk_size_not_dividing_U(lg_panel_setup_some_shared):
     J = 2
     panel.pfilter(J=J, chunk_size=3, key=key)
     check_pfilter_result(panel.results_history[-1], theta_orig, J=J, key=key)
+
+
+def test_pfilter_dataframe_shared_loglik_excludes_theta_idx():
+    logliks = xr.DataArray(
+        np.array(
+            [
+                [[-10.0], [-20.0]],
+                [[-11.0], [-21.0]],
+            ]
+        ),
+        dims=["theta_idx", "unit", "rep"],
+        coords={"unit": ["u1", "u2"], "rep": [0]},
+    )
+    result = PanelPompPFilterResult(
+        method="pfilter",
+        execution_time=0.0,
+        key=jax.random.key(0),
+        logLiks=logliks,
+    )
+
+    df = result.to_dataframe()
+    totals = (
+        df[["theta_idx", "shared logLik"]]
+        .drop_duplicates()
+        .sort_values("theta_idx")
+    )
+
+    assert np.allclose(totals["shared logLik"].to_numpy(), np.array([-30.0, -32.0]))

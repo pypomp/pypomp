@@ -56,11 +56,12 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
+        unit_names = self.logLiks.coords["unit"].values
         df = (
-            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
+            pd.DataFrame(ll, columns=unit_names)
             .assign(
                 theta_idx=lambda x: range(len(x)),
-                **{"shared logLik": lambda x: x.sum(axis=1)},
+                **{"shared logLik": lambda x: x.loc[:, unit_names].sum(axis=1)},
             )
             .melt(
                 id_vars=["theta_idx", "shared logLik"],
@@ -345,6 +346,9 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
         return True
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        rep_dim = (
+            "theta_idx" if "theta_idx" in self.shared_traces.dims else "replicate"
+        )
         s_df = (
             self.shared_traces.isel(iteration=-1)
             .to_dataset(dim="variable")
@@ -362,13 +366,15 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
 
-        u_df = u_df.join(s_df, on="replicate").reset_index()
+        u_df = u_df.join(s_df, on=rep_dim).reset_index()
+        if rep_dim != "theta_idx":
+            u_df = u_df.rename(columns={rep_dim: "theta_idx"})
 
-        cols = ["replicate", "iteration", "shared logLik", "unit", "unit logLik"] + [
+        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"] + [
             c
             for c in u_df.columns
             if c
-            not in {"replicate", "iteration", "shared logLik", "unit", "unit logLik"}
+            not in {"theta_idx", "iteration", "shared logLik", "unit", "unit logLik"}
         ]
         u_df = u_df[cols]
 
@@ -384,22 +390,28 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
         df_s = (
             self.shared_traces.to_dataset(dim="variable").to_dataframe().reset_index()
         )
+        if "replicate" in df_s.columns and "theta_idx" not in df_s.columns:
+            df_s = df_s.rename(columns={"replicate": "theta_idx"})
         df_s["unit"] = "shared"
 
         df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
+        if "replicate" in df_u.columns and "theta_idx" not in df_u.columns:
+            df_u = df_u.rename(columns={"replicate": "theta_idx"})
         df_u = df_u.rename(columns={"unitLogLik": "logLik"})
 
-        meta_cols = {"replicate", "iteration", "logLik", "unit"}
+        meta_cols = {"theta_idx", "iteration", "logLik", "unit"}
         shared_params = [c for c in df_s.columns if c not in meta_cols]
 
         if shared_params:
             df_u = df_u.merge(
-                df_s[["replicate", "iteration"] + shared_params],
-                on=["replicate", "iteration"],
+                df_s[["theta_idx", "iteration"] + shared_params],
+                on=["theta_idx", "iteration"],
                 how="left",
             )
 
-        return pd.concat([df_s, df_u], ignore_index=True).assign(method="dpop_train")
+        df = pd.concat([df_s, df_u], ignore_index=True).assign(method="dpop_train")
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        return df.loc[:, cols + [c for c in df.columns if c not in cols]].copy()
 
     def CLL(self, average: bool = False) -> pd.DataFrame:
         return pd.DataFrame()
@@ -426,7 +438,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
 
     @staticmethod
     def merge(*results: "PanelPompDpopTrainResult") -> "PanelPompDpopTrainResult":
-        """Merge replications from multiple PanelPompDpopTrainResult objects into a single object."""
+        """Merge parameter sets from multiple PanelPompDpopTrainResult objects."""
         if len(results) == 0:
             raise ValueError(
                 "At least one PanelPompDpopTrainResult object must be provided."
@@ -455,25 +467,42 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
             else None
         )
 
+        def _theta_idx_array(array: xr.DataArray) -> xr.DataArray:
+            if "replicate" in array.dims and "theta_idx" not in array.dims:
+                array = array.rename({"replicate": "theta_idx"})
+            return array
+
         shared_trace_arrays = [
-            r.shared_traces for r in results if r.shared_traces.size > 0
+            _theta_idx_array(r.shared_traces)
+            for r in results
+            if r.shared_traces.size > 0
         ]
         merged_shared_traces = (
-            xr.concat(shared_trace_arrays, dim="replicate")
+            xr.concat(shared_trace_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
             if shared_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
-        unit_trace_arrays = [r.unit_traces for r in results if r.unit_traces.size > 0]
+        unit_trace_arrays = [
+            _theta_idx_array(r.unit_traces) for r in results if r.unit_traces.size > 0
+        ]
         merged_unit_traces = (
-            xr.concat(unit_trace_arrays, dim="replicate")
+            xr.concat(unit_trace_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
             if unit_trace_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]
 
-        logLik_arrays = [r.logLiks for r in results if r.logLiks.size > 0]
+        logLik_arrays = [
+            _theta_idx_array(r.logLiks) for r in results if r.logLiks.size > 0
+        ]
         merged_logLiks = (
-            xr.concat(logLik_arrays, dim="replicate")
+            xr.concat(logLik_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
             if logLik_arrays
             else xr.DataArray([])
         )  # type: ignore[assignment]

@@ -115,6 +115,8 @@ def test_panel_dpop_train_adam(chunk_size):
     res = panel.results_history[-1]
     assert isinstance(res, PanelPompDpopTrainResult)
     assert res.method == "dpop_train"
+    assert res.shared_traces.dims == ("theta_idx", "iteration", "variable")
+    assert res.unit_traces.dims == ("theta_idx", "iteration", "variable", "unit")
     assert res.shared_traces.shape[0] == 1  # n_reps
     assert res.shared_traces.shape[1] == M + 1
     assert res.unit_traces.shape[0] == 1  # n_reps
@@ -227,6 +229,11 @@ def test_panel_dpop_train_to_dataframe():
     res = panel.results_history[-1]
     assert isinstance(res, PanelPompDpopTrainResult)
     df = res.to_dataframe()
+    tr = res.traces()
+    assert "theta_idx" in df.columns
+    assert "theta_idx" in tr.columns
+    assert "replicate" not in df.columns
+    assert "replicate" not in tr.columns
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns
 
@@ -307,8 +314,8 @@ def test_panel_dpop_train_params_change():
 
     res = panel.results_history[-1]
     unit_vars = [v for v in res.unit_traces.coords["variable"].values if v != "unitLogLik"]
-    initial = res.unit_traces.sel(replicate=0, iteration=0, variable=unit_vars).values
-    final = res.unit_traces.sel(replicate=0, iteration=M, variable=unit_vars).values
+    initial = res.unit_traces.sel(theta_idx=0, iteration=0, variable=unit_vars).values
+    final = res.unit_traces.sel(theta_idx=0, iteration=M, variable=unit_vars).values
     assert not np.allclose(initial, final), "Parameters should change after training"
 
 

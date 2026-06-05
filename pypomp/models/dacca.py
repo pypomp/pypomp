@@ -419,14 +419,14 @@ def _from_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def dacca(
+def dhaka(
     dt: float | None = 1 / 240, nstep: int | None = None, gamma: bool = False
 ) -> Pomp:
     """
-    Creates a POMP model for the Dacca cholera data.
+    Creates a POMP model for the Dhaka cholera data.
 
     This function constructs a Partially Observed Markov Process (POMP) model
-    for the Dacca cholera dataset. The model includes a stochastic process for
+    for the Dhaka cholera dataset. The model includes a stochastic process for
     the underlying disease dynamics and a measurement model for observed deaths.
 
     Arguments
@@ -472,7 +472,7 @@ def dacca(
     Returns
     -------
     Pomp
-        A POMP model object representing the Dacca cholera model.
+        A POMP model object representing the Dhaka cholera model.
     """
 
     rproc_func = _rproc_gamma if gamma else _rproc
@@ -484,7 +484,7 @@ def dacca(
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")
 
-    dacca_obj = Pomp(
+    dhaka_obj = Pomp(
         rinit=_rinit,
         rproc=rproc_func,
         dmeas=_dmeas,
@@ -499,4 +499,7 @@ def dacca(
         statenames=statenames,
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),
     )
-    return dacca_obj
+    return dhaka_obj
+
+
+dacca = dhaka

@@ -8,7 +8,7 @@ Example Models
 .. autosummary::
    :toctree: generated/
 
-   ~dacca
+   ~dhaka
    ~spx
    UKMeasles.Pomp
    ~LG

@@ -1,6 +1,6 @@
-﻿pypomp.models.dacca
+﻿pypomp.models.dhaka
 ===================
 
 .. currentmodule:: pypomp.models
 
-.. autofunction:: dacca
+.. autofunction:: dhaka

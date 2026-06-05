@@ -65,3 +65,8 @@ def test_dacca_dt():
     dacca_dt = pp.models.dacca(nstep=None, dt=1 / 240)
     eta = pp.LearningRate({param: 0.2 for param in dacca_dt.canonical_param_names})
     dacca_dt.train(J=2, M=1, eta=eta, key=jax.random.key(111))
+
+
+def test_dhaka_alias():
+    # Check that dhaka is an alias for dacca
+    assert pp.models.dhaka is pp.models.dacca

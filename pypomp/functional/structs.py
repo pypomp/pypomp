@@ -7,7 +7,7 @@ class PompStruct(NamedTuple):
     A lightweight, immutable JAX PyTree holding the static data and compiled
     simulator functions for a POMP model.
 
-    This object contains all the 'plumbing' necessary to evaluate the core
+    This object contains all the plumbing necessary to evaluate the core
     JAX algorithms (like pfilter, mif) purely functionally.
     """
 

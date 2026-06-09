@@ -7,13 +7,11 @@ Random Walk Standard Deviation
    :no-members:
 
 .. rubric:: Attributes
-.. autosummary::
-   :toctree: generated/
 
-   ~RWSigma.sigmas
-   ~RWSigma.init_names
-   ~RWSigma.not_init_names
-   ~RWSigma.all_names
+.. autoattribute:: RWSigma.sigmas
+.. autoattribute:: RWSigma.init_names
+.. autoattribute:: RWSigma.not_init_names
+.. autoattribute:: RWSigma.all_names
 
 
 .. rubric:: Methods

@@ -17,7 +17,7 @@ def pfilter(
     """
     This is a pure functional implementation of the particle filter, intended for
     users who need to compose it within custom JAX loops or higher-order
-    functions. For a more user-friendly (but non-functional) interface, see
+    functions. For a more user-friendly (but impurely-functional) interface, see
     :meth:`pypomp.core.pomp.Pomp.pfilter`.
 
     This implementation leverages JAX to efficiently vectorize the algorithm across

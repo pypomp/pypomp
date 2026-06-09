@@ -7,11 +7,31 @@
    :show-inheritance:
 
    
+   
+   .. rubric:: Attributes
 
+   
+   .. autoattribute:: PompMIFResult.J
+   .. autoattribute:: PompMIFResult.M
+   .. autoattribute:: PompMIFResult.a
+   .. autoattribute:: PompMIFResult.n_monitors
+   .. autoattribute:: PompMIFResult.rw_sd
+   .. autoattribute:: PompMIFResult.thresh
+   .. autoattribute:: PompMIFResult.traces_da
+   .. autoattribute:: PompMIFResult.theta
+   .. autoattribute:: PompMIFResult.method
+   .. autoattribute:: PompMIFResult.execution_time
+   .. autoattribute:: PompMIFResult.key
+   .. autoattribute:: PompMIFResult.timestamp
+   
+   
+
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~PompMIFResult.CLL
       ~PompMIFResult.ESS
@@ -20,26 +40,5 @@
       ~PompMIFResult.print_summary
       ~PompMIFResult.to_dataframe
       ~PompMIFResult.traces
-   
-   
-
-   
-   
-   .. rubric:: Attributes
-
-   .. autosummary::
-   
-      ~PompMIFResult.J
-      ~PompMIFResult.M
-      ~PompMIFResult.a
-      ~PompMIFResult.n_monitors
-      ~PompMIFResult.rw_sd
-      ~PompMIFResult.thresh
-      ~PompMIFResult.traces_da
-      ~PompMIFResult.theta
-      ~PompMIFResult.method
-      ~PompMIFResult.execution_time
-      ~PompMIFResult.key
-      ~PompMIFResult.timestamp
    
    

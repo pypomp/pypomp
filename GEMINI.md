@@ -15,6 +15,8 @@ You may need to run `source .venv/bin/activate && pip install -e .` first to upd
 
 DO NOT preemptively run tests at the beginning of a session. 
 DO NOT run tests unless you have made edits to the code already. 
+DO NOT run tests just to check that new doc strings work. 
+
 You can assume that the tests work at first unless the user explicitly tells you otherwise.
 
 ## Build and Package

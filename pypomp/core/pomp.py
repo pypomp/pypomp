@@ -71,10 +71,10 @@ class Pomp:
         Initial parameter(s) for the model. Accepts:
         - A single dictionary: dict[str, Numeric]
         - A list of dictionaries: list[dict[str, Numeric]]
-        - An existing PompParameters object
+        - An existing :class:`~pypomp.core.parameters.PompParameters` object
         Numeric values (e.g. jax.Array, int) are automatically coerced to
         standard Python floats for internal storage. Vectorized methods
-        (like pfilter) will run in parallel over list/PompParameters inputs.
+        (like pfilter) will run in parallel over list/:class:`~pypomp.core.parameters.PompParameters` inputs.
     statenames : list[str]
         List of all latent state variable names.
     t0 : float
@@ -87,7 +87,7 @@ class Pomp:
         Measurement density function (log-likelihood).
     rmeas : Callable, optional
         Measurement simulator function.
-    par_trans : ParTrans, optional
+    par_trans : :class:`~pypomp.core.par_trans.ParTrans`, optional
         Parameter transformation object used to move parameters
         between the natural space and the estimation space. Defaults to the identity transformation.
     covars : pd.DataFrame, optional
@@ -156,10 +156,10 @@ class Pomp:
     """Indices of accumulator state variables within the full state vector."""
 
     results_history: ResultsHistory
-    """History of results from `pfilter`, `mif`, and `train` calls."""
+    """A :class:`~pypomp.core.results.ResultsHistory` object storing the history of results from :meth:`pfilter`, :meth:`mif`, and :meth:`train` calls."""
 
     fresh_key: jax.Array | None
-    """Running a method that takes a key will store a fresh, unused key here."""
+    """Running a method that accepts a JAX PRNG key will store a fresh, unused key here."""
 
     metadata: ModelMetadata
     """Environment and version metadata initialized when this instance was built."""
@@ -300,6 +300,7 @@ class Pomp:
 
     @property
     def theta(self) -> PompParameters:
+        """The parameter object for the model."""
         return self._theta
 
     @theta.setter
@@ -444,7 +445,7 @@ class Pomp:
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple parameter sets simultaneously. Results are automatically stored in the
-        model's history and can be accessed using `self.results()`.
+        model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles
@@ -453,8 +454,8 @@ class Pomp:
                 Defaults to self.theta. Accepts:
                 - A single dictionary: dict[str, Numeric]
                 - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+                - An existing :class:`~pypomp.core.parameters.PompParameters` object
+                Providing a list or :class:`~pypomp.core.parameters.PompParameters` object enables faster, vectorized
                 execution across all parameter sets.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
@@ -470,7 +471,7 @@ class Pomp:
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-            None. Updates `self.results_history` with a `PompPFilterResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompPFilterResult` containing the log-likelihoods,
             and optionally the conditional log-likelihoods (CLL), effective sample size (ESS),
             filtered means, and prediction means if requested.
         """
@@ -609,12 +610,12 @@ class Pomp:
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple initial parameter sets simultaneously. Results are automatically stored in
-        the model's history and can be accessed using `self.results()`.
+        the model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            rw_sd (RWSigma): Random walk sigma object.
+            rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk sigma object.
             a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
@@ -622,8 +623,8 @@ class Pomp:
                 Defaults to self.theta. Accepts:
                 - A single dictionary: dict[str, Numeric]
                 - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+                - An existing :class:`~pypomp.core.parameters.PompParameters` object
+                Providing a list or :class:`~pypomp.core.parameters.PompParameters` object enables faster, vectorized
                 execution across all parameter sets.
             thresh (float): Resampling threshold. Defaults to 0.
             n_monitors (int): Number of particle filter runs to average for
@@ -632,7 +633,7 @@ class Pomp:
             track_time (bool): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-            None. Updates `self.results_history` with a `PompMIFResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompMIFResult` containing the log-likelihoods,
             parameter traces, and diagnostic information from the Iterated Filtering (IF2) run.
         """
         start_time = time.time()
@@ -772,34 +773,32 @@ class Pomp:
         track_time: bool = True,
     ) -> None:
         """
-        Optimizes model parameters using a differentiable particle filter and gradient-based methods.
+        Optimizes parameters for a continuous-state model using a differentiable particle filter and gradient-based methods.
 
-        This method performs Maximum Likelihood Estimation (MLE) by treating the particle filter
-        as a differentiable computational graph. It computes gradients of the log-likelihood
-        with respect to the parameters via reverse-mode automatic differentiation (using JAX),
-        and updates the parameters using optimizers (e.g., Adam, SGD).
+        This method performs Maximum Likelihood Estimation (MLE) using MOP, a differentiable particle filter for continuous-state POMPs. It computes gradients of the log-likelihood with respect to the parameters via reverse-mode automatic differentiation (using JAX), and updates the parameters using optimizers (e.g., Adam, SGD).
+
+        It bears repeating that this optimizer is only valid for continuous-state POMPs! For discrete-state models, use :meth:`Pomp.mif()` or :meth:`Pomp.dpop_train()`.
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple initial parameter sets simultaneously.
-        Results are automatically stored in the model's history and can be accessed using
-        `self.results()`.
+        Results are automatically stored in the model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (LearningRate): Learning rates per parameter as a LearningRate object.
+            eta (:class:`~pypomp.core.learning_rate.LearningRate`): Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (ThetaInput, optional): Parameters involved in the POMP model.
                 Defaults to self.theta. Accepts:
                 - A single dictionary: dict[str, Numeric]
                 - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+                - An existing :class:`~pypomp.core.parameters.PompParameters` object
+                Providing a list or :class:`~pypomp.core.parameters.PompParameters` object enables faster, vectorized
                 execution across all parameter sets.
-            optimizer (Optimizer, optional): The optimizer configuration object to use
-                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.Newton()`, `pp.FullMatrixAdam()`, etc.).
-                Defaults to `pp.Adam()`. Hyperparameters like learning rate scaling, line search
+            optimizer (:class:`~pypomp.core.optimizer.Optimizer`, optional): The optimizer configuration object to use
+                (e.g., `pypomp.Adam()`, `pypomp.SGD()`, `pypomp.Newton()`, `pypomp.FullMatrixAdam()`, etc.).
+                Defaults to `pypomp.Adam()`. Hyperparameters like learning rate scaling, line search
                 (`scale`, `ls`, `c`, `max_ls_itn`), gradient clipping (`clip_norm`), or Adam beta values
                 are configured directly inside the optimizer instance.
             alpha (float, optional): Discount factor for MOP.
@@ -812,7 +811,7 @@ class Pomp:
                 execution time.
 
         Returns:
-            None. Updates `self.results_history` with a `PompTrainResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompTrainResult` containing the log-likelihoods,
             parameter traces, and optimizer details from the training run.
         """
         start_time = time.time()
@@ -958,8 +957,8 @@ class Pomp:
             Number of particles.
         M : int
             Number of gradient steps.
-        eta : LearningRate
-            Learning rates per parameter as a LearningRate object.
+        eta : :class:`~pypomp.core.learning_rate.LearningRate`
+            Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
         alpha : float, default 0.8
@@ -1104,8 +1103,8 @@ class Pomp:
                 Defaults to self.theta. Accepts:
                 - A single dictionary: dict[str, Numeric]
                 - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+                - An existing :class:`~pypomp.core.parameters.PompParameters` object
+                Providing a list or :class:`~pypomp.core.parameters.PompParameters` object enables faster, vectorized
                 execution across all parameter sets.
             times (jax.Array, optional): Times at which to generate observations.
                 Defaults to self.ys.index.

@@ -148,9 +148,9 @@ class RWSigma:
 
     def __eq__(self, other) -> bool:
         """
-        Check equality with another RWSigma object.
+        Check equality with another :class:`~pypomp.core.rw_sigma.RWSigma` object.
 
-        Two RWSigma instances are equal if they have the same sigmas
+        Two :class:`~pypomp.core.rw_sigma.RWSigma` instances are equal if they have the same sigmas
         and init_names.
         """
         if not isinstance(other, type(self)):

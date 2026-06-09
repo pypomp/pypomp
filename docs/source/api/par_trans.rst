@@ -7,11 +7,10 @@ Parameter Transformations
    :no-members:
 
 .. rubric:: Attributes
-.. autosummary::
-   :toctree: generated/
 
-   ~ParTrans.to_est
-   ~ParTrans.from_est
+.. autoattribute:: ParTrans.to_est
+.. autoattribute:: ParTrans.from_est
+
 
 .. rubric:: Methods
 .. autosummary::

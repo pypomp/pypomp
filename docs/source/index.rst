@@ -8,6 +8,7 @@ pypomp documentation
 * Estimation, filtering, and inference for nonlinear, non-Gaussian POMP models via the particle filter
 * GPU support and just-in-time compilation via JAX, enabling significant speedups
 * New algorithms for model-fitting with gradient descent using improved gradient estimates
+* Support for both standard POMP models and panel POMP models
  
  
 Installation
@@ -17,12 +18,19 @@ You can install **pypomp** from PyPI:
  
 .. code-block:: bash
  
-    pip install pypomp
+    pip install pypomp              # install with core dependencies
+    pip install pypomp[benchmarks]  # install with packages for benchmarking
+    pip install pypomp[viz]         # install with plot dependencies
+
+To install the latest development branch:
+
+.. code-block:: bash
+
+    pip install git+https://github.com/pypomp/pypomp.git
  
 **pypomp** depends on **JAX**. 
 To take full advantage of GPU acceleration, we highly recommend installing the GPU-enabled version of JAX. 
 Please refer to the `JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_ for detailed instructions specific to your system.
-
 
   
 Getting started
@@ -31,12 +39,6 @@ Getting started
 * The `tutorials <https://pypomp.github.io/tutorials>`_ provide introductory explanations of POMP models and methods in pypomp.
 * The `quantitative tests <https://pypomp.github.io/quant>`_ provide sample code used for benchmarking package performance.
 * The `pypomp organization GitHub site <https://github.com/pypomp>`_ hosts source code and related projects.
-
-The main classes in pypomp are:
-
-* :class:`~pypomp.core.pomp.Pomp` - Core POMP model class
-* :class:`~pypomp.panel.panel.PanelPomp` - Panel POMP models for multiple units
-
 
 Contents
 --------

@@ -111,6 +111,18 @@ class PanelEstimationMixin(Base):
         unit: str,
         theta: PanelParameters | None = None,
     ) -> list[dict[str, float]]:
+        """
+        Get the parameter values for a specific unit across all replicates.
+
+        Args
+        ----
+        unit (str): The name of the unit to get the parameter values for.
+        theta (PanelParameters | None): The parameter values to get the parameter values for. If None, the parameter values of the panel will be used.
+
+        Returns
+        -------
+        list[dict[str, float]]: A list of dictionaries containing the parameter values for the specified unit across all replicates.
+        """
         theta = self._prepare_theta_input(theta)
 
         tll = theta.num_replicates()
@@ -225,20 +237,20 @@ class PanelEstimationMixin(Base):
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Base:
         """
-        Simulate the PanelPomp model.
+        Simulate the :class:`~pypomp.panel.panel.PanelPomp` model.
 
         Args:
             key (jax.Array): JAX random key.
-            theta (PanelParameters | dict | list, optional): Parameter sets to use.
+            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Parameter sets to use.
                 If None, uses `self.theta`.
             times (jax.Array, optional): Times at which to simulate the model.
                 If None, uses `self.times`.
             nsim (int, optional): Number of simulations to run.
-            as_pomp (bool, optional): If True, returns a new PanelPomp object containing the simulated
+            as_pomp (bool, optional): If True, returns a new :class:`~pypomp.panel.panel.PanelPomp` object containing the simulated
                 observations for the first parameter replicate and simulation, instead of DataFrames.
 
         Returns:
-            Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], PanelPomp]:
+            Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], :class:`~pypomp.panel.panel.PanelPomp`]:
                 If as_pomp is False, returns a tuple of (X_sims, Y_sims) DataFrames.
                 If as_pomp is True, returns a deep copy of the original model with simulated observations.
         """
@@ -374,12 +386,12 @@ class PanelEstimationMixin(Base):
         prediction_mean: bool = False,
     ) -> None:
         """
-        Run the particle filter (SMC) algorithm on the PanelPomp model.
+        Run the particle filter (SMC) algorithm on the :class:`~pypomp.panel.panel.PanelPomp` model.
 
         Args:
             J (int): Number of particles per unit.
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (PanelParameters | dict | list, optional): Parameter sets to use.
+            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Parameter sets to use.
                 If None, uses `self.theta`.
             thresh (float, optional): Resampling threshold. If 0.0, always resample.
             reps (int, optional): Number of replicates per parameter set.
@@ -390,7 +402,7 @@ class PanelEstimationMixin(Base):
             prediction_mean (bool, optional): Whether to compute prediction means.
 
         Returns:
-            None: Updates `self.theta.logLik_unit` and adds result to `self.results_history`.
+            None. Updates :attr:`self.theta.logLik_unit` and adds a :class:`~pypomp.core.results.PanelPompPFilterResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
@@ -577,15 +589,15 @@ class PanelEstimationMixin(Base):
         vmap_chunk_size: int | None = None,
     ) -> None:
         """
-        Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for PanelPomp.
+        Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for :class:`~pypomp.panel.panel.PanelPomp`.
 
         Args:
             J (int): Number of particles per unit.
             M (int): Number of iterations (cooling cycles).
-            rw_sd (RWSigma): Random walk standard deviations for parameter perturbations.
+            rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk standard deviations for parameter perturbations.
             a (float): Cooling factor (perturbation variance reduction per unit time).
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (PanelParameters | dict | list, optional): Initial parameter estimates.
+            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Initial parameter estimates.
                 If None, uses `self.theta`.
             thresh (float): Resampling threshold for the particle filter.
             n_monitors (int): Number of particle filter runs to average for
@@ -599,7 +611,7 @@ class PanelEstimationMixin(Base):
                 size does not evenly divide the number of units.
 
         Returns:
-            None: Updates `self.theta` with final estimates and adds result to `self.results_history`.
+            None. Updates :attr:`self.theta` with final estimates and adds a :class:`~pypomp.core.results.PanelPompMIFResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
@@ -877,22 +889,22 @@ class PanelEstimationMixin(Base):
         Args:
             J (int): Number of particles per unit.
             M (int): Number of training iterations.
-            eta (LearningRate): Learning rates per parameter as a LearningRate object.
+            eta (:class:`~pypomp.core.learning_rate.LearningRate`): Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
             chunk_size (int, optional): Number of units to process per
                 gradient calculation step.
-            optimizer (Optimizer, optional): The optimizer configuration object to use
+            optimizer (:class:`~pypomp.core.optimizer.Optimizer`, optional): The optimizer configuration object to use
                 (e.g., `pp.Adam()`, `pp.SGD()`, `pp.FullMatrixAdam()`, etc.). Defaults to `pp.Adam()`.
                 Hyperparameters like gradient clipping (`clip_norm`) or Adam beta values are
                 configured directly inside the optimizer instance.
             alpha (float, optional): Learning rate decay factor per iteration.
             key (jax.Array, optional): JAX PRNG key. If None, uses the
                 `fresh_key` attribute.
-            theta (PanelParameters, optional): Initial parameter estimates.
+            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
             alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
 
         Returns:
-            None: Updates `self.theta` and appends result to `self.results_history`.
+            None. Updates :attr:`self.theta` and adds a :class:`~pypomp.core.results.PanelPompTrainResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))

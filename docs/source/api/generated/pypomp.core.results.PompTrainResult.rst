@@ -7,11 +7,32 @@
    :show-inheritance:
 
    
+   
+   .. rubric:: Attributes
 
+   
+   .. autoattribute:: PompTrainResult.J
+   .. autoattribute:: PompTrainResult.M
+   .. autoattribute:: PompTrainResult.alpha
+   .. autoattribute:: PompTrainResult.alpha_cooling
+   .. autoattribute:: PompTrainResult.eta
+   .. autoattribute:: PompTrainResult.thresh
+   .. autoattribute:: PompTrainResult.traces_da
+   .. autoattribute:: PompTrainResult.optimizer
+   .. autoattribute:: PompTrainResult.theta
+   .. autoattribute:: PompTrainResult.method
+   .. autoattribute:: PompTrainResult.execution_time
+   .. autoattribute:: PompTrainResult.key
+   .. autoattribute:: PompTrainResult.timestamp
+   
+   
+
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~PompTrainResult.CLL
       ~PompTrainResult.ESS
@@ -20,27 +41,5 @@
       ~PompTrainResult.print_summary
       ~PompTrainResult.to_dataframe
       ~PompTrainResult.traces
-   
-   
-
-   
-   
-   .. rubric:: Attributes
-
-   .. autosummary::
-   
-      ~PompTrainResult.J
-      ~PompTrainResult.M
-      ~PompTrainResult.alpha
-      ~PompTrainResult.alpha_cooling
-      ~PompTrainResult.eta
-      ~PompTrainResult.thresh
-      ~PompTrainResult.traces_da
-      ~PompTrainResult.optimizer
-      ~PompTrainResult.theta
-      ~PompTrainResult.method
-      ~PompTrainResult.execution_time
-      ~PompTrainResult.key
-      ~PompTrainResult.timestamp
    
    

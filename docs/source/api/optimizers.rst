@@ -10,6 +10,7 @@ Optimizers
    :toctree: generated/
    :template: autosummary/optimizer_class.rst
 
+   Optimizer
    SGD
    Adam
    FullMatrixAdam

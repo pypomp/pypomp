@@ -65,7 +65,7 @@ class PompParameters(ParameterSet):
         Parameters for the model. Accepts:
         - A single dictionary: dict[str, Numeric]
         - A list of dictionaries: list[dict[str, Numeric]]
-        - An existing PompParameters object
+        - An existing :class:`~pypomp.core.parameters.PompParameters` object
     logLik : np.ndarray, optional
         A numpy array of log-likelihoods.
     estimation_scale : bool, optional
@@ -208,6 +208,15 @@ class PompParameters(ParameterSet):
 
     @property
     def logLik(self) -> np.ndarray:
+        """
+        Get or set the log-likelihoods for each parameter replicate.
+
+        Returns
+        -------
+        np.ndarray
+            A 1D numpy array of shape (n_replicates,) containing the log-likelihood
+            values.
+        """
         return self._logLik
 
     @logLik.setter
@@ -215,15 +224,52 @@ class PompParameters(ParameterSet):
         self._logLik = self._format_logLik(value, self.num_replicates())
 
     def to_jax_array_canonical(self) -> jax.Array:
+        """
+        Convert to a JAX array matching the canonical parameter names order.
+
+        Returns
+        -------
+        jax.Array
+            A JAX array of shape (n_reps, n_params).
+        """
         return self.to_jax_array(self._canonical_param_names)
 
     def num_replicates(self) -> int:
+        """
+        Return the number of parameter replicates.
+
+        Returns
+        -------
+        int
+            The number of replicates (J).
+        """
         return len(self._params)
 
     def num_params(self) -> int:
+        """
+        Return the number of canonical parameters.
+
+        Returns
+        -------
+        int
+            The number of parameters.
+        """
         return len(self._canonical_param_names)
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PompParameters":
+        """
+        Return a new PompParameters object with the specified replicate indices.
+
+        Parameters
+        ----------
+        indices : int, list of int, or slice
+            The replicate indices to select.
+
+        Returns
+        -------
+        PompParameters
+            A new parameter set containing only the selected replicates.
+        """
         if isinstance(indices, int):
             indices = [indices]
 
@@ -238,6 +284,14 @@ class PompParameters(ParameterSet):
         return self._child_PompParameters(subset_params, logLik=subset_logLik)
 
     def get_param_names(self) -> list[str]:
+        """
+        Return the list of parameter names contained in this parameter set.
+
+        Returns
+        -------
+        list of str
+            The parameter names.
+        """
         if not self._params:
             return []
         return list(self._canonical_param_names)
@@ -323,7 +377,7 @@ class PompParameters(ParameterSet):
         """
         Support indexing like theta[0] or theta[0:2] or theta[0]["param_name"].
         - Integer index: returns the dict at that position
-        - Slice: returns a new PompParameters object
+        - Slice: returns a new :class:`~pypomp.core.parameters.PompParameters` object
         """
         if isinstance(index, int):
             # Integer index: return the dict directly
@@ -345,7 +399,7 @@ class PompParameters(ParameterSet):
     def __mul__(self, n: int) -> "PompParameters":
         """
         Support replication like theta * 3.
-        Returns a new PompParameters with n copies of the parameter sets.
+        Returns a new :class:`~pypomp.core.parameters.PompParameters` with n copies of the parameter sets.
         """
         if not isinstance(n, int):
             return NotImplemented
@@ -368,7 +422,7 @@ class PompParameters(ParameterSet):
 
     def __eq__(self, other) -> bool:
         """
-        Check equality with another PompParameters object.
+        Check equality with another :class:`~pypomp.core.parameters.PompParameters` object.
         Two PompParameters are equal if their canonical parameter names and parameter sets are equal.
         """
         if not isinstance(other, type(self)):
@@ -390,7 +444,7 @@ class PompParameters(ParameterSet):
     @staticmethod
     def merge(*param_objs: "PompParameters") -> "PompParameters":
         """
-        Merge replications from an arbitrary number of PompParameters objects into a single PompParameters object.
+        Merge replications from an arbitrary number of :class:`~pypomp.core.parameters.PompParameters` objects into a single :class:`~pypomp.core.parameters.PompParameters` object.
         All objects must have the same canonical parameter names and estimation scale.
         Usage: `merged = PompParameters.merge(p1, p2, p3, ...)`
         """
@@ -425,11 +479,11 @@ class PanelParameters(ParameterSet):
 
     Parameters
     ----------
-    theta : PanelParameters | dict | list, optional
+    theta : :class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional
         Parameters for the panel model. Accepts:
         - A single dictionary with "shared" and "unit_specific" keys.
         - A list of such dictionaries.
-        - An existing PanelParameters object.
+        - An existing :class:`~pypomp.core.parameters.PanelParameters` object.
     logLik_unit : np.ndarray, optional
         A numpy array of unit-specific log-likelihoods.
     estimation_scale : bool, optional
@@ -619,6 +673,19 @@ class PanelParameters(ParameterSet):
 
     @property
     def logLik(self) -> np.ndarray:
+        """
+        Get the overall log-likelihood for each parameter replicate.
+
+        This is computed as the sum of unit-specific log-likelihoods over all units.
+        The setter is currently a no-op as unit-level log-likelihoods cannot be
+        uniquely inferred from the overall log-likelihood.
+
+        Returns
+        -------
+        np.ndarray
+            A 1D numpy array of shape (n_replicates,) containing the total
+            log-likelihood values.
+        """
         return self._logLik
 
     @logLik.setter
@@ -630,6 +697,15 @@ class PanelParameters(ParameterSet):
 
     @property
     def logLik_unit(self) -> np.ndarray:
+        """
+        Get or set the unit-specific log-likelihoods for each replicate.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D numpy array of shape (n_replicates, n_units) containing the
+            unit-specific log-likelihood values.
+        """
         return self._logLik_unit
 
     @logLik_unit.setter
@@ -639,6 +715,15 @@ class PanelParameters(ParameterSet):
 
     @property
     def theta(self):
+        """
+        Get or set the parameter dictionary or list of dictionaries.
+
+        Returns
+        -------
+        list of dict
+            A copy of the list of dictionaries representing the parameters,
+            where each dictionary has keys "shared" and "unit_specific".
+        """
         return self._theta.copy()
 
     @theta.setter
@@ -654,15 +739,47 @@ class PanelParameters(ParameterSet):
         self._logLik = self._logLik_unit.sum(axis=1)
 
     def num_replicates(self) -> int:
+        """
+        Return the number of parameter replicates.
+
+        Returns
+        -------
+        int
+            The number of replicates (J).
+        """
         return len(self._theta)
 
     def get_param_names(self) -> list[str]:
+        """
+        Return the list of canonical parameter names.
+
+        Returns
+        -------
+        list of str
+            The union of shared and unit-specific parameter names.
+        """
         return self._canonical_param_names
 
     def get_shared_param_names(self) -> list[str]:
+        """
+        Return the list of shared parameter names.
+
+        Returns
+        -------
+        list of str
+            The shared parameter names.
+        """
         return self._canonical_shared_param_names
 
     def get_unit_param_names(self) -> list[str]:
+        """
+        Return the list of unit-specific parameter names.
+
+        Returns
+        -------
+        list of str
+            The unit-specific parameter names.
+        """
         return self._canonical_unit_param_names
 
     def get_unit_names(self) -> list[str]:
@@ -678,6 +795,19 @@ class PanelParameters(ParameterSet):
         return []
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PanelParameters":
+        """
+        Return a new PanelParameters object with the specified replicate indices.
+
+        Parameters
+        ----------
+        indices : int, list of int, or slice
+            The replicate indices to select.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing only the selected replicates.
+        """
         if isinstance(indices, int):
             indices = [indices]
 
@@ -696,6 +826,23 @@ class PanelParameters(ParameterSet):
     def to_jax_array(
         self, param_names: list[str], unit_names: list[str] | None = None, **kwargs
     ) -> jax.Array:
+        """
+        Convert to a JAX array matching the order of param_names and unit_names.
+
+        Parameters
+        ----------
+        param_names : list of str
+            A list of canonical parameter names expected by the model.
+        unit_names : list of str, optional
+            The unit names to select. If None, unit names are inferred from the parameters.
+        **kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        jax.Array
+            A JAX array of shape (n_reps, n_units, n_params).
+        """
         reps = len(self._theta)
         if reps == 0:
             return jnp.empty((0, 0, 0))
@@ -773,6 +920,17 @@ class PanelParameters(ParameterSet):
         par_trans: ParTrans,
         direction: Literal["to_est", "from_est"] | None = None,
     ):
+        """
+        Transform the parameters to or from the estimation parameter space.
+
+        Parameters
+        ----------
+        par_trans : ParTrans
+            The parameter transformation object.
+        direction : {"to_est", "from_est"}, optional
+            The direction of transformation. If None, the direction is determined
+            automatically based on the current estimation_scale attribute.
+        """
         auto = direction is None
         if auto:
             direction = "from_est" if self.estimation_scale else "to_est"
@@ -786,6 +944,17 @@ class PanelParameters(ParameterSet):
             self.estimation_scale = not self.estimation_scale
 
     def prune(self, n: int = 1, refill: bool = True) -> None:
+        """
+        Replace internal parameter sets with the top `n` based on stored log-likelihoods.
+
+        Parameters
+        ----------
+        n : int, default 1
+            Number of top parameter sets to keep.
+        refill : bool, default True
+            If True, repeat the top `n` parameter sets to match the previous number
+            of replicates. If False, keep only the `n` sets.
+        """
         if not self._theta:
             return
 
@@ -866,6 +1035,14 @@ class PanelParameters(ParameterSet):
         self._logLik = new_ll_unit.sum(axis=1)
 
     def to_list(self) -> list[dict[str, pd.DataFrame | None]]:
+        """
+        Return the internal list of parameter dictionaries.
+
+        Returns
+        -------
+        list of dict
+            A list where each item is a dictionary with keys "shared" and "unit_specific".
+        """
         return self._theta.copy()
 
     @overload
@@ -958,7 +1135,7 @@ class PanelParameters(ParameterSet):
 
     def __eq__(self, other) -> bool:
         """
-        Check structural equality with another PanelParameters object.
+        Check structural equality with another :class:`~pypomp.core.parameters.PanelParameters` object.
         Two PanelParameters are equal if they have the same canonical
         parameter names, estimation scale, log-likelihoods, and
         per-replicate parameter DataFrames.
@@ -992,7 +1169,7 @@ class PanelParameters(ParameterSet):
     @staticmethod
     def merge(*param_objs: "PanelParameters") -> "PanelParameters":
         """
-        Merge replications from an arbitrary number of PanelParameters objects into a single PanelParameters object.
+        Merge replications from an arbitrary number of :class:`~pypomp.core.parameters.PanelParameters` objects into a single :class:`~pypomp.core.parameters.PanelParameters` object.
         All objects must have the same canonical parameter names, unit names, and estimation scale.
         Usage: `merged = PanelParameters.merge(p1, p2, p3, ...)`
         """

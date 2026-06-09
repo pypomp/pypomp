@@ -7,11 +7,33 @@
    :show-inheritance:
 
    
+   
+   .. rubric:: Attributes
 
+   
+   .. autoattribute:: PanelPompTrainResult.J
+   .. autoattribute:: PanelPompTrainResult.M
+   .. autoattribute:: PanelPompTrainResult.alpha
+   .. autoattribute:: PanelPompTrainResult.alpha_cooling
+   .. autoattribute:: PanelPompTrainResult.eta
+   .. autoattribute:: PanelPompTrainResult.theta
+   .. autoattribute:: PanelPompTrainResult.shared_traces
+   .. autoattribute:: PanelPompTrainResult.unit_traces
+   .. autoattribute:: PanelPompTrainResult.logLiks
+   .. autoattribute:: PanelPompTrainResult.optimizer
+   .. autoattribute:: PanelPompTrainResult.method
+   .. autoattribute:: PanelPompTrainResult.execution_time
+   .. autoattribute:: PanelPompTrainResult.key
+   .. autoattribute:: PanelPompTrainResult.timestamp
+   
+   
+
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~PanelPompTrainResult.CLL
       ~PanelPompTrainResult.ESS
@@ -20,28 +42,5 @@
       ~PanelPompTrainResult.print_summary
       ~PanelPompTrainResult.to_dataframe
       ~PanelPompTrainResult.traces
-   
-   
-
-   
-   
-   .. rubric:: Attributes
-
-   .. autosummary::
-   
-      ~PanelPompTrainResult.J
-      ~PanelPompTrainResult.M
-      ~PanelPompTrainResult.alpha
-      ~PanelPompTrainResult.alpha_cooling
-      ~PanelPompTrainResult.eta
-      ~PanelPompTrainResult.theta
-      ~PanelPompTrainResult.shared_traces
-      ~PanelPompTrainResult.unit_traces
-      ~PanelPompTrainResult.logLiks
-      ~PanelPompTrainResult.optimizer
-      ~PanelPompTrainResult.method
-      ~PanelPompTrainResult.execution_time
-      ~PanelPompTrainResult.key
-      ~PanelPompTrainResult.timestamp
    
    

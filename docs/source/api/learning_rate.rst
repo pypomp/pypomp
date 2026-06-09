@@ -7,10 +7,8 @@ Learning Rate
    :no-members:
 
 .. rubric:: Attributes
-.. autosummary::
-   :toctree: generated/
 
-   ~LearningRate.rates
+.. autoattribute:: LearningRate.rates
 
 
 .. rubric:: Methods

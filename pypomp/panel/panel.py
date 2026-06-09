@@ -29,21 +29,29 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
     Parameters
     ----------
-    Pomp_dict : dict[str, Pomp]
-        A dictionary mapping unit names to Pomp objects. Each Pomp object represents a single unit in the panel data.
+    Pomp_dict : dict[str, :class:`~pypomp.core.pomp.Pomp`]
+        A dictionary mapping unit names to :class:`~pypomp.core.pomp.Pomp` objects. Each :class:`~pypomp.core.pomp.Pomp` object represents a single unit in the panel data.
         The keys are used as unit identifiers.
-    theta : PanelParameters | dict | list, optional
-        A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
+    theta : :class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional
+        A :class:`~pypomp.core.parameters.PanelParameters` object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
     """
 
     unit_objects: dict[str, Pomp]
+    """A dictionary mapping unit names to their corresponding :class:`~pypomp.core.pomp.Pomp` objects."""
     theta: PanelParameters
+    """The parameters for the panel model represented as a :class:`~pypomp.core.parameters.PanelParameters` object."""
     results_history: ResultsHistory
+    """A :class:`~pypomp.core.results.ResultsHistory` object storing the history of results from method calls."""
     fresh_key: jax.Array | None
+    """Running a method that accepts a JAX PRNG key will store a fresh, unused key here."""
     metadata: ModelMetadata
+    """Environment and version metadata initialized when this instance was built."""
     canonical_param_names: list[str]
+    """All unique parameter names present in either the shared or unit-specific parameters."""
     canonical_shared_param_names: list[str]
+    """Parameter names of parameters with values shared across all units in the panel."""
     canonical_unit_param_names: list[str]
+    """Parameter names of parameters with values specific to individual units in the panel."""
 
     def __init__(
         self,
@@ -75,6 +83,14 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             self.unit_objects[unit].theta = None  # type: ignore
 
     def get_unit_names(self) -> list[str]:
+        """
+        Returns a list of the names of the units in the panel.
+
+        Returns
+        -------
+        list[str]
+            The names of the units in the panel.
+        """
         return list(self.unit_objects.keys())
 
     def print_metadata(self) -> None:

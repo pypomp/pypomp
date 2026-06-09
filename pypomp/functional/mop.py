@@ -13,7 +13,8 @@ def mop(
     """
     This is a pure functional implementation of the MOP differentiable particle
     filter, intended for users who need to compose it within custom JAX
-    loops or higher-order functions.
+    loops or higher-order functions. For a more user-friendly (but impurely-functional) interface
+    to train models using the MOP objective, see :meth:`pypomp.core.pomp.Pomp.train`.
 
     Unlike the standard particle filter (:func:`pypomp.functional.pfilter`), the MOP objective is specifically
     designed to be fully differentiable with respect to the model parameters. This allows

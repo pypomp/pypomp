@@ -113,8 +113,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with cosine decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with cosine decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")
@@ -151,8 +151,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with geometric decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with geometric decay applied.
         """
         if not (0 <= decay_rate <= 1):
             raise ValueError("decay_rate should be between 0 and 1")
@@ -186,8 +186,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with linear decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with linear decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")

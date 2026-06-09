@@ -7,11 +7,32 @@
    :show-inheritance:
 
    
+   
+   .. rubric:: Attributes
 
+   
+   .. autoattribute:: PompPFilterResult.CLL_da
+   .. autoattribute:: PompPFilterResult.ESS_da
+   .. autoattribute:: PompPFilterResult.J
+   .. autoattribute:: PompPFilterResult.filter_mean
+   .. autoattribute:: PompPFilterResult.prediction_mean
+   .. autoattribute:: PompPFilterResult.reps
+   .. autoattribute:: PompPFilterResult.thresh
+   .. autoattribute:: PompPFilterResult.logLiks
+   .. autoattribute:: PompPFilterResult.theta
+   .. autoattribute:: PompPFilterResult.method
+   .. autoattribute:: PompPFilterResult.execution_time
+   .. autoattribute:: PompPFilterResult.key
+   .. autoattribute:: PompPFilterResult.timestamp
+   
+   
+
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~PompPFilterResult.CLL
       ~PompPFilterResult.ESS
@@ -20,27 +41,5 @@
       ~PompPFilterResult.print_summary
       ~PompPFilterResult.to_dataframe
       ~PompPFilterResult.traces
-   
-   
-
-   
-   
-   .. rubric:: Attributes
-
-   .. autosummary::
-   
-      ~PompPFilterResult.CLL_da
-      ~PompPFilterResult.ESS_da
-      ~PompPFilterResult.J
-      ~PompPFilterResult.filter_mean
-      ~PompPFilterResult.prediction_mean
-      ~PompPFilterResult.reps
-      ~PompPFilterResult.thresh
-      ~PompPFilterResult.logLiks
-      ~PompPFilterResult.theta
-      ~PompPFilterResult.method
-      ~PompPFilterResult.execution_time
-      ~PompPFilterResult.key
-      ~PompPFilterResult.timestamp
    
    

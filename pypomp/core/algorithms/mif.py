@@ -6,7 +6,6 @@ from .helpers import _normalize_weights
 from .helpers import _keys_helper
 from .helpers import _resampler_thetas
 from .helpers import _no_resampler_thetas
-from .helpers import _geometric_cooling
 
 from .pfilter import _vmapped_pfilter_internal
 
@@ -28,7 +27,8 @@ def _mif_internal(
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
     M: int,  # static
-    a: float,
+    cooling_fn: Callable,  # static
+    m_offset: int | jax.Array,
     J: int,  # static
     thresh: float,
     key: jax.Array,
@@ -47,7 +47,7 @@ def _mif_internal(
         m, iter_key = scan_inputs
 
         next_theta_Jd, neg_loglik_per, ancestry = _perfilter_internal(
-            m,
+            m_offset + m,
             current_theta_Jd,
             iter_key,
             dt_array_extended=dt_array_extended,
@@ -64,7 +64,7 @@ def _mif_internal(
             accumvars=accumvars,
             covars_extended=covars_extended,
             thresh=thresh,
-            a=a,
+            cooling_fn=cooling_fn,
             return_ancestry=return_ancestry,
         )
 
@@ -130,16 +130,16 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 16 + (0,) + (None,) * 5,
+    in_axes=(1,) + (None,) * 17 + (0,) + (None,) * 5,
 )
 
 _jv_mif_internal = jit(
-    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 15, 18, 19, 20, 21, 22)
+    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16, 19, 20, 21, 22, 23)
 )
 
 
 def _perfilter_internal(
-    m: int,
+    m_current: int | jax.Array,
     thetas_Jd: jax.Array,
     key: jax.Array,
     dt_array_extended: jax.Array,
@@ -156,7 +156,7 @@ def _perfilter_internal(
     accumvars: jax.Array | None,
     covars_extended: jax.Array | None,
     thresh: float,
-    a: float,
+    cooling_fn: Callable,
     return_ancestry: bool,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
@@ -164,9 +164,7 @@ def _perfilter_internal(
     """
     loglik = jnp.array(0.0)
     key, subkey = jax.random.split(key)
-    sigmas_init_cooled = (
-        _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init
-    )
+    sigmas_init_cooled = cooling_fn(0, m_current, len(times)) * sigmas_init
     thetas_Jd = thetas_Jd + sigmas_init_cooled * jax.random.normal(
         shape=thetas_Jd.shape, key=subkey
     )
@@ -179,9 +177,9 @@ def _perfilter_internal(
     counts = jnp.ones(J, dtype=int)
 
     time_indices = jnp.arange(len(ys))
-    cooling_factors = jax.vmap(
-        lambda i: _geometric_cooling(nt=i, m=m, ntimes=len(times), a=a)
-    )(time_indices)
+    cooling_factors = jax.vmap(lambda i: cooling_fn(i, m_current, len(times)))(
+        time_indices
+    )
 
     all_keys = jax.random.split(key, num=len(ys) + 1)
     step_keys_raw = all_keys[1:]
@@ -363,7 +361,7 @@ def _panel_mif_internal(
     covars_per_unit: jax.Array | None,  # (U, ...) or None
     unit_param_permutations: jax.Array,  # (U, n_params)
     M: int,
-    a: float,
+    cooling_fn: Callable,
     J: int,
     U: int,
     thresh: float,
@@ -444,13 +442,6 @@ def _panel_mif_internal(
 
             subkey = unit_key
 
-            sigmas_init_u_cooled = (
-                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_init_u
-            )
-            sigmas_u_cooled = (
-                _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
-            )
-
             nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
                 thetas_u,
                 dt_array_extended,
@@ -461,12 +452,13 @@ def _panel_mif_internal(
                 rinitializers,
                 rprocesses_interp,
                 dmeasures,
-                sigmas_u_cooled,
-                sigmas_init_u_cooled,
+                sigmas_u,
+                sigmas_init_u,
                 accumvars,
                 covars_u,
                 1,
-                a,
+                cooling_fn,
+                m,
                 J,
                 thresh,
                 subkey,
@@ -593,6 +585,7 @@ _jv_panel_mif_internal = jit(
         8,  # rprocesses_interp
         9,  # dmeasures
         15,  # M
+        16,  # cooling_fn
         17,  # J
         18,  # U
         21,  # rinitializer_pf
@@ -622,7 +615,7 @@ def _panel_mif_internal_vmap(
     unit_param_permutations: jax.Array,  # (U_padded, n_params)
     unit_mask: jax.Array,  # (U_padded,) - 1.0 for real units, 0.0 for padding
     M: int,
-    a: float,
+    cooling_fn: Callable,
     J: int,
     U: int,  # U_padded
     thresh: float,
@@ -733,14 +726,6 @@ def _panel_mif_internal_vmap(
                 sigmas_u = sigmas[perm]
                 sigmas_init_u = sigmas_init[perm]
 
-                sigmas_init_u_cooled = (
-                    _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a)
-                    * sigmas_init_u
-                )
-                sigmas_u_cooled = (
-                    _geometric_cooling(nt=0, m=m, ntimes=len(times), a=a) * sigmas_u
-                )
-
                 nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
                     thetas_u,
                     dt_array_extended,
@@ -751,12 +736,13 @@ def _panel_mif_internal_vmap(
                     rinitializers,
                     rprocesses_interp,
                     dmeasures,
-                    sigmas_u_cooled,
-                    sigmas_init_u_cooled,
+                    sigmas_u,
+                    sigmas_init_u,
                     accumvars,
                     covars_u,
                     1,
-                    a,
+                    cooling_fn,
+                    m,
                     J,
                     thresh,
                     key_u,
@@ -916,6 +902,7 @@ _jv_panel_mif_internal_vmap = jit(
         8,  # rprocesses_interp
         9,  # dmeasures
         16,  # M
+        17,  # cooling_fn
         18,  # J
         19,  # U
         22,  # vmap_chunk_size

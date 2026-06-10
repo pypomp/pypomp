@@ -49,7 +49,7 @@ def test_dacca_pfilter(simple):
 def test_dacca_basic(simple):
     # Check whether dacca.mif() runs without error.
     dacca, rw_sd, J, key, ys = simple
-    dacca.mif(rw_sd=rw_sd, J=J, key=key, M=1, a=0.5)
+    dacca.mif(rw_sd=rw_sd.geometric_cooling(a=0.5), J=J, key=key, M=1)
 
 
 def test_dacca_nstep():

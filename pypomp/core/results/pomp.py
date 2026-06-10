@@ -138,8 +138,6 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
     """The number of iterations performed."""
     rw_sd: RWSigma | None = None
     """The random walk standard deviations for parameter perturbation."""
-    a: float = 0.0
-    """The cooling fraction used."""
     thresh: float = 0.0
     """The resampling threshold used."""
     n_monitors: int = 0
@@ -154,7 +152,6 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
             ("Number of parameter sets", "theta"),
             ("Number of particles (J)", "J"),
             ("Number of iterations (M)", "M"),
-            ("Cooling fraction (a)", "a"),
             ("Resampling threshold", "thresh"),
             ("Number of monitors", "n_monitors"),
         ]
@@ -164,7 +161,7 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
         return _merge_results(
             PompMIFResult,
             results,
-            ["J", "M", "a", "thresh", "n_monitors", "rw_sd", "method"],
+            ["J", "M", "thresh", "n_monitors", "rw_sd", "method"],
             ["traces_da"],
         )
 

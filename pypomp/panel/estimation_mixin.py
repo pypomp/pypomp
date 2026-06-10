@@ -575,7 +575,6 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         rw_sd: RWSigma,
-        a: float,
         key: jax.Array | None = None,
         theta: Union[
             PanelParameters,
@@ -595,7 +594,6 @@ class PanelEstimationMixin(Base):
             J (int): Number of particles per unit.
             M (int): Number of iterations (cooling cycles).
             rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk standard deviations for parameter perturbations.
-            a (float): Cooling factor (perturbation variance reduction per unit time).
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
             theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Initial parameter estimates.
                 If None, uses `self.theta`.
@@ -627,8 +625,6 @@ class PanelEstimationMixin(Base):
             raise ValueError("J should be greater than 0.")
         if M < 1:
             raise ValueError("M should be greater than 0.")
-        if a < 0 or a > 1:
-            raise ValueError("a should be between 0 and 1.")
 
         unit_names = self.get_unit_names()
         U = len(unit_names)
@@ -722,7 +718,7 @@ class PanelEstimationMixin(Base):
                 unit_param_permutations,
                 unit_mask,
                 M,
-                a,
+                rw_sd.cooling_fn,
                 J,
                 U_padded,
                 thresh,
@@ -761,7 +757,7 @@ class PanelEstimationMixin(Base):
                     covars_per_unit,
                     unit_param_permutations,
                     M,
-                    a,
+                    rw_sd.cooling_fn,
                     J,
                     U,
                     thresh,
@@ -847,7 +843,6 @@ class PanelEstimationMixin(Base):
             J=J,
             M=M,
             rw_sd=rw_sd,
-            a=a,
             thresh=thresh,
             n_monitors=n_monitors,
             block=block,

@@ -25,7 +25,7 @@ def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
 
     assert result.J == J
     assert result.M == M
-    assert result.a == a
+    assert result.rw_sd.a == a
     assert result.rw_sd == rw_sd
     assert isinstance(result.shared_traces, xr.DataArray)
     assert isinstance(result.unit_traces, xr.DataArray)
@@ -46,9 +46,12 @@ def test_mif(lg_panel_setup_some_shared):
     panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
@@ -73,9 +76,8 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
 
     panel.mif(
         J=J,
-        rw_sd=rw_sd,
+        rw_sd=rw_sd.geometric_cooling(a=a),
         M=M,
-        a=a,
         key=key,
         theta=original_theta,
     )
@@ -84,9 +86,8 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
     panel.results_history.clear()
     panel.mif(
         J=J,
-        rw_sd=rw_sd,
+        rw_sd=rw_sd.geometric_cooling(a=a),
         M=M,
-        a=a,
         key=key,
         theta=reordered_theta,
     )
@@ -195,10 +196,10 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     key = jax.random.key(42)
 
     # Run MIF on both
-    panel_shared.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
+    panel_shared.mif(J=J, M=M, rw_sd=measles_rw_sd.geometric_cooling(a=a), key=key)
     res_shared = panel_shared.results_history[-1]
 
-    panel_specific.mif(J=J, M=M, rw_sd=measles_rw_sd, a=a, key=key)
+    panel_specific.mif(J=J, M=M, rw_sd=measles_rw_sd.geometric_cooling(a=a), key=key)
     res_specific = panel_specific.results_history[-1]
 
     from pypomp.core.results.panel import PanelPompMIFResult
@@ -234,9 +235,12 @@ def test_mif_vmap_some_shared(lg_panel_setup_some_shared):
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=U)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_mif_vmap_specific_only(lg_panel_setup_specific_only):
@@ -245,9 +249,12 @@ def test_mif_vmap_specific_only(lg_panel_setup_specific_only):
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=U)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_mif_vmap_chunk_size_1(lg_panel_setup_some_shared):
@@ -255,9 +262,12 @@ def test_mif_vmap_chunk_size_1(lg_panel_setup_some_shared):
     panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=1)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=1)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_mif_vmap_with_padding(lg_panel_setup_some_shared):
@@ -269,9 +279,12 @@ def test_mif_vmap_with_padding(lg_panel_setup_some_shared):
     # U=2, so chunk_size=3 requires padding to 3
     chunk_size = U + 1
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=chunk_size)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=chunk_size)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_pif(lg_panel_setup_some_shared):
@@ -279,9 +292,12 @@ def test_pif(lg_panel_setup_some_shared):
     panel, rw_sd, key = lg_panel_setup_some_shared
     J, M, a = 2, 2, 0.5
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, block=False)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, block=False)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
 
 
 def test_pif_vmap(lg_panel_setup_some_shared):
@@ -290,6 +306,43 @@ def test_pif_vmap(lg_panel_setup_some_shared):
     J, M, a = 2, 2, 0.5
     U = len(panel.unit_objects)
     theta_orig = deepcopy(panel.theta)
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key, vmap_chunk_size=U, block=False)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U, block=False)
 
-    check_mif_result(panel.results_history[-1], panel, J, M, a, rw_sd, theta_orig)
+    check_mif_result(
+        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
+    )
+
+
+def test_panel_mif_cooling_schedules(lg_panel_setup_some_shared):
+    """Test Panel MIF with other cooling schedules."""
+    panel, rw_sd, key = lg_panel_setup_some_shared
+    J, M = 2, 2
+    U = len(panel.unit_objects)
+
+    # 1. Cosine cooling
+    rw_cos = rw_sd.cosine_cooling(0.1, M)
+    panel.results_history.clear()
+    panel.mif(J=J, M=M, rw_sd=rw_cos, key=key, vmap_chunk_size=U)
+    res_cos = panel.results_history[-1]
+    assert res_cos.rw_sd.a is None
+    assert res_cos.rw_sd == rw_cos
+
+    # 2. Hyperbolic cooling
+    rw_hyp = rw_sd.hyperbolic_cooling(0.5)
+    panel.results_history.clear()
+    panel.mif(J=J, M=M, rw_sd=rw_hyp, key=key)
+    res_hyp = panel.results_history[-1]
+    assert res_hyp.rw_sd.a is None
+    assert res_hyp.rw_sd == rw_hyp
+
+    # 3. Custom cooling
+    def custom_fn(nt, m, ntimes):
+        return 0.8 ** (nt / ntimes + m)
+
+    rw_cust = rw_sd.custom_cooling(custom_fn)
+    panel.results_history.clear()
+    panel.mif(J=J, M=M, rw_sd=rw_cust, key=key, vmap_chunk_size=U)
+    res_cust = panel.results_history[-1]
+    assert res_cust.rw_sd.a is None
+    assert res_cust.rw_sd == rw_cust

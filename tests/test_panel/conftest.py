@@ -114,7 +114,7 @@ def measles_panel_mp_module(measles_panel_setup_specific_only_module):
     J = 2
     M = 2
     a = 0.5
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
     panel.pfilter(J=J)
     results_history = panel.results_history
     fresh_key = panel.fresh_key
@@ -256,7 +256,7 @@ def lg_panel_mp_module(lg_panel_setup_some_shared_module):
     J = 2
     M = 2
     a = 0.5
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
     panel.pfilter(J=J)
     results_history = deepcopy(panel.results_history)
     fresh_key = panel.fresh_key

@@ -202,8 +202,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
     """The number of iterations performed."""
     rw_sd: RWSigma | None = None
     """The random walk standard deviations for parameter perturbation."""
-    a: float = 0.0
-    """The cooling fraction used."""
     thresh: float = 0.0
     """The resampling threshold used."""
     n_monitors: int = 0
@@ -220,7 +218,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
             ("Number of parameter sets", "theta"),
             ("Number of particles (J)", "J"),
             ("Number of iterations (M)", "M"),
-            ("Cooling fraction (a)", "a"),
             ("Resampling threshold", "thresh"),
             ("Number of monitors", "n_monitors"),
             ("Block", "block"),
@@ -231,7 +228,7 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
         return _merge_results(
             PanelPompMIFResult,
             results,
-            ["J", "M", "a", "thresh", "n_monitors", "block", "rw_sd", "method"],
+            ["J", "M", "thresh", "n_monitors", "block", "rw_sd", "method"],
             ["shared_traces", "unit_traces", "logLiks"],
         )
 

@@ -143,8 +143,7 @@ def test_measles_mif(london, default_rw_sd):
         J=DEFAULT_J,
         key=DEFAULT_KEY,
         M=DEFAULT_M,
-        rw_sd=default_rw_sd,
-        a=DEFAULT_A,
+        rw_sd=default_rw_sd.geometric_cooling(a=DEFAULT_A),
     )
 
 

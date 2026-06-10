@@ -97,9 +97,9 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
     rw_sd = pp.RWSigma(
         sigmas={k: 0.0 for k in all_param_names},
         init_names=[],
-    )
+    ).geometric_cooling(0.5)
 
-    panel.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
+    panel.mif(J=2, M=1, rw_sd=rw_sd, key=jax.random.key(42))
 
     final_shared = [
         panel.theta.theta[i].get("shared")

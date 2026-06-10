@@ -1,6 +1,8 @@
 {
   "exclude": [
-    "**/.venv"
+    "**/.venv",
+    "scratch",
+    "dist"
   ],
   "typeCheckingMode": "standard",
   "pythonVersion": "3.12"

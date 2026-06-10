@@ -593,7 +593,6 @@ class Pomp:
         J: int,
         M: int,
         rw_sd: RWSigma,
-        a: float,
         key: jax.Array | None = None,
         theta: ThetaInput = None,
         thresh: float = 0,
@@ -616,7 +615,6 @@ class Pomp:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
             rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk sigma object.
-            a (float): Decay factor for RWSigma over 50 iterations.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
             theta (ThetaInput, optional): Parameters involved in the POMP model.
@@ -678,7 +676,7 @@ class Pomp:
             sigmas_array,
             sigmas_init_array,
             M,
-            a,
+            rw_sd.cooling_fn,
             J,
             thresh,
             keys,
@@ -751,7 +749,6 @@ class Pomp:
             J=J,
             M=M,
             rw_sd=rw_sd,
-            a=a,
             thresh=thresh,
             n_monitors=n_monitors,
         )

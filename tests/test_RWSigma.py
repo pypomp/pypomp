@@ -36,9 +36,9 @@ class TestRWSigma:
         rw_sigma = pp.RWSigma(sigmas, init_names)
 
         assert rw_sigma.sigmas == sigmas
-        assert rw_sigma.init_names == init_names
-        assert rw_sigma.not_init_names == expected_not_init
-        assert rw_sigma.all_names == expected_all
+        assert rw_sigma.init_names == tuple(init_names)
+        assert rw_sigma.not_init_names == tuple(expected_not_init)
+        assert rw_sigma.all_names == tuple(expected_all)
 
     @pytest.mark.parametrize(
         "sigmas,init_names,expected_error",
@@ -183,9 +183,9 @@ class TestRWSigma:
             {"a": 1.0, "b": 2.0}, ["a"]
         )
         assert sigmas == {"a": 1.0, "b": 2.0}
-        assert init_names == ["a"]
-        assert not_init_names == ["b"]
-        assert all_names == ["b", "a"]
+        assert init_names == ("a",)
+        assert not_init_names == ("b",)
+        assert all_names == ("b", "a")
 
     @pytest.mark.parametrize(
         "sigmas, init_names, expected_error",
@@ -234,12 +234,179 @@ class TestRWSigma:
 
     def test_cool(self):
         rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
-        rw_sigma.cool(0.5)
-        assert rw_sigma.sigmas == {"param1": 0.05, "param2": 0.1}
+        new_rw_sigma = rw_sigma.cool(0.5)
+        assert rw_sigma.sigmas == {"param1": 0.1, "param2": 0.2}
+        assert new_rw_sigma.sigmas == {"param1": 0.05, "param2": 0.1}
+
+    def test_copy(self):
+        rw = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"]).geometric_cooling(0.3)
+        rw_copy = rw.copy()
+        assert rw_copy == rw
+        assert rw_copy is not rw
+        assert rw_copy.sigmas is not rw.sigmas
+        assert rw_copy.sigmas == rw.sigmas
+        assert rw_copy.init_names == rw.init_names
 
     def test_cool_invalid_factor(self):
         rw_sigma = pp.RWSigma({"param1": 0.1}, [])
-        with pytest.raises(ValueError, match="factor should be between 0 and 1"):
-            rw_sigma.cool(1.1)
-        with pytest.raises(ValueError, match="factor should be between 0 and 1"):
+        with pytest.raises(ValueError, match="factor must be >= 0"):
             rw_sigma.cool(-0.1)
+
+    def test_cooling_schedules(self):
+        import numpy as np
+
+        sigmas = {"param1": 0.1}
+        # 1. Default init has geometric cooling with a=0.5
+        rw = pp.RWSigma(sigmas)
+        assert rw.a == 0.5
+        factor = 0.5 ** (1 / 50)
+        assert np.isclose(rw.cooling_fn(10, 5, 20), factor ** (10 / 20 + 5 - 1))
+
+        # 2. geometric_cooling
+        rw_geom = rw.geometric_cooling(0.3)
+        assert rw_geom.a == 0.3
+        f_geom = rw_geom.cooling_fn(0, 0, 50)
+        assert np.isclose(f_geom, (0.3 ** (1 / 50)) ** -1)
+
+        # 3. cosine_cooling
+        rw_cos = rw.cosine_cooling(0.1, 10)
+        assert rw_cos.a is None
+        # progress = (nt/ntimes + m) / M = (5/10 + 2) / 10 = 0.25
+        # cos(pi * 0.25) = cos(pi/4) = sqrt(2)/2 approx 0.7071
+        # cooling factor = 0.1 + (1 - 0.1) * 0.5 * (1 + 0.7071)
+        f_cos = rw_cos.cooling_fn(5, 2, 10)
+        expected_cos = 0.1 + 0.9 * 0.5 * (1.0 + np.cos(np.pi * 0.25))
+        assert np.isclose(f_cos, expected_cos)
+
+        # 4. hyperbolic_cooling
+        rw_hyper = rw.hyperbolic_cooling(0.2)
+        assert rw_hyper.a is None
+        # factor = 1 / (1 + 0.2 * (nt/ntimes + m))
+        # nt=5, m=2, ntimes=10 => (nt/ntimes + m) = 2.5
+        # factor = 1 / (1 + 0.2 * 2.5) = 1 / (1 + 0.5) = 1 / 1.5 = 2/3
+        f_hyper = rw_hyper.cooling_fn(5, 2, 10)
+        assert np.isclose(f_hyper, 1.0 / 1.5)
+
+        # 5. custom_cooling
+        def custom_fn(nt, m, ntimes):
+            return float(nt + m + ntimes)
+
+        rw_custom = rw.custom_cooling(custom_fn)
+        assert rw_custom.a is None
+        assert rw_custom.cooling_fn(5, 2, 10) == 17.0
+
+    def test_cooling_fn_equality(self):
+        sigmas = {"param1": 0.1}
+        rw1 = pp.RWSigma(sigmas).geometric_cooling(0.5)
+        rw2 = pp.RWSigma(sigmas).geometric_cooling(0.5)
+        assert rw1 == rw2
+
+        rw3 = pp.RWSigma(sigmas).geometric_cooling(0.3)
+        assert rw1 != rw3
+
+        # Cosine cooling
+        rw_cos1 = rw1.cosine_cooling(0.1, 10)
+        rw_cos2 = rw2.cosine_cooling(0.1, 10)
+        assert rw_cos1 == rw_cos2
+
+        rw_cos3 = rw1.cosine_cooling(0.2, 10)
+        assert rw_cos1 != rw_cos3
+
+        # Hyperbolic cooling
+        rw_hyp1 = rw1.hyperbolic_cooling(0.5)
+        rw_hyp2 = rw2.hyperbolic_cooling(0.5)
+        assert rw_hyp1 == rw_hyp2
+
+        rw_hyp3 = rw1.hyperbolic_cooling(0.3)
+        assert rw_hyp1 != rw_hyp3
+
+        # Custom cooling - same function instance
+        def fn_same(nt, m, ntimes):
+            return 2.0
+
+        rw_cust1 = rw1.custom_cooling(fn_same)
+        rw_cust2 = rw2.custom_cooling(fn_same)
+        assert rw_cust1 == rw_cust2
+
+        # Custom cooling - different function instances defined on different lines are not equal
+        def fn_other(nt, m, ntimes):
+            return 2.0
+
+        rw_cust3 = rw1.custom_cooling(fn_other)
+        assert rw_cust1 != rw_cust3
+
+        # Test closures (different function instances created on the same line by a factory)
+        def make_fn(x):
+            def fn(nt, m, ntimes):
+                return float(x)
+
+            return fn
+
+        fn_a = make_fn(5)
+        fn_b = make_fn(5)
+        fn_c = make_fn(6)
+
+        rw_cust_a = rw1.custom_cooling(fn_a)
+        rw_cust_b = rw2.custom_cooling(fn_b)
+        rw_cust_c = rw1.custom_cooling(fn_c)
+
+        assert rw_cust_a == rw_cust_b
+        assert rw_cust_a != rw_cust_c
+
+    def test_pickle(self):
+        import pickle
+        import numpy as np
+
+        sigmas = {"param1": 0.1}
+        rw = pp.RWSigma(sigmas)
+
+        for rw_obj in [
+            rw,
+            rw.geometric_cooling(0.3),
+            rw.cosine_cooling(0.1, 10),
+            rw.hyperbolic_cooling(0.5),
+        ]:
+            pickled = pickle.dumps(rw_obj)
+            unpickled = pickle.loads(pickled)
+            assert unpickled == rw_obj
+            # Verify reconstructed cooling_fn works
+            assert np.isclose(
+                unpickled.cooling_fn(5, 2, 10), rw_obj.cooling_fn(5, 2, 10)
+            )
+
+    def test_container_methods(self):
+        """Test dictionary-like container operations."""
+        rw = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
+        
+        # __getitem__
+        assert rw["param1"] == 0.1
+        assert rw["param2"] == 0.2
+        with pytest.raises(KeyError):
+            _ = rw["param3"]
+
+        # __contains__
+        assert "param1" in rw
+        assert "param3" not in rw
+
+        # __len__
+        assert len(rw) == 2
+
+        # __iter__
+        assert list(rw) == ["param2", "param1"]
+
+        # keys, values, items
+        assert list(rw.keys()) == ["param1", "param2"]
+        assert list(rw.values()) == [0.1, 0.2]
+        assert list(rw.items()) == [("param1", 0.1), ("param2", 0.2)]
+
+        # get
+        assert rw.get("param1") == 0.1
+        assert rw.get("param3") is None
+        assert rw.get("param3", 0.5) == 0.5
+
+    def test_string_representations(self):
+        """Test __str__ and __repr__ representations."""
+        rw = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
+        expected_str = "RWSigma(sigmas={'param1': 0.1, 'param2': 0.2}, init_names=('param1',), cooling='geometric')"
+        assert str(rw) == expected_str
+        assert repr(rw) == expected_str

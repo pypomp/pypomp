@@ -91,13 +91,18 @@ def test_mif_functional(model_setup):
     # thetas_array for mif needs to be (J, n_reps, n_params)
     thetas_mif = jnp.repeat(thetas_array[jnp.newaxis, ...], J, axis=0)
 
+    a_val = 0.5
+    factor = a_val ** (1 / 50)
+    def cooling_fn(nt, m, ntimes):
+        return factor ** (nt / ntimes + m - 1)
+
     neg_logliks_M, thetas_traces_Md, final_theta_Jd = F.mif(
         struct,
         thetas_mif,
         sigmas,
         sigmas,
         M=M,
-        a=0.5,
+        cooling_fn=cooling_fn,
         J=J,
         thresh=0.0,
         keys=keys,

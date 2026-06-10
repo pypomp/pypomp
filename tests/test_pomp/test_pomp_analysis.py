@@ -9,8 +9,8 @@ def test_plot_traces_happy_path():
     LG = pp.models.LG()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names}, init_names=[]
-    )
-    LG.mif(J=2, M=2, a=0.5, rw_sd=rw_sd, key=jax.random.key(0))
+    ).geometric_cooling(a=0.5)
+    LG.mif(J=2, M=2, rw_sd=rw_sd, key=jax.random.key(0))
     LG.pfilter(J=2)
 
     fig = LG.plot_traces(show=False)

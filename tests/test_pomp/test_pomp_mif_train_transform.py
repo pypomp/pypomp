@@ -54,15 +54,13 @@ def test_mif_traces_transformed(simple_pomp_with_transform):
     initial_theta = [{k: v for k, v in theta.items()} for theta in LG.theta]
 
     # Set up mif parameters with zero random walk standard deviation
-    # This means parameters should be transformed to perturbation scale,
-    # remain unchanged, and then transformed back to natural scale
     rw_sd = pp.RWSigma(
         sigmas={k: 0.0 for k in LG.canonical_param_names},
         init_names=[],
-    )
+    ).geometric_cooling(a=0.5)
 
     # Run mif with zero rw_sd - parameters should remain unchanged
-    LG.mif(J=2, M=1, rw_sd=rw_sd, a=0.5, key=jax.random.key(42))
+    LG.mif(J=2, M=1, rw_sd=rw_sd, key=jax.random.key(42))
 
     # Check that parameters are unchanged
     for rep_idx in range(len(LG.theta)):

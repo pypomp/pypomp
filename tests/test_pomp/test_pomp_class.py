@@ -12,7 +12,7 @@ def setup():
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names},
         init_names=[],
-    )
+    ).geometric_cooling(0.5)
     rw_sd.sigmas["R4"] = 0.0
     return {
         "LG": LG,
@@ -40,7 +40,7 @@ def neapolitan_setup(setup):
     LG = setup["LG"]
     p = setup
     LG.pfilter(J=p["J"], reps=1, key=p["key"])
-    LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
+    LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], key=p["key"])
     LG.train(
         J=p["J"],
         M=1,
@@ -83,7 +83,7 @@ def test_theta_carryover(model, method):
     LG, p = model
     theta_order = list(LG.theta[0].keys())
     if method == "mif":
-        LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], a=p["a"], key=p["key"])
+        LG.mif(J=p["J"], rw_sd=p["rw_sd"], M=p["M"], key=p["key"])
     else:
         LG.train(
             J=p["J"],
@@ -195,7 +195,7 @@ def test_merge(setup):
 
     for obj, k in [(LG1, k1), (LG2, k2)]:
         obj.pfilter(theta=p["theta"], J=p["J"], reps=1, key=k)
-        obj.mif(J=p["J"], M=p["M"], rw_sd=p["rw_sd"], a=p["a"])
+        obj.mif(J=p["J"], M=p["M"], rw_sd=p["rw_sd"])
         obj.train(
             J=p["J"],
             M=1,

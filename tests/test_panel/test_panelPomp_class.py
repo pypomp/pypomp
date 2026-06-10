@@ -5,6 +5,7 @@ import pypomp as pp
 import numpy as np
 import pickle
 import time
+from typing import Any
 
 
 def test_get_unit_parameters(lg_panel_setup_some_shared):
@@ -288,8 +289,7 @@ def test_performance_comprehensive():
                     "unit_param1": 0.1,
                     "unit_param2": 0.1,
                 }
-            ),
-            a=0.1,
+            ).geometric_cooling(0.1),
             thresh=0.0,
             block=True,
         )
@@ -523,10 +523,11 @@ def test_merge(lg_panel_setup_some_shared):
     J = 2
     M = 2
     a = 0.5
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
     panel1.pfilter(J=J, key=key1)
-    panel1.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key1)
+    panel1.mif(J=J, M=M, rw_sd=rw_sd_cooled, key=key1)
     panel2.pfilter(J=J, key=key2)
-    panel2.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key2)
+    panel2.mif(J=J, M=M, rw_sd=rw_sd_cooled, key=key2)
 
     n_reps1 = len(panel1.theta)
     n_reps2 = len(panel2.theta)
@@ -543,9 +544,9 @@ def test_merge(lg_panel_setup_some_shared):
 
     # Verify merged results have combined replications
     for i in range(len(merged.results_history)):
-        merged_result = merged.results_history[i]
-        result1 = panel1.results_history[i]
-        result2 = panel2.results_history[i]
+        merged_result: Any = merged.results_history[i]
+        result1: Any = panel1.results_history[i]
+        result2: Any = panel2.results_history[i]
 
         # Verify algorithmic parameters match
         assert merged_result.J == result1.J == result2.J == J
@@ -555,8 +556,8 @@ def test_merge(lg_panel_setup_some_shared):
             assert merged_result.reps == result1.reps == result2.reps
         elif merged_result.method == "mif":
             assert merged_result.M == result1.M == result2.M == M
-            assert merged_result.a == result1.a == result2.a == a
-            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd
+            assert merged_result.rw_sd.a == result1.rw_sd.a == result2.rw_sd.a == a
+            assert merged_result.rw_sd == result1.rw_sd == result2.rw_sd == rw_sd_cooled
             assert merged_result.block == result1.block == result2.block
 
         # Check that merged result has combined replications

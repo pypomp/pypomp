@@ -1,4 +1,5 @@
 import jax
+from typing import Callable
 from .structs import PompStruct
 from ..core.algorithms.mif import _jv_mif_internal
 
@@ -9,7 +10,7 @@ def mif(
     sigmas_array: jax.Array,
     sigmas_init_array: jax.Array,
     M: int,
-    a: float,
+    cooling_fn: Callable | float,
     J: int,
     thresh: float,
     keys: jax.Array,
@@ -31,7 +32,7 @@ def mif(
         sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
         sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
         M (int): Number of iterations.
-        a (float): Cooling factor.
+        cooling_fn (Callable | float): Cooling function taking (nt, m, ntimes) or float cooling factor.
         J (int): Number of particles.
         thresh (float): Resampling threshold.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
@@ -58,7 +59,8 @@ def mif(
         struct.accumvars,
         struct.covars_extended,
         M,
-        a,
+        cooling_fn,
+        0,
         J,
         thresh,
         keys,

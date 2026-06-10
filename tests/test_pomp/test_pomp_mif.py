@@ -8,6 +8,7 @@ import pypomp as pp
 def simple_setup():
     # Set default values for tests
     LG = pp.models.LG()
+    a = 0.5
     rw_sd = pp.RWSigma(
         sigmas={
             "A11": 0.02,
@@ -26,31 +27,29 @@ def simple_setup():
             "R22": 0.0,
         },
         init_names=[],
-    )
+    ).geometric_cooling(a)
     J = 2
     key = jax.random.key(111)
-    a = 0.5
     M = 2
     theta = LG.theta
-    return LG, rw_sd, J, key, a, M, theta
+    return LG, rw_sd, J, key, M, theta
 
 
 @pytest.fixture(scope="function")
 def simple(simple_setup):
-    LG, rw_sd, J, key, a, M, theta = simple_setup
+    LG, rw_sd, J, key, M, theta = simple_setup
     LG.results_history.clear()
     LG.theta = theta
-    return LG, rw_sd, J, key, a, M
+    return LG, rw_sd, J, key, M
 
 
 def test_class_mif_basic(simple):
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
     for J, M in [(J, 2), (100, 10)]:
         LG.mif(
             J=J,
             M=M,
             rw_sd=rw_sd,
-            a=a,
             key=key,
         )
         mif_out1 = LG.results_history[-1]
@@ -68,13 +67,12 @@ def test_class_mif_basic(simple):
 
 
 def test_class_mif_sigmas_array(simple):
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
     # check that sigmas array input works
     LG.mif(
         rw_sd=rw_sd,
         J=J,
         M=M,
-        a=a,
         key=key,
     )
     mif_out2 = LG.results_history[-1]
@@ -91,7 +89,7 @@ def test_class_mif_sigmas_array(simple):
 
 
 def test_mif_order_of_sigmas_consistency(simple):
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
     theta = LG.theta
 
     param_names = LG.canonical_param_names
@@ -99,17 +97,18 @@ def test_mif_order_of_sigmas_consistency(simple):
     base_sigma = 0.01
     unique_sigmas = [base_sigma + 0.001 * i for i in range(len(param_names))]
     sigmas_dict = {k: v for k, v in zip(param_names, unique_sigmas)}
-    rw_sd_orig = pp.RWSigma(sigmas=sigmas_dict, init_names=[])
+    rw_sd_orig = pp.RWSigma(sigmas=sigmas_dict, init_names=[]).geometric_cooling(0.5)
 
     reversed_param_names = list(reversed(param_names))
     sigmas_dict_reversed = {k: sigmas_dict[k] for k in reversed_param_names}
-    rw_sd_reversed = pp.RWSigma(sigmas=sigmas_dict_reversed, init_names=[])
+    rw_sd_reversed = pp.RWSigma(
+        sigmas=sigmas_dict_reversed, init_names=[]
+    ).geometric_cooling(0.5)
     LG.mif(
         theta=theta,
         J=J,
         M=M,
         rw_sd=rw_sd_orig,
-        a=a,
         key=key,
     )
     traces_ref = LG.results_history[-1].traces_da
@@ -121,7 +120,6 @@ def test_mif_order_of_sigmas_consistency(simple):
         J=J,
         M=M,
         rw_sd=rw_sd_reversed,
-        a=a,
         key=key,
     )
     traces_rev = LG.results_history[-1].traces_da
@@ -144,7 +142,7 @@ def test_mif_order_of_sigmas_consistency(simple):
 
 
 def test_order_of_parameters_consistency(simple):
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
     # check that the order of parameters in the theta dict does not affect the results
     theta_orig = LG.theta[0]
 
@@ -156,7 +154,6 @@ def test_order_of_parameters_consistency(simple):
         J=J,
         M=M,
         rw_sd=rw_sd,
-        a=a,
         key=key,
         theta=theta_orig,
     )
@@ -168,7 +165,6 @@ def test_order_of_parameters_consistency(simple):
         J=J,
         M=M,
         rw_sd=rw_sd,
-        a=a,
         key=key,
         theta=theta_reordered,
     )
@@ -200,12 +196,11 @@ def test_order_of_parameters_consistency(simple):
 
 
 def test_invalid_mif_input(simple):
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
     with pytest.raises(ValueError):
         LG.mif(
             rw_sd=rw_sd,
             M=M,
-            a=a,
             J=-1,
             key=key,
         )
@@ -213,7 +208,7 @@ def test_invalid_mif_input(simple):
 
 def test_mif_invalid_theta_and_rw_sd_keys(simple):
     """theta or rw_sd with non-canonical keys should raise an error."""
-    LG, rw_sd, J, key, a, M = simple
+    LG, rw_sd, J, key, M = simple
 
     # Bad theta: wrong parameter names
     bad_theta = {"not_a_param": 1.0}
@@ -221,12 +216,45 @@ def test_mif_invalid_theta_and_rw_sd_keys(simple):
         ValueError,
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
-        LG.mif(J=J, M=M, rw_sd=rw_sd, a=a, key=key, theta=bad_theta)
+        LG.mif(J=J, M=M, rw_sd=rw_sd, key=key, theta=bad_theta)
 
     # Bad rw_sd: sigmas keys not matching canonical_param_names
-    bad_rw_sd = pp.RWSigma(sigmas={"not_a_param": 0.1}, init_names=[])
+    bad_rw_sd = pp.RWSigma(
+        sigmas={"not_a_param": 0.1}, init_names=[]
+    ).geometric_cooling(0.5)
     with pytest.raises(
         ValueError,
         match="rw_sd.sigmas keys must match canonical_param_names up to reordering.* ",
     ):
-        LG.mif(J=J, M=M, rw_sd=bad_rw_sd, a=a, key=key)
+        LG.mif(J=J, M=M, rw_sd=bad_rw_sd, key=key)
+
+
+def test_mif_cooling_schedules(simple):
+    LG, rw_sd, J, key, M = simple
+
+    # 1. Cosine cooling
+    rw_cos = rw_sd.cosine_cooling(0.1, M)
+    LG.results_history.clear()
+    LG.mif(J=J, M=M, rw_sd=rw_cos, key=key)
+    res_cos = LG.results_history[-1]
+    assert res_cos.rw_sd.a is None
+    assert res_cos.rw_sd == rw_cos
+
+    # 2. Hyperbolic cooling
+    rw_hyp = rw_sd.hyperbolic_cooling(0.5)
+    LG.results_history.clear()
+    LG.mif(J=J, M=M, rw_sd=rw_hyp, key=key)
+    res_hyp = LG.results_history[-1]
+    assert res_hyp.rw_sd.a is None
+    assert res_hyp.rw_sd == rw_hyp
+
+    # 3. Custom cooling function
+    def custom_fn(nt, m, ntimes):
+        return 0.8 ** (nt / ntimes + m)
+
+    rw_cust = rw_sd.custom_cooling(custom_fn)
+    LG.results_history.clear()
+    LG.mif(J=J, M=M, rw_sd=rw_cust, key=key)
+    res_cust = LG.results_history[-1]
+    assert res_cust.rw_sd.a is None
+    assert res_cust.rw_sd == rw_cust

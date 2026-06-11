@@ -6,7 +6,7 @@ import xarray as xr
 import numpy as np
 import time
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
+from typing import TYPE_CHECKING, cast, Callable, overload, Literal
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
@@ -37,10 +37,6 @@ class PanelEstimationMixin(Base):
     Handles Simulation, Particle Filtering, and MIF algorithms.
     """
 
-    fresh_key: jax.Array | None
-    theta: "PanelParameters"  # From TYPE_CHECKING or imports
-    unit_objects: dict[str, "Pomp"]
-
     def _update_fresh_key(
         self, key: jax.Array | None = None
     ) -> tuple[jax.Array, jax.Array]:
@@ -70,21 +66,16 @@ class PanelEstimationMixin(Base):
 
     def _prepare_theta_input(
         self,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ],
+        theta: PanelParameters | None,
     ) -> PanelParameters:
-        """Convert various theta inputs to PanelParameters."""
-        if isinstance(theta, PanelParameters):
-            return theta
+        """Convert theta input to PanelParameters."""
         if theta is None:
             if self.theta is None:
                 raise ValueError("theta must be provided or self.theta must exist")
             return self.theta
-        return PanelParameters(theta=theta)
+        if not isinstance(theta, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance or None")
+        return theta
 
     def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
         unit_canonical = self.unit_objects[unit_name].canonical_param_names
@@ -128,8 +119,9 @@ class PanelEstimationMixin(Base):
         tll = theta.num_replicates()
         params: list[dict[str, float]] = [{} for _ in range(tll)]
 
+        theta_list = theta.params()
         for i in range(tll):
-            theta_dict = theta.theta[i]
+            theta_dict = theta_list[i]
             if theta_dict["shared"] is not None:
                 params[i].update(
                     cast(dict[str, float], theta_dict["shared"].iloc[:, 0].to_dict())
@@ -148,7 +140,7 @@ class PanelEstimationMixin(Base):
         n: int,
         key: jax.Array,
         shared_names: list[str] | None = None,
-    ) -> list[dict[str, pd.DataFrame | None]]:
+    ) -> PanelParameters:
         """
         Sample parameters for PanelPomp models.
 
@@ -160,52 +152,67 @@ class PanelEstimationMixin(Base):
             shared_names (list[str], optional): List of shared parameter names. If None, all parameters are considered unit-specific.
 
         Returns:
-            list[dict[str, pd.DataFrame | None]]: List of n dictionaries containing sampled parameters. Each dictionary contains "shared" and "unit_specific" keys mapping to DataFrames or None.
+            PanelParameters: A PanelParameters object containing the sampled parameters.
         """
-        shared = shared_names or []
+        shared = list(shared_names or [])
         specific = [k for k in param_bounds if k not in shared]
-        keys = jax.random.split(key, n)
 
-        def _sample(k, names, n_cols):
-            if not names:
-                return None
-            # Create arrays of shape (n_params, 1) for broadcasting
-            low = jnp.array([param_bounds[p][0] for p in names])[:, None]
-            high = jnp.array([param_bounds[p][1] for p in names])[:, None]
-            # Sample (n_params, n_cols)
-            return low + jax.random.uniform(k, (len(names), n_cols)) * (high - low)
+        key_s, key_u = jax.random.split(key)
 
-        results = []
-        for i in range(n):
-            k_s, k_u = jax.random.split(keys[i])
-            s_arr = _sample(k_s, shared, 1)
-            u_arr = _sample(k_u, specific, len(units))
-
-            results.append(
-                {
-                    "shared": pd.DataFrame(
-                        s_arr, index=pd.Index(shared), columns=pd.Index(["shared"])
-                    )
-                    if shared
-                    else None,
-                    "unit_specific": pd.DataFrame(
-                        u_arr, index=pd.Index(specific), columns=pd.Index(units)
-                    )
-                    if specific
-                    else None,
-                }
+        if shared:
+            low_s = jnp.array([param_bounds[p][0] for p in shared])
+            high_s = jnp.array([param_bounds[p][1] for p in shared])
+            s_samples = jax.random.uniform(
+                key_s, (n, len(shared)), minval=low_s, maxval=high_s
             )
+            shared_values = np.array(s_samples)
+        else:
+            shared_values = np.empty((n, 0))
 
-        return results
+        if specific:
+            low_u = jnp.array([param_bounds[p][0] for p in specific])
+            high_u = jnp.array([param_bounds[p][1] for p in specific])
+            low_u_3d = low_u[jnp.newaxis, jnp.newaxis, :]
+            high_u_3d = high_u[jnp.newaxis, jnp.newaxis, :]
+            u_samples = jax.random.uniform(
+                key_u, (n, len(units), len(specific)), minval=low_u_3d, maxval=high_u_3d
+            )
+            unit_specific_values = np.array(u_samples)
+        else:
+            unit_specific_values = np.empty((n, len(units), 0))
+
+        shared_da = xr.DataArray(
+            shared_values,
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n),
+                "parameter": shared,
+            },
+        )
+        unit_specific_da = xr.DataArray(
+            unit_specific_values,
+            dims=["theta_idx", "unit", "parameter"],
+            coords={
+                "theta_idx": np.arange(n),
+                "unit": units,
+                "parameter": specific,
+            },
+        )
+        ds = xr.Dataset(
+            data_vars={
+                "shared": shared_da,
+                "unit_specific": unit_specific_da,
+            }
+        )
+        ds.attrs["shared_names"] = shared
+        ds.attrs["unit_specific_names"] = specific
+        return PanelParameters(ds)
 
     @overload
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: Literal[False] = False,
@@ -215,10 +222,7 @@ class PanelEstimationMixin(Base):
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         *,
@@ -228,10 +232,7 @@ class PanelEstimationMixin(Base):
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
@@ -241,7 +242,7 @@ class PanelEstimationMixin(Base):
 
         Args:
             key (jax.Array): JAX random key.
-            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Parameter sets to use.
+            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Parameter sets to use.
                 If None, uses `self.theta`.
             times (jax.Array, optional): Times at which to simulate the model.
                 If None, uses `self.times`.
@@ -269,10 +270,13 @@ class PanelEstimationMixin(Base):
         new_unit_objects: dict[str, "Pomp"] = {}
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, theta=theta)
+            from ..core.parameters import PompParameters
+
+            theta_obj = PompParameters(theta_list)
             key, subkey = jax.random.split(key)
             result = obj.simulate(
                 key=subkey,
-                theta=theta_list,
+                theta=theta_obj,
                 times=times,
                 nsim=nsim,
                 as_pomp=as_pomp,
@@ -306,12 +310,7 @@ class PanelEstimationMixin(Base):
         probes: dict[str, Callable[[pd.DataFrame], float]],
         key: jax.Array,
         nsim: int = 100,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters | None = None,
     ) -> pd.DataFrame:
         """
         Evaluate probe statistics on the model's true data and simulated data for each unit.
@@ -326,7 +325,7 @@ class PanelEstimationMixin(Base):
 
         Returns:
             pd.DataFrame: A long-format DataFrame with columns:
-                `probe`, `value`, `is_real_data`, `replicate`, `sim`, `unit`
+                `probe`, `value`, `is_real_data`, `theta_idx`, `sim`, `unit`
         """
         sim_result = self.simulate(nsim=nsim, key=key, theta=theta)
         assert isinstance(sim_result, tuple)
@@ -371,12 +370,7 @@ class PanelEstimationMixin(Base):
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters | None = None,
         thresh: float = 0.0,
         reps: int = 1,
         chunk_size: int = 1,
@@ -391,7 +385,7 @@ class PanelEstimationMixin(Base):
         Args:
             J (int): Number of particles per unit.
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Parameter sets to use.
+            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Parameter sets to use.
                 If None, uses `self.theta`.
             thresh (float, optional): Resampling threshold. If 0.0, always resample.
             reps (int, optional): Number of replicates per parameter set.
@@ -576,12 +570,7 @@ class PanelEstimationMixin(Base):
         M: int,
         rw_sd: RWSigma,
         key: jax.Array | None = None,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters | None = None,
         thresh: float = 0,
         n_monitors: int = 0,
         block: bool = True,
@@ -595,7 +584,7 @@ class PanelEstimationMixin(Base):
             M (int): Number of iterations (cooling cycles).
             rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk standard deviations for parameter perturbations.
             key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (:class:`~pypomp.core.parameters.PanelParameters` | dict | list, optional): Initial parameter estimates.
+            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Initial parameter estimates.
                 If None, uses `self.theta`.
             thresh (float): Resampling threshold for the particle filter.
             n_monitors (int): Number of particle filter runs to average for
@@ -865,12 +854,7 @@ class PanelEstimationMixin(Base):
         optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         key: jax.Array | None = None,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters | None = None,
         alpha_cooling: float = 1.0,
     ):
         """
@@ -939,7 +923,7 @@ class PanelEstimationMixin(Base):
 
         n_reps = theta_obj_in.num_replicates()
 
-        theta_list = theta_obj_in.theta
+        theta_list = theta_obj_in.params()
         if not theta_obj_in.estimation_scale:
             theta_list = [
                 {
@@ -1151,7 +1135,7 @@ class PanelEstimationMixin(Base):
 
         logLik_unit_out = np.full((n_reps, U), np.nan)
 
-        self.theta.theta = theta_list_out
+        self.theta.set_params(theta_list_out)
         self.theta.logLik_unit = logLik_unit_out
         self.theta.estimation_scale = False
 

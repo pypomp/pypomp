@@ -181,6 +181,7 @@ def LG(
         0, index=np.arange(1, T + 1, dtype=float), columns=pd.Index(["Y1", "Y2"])
     )
 
+    from pypomp.core.parameters import PompParameters
     LG_obj_temp = Pomp(
         rinit=_rinit,
         rproc=_rproc,
@@ -190,7 +191,7 @@ def LG(
         t0=0.0,
         nstep=1,
         dt=None,
-        theta=theta,
+        theta=PompParameters(theta),
         covars=None,
         statenames=["X1", "X2"],
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),

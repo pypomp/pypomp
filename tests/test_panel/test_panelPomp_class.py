@@ -145,7 +145,7 @@ def test_sample_params(lg_panel_setup_some_shared):
         key=key,
         shared_names=shared_names,
     )
-    assert isinstance(param_sets, list)
+    assert isinstance(param_sets, pp.PanelParameters)
     assert len(param_sets) == 2
 
     # Check that shared_param_sets DataFrames have correct index and column in correct order
@@ -197,12 +197,14 @@ def test_performance_comprehensive():
         ys = pd.DataFrame({"cases": np.random.poisson(10, 10)}, index=times)
         pomp_obj = pp.Pomp(
             ys=ys,
-            theta={
-                "param1": 1.0,
-                "param2": 2.0,
-                "unit_param1": 0.5,
-                "unit_param2": 0.5,
-            },
+            theta=pp.PompParameters(
+                {
+                    "param1": 1.0,
+                    "param2": 2.0,
+                    "unit_param1": 0.5,
+                    "unit_param2": 0.5,
+                }
+            ),
             statenames=["S", "I"],
             t0=float(times[0]),
             rinit=lambda theta_, key, covars, t0: {"S": 1000, "I": 1},
@@ -227,7 +229,9 @@ def test_performance_comprehensive():
     # Create panel
     panel = pp.PanelPomp(
         Pomp_dict=pomp_objects,
-        theta=[{"shared": shared_params, "unit_specific": unit_specific_params}],
+        theta=pp.PanelParameters(
+            [{"shared": shared_params, "unit_specific": unit_specific_params}]
+        ),
     )
 
     # Create comprehensive dummy results to stress test
@@ -349,14 +353,14 @@ def test_prune(lg_panel_mp):
     assert initial_n_reps > 1, "Need multiple replicates to test prune"
 
     # Store initial parameter lists
-    initial_shared_len = len(panel.theta._theta) if panel.theta._theta else 0
+    initial_shared_len = len(panel.theta.params()) if panel.theta.params() else 0
 
     # Store original parameters from results_history for comparison
     original_results = panel.results_history[-1]
     original_theta = original_results.theta
     if original_theta is not None:
-        original_shared = [t.get("shared") for t in original_theta._theta]
-        original_unit_specific = [t.get("unit_specific") for t in original_theta._theta]
+        original_shared = [t.get("shared") for t in original_theta.params()]
+        original_unit_specific = [t.get("unit_specific") for t in original_theta.params()]
     else:
         original_shared = None
         original_unit_specific = None
@@ -365,7 +369,7 @@ def test_prune(lg_panel_mp):
     panel.prune(n=1, refill=False)
 
     # Check that theta has been updated to length 1
-    assert len(panel.theta._theta) == 1
+    assert len(panel.theta.params()) == 1
 
     # Verify that the pruned parameters match the top replicate
     # Get the top replicate index from original results
@@ -378,19 +382,19 @@ def test_prune(lg_panel_mp):
         # Check that pruned parameters match the top replicate
         if original_shared is not None:
             top_shared = original_shared[top_idx]
-            current_shared = panel.theta._theta[0].get("shared")
+            current_shared = panel.theta.params()[0].get("shared")
             if top_shared is not None and current_shared is not None:
                 pd.testing.assert_frame_equal(current_shared, top_shared)
 
         if original_unit_specific is not None:
             top_unit_specific = original_unit_specific[top_idx]
-            current_unit_specific = panel.theta._theta[0].get("unit_specific")
+            current_unit_specific = panel.theta.params()[0].get("unit_specific")
             if top_unit_specific is not None and current_unit_specific is not None:
                 pd.testing.assert_frame_equal(current_unit_specific, top_unit_specific)
 
     # Test refill functionality
     # Restore to initial state from results_history
-    panel.theta._theta = (
+    panel.theta.set_params(
         [
             {
                 "shared": s.copy() if s is not None else None,
@@ -406,18 +410,18 @@ def test_prune(lg_panel_mp):
     panel.prune(n=1, refill=True)
 
     # Check that lists are refilled to original length
-    assert len(panel.theta._theta) == initial_shared_len
+    assert len(panel.theta.params()) == initial_shared_len
     # All entries should be the same (repeated top replicate)
     if initial_shared_len > 1:
-        first_shared = panel.theta._theta[0].get("shared")
-        first_unit_specific = panel.theta._theta[0].get("unit_specific")
+        first_shared = panel.theta.params()[0].get("shared")
+        first_unit_specific = panel.theta.params()[0].get("unit_specific")
         for i in range(1, initial_shared_len):
             if first_shared is not None:
-                current_shared = panel.theta._theta[i].get("shared")
+                current_shared = panel.theta.params()[i].get("shared")
                 assert isinstance(current_shared, pd.DataFrame)
                 pd.testing.assert_frame_equal(current_shared, first_shared)
             if first_unit_specific is not None:
-                current_unit_specific = panel.theta._theta[i].get("unit_specific")
+                current_unit_specific = panel.theta.params()[i].get("unit_specific")
                 assert isinstance(current_unit_specific, pd.DataFrame)
                 pd.testing.assert_frame_equal(
                     current_unit_specific, first_unit_specific
@@ -440,13 +444,13 @@ def test_mix_and_match(lg_panel_mp):
     # Make deep copies of the DataFrames before they get modified
     original_shared = [
         t.get("shared").copy(deep=True) if t.get("shared") is not None else None
-        for t in original_theta._theta
+        for t in original_theta.params()
     ]
     original_unit_specific = [
         t.get("unit_specific").copy(deep=True)
         if t.get("unit_specific") is not None
         else None
-        for t in original_theta._theta
+        for t in original_theta.params()
     ]
     unit_names = list(panel.unit_objects.keys())
 
@@ -463,11 +467,11 @@ def test_mix_and_match(lg_panel_mp):
     }
 
     panel.mix_and_match()
-    assert len(panel.theta._theta) == initial_n_reps
+    assert len(panel.theta.params()) == initial_n_reps
 
     # Helper to verify a replicate has correct mixed parameters
     def verify_replicate(rep_idx, rank_idx):
-        new_shared = panel.theta.theta[rep_idx].get("shared")
+        new_shared = panel.theta.params()[rep_idx].get("shared")
         orig_shared = original_shared[shared_ranks[rank_idx]]
         if isinstance(new_shared, pd.DataFrame) and isinstance(
             orig_shared, pd.DataFrame
@@ -477,7 +481,7 @@ def test_mix_and_match(lg_panel_mp):
             raise AssertionError(f"Mismatch: {type(new_shared)} vs {type(orig_shared)}")
 
         if original_unit_specific:
-            new_spec = panel.theta.theta[rep_idx].get("unit_specific")
+            new_spec = panel.theta.params()[rep_idx].get("unit_specific")
             if isinstance(new_spec, pd.DataFrame):
                 for unit in unit_names:
                     orig_df = original_unit_specific[unit_ranks[unit][rank_idx]]
@@ -499,9 +503,9 @@ def test_mix_and_match(lg_panel_mp):
 
     if (
         original_unit_specific is not None
-        and panel.theta._theta[0].get("unit_specific") is not None
+        and panel.theta.params()[0].get("unit_specific") is not None
     ):
-        new_spec = panel.theta._theta[0]["unit_specific"]
+        new_spec = panel.theta.params()[0]["unit_specific"]
         for unit in unit_names:
             orig_df = original_unit_specific[0]
             if orig_df is not None and new_spec is not None:

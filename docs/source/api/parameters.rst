@@ -17,7 +17,7 @@ Parameters
    ~PompParameters.num_params
    ~PompParameters.subset
    ~PompParameters.get_param_names
-   ~PompParameters.to_list
+   ~PompParameters.params
    ~PompParameters.transform
    ~PompParameters.prune
    ~PompParameters.merge
@@ -31,7 +31,7 @@ Parameters
 
    ~PanelParameters.logLik
    ~PanelParameters.logLik_unit
-   ~PanelParameters.theta
+   ~PanelParameters.params
    ~PanelParameters.num_replicates
    ~PanelParameters.get_param_names
    ~PanelParameters.get_shared_param_names

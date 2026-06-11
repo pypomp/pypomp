@@ -17,9 +17,9 @@
    .. autoattribute:: PompPFilterResult.filter_mean
    .. autoattribute:: PompPFilterResult.prediction_mean
    .. autoattribute:: PompPFilterResult.reps
+   .. autoattribute:: PompPFilterResult.theta
    .. autoattribute:: PompPFilterResult.thresh
    .. autoattribute:: PompPFilterResult.logLiks
-   .. autoattribute:: PompPFilterResult.theta
    .. autoattribute:: PompPFilterResult.method
    .. autoattribute:: PompPFilterResult.execution_time
    .. autoattribute:: PompPFilterResult.key

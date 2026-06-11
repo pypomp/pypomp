@@ -13,7 +13,7 @@ def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
     assert hasattr(result, "unit_traces")
     assert hasattr(result, "logLiks")
 
-    theta_list1, theta_list2 = result.theta.to_list(), theta_orig.to_list()
+    theta_list1, theta_list2 = result.theta.params(), theta_orig.params()
     assert len(theta_list1) == len(theta_list2)
     for d1, d2 in zip(theta_list1, theta_list2):
         for k in ["shared", "unit_specific"]:
@@ -66,9 +66,9 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
 
     original_theta = deepcopy(panel.theta)
     reordered_theta = deepcopy(panel.theta)
-    reordered_theta.theta = list(reversed(reordered_theta.theta))
+    reordered_theta.set_params(list(reversed(reordered_theta.params())))
 
-    for t_dict in reordered_theta.theta:
+    for t_dict in reordered_theta.params():
         if t_dict["shared"] is not None:
             t_dict["shared"] = t_dict["shared"].iloc[::-1]
         if t_dict["unit_specific"] is not None:
@@ -156,7 +156,7 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     reversed_london_params = {
         k: london_params_orig[k] for k in reversed(list(london_params_orig.keys()))
     }
-    london.theta = reversed_london_params
+    london.theta = pp.PompParameters(reversed_london_params)
 
     # Define some parameters to toggle between shared and unit-specific
     toggled_params = ["gamma", "cohort"]
@@ -177,7 +177,7 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
 
     panel_shared = pp.PanelPomp(
         Pomp_dict={"London": london},
-        theta={"shared": shared_df, "unit_specific": specific_df},
+        theta=pp.PanelParameters({"shared": shared_df, "unit_specific": specific_df}),
     )
 
     # 2. Setup Panel with toggled parameters as UNIT-SPECIFIC
@@ -189,7 +189,7 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
 
     panel_specific = pp.PanelPomp(
         Pomp_dict={"London": london},
-        theta={"shared": None, "unit_specific": all_specific_df},
+        theta=pp.PanelParameters({"shared": None, "unit_specific": all_specific_df}),
     )
 
     J, M, a = 2, 3, 0.5

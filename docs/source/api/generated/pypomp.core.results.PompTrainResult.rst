@@ -16,10 +16,10 @@
    .. autoattribute:: PompTrainResult.alpha
    .. autoattribute:: PompTrainResult.alpha_cooling
    .. autoattribute:: PompTrainResult.eta
+   .. autoattribute:: PompTrainResult.theta
    .. autoattribute:: PompTrainResult.thresh
    .. autoattribute:: PompTrainResult.traces_da
    .. autoattribute:: PompTrainResult.optimizer
-   .. autoattribute:: PompTrainResult.theta
    .. autoattribute:: PompTrainResult.method
    .. autoattribute:: PompTrainResult.execution_time
    .. autoattribute:: PompTrainResult.key

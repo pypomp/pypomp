@@ -238,9 +238,10 @@ class UKMeasles:
         }[model]
 
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
+        from pypomp.core.parameters import PompParameters
         return Pomp(
             ys=dat_filtered,
-            theta=theta,
+            theta=PompParameters(theta),
             covars=covar_df,
             t0=t0,
             nstep=None,

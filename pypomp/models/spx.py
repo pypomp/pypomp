@@ -145,9 +145,10 @@ def spx():
         - covars: Covariates used in the model. In this case, the log returns of the S&P 500 stock index at the previous time step.
     """
     assert isinstance(sp500, pd.DataFrame)
+    from pypomp.core.parameters import PompParameters
     return Pomp(
         ys=sp500,
-        theta=theta,
+        theta=PompParameters(theta),
         t0=0.0,
         nstep=1,
         dt=None,

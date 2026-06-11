@@ -13,12 +13,11 @@
    
    .. autoattribute:: PompMIFResult.J
    .. autoattribute:: PompMIFResult.M
-   .. autoattribute:: PompMIFResult.a
    .. autoattribute:: PompMIFResult.n_monitors
    .. autoattribute:: PompMIFResult.rw_sd
+   .. autoattribute:: PompMIFResult.theta
    .. autoattribute:: PompMIFResult.thresh
    .. autoattribute:: PompMIFResult.traces_da
-   .. autoattribute:: PompMIFResult.theta
    .. autoattribute:: PompMIFResult.method
    .. autoattribute:: PompMIFResult.execution_time
    .. autoattribute:: PompMIFResult.key

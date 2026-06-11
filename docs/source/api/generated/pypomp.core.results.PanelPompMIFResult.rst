@@ -13,7 +13,6 @@
    
    .. autoattribute:: PanelPompMIFResult.J
    .. autoattribute:: PanelPompMIFResult.M
-   .. autoattribute:: PanelPompMIFResult.a
    .. autoattribute:: PanelPompMIFResult.block
    .. autoattribute:: PanelPompMIFResult.n_monitors
    .. autoattribute:: PanelPompMIFResult.rw_sd

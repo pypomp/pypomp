@@ -1,4 +1,5 @@
 import jax
+import numpy as np
 import pickle
 import pypomp as pp
 import pytest
@@ -73,6 +74,7 @@ def test_results(neapolitan_setup):
 def test_sample_params():
     bounds = {"R0": (0.0, 100.0), "sigma": (0.0, 100.0), "gamma": (0.0, 100.0)}
     params = pp.Pomp.sample_params(bounds, 10, jax.random.key(1))
+    assert isinstance(params, pp.PompParameters)
     assert len(params) == 10
     assert list(params[0].keys()) == list(bounds.keys())
 
@@ -130,7 +132,7 @@ def test_pickle_by_value():
 
     pomp = pp.Pomp(
         ys=pd.DataFrame({"y": [1.0, 2.0]}, index=[1.0, 2.0]),
-        theta={"X0": 0.0, "sigma": 0.1},
+        theta=pp.PompParameters({"X0": 0.0, "sigma": 0.1}),
         rinit=rinit_local,
         rproc=rproc_local,
         dmeas=dmeas_local,
@@ -144,7 +146,7 @@ def test_pickle_by_value():
     unpickled = pickle.loads(pickle.dumps(pomp))
     assert unpickled.statenames == pomp.statenames
     assert float(unpickled.t0) == float(pomp.t0)
-    assert unpickled.theta.to_list() == pomp.theta.to_list()
+    assert unpickled.theta.params() == pomp.theta.params()
     assert jnp.array_equal(
         jax.random.key_data(unpickled.fresh_key), jax.random.key_data(pomp.fresh_key)
     )
@@ -171,7 +173,7 @@ def test_prune(model):
     with pytest.raises(ValueError):
         LG.__class__(
             ys=LG.ys.copy(),
-            theta=pp.PompParameters(LG.theta.to_list()[0].copy()),
+            theta=pp.PompParameters(LG.theta.params()[0].copy()),
             rinit=LG.rinit.original_func,
             rproc=LG.rproc.original_func,
             dmeas=LG.dmeas.original_func,
@@ -231,3 +233,69 @@ def test_traces(neapolitan_setup):
         iterations = sub_df["iteration"].tolist()
         assert iterations == sorted(iterations)
         assert max(iterations) > 0
+
+
+def test_pomp_parameters_indexing(model):
+    LG, p = model
+    # Set up some logLik values to check slicing behavior
+    log_liks = np.array([-10.0, -20.0, -30.0, -40.0])
+    # Create PompParameters with 4 replicates
+    params_dicts = [
+        {"R0": 1.0, "sigma": 0.1},
+        {"R0": 2.0, "sigma": 0.2},
+        {"R0": 3.0, "sigma": 0.3},
+        {"R0": 4.0, "sigma": 0.4},
+    ]
+    params = pp.PompParameters(params_dicts, logLik=log_liks)
+
+    # 1. Test single integer indexing
+    assert params[0] == {"R0": 1.0, "sigma": 0.1}
+    assert params[2] == {"R0": 3.0, "sigma": 0.3}
+
+    # 2. Test slice indexing (this previously crashed with ValueError)
+    slice_params = params[1:3]
+    assert isinstance(slice_params, pp.PompParameters)
+    assert len(slice_params) == 2
+    assert slice_params[0] == {"R0": 2.0, "sigma": 0.2}
+    assert slice_params[1] == {"R0": 3.0, "sigma": 0.3}
+    np.testing.assert_allclose(slice_params.logLik, [-20.0, -30.0])
+
+    # 3. Test list of indices indexing
+    list_params = params[[0, 3]]
+    assert isinstance(list_params, pp.PompParameters)
+    assert len(list_params) == 2
+    assert list_params[0] == {"R0": 1.0, "sigma": 0.1}
+    assert list_params[1] == {"R0": 4.0, "sigma": 0.4}
+    np.testing.assert_allclose(list_params.logLik, [-10.0, -40.0])
+
+    # 4. Test mutation safety (dicts copy constructors)
+    user_dicts = [{"R0": 1.5}]
+    pp_params = pp.PompParameters(user_dicts)
+    pp_params[0]["R0"] = 9.9
+    # Slicing/copying should not mutate original user_dicts input
+    assert user_dicts[0]["R0"] == 1.5
+
+
+def test_pomp_parameters_data_array_dimension_expansion():
+    import xarray as xr
+
+    # Test 1D DataArray
+    da_1d = xr.DataArray(
+        [1.0, 2.0], dims=["parameter"], coords={"parameter": ["R0", "sigma"]}
+    )
+    p_1d = pp.PompParameters(da_1d)
+    assert p_1d.get_param_names() == ["R0", "sigma"]
+    assert len(p_1d) == 1
+    assert p_1d[0] == {"R0": 1.0, "sigma": 2.0}
+
+    # Test 2D DataArray
+    da_2d = xr.DataArray(
+        [[1.0, 2.0], [3.0, 4.0]],
+        dims=["theta_idx", "parameter"],
+        coords={"theta_idx": [0, 1], "parameter": ["R0", "sigma"]},
+    )
+    p_2d = pp.PompParameters(da_2d)
+    assert p_2d.get_param_names() == ["R0", "sigma"]
+    assert len(p_2d) == 2
+    assert p_2d[0] == {"R0": 1.0, "sigma": 2.0}
+    assert p_2d[1] == {"R0": 3.0, "sigma": 4.0}

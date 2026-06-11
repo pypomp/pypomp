@@ -484,6 +484,7 @@ def dhaka(
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")
 
+    from pypomp.core.parameters import PompParameters
     dhaka_obj = Pomp(
         rinit=_rinit,
         rproc=rproc_func,
@@ -494,7 +495,7 @@ def dhaka(
         nstep=nstep,
         dt=dt,
         accumvars=accumvars,
-        theta=theta,
+        theta=PompParameters(theta),
         covars=covars,
         statenames=statenames,
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),

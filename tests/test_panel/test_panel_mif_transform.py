@@ -39,7 +39,7 @@ def panel_pomp_with_transform():
     LG1.par_trans = pp.ParTrans(to_est, from_est)
     LG2.par_trans = pp.ParTrans(to_est, from_est)
 
-    theta_base = LG1.theta.to_list()[0]
+    theta_base = LG1.theta.params()[0]
 
     shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
     unit_param_names = ["Q11", "Q12", "Q22", "R11", "R12", "R22"]
@@ -63,7 +63,7 @@ def panel_pomp_with_transform():
     )
     panel = pp.PanelPomp(
         Pomp_dict={"unit1": LG1, "unit2": LG2},
-        theta=theta,
+        theta=pp.PanelParameters(theta),
     )
 
     return panel
@@ -75,15 +75,12 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
     """
     panel = panel_pomp_with_transform
 
-    panel_shared = [
-        panel.theta.theta[i].get("shared")
-        for i in range(len(panel.theta.theta))
-        if panel.theta.theta[i].get("shared") is not None
-    ]
+    panel_theta = panel.theta.params()
+    panel_shared = [t.get("shared") for t in panel_theta if t.get("shared") is not None]
     panel_unit_specific = [
-        panel.theta.theta[i].get("unit_specific")
-        for i in range(len(panel.theta.theta))
-        if panel.theta.theta[i].get("unit_specific") is not None
+        t.get("unit_specific")
+        for t in panel_theta
+        if t.get("unit_specific") is not None
     ]
     initial_shared = [df.copy() for df in panel_shared] if panel_shared else None
     initial_unit_specific = (
@@ -101,15 +98,14 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
 
     panel.mif(J=2, M=1, rw_sd=rw_sd, key=jax.random.key(42))
 
+    final_panel_theta = panel.theta.params()
     final_shared = [
-        panel.theta.theta[i].get("shared")
-        for i in range(len(panel.theta.theta))
-        if panel.theta.theta[i].get("shared") is not None
+        t.get("shared") for t in final_panel_theta if t.get("shared") is not None
     ]
     final_unit_specific = [
-        panel.theta.theta[i].get("unit_specific")
-        for i in range(len(panel.theta.theta))
-        if panel.theta.theta[i].get("unit_specific") is not None
+        t.get("unit_specific")
+        for t in final_panel_theta
+        if t.get("unit_specific") is not None
     ]
     final_shared = final_shared if final_shared else None
     final_unit_specific = final_unit_specific if final_unit_specific else None

@@ -5,10 +5,8 @@ Uses Annotated so the library can match arguments by tag regardless of order.
 Users see the underlying type (e.g. dict[str, float]); the tag is used internally.
 """
 
-from typing import Annotated, TypeAlias, Mapping, Sequence, Union, TYPE_CHECKING
+from typing import Annotated, TypeAlias
 
-if TYPE_CHECKING:
-    import pypomp.core.parameters
 import jax
 import numpy as np
 
@@ -38,10 +36,3 @@ ObservationDict = Annotated[dict[str, float | jax.Array], "ObservationDict"]
 
 # Maps to 't0' (for RInit)
 InitialTimeFloat = Annotated[float, "InitialTimeFloat"]
-
-ThetaInput: TypeAlias = Union[
-    Mapping[str, Numeric],
-    Sequence[Mapping[str, Numeric]],
-    "pypomp.core.parameters.PompParameters",
-    None,
-]

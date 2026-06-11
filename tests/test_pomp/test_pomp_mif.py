@@ -155,7 +155,7 @@ def test_order_of_parameters_consistency(simple):
         M=M,
         rw_sd=rw_sd,
         key=key,
-        theta=theta_orig,
+        theta=pp.PompParameters(theta_orig),
     )
     traces_orig = LG.results_history[-1].traces_da
 
@@ -166,7 +166,7 @@ def test_order_of_parameters_consistency(simple):
         M=M,
         rw_sd=rw_sd,
         key=key,
-        theta=theta_reordered,
+        theta=pp.PompParameters(theta_reordered),
     )
     traces_reordered = LG.results_history[-1].traces_da
 
@@ -216,7 +216,7 @@ def test_mif_invalid_theta_and_rw_sd_keys(simple):
         ValueError,
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
-        LG.mif(J=J, M=M, rw_sd=rw_sd, key=key, theta=bad_theta)
+        LG.mif(J=J, M=M, rw_sd=rw_sd, key=key, theta=pp.PompParameters(bad_theta))
 
     # Bad rw_sd: sigmas keys not matching canonical_param_names
     bad_rw_sd = pp.RWSigma(

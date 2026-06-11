@@ -41,7 +41,7 @@ def test_train_basic(opt_instance, simple):
     assert traces.sel(theta_idx=0).shape == (M + 1, len(LG.theta[0]) + 1)
     # Check that "logLik" and all parameter names are in variable coordinate
     assert "logLik" in list(traces.coords["variable"].values)
-    for param in LG.theta.to_list()[0].keys():
+    for param in LG.theta.params()[0].keys():
         assert param in list(traces.coords["variable"].values)
     assert all(isinstance(v, float) for v in LG.theta[0].values())
     from pypomp.core.optimizer import Optimizer
@@ -96,7 +96,7 @@ def test_train_validation(simple):
         ValueError,
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
-        LG.train(J=J, M=M, eta=eta, key=key, theta=bad_theta)
+        LG.train(J=J, M=M, eta=eta, key=key, theta=pp.PompParameters(bad_theta))
 
 
 def test_train_param_order_invariance(simple):
@@ -108,9 +108,9 @@ def test_train_param_order_invariance(simple):
     out1 = LG.results_history[-1].traces_da.values
 
     # Permute theta parameter order
-    param_keys = list(theta.to_list()[0].keys())
+    param_keys = list(theta.params()[0].keys())
     rev_keys = list(reversed(param_keys))
-    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params()]
 
     LG.train(
         J=J,
@@ -118,7 +118,7 @@ def test_train_param_order_invariance(simple):
         eta=eta,
         optimizer=pp.Newton(scale=True),
         key=key,
-        theta=permuted_theta,
+        theta=pp.PompParameters(permuted_theta),
     )
     out2 = LG.results_history[-1].traces_da.values
     np.testing.assert_allclose(out1, out2, atol=1e-7)

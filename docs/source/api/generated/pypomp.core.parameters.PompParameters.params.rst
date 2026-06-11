@@ -1,6 +1,6 @@
-﻿pypomp.core.parameters.PanelParameters.theta
+﻿pypomp.core.parameters.PompParameters.params
 ============================================
 
 .. currentmodule:: pypomp.core.parameters
 
-.. autoproperty:: PanelParameters.theta
+.. automethod:: PompParameters.params

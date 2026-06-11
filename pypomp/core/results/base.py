@@ -215,7 +215,7 @@ class PompEstimationTracesMixin:
             .to_dataframe()
             .reset_index()
         )
-        param_names = list(self.theta[0].keys())
+        param_names = self.theta.get_param_names() if self.theta is not None else []
         df = df[["theta_idx", "logLik"] + param_names]
         df.insert(2, "se", np.nan)
         return df

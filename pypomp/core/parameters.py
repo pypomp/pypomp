@@ -19,11 +19,14 @@ from typing import (
     cast,
     Iterator,
     Any,
-    Self,
     Generic,
     TypeVar,
     overload,
 )
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
 from .par_trans import ParTrans
 from pypomp.types import Numeric
 

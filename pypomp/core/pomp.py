@@ -676,24 +676,20 @@ class Pomp:
 
         del nLLs_jax, theta_traces_jax, final_thetas_jax
 
-        final_theta_ests = []
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
-        trace_data = np.zeros((n_reps, M + 1, len(trace_vars)), dtype=float)
 
-        for i in range(n_reps):
-            # Prepend nan for the log-likelihood of the initial parameters
-            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
+        # Prepend nan for the log-likelihood of the initial parameters (at iteration 0)
+        nans = np.full((n_reps, 1), np.nan)
+        logliks_with_nan = np.concatenate([nans, -nLLs], axis=1)  # shape: (n_reps, M+1)
 
-            param_traces = theta_traces[i]  # shape: (M+1, n_params)
+        theta_traces_natural = self.par_trans._transform_array(
+            theta_traces, param_names, direction="from_est"
+        )
 
-            # Transform traces from estimation space to natural space
-            param_traces = self.par_trans.transform_array(
-                param_traces, param_names, direction="from_est"
-            )
-            trace_data[i, :, 0] = logliks_with_nan
-            trace_data[i, :, 1:] = param_traces
-            final_theta_ests.append(final_thetas[i])
+        trace_data = np.concatenate(
+            [logliks_with_nan[:, :, np.newaxis], theta_traces_natural], axis=-1
+        )
 
         traces_da = xr.DataArray(
             trace_data,
@@ -705,22 +701,20 @@ class Pomp:
             },
         )
 
-        final_theta_list = [
-            self.par_trans.to_floats(
-                theta=dict(
-                    zip(
-                        self.canonical_param_names,
-                        np.mean(theta_est, axis=0).tolist(),
-                    )
-                ),
-                direction="from_est",
-            )
-            for theta_est in final_theta_ests
-        ]
-        logLik_estimates = -nLLs
-        self.theta = PompParameters(final_theta_list, logLik=logLik_estimates)
+        final_thetas_mean = np.mean(final_thetas, axis=1)  # shape: (n_reps, n_params)
+        final_thetas_natural = self.par_trans._transform_array(
+            final_thetas_mean, param_names, direction="from_est"
+        )
 
-        del final_theta_ests
+        final_theta_da = xr.DataArray(
+            final_thetas_natural,
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "parameter": param_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=-nLLs)
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -849,16 +843,10 @@ class Pomp:
             epsilon,
         )
 
-        theta_ests_natural = np.stack(
-            [
-                self.par_trans.transform_array(
-                    np.asarray(theta_ests[i]),
-                    self.canonical_param_names,
-                    direction="from_est",
-                )
-                for i in range(n_reps)
-            ],
-            axis=0,
+        theta_ests_natural = self.par_trans._transform_array(
+            np.asarray(theta_ests),
+            self.canonical_param_names,
+            direction="from_est",
         )
 
         joined_array = xr.DataArray(
@@ -877,17 +865,15 @@ class Pomp:
             },
         )
 
-        final_theta_list = [
-            self.par_trans.to_floats(
-                theta=dict(
-                    zip(self.canonical_param_names, theta_ests[i, -1, :].tolist())
-                ),
-                direction="from_est",
-            )
-            for i in range(n_reps)
-        ]
-        logLik_estimates = np.asarray(-nLLs)
-        self.theta = PompParameters(final_theta_list, logLik=logLik_estimates)
+        final_theta_da = xr.DataArray(
+            theta_ests_natural[:, -1, :],
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "parameter": self.canonical_param_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
 
         if track_time is True:
             nLLs.block_until_ready()

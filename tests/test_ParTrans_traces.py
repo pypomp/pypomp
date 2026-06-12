@@ -31,13 +31,13 @@ def test_transform_array_single_param_set():
     param_names = ["pos_param", "standard_param"]
 
     # Transform to estimation space
-    est_array = par_trans.transform_array(param_array, param_names, direction="to_est")
+    est_array = par_trans._transform_array(param_array, param_names, direction="to_est")
     assert est_array.shape == (2,)
     assert np.abs(est_array[0] - np.log(1.0)) < 1e-6
     assert np.abs(est_array[1] - 2.0) < 1e-6
 
     # Transform back to natural space
-    nat_array = par_trans.transform_array(est_array, param_names, direction="from_est")
+    nat_array = par_trans._transform_array(est_array, param_names, direction="from_est")
     assert nat_array.shape == (2,)
     assert np.abs(nat_array[0] - 1.0) < 1e-6
     assert np.abs(nat_array[1] - 2.0) < 1e-6
@@ -71,7 +71,7 @@ def test_transform_array_multiple_param_sets():
     param_names = ["pos_param", "standard_param"]
 
     # Transform to estimation space
-    est_array = par_trans.transform_array(param_array, param_names, direction="to_est")
+    est_array = par_trans._transform_array(param_array, param_names, direction="to_est")
     assert est_array.shape == (3, 2)
     assert np.abs(est_array[0, 0] - np.log(1.0)) < 1e-6
     assert np.abs(est_array[1, 0] - np.log(2.0)) < 1e-6
@@ -81,7 +81,7 @@ def test_transform_array_multiple_param_sets():
     assert np.abs(est_array[2, 1] - 4.0) < 1e-6
 
     # Transform back to natural space
-    nat_array = par_trans.transform_array(est_array, param_names, direction="from_est")
+    nat_array = par_trans._transform_array(est_array, param_names, direction="from_est")
     assert nat_array.shape == (3, 2)
     assert np.allclose(nat_array, param_array, rtol=1e-6)
 
@@ -94,10 +94,10 @@ def test_transform_array_default_transformation():
     param_names = ["param1", "param2"]
 
     # Should be unchanged
-    est_array = par_trans.transform_array(param_array, param_names, direction="to_est")
+    est_array = par_trans._transform_array(param_array, param_names, direction="to_est")
     assert np.allclose(est_array, param_array)
 
-    nat_array = par_trans.transform_array(est_array, param_names, direction="from_est")
+    nat_array = par_trans._transform_array(est_array, param_names, direction="from_est")
     assert np.allclose(nat_array, param_array)
 
 
@@ -128,14 +128,12 @@ def test_transform_panel_traces_shared_only():
 
     shared_param_names = ["shared_param1", "shared_param2"]
     unit_param_names = []
-    unit_names = []
 
-    shared_out, unit_out = par_trans.transform_panel_traces(
+    shared_out, unit_out = par_trans._transform_panel_traces(
         shared_traces=shared_traces,
         unit_traces=None,
         shared_param_names=shared_param_names,
         unit_param_names=unit_param_names,
-        unit_names=unit_names,
         direction="from_est",
     )
 
@@ -183,14 +181,12 @@ def test_transform_panel_traces_unit_only():
 
     shared_param_names = []
     unit_param_names = ["unit_param1"]
-    unit_names = ["unit1", "unit2"]
 
-    shared_out, unit_out = par_trans.transform_panel_traces(
+    shared_out, unit_out = par_trans._transform_panel_traces(
         shared_traces=None,
         unit_traces=unit_traces,
         shared_param_names=shared_param_names,
         unit_param_names=unit_param_names,
-        unit_names=unit_names,
         direction="from_est",
     )
 
@@ -250,14 +246,12 @@ def test_transform_panel_traces_both():
 
     shared_param_names = ["shared_param"]
     unit_param_names = ["unit_param"]
-    unit_names = ["unit1", "unit2"]
 
-    shared_out, unit_out = par_trans.transform_panel_traces(
+    shared_out, unit_out = par_trans._transform_panel_traces(
         shared_traces=shared_traces,
         unit_traces=unit_traces,
         shared_param_names=shared_param_names,
         unit_param_names=unit_param_names,
-        unit_names=unit_names,
         direction="from_est",
     )
 
@@ -301,8 +295,8 @@ def test_transform_roundtrip():
     param_names = ["param1", "param2", "param3"]
 
     # Round trip: natural -> est -> natural
-    est_space = par_trans.transform_array(original, param_names, direction="to_est")
-    back_to_nat = par_trans.transform_array(
+    est_space = par_trans._transform_array(original, param_names, direction="to_est")
+    back_to_nat = par_trans._transform_array(
         est_space, param_names, direction="from_est"
     )
 

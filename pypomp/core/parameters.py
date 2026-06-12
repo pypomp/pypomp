@@ -23,6 +23,7 @@ from typing import (
     TypeVar,
     overload,
 )
+
 try:
     from typing import Self
 except ImportError:
@@ -67,19 +68,15 @@ def _standardize_pomp_theta(
     for i, t in enumerate(theta_dicts):
         t_copy = {}
         for key, value in t.items():
-            if isinstance(value, (int, np.number, jax.Array)) and not isinstance(
-                value, bool
-            ):
-                try:
-                    t_copy[key] = float(value)
-                except (TypeError, ValueError):
-                    t_copy[key] = value
-            else:
-                t_copy[key] = value
-
-            if not isinstance(t_copy[key], float):
+            if isinstance(value, bool):
                 raise TypeError(
-                    f"Parameter '{key}' at index {i} is not a float: got {type(t_copy[key]).__name__}"
+                    f"Parameter '{key}' at index {i} is not a float: got bool"
+                )
+            try:
+                t_copy[key] = float(value)
+            except (TypeError, ValueError):
+                raise TypeError(
+                    f"Parameter '{key}' at index {i} is not a float: got {type(value).__name__}"
                 )
         clean_dicts.append(t_copy)
 
@@ -96,10 +93,7 @@ def _standardize_pomp_theta(
     param_names = list(clean_dicts[0].keys())
 
     # Contiguous array of shape (J, 1, P)
-    values = np.zeros((reps, 1, len(param_names)))
-    for j, t in enumerate(clean_dicts):
-        for p_idx, name in enumerate(param_names):
-            values[j, 0, p_idx] = t[name]
+    values = pd.DataFrame(clean_dicts)[param_names].values[:, np.newaxis, :]
 
     return xr.DataArray(
         values,
@@ -228,33 +222,22 @@ def _standardize_panel_theta(
 
     reps = len(clean_theta)
 
-    shared_values = np.zeros((reps, len(shared_names_list)))
-    unit_values = np.zeros((reps, len(unit_names), len(unit_specific_names_list)))
+    if ref["shared"] is not None:
+        shared_values = np.stack(
+            [t["shared"].loc[shared_names_list].iloc[:, 0].values for t in clean_theta]
+        )
+    else:
+        shared_values = np.zeros((reps, 0))
 
-    shared_param_to_idx = {name: idx for idx, name in enumerate(shared_names_list)}
-    specific_param_to_idx = {
-        name: idx for idx, name in enumerate(unit_specific_names_list)
-    }
-    unit_to_idx = {name: idx for idx, name in enumerate(unit_names)}
-
-    for j, t in enumerate(clean_theta):
-        s_df = t["shared"]
-        u_df = t["unit_specific"]
-
-        if s_df is not None:
-            s_col = s_df.columns[0]
-            for p_name in shared_names_list:
-                shared_values[j, shared_param_to_idx[p_name]] = float(
-                    s_df.loc[p_name, s_col]
-                )
-
-        if u_df is not None:
-            for p_name in unit_specific_names_list:
-                p_idx = specific_param_to_idx[p_name]
-                for u_name in unit_names:
-                    unit_values[j, unit_to_idx[u_name], p_idx] = float(
-                        u_df.loc[p_name, u_name]
-                    )
+    if ref["unit_specific"] is not None:
+        unit_values = np.stack(
+            [
+                t["unit_specific"].loc[unit_specific_names_list, unit_names].T.values
+                for t in clean_theta
+            ]
+        )
+    else:
+        unit_values = np.zeros((reps, len(unit_names), 0))
 
     shared_da = xr.DataArray(
         shared_values,
@@ -304,12 +287,13 @@ class ParameterSet(ABC, Generic[T_data]):
     estimation_scale: bool
 
     @abstractmethod
-    def to_jax_array(self, param_names: list[str], **kwargs) -> jax.Array:
+    def to_jax_array(self, param_names: list[str] | None = None, **kwargs) -> jax.Array:
         """
         Converts the parameters to a JAX array suitable for model functions.
 
         Args:
             param_names: A list of canonical parameter names expected by the model.
+                If None, defaults to the canonical order of parameters in the set.
             **kwargs: Additional context required for conversion (e.g. unit names).
 
         Returns:
@@ -380,10 +364,7 @@ class ParameterSet(ABC, Generic[T_data]):
         if n == 0:
             raise ValueError("Cannot create empty ParameterSet")
 
-        if isinstance(self._data, xr.Dataset):
-            new_data = xr.concat([self._data] * n, dim="theta_idx")
-        else:
-            new_data = xr.concat([self._data] * n, dim="theta_idx")
+        new_data = xr.concat(cast(Any, [self._data] * n), dim="theta_idx")
         new_data.coords["theta_idx"] = np.arange(new_data.sizes["theta_idx"])
 
         extra_kwargs = self._replicated_logLik(n)
@@ -498,6 +479,9 @@ class ParameterSet(ABC, Generic[T_data]):
         return self._data
 
     def set_params(self, value: Any) -> None:
+        """
+        Set or overwrite the parameter values.
+        """
         self._set_theta(value)
 
     @property
@@ -600,6 +584,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
             return
 
         if isinstance(theta, xr.DataArray):
+            theta = theta.astype(float)
             if theta.ndim == 1:
                 if "parameter" not in theta.dims:
                     if len(theta.dims) == 1:
@@ -653,12 +638,23 @@ class PompParameters(ParameterSet[xr.DataArray]):
             )
         return ll
 
-    def to_jax_array(self, param_names: list[str], **kwargs) -> jax.Array:
+    def to_jax_array(self, param_names: list[str] | None = None, **kwargs) -> jax.Array:
         """
-        Convert to JAX array matching the order of param_names.
+        Convert to a JAX array matching the order of param_names.
 
-        Returns shape (num_theta_idx, n_params).
+        Parameters
+        ----------
+        param_names : list[str], optional
+            A list of parameter names in the desired order. If None (default),
+            returns the array matching the canonical order of parameters.
+
+        Returns
+        -------
+        jax.Array
+            A JAX array of shape (num_theta_idx, n_params).
         """
+        if param_names is None:
+            param_names = self.get_param_names()
         try:
             ordered_values = self._data.sel(parameter=param_names).values[:, 0, :]
         except KeyError as e:
@@ -678,12 +674,6 @@ class PompParameters(ParameterSet[xr.DataArray]):
     @logLik.setter
     def logLik(self, value):
         self._logLik = self._format_logLik(value, self.num_replicates())
-
-    def to_jax_array_canonical(self) -> jax.Array:
-        """
-        Convert to a JAX array matching the canonical parameter names order.
-        """
-        return self.to_jax_array(list(self._data.coords["parameter"].values))
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PompParameters":
         """
@@ -726,14 +716,31 @@ class PompParameters(ParameterSet[xr.DataArray]):
         """
         return super().params(as_list)
 
+    def set_params(
+        self,
+        value: Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | xr.DataArray,
+    ) -> None:
+        """
+        Set or overwrite the parameter values.
+
+        Parameters
+        ----------
+        value : Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | xr.DataArray
+            The new parameter values. Accepts:
+            - A single dictionary: ``dict[str, Numeric]``
+            - A list of dictionaries: ``list[dict[str, Numeric]]`` (must have identical keys)
+            - An ``xarray.DataArray`` of shape ``(theta_idx, unit, parameter)``
+        """
+        super().set_params(value)
+
     def _to_list(self) -> list[dict[str, float]]:
         """Return the parameter sets as a list of dictionaries."""
-        param_names = self.get_param_names()
-        values = self._data.values
-        return [
-            {name: float(values[j, 0, p_idx]) for p_idx, name in enumerate(param_names)}
-            for j in range(self.num_replicates())
-        ]
+        return cast(
+            list[dict[str, float]],
+            pd.DataFrame(
+                self._data.values[:, 0, :], columns=self.get_param_names()
+            ).to_dict(orient="records"),
+        )
 
     @property
     def _params(self) -> list[dict[str, float]]:
@@ -753,12 +760,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
         return np.array_equal(self._logLik, other._logLik, equal_nan=True)
 
     def _getitem_int(self, index: int) -> dict[str, float]:
-        param_names = self.get_param_names()
-        values = self._data.values
-        return {
-            name: float(values[index, 0, p_idx])
-            for p_idx, name in enumerate(param_names)
-        }
+        return dict(zip(self.get_param_names(), self._data.values[index, 0]))
 
     def _transform_and_load(
         self,
@@ -767,11 +769,13 @@ class PompParameters(ParameterSet[xr.DataArray]):
         direction: Literal["to_est", "from_est"],
     ) -> None:
         transformed_list = [
-            par_trans.to_floats(theta_i, direction) for theta_i in param_list
+            par_trans._to_floats(theta_i, direction) for theta_i in param_list
         ]
         self._data = _standardize_pomp_theta(transformed_list)
 
     def _set_theta(self, value: Any) -> None:
+        if value is None:
+            raise ValueError("theta cannot be None")
         self._data = _standardize_pomp_theta(value)
         self._logLik = self._format_logLik(None, self.num_replicates())
 
@@ -931,8 +935,10 @@ class PanelParameters(ParameterSet[xr.Dataset]):
 
     @logLik.setter
     def logLik(self, value):
-        # Read-only derived property
-        pass
+        raise AttributeError(
+            "Cannot set logLik directly on PanelParameters. "
+            "Please assign unit-specific log-likelihoods to logLik_unit instead."
+        )
 
     @property
     def logLik_unit(self) -> np.ndarray:
@@ -987,13 +993,30 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         )
 
     def to_jax_array(
-        self, param_names: list[str], unit_names: list[str] | None = None, **kwargs
+        self,
+        param_names: list[str] | None = None,
+        unit_names: list[str] | None = None,
+        **kwargs,
     ) -> jax.Array:
         """
         Convert to a JAX array matching the order of param_names and unit_names.
 
-        Returns shape (num_theta_idx, n_units, n_params).
+        Parameters
+        ----------
+        param_names : list[str], optional
+            A list of parameter names in the desired order. If None (default),
+            returns the array matching the canonical order of parameters.
+        unit_names : list[str], optional
+            A list of unit names in the desired order. If None (default),
+            returns array for all units.
+
+        Returns
+        -------
+        jax.Array
+            A JAX array of shape (num_theta_idx, n_units, n_params).
         """
+        if param_names is None:
+            param_names = self.get_param_names()
         reps = self.num_replicates()
         if reps == 0:
             return jnp.empty((0, 0, 0))
@@ -1011,38 +1034,31 @@ class PanelParameters(ParameterSet[xr.Dataset]):
 
         shared_keys = set(self._canonical_shared_param_names)
         specific_keys = set(self._canonical_unit_param_names)
+        existing_units = self.get_unit_names()
+
+        # Pre-validate keys and units
+        for p_name in param_names:
+            if p_name not in shared_keys and p_name not in specific_keys:
+                raise KeyError(f"Parameter '{p_name}' not found.")
+            if p_name in specific_keys:
+                for u in unit_names:
+                    if u not in existing_units:
+                        raise KeyError(f"Unit mismatch for parameter {p_name}")
 
         out_array = np.zeros((reps, n_units, n_params))
 
         for p_idx, p_name in enumerate(param_names):
             if p_name in specific_keys:
-                try:
-                    out_array[:, :, p_idx] = (
-                        self._data["unit_specific"]
-                        .sel(parameter=p_name, unit=unit_names)
-                        .values
-                    )
-                except KeyError as e:
-                    if (
-                        "unit_specific" not in self._data
-                        or p_name
-                        not in self._data["unit_specific"].coords["parameter"].values
-                    ):
-                        raise KeyError(f"Parameter '{p_name}' not found.")
-                    existing_units = list(
-                        self._data["unit_specific"].coords["unit"].values
-                    )
-                    for u in unit_names:
-                        if u not in existing_units:
-                            raise KeyError(f"Unit mismatch for parameter {p_name}")
-                    raise e
-            elif p_name in shared_keys:
+                out_array[:, :, p_idx] = (
+                    self._data["unit_specific"]
+                    .sel(parameter=p_name, unit=unit_names)
+                    .values
+                )
+            else:  # p_name in shared_keys
                 shared_vals = self._data["shared"].sel(parameter=p_name).values
                 out_array[:, :, p_idx] = np.broadcast_to(
                     shared_vals[:, None], (reps, n_units)
                 )
-            else:
-                raise KeyError(f"Parameter '{p_name}' not found.")
 
         return jnp.array(out_array)
 
@@ -1067,44 +1083,27 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         shared_keys = self._canonical_shared_param_names
         specific_keys = self._canonical_unit_param_names
 
-        new_shared_values = np.zeros((reps, len(shared_keys)))
+        # Reorder shared parameters
+        new_shared_da = (
+            self._data["shared"]
+            .sel(parameter=shared_keys)
+            .isel(theta_idx=shared_ranks)
+            .assign_coords(theta_idx=np.arange(reps))
+        )
+
+        # Reorder unit-specific parameters and unit log-likelihoods
         new_unit_values = np.zeros((reps, len(unit_names), len(specific_keys)))
         new_ll_unit = np.zeros_like(self._logLik_unit)
+        for u_idx, unit in enumerate(unit_names):
+            best_idx = unit_ranks[unit]
+            new_unit_values[:, u_idx, :] = (
+                self._data["unit_specific"]
+                .sel(unit=unit, parameter=specific_keys)
+                .isel(theta_idx=best_idx)
+                .values
+            )
+            new_ll_unit[:, u_idx] = self._logLik_unit[best_idx, u_idx]
 
-        shared_param_to_idx = {name: idx for idx, name in enumerate(shared_keys)}
-        specific_param_to_idx = {name: idx for idx, name in enumerate(specific_keys)}
-
-        for i in range(reps):
-            s_idx = shared_ranks[i]
-            for p_name in shared_keys:
-                new_shared_values[i, shared_param_to_idx[p_name]] = float(
-                    self._data["shared"]
-                    .isel(theta_idx=s_idx)
-                    .sel(parameter=p_name)
-                    .values
-                )
-
-            for u_idx, unit in enumerate(unit_names):
-                u_best_idx = unit_ranks[unit][i]
-                new_ll_unit[i, u_idx] = self._logLik_unit[u_best_idx, u_idx]
-
-                for p_name in specific_keys:
-                    p_idx = specific_param_to_idx[p_name]
-                    new_unit_values[i, u_idx, p_idx] = float(
-                        self._data["unit_specific"]
-                        .isel(theta_idx=u_best_idx)
-                        .sel(parameter=p_name, unit=unit)
-                        .values
-                    )
-
-        shared_da = xr.DataArray(
-            new_shared_values,
-            dims=["theta_idx", "parameter"],
-            coords={
-                "theta_idx": np.arange(reps),
-                "parameter": shared_keys,
-            },
-        )
         unit_specific_da = xr.DataArray(
             new_unit_values,
             dims=["theta_idx", "unit", "parameter"],
@@ -1116,7 +1115,7 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         )
         self._data = xr.Dataset(
             data_vars={
-                "shared": shared_da,
+                "shared": new_shared_da,
                 "unit_specific": unit_specific_da,
             }
         )
@@ -1156,6 +1155,25 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         """
         return super().params(as_list)
 
+    def set_params(
+        self,
+        value: dict[str, pd.DataFrame | None]
+        | list[dict[str, pd.DataFrame | None]]
+        | xr.Dataset,
+    ) -> None:
+        """
+        Set or overwrite the parameter values.
+
+        Parameters
+        ----------
+        value : dict[str, pd.DataFrame | None] | list[dict[str, pd.DataFrame | None]] | xr.Dataset
+            The new panel parameter values. Accepts:
+            - A single dictionary with ``"shared"`` and ``"unit_specific"`` keys (each containing a DataFrame).
+            - A list of such dictionaries.
+            - An existing :class:`xarray.Dataset` of panel parameters.
+        """
+        super().set_params(value)
+
     def _to_list(self) -> list[dict[str, pd.DataFrame | None]]:
         """Return the parameter sets as a list of dictionaries with 'shared' and 'unit_specific' DataFrames."""
         reps = self.num_replicates()
@@ -1171,30 +1189,23 @@ class PanelParameters(ParameterSet[xr.Dataset]):
             t_dict = {}
 
             if shared_names:
-                s_vals = [
-                    float(
-                        self._data["shared"].isel(theta_idx=j).sel(parameter=p).values
-                    )
-                    for p in shared_names
-                ]
                 t_dict["shared"] = pd.DataFrame(
-                    s_vals, index=pd.Index(shared_names), columns=["shared"]
+                    self._data["shared"]
+                    .isel(theta_idx=j)
+                    .sel(parameter=shared_names)
+                    .values,
+                    index=pd.Index(shared_names),
+                    columns=["shared"],
                 )
             else:
                 t_dict["shared"] = None
 
             if unit_specific_names and unit_names:
-                u_vals = np.zeros((len(unit_specific_names), len(unit_names)))
-                for p_idx, p in enumerate(unit_specific_names):
-                    for u_idx, u in enumerate(unit_names):
-                        u_vals[p_idx, u_idx] = float(
-                            self._data["unit_specific"]
-                            .isel(theta_idx=j)
-                            .sel(parameter=p, unit=u)
-                            .values
-                        )
                 t_dict["unit_specific"] = pd.DataFrame(
-                    u_vals,
+                    self._data["unit_specific"]
+                    .isel(theta_idx=j)
+                    .sel(parameter=unit_specific_names, unit=unit_names)
+                    .values.T,
                     index=pd.Index(unit_specific_names),
                     columns=pd.Index(unit_names),
                 )
@@ -1231,7 +1242,7 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         param_list: list[Any],
         direction: Literal["to_est", "from_est"],
     ) -> None:
-        transformed_list = par_trans.panel_transform_list(
+        transformed_list = par_trans._panel_transform_list(
             param_list, direction=direction
         )
         ds, s_names, u_names = _standardize_panel_theta(transformed_list)
@@ -1240,14 +1251,35 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._canonical_unit_param_names = [str(x) for x in u_names]
 
     def _set_theta(self, value: Any) -> None:
-        ds, s_names, u_names = _standardize_panel_theta(value)
-        self._data = ds
-        self._canonical_shared_param_names = [str(x) for x in s_names]
-        self._canonical_unit_param_names = [str(x) for x in u_names]
+        if value is None:
+            raise ValueError("theta cannot be None")
+        if isinstance(value, xr.Dataset):
+            self._data = value.copy(deep=True)
+            raw_s = self._data.attrs.get("shared_names")
+            if raw_s is None:
+                raw_s = (
+                    list(self._data["shared"].coords["parameter"].values)
+                    if "shared" in self._data
+                    else []
+                )
+            s_names = [str(x) for x in raw_s]
 
-        self._canonical_param_names = list(
-            set(self._canonical_shared_param_names + self._canonical_unit_param_names)
-        )
+            raw_u = self._data.attrs.get("unit_specific_names")
+            if raw_u is None:
+                raw_u = (
+                    list(self._data["unit_specific"].coords["parameter"].values)
+                    if "unit_specific" in self._data
+                    else []
+                )
+            u_names = [str(x) for x in raw_u]
+        else:
+            self._data, s_names, u_names = _standardize_panel_theta(value)
+            s_names = [str(x) for x in s_names]
+            u_names = [str(x) for x in u_names]
+
+        self._canonical_shared_param_names = s_names
+        self._canonical_unit_param_names = u_names
+        self._canonical_param_names = list(set(s_names + u_names))
         self._logLik_unit = self._format_logLik_unit(None, self.num_replicates())
         self._logLik = self._logLik_unit.sum(axis=1)
 

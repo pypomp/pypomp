@@ -25,7 +25,7 @@ class ParTrans:
         self.to_est: Callable[[ParamDict], ParamDict] = to_est or _to_est_default
         self.from_est: Callable[[ParamDict], ParamDict] = from_est or _from_est_default
 
-    def panel_transform(
+    def _panel_transform(
         self,
         theta: dict[str, pd.DataFrame | None],
         direction: Literal["to_est", "from_est"],
@@ -36,14 +36,8 @@ class ParTrans:
         """
         func = self.to_est if direction == "to_est" else self.from_est
 
-        # Normalize to empty DFs if None or missing for cleaner logic
         s_df = theta.get("shared")
-        if s_df is None:
-            s_df = None
-
         u_df = theta.get("unit_specific")
-        if u_df is None:
-            u_df = None
 
         res: dict[str, pd.DataFrame | None] = {"shared": None, "unit_specific": None}
 
@@ -64,8 +58,8 @@ class ParTrans:
             new_s_vals = {k: trans[k] for k in s_vals}
             res["shared"] = pd.DataFrame(
                 list(new_s_vals.values()),
-                index=pd.Index(list(new_s_vals.keys())),
-                columns=pd.Index(["shared"]),
+                index=s_df.index,
+                columns=s_df.columns,
             )
 
         # 2. Transform Unit-Specific Parameters
@@ -85,7 +79,7 @@ class ParTrans:
 
         return res
 
-    def panel_transform_list(
+    def _panel_transform_list(
         self,
         theta_list: list[dict[str, pd.DataFrame | None]],
         direction: Literal["to_est", "from_est"],
@@ -93,9 +87,9 @@ class ParTrans:
         """
         Apply transform to a list of parameter sets.
         """
-        return [self.panel_transform(t, direction) for t in theta_list]
+        return [self._panel_transform(t, direction) for t in theta_list]
 
-    def to_floats(
+    def _to_floats(
         self,
         theta: Mapping[str, float | jax.Array],
         direction: Literal["to_est", "from_est"],
@@ -103,16 +97,14 @@ class ParTrans:
         """
         Convert the theta dictionary values from jax.Array to float.
         """
-        if direction == "to_est":
-            theta_out = self.to_est(dict(theta))
-            return {k: float(v) for k, v in theta_out.items()}
-        elif direction == "from_est":
-            theta_out = self.from_est(dict(theta))
-            return {k: float(v) for k, v in theta_out.items()}
-        else:
+        if direction not in ("to_est", "from_est"):
             raise ValueError(f"Invalid direction: {direction}")
 
-    def transform_array(
+        func = self.to_est if direction == "to_est" else self.from_est
+        theta_out = func(dict(theta))
+        return {k: float(v) for k, v in theta_out.items()}
+
+    def _transform_array(
         self,
         param_array: np.ndarray,
         param_names: list[str],
@@ -145,7 +137,7 @@ class ParTrans:
             param_array_2d = param_array.reshape(-1, original_shape[-1])
 
         def transform_single_row(row):
-            param_dict = {name: row[i] for i, name in enumerate(param_names)}
+            param_dict = dict(zip(param_names, row))
             transformed_dict = transform_fn(param_dict)
             return jnp.array([transformed_dict[name] for name in param_names])
 
@@ -155,18 +147,14 @@ class ParTrans:
         transformed_jax = transform_vectorized(param_jax)
         transformed_array = np.array(transformed_jax)
 
-        if len(original_shape) == 1:
-            return transformed_array.reshape(original_shape)
-        else:
-            return transformed_array.reshape(original_shape)
+        return transformed_array.reshape(original_shape)
 
-    def transform_panel_traces(
+    def _transform_panel_traces(
         self,
         shared_traces: np.ndarray | None,
         unit_traces: np.ndarray | None,
         shared_param_names: list[str],
         unit_param_names: list[str],
-        unit_names: list[str],
         direction: Literal["to_est", "from_est"],
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
         """
@@ -183,7 +171,6 @@ class ParTrans:
                 and [:, :, 1:, :] are unit-specific params
             shared_param_names: List of shared parameter names
             unit_param_names: List of unit-specific parameter names
-            unit_names: List of unit names
             direction: Direction of transformation ("to_est" or "from_est")
 
         Returns:
@@ -208,16 +195,9 @@ class ParTrans:
             shared_out = shared_traces.copy()
 
             def transform_shared_single(shared_vals, unit_vals_for_context):
-                param_dict = {
-                    name: shared_vals[i] for i, name in enumerate(shared_param_names)
-                }
+                param_dict = dict(zip(shared_param_names, shared_vals))
                 if n_spec > 0:
-                    param_dict.update(
-                        {
-                            name: unit_vals_for_context[i]
-                            for i, name in enumerate(unit_param_names)
-                        }
-                    )
+                    param_dict.update(zip(unit_param_names, unit_vals_for_context))
                 transformed = transform_fn(param_dict)
                 return jnp.array([transformed[name] for name in shared_param_names])
 
@@ -240,17 +220,9 @@ class ParTrans:
             unit_out = unit_traces.copy()
 
             def transform_unit_single(shared_vals_for_context, unit_vals):
-                param_dict = {}
+                param_dict = dict(zip(unit_param_names, unit_vals))
                 if n_shared > 0:
-                    param_dict.update(
-                        {
-                            name: shared_vals_for_context[i]
-                            for i, name in enumerate(shared_param_names)
-                        }
-                    )
-                param_dict.update(
-                    {name: unit_vals[i] for i, name in enumerate(unit_param_names)}
-                )
+                    param_dict.update(zip(shared_param_names, shared_vals_for_context))
                 transformed = transform_fn(param_dict)
                 return jnp.array([transformed[name] for name in unit_param_names])
 
@@ -303,29 +275,10 @@ class ParTrans:
         Lambdas/closures cannot be reliably reconstructed and will fall back
         to defaults on unpickling.
         """
-        state = {}
-
-        if (
-            hasattr(self.to_est, "__module__")
-            and hasattr(self.to_est, "__name__")
-            and self.to_est.__module__ is not None
-        ):
-            state["_to_est_module"] = self.to_est.__module__
-            state["_to_est_name"] = self.to_est.__name__
-        else:
-            state["_to_est_is_lambda"] = True
-
-        if (
-            hasattr(self.from_est, "__module__")
-            and hasattr(self.from_est, "__name__")
-            and self.from_est.__module__ is not None
-        ):
-            state["_from_est_module"] = self.from_est.__module__
-            state["_from_est_name"] = self.from_est.__name__
-        else:
-            state["_from_est_is_lambda"] = True
-
-        return state
+        return {
+            **_serialize_func(self.to_est, "to_est"),
+            **_serialize_func(self.from_est, "from_est"),
+        }
 
     def __setstate__(self, state):
         """
@@ -334,18 +287,28 @@ class ParTrans:
         Reconstructs module-level functions by importing them.
         Falls back to defaults for lambdas/closures.
         """
+        self.to_est = _restore_func(state, "to_est", _to_est_default)
+        self.from_est = _restore_func(state, "from_est", _from_est_default)
 
-        if "_to_est_is_lambda" in state:
-            self.to_est = _to_est_default
-        else:
-            module = importlib.import_module(state["_to_est_module"])
-            self.to_est = getattr(module, state["_to_est_name"])
 
-        if "_from_est_is_lambda" in state:
-            self.from_est = _from_est_default
-        else:
-            module = importlib.import_module(state["_from_est_module"])
-            self.from_est = getattr(module, state["_from_est_name"])
+def _serialize_func(func, name: str) -> dict[str, str | bool]:
+    if (
+        hasattr(func, "__module__")
+        and hasattr(func, "__name__")
+        and func.__module__ is not None
+    ):
+        return {f"_{name}_module": func.__module__, f"_{name}_name": func.__name__}
+    return {f"_{name}_is_lambda": True}
+
+
+def _restore_func(state: dict, name: str, default_func) -> Callable:
+    if f"_{name}_is_lambda" in state:
+        return default_func
+    try:
+        module = importlib.import_module(state[f"_{name}_module"])
+        return getattr(module, state[f"_{name}_name"])
+    except (ImportError, AttributeError):
+        return default_func
 
 
 def _to_est_default(

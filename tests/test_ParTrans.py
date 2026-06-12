@@ -37,7 +37,7 @@ def test_ParTrans_to_est_panel():
         "shared": shared,
         "unit_specific": unit_specific,
     }
-    theta_out = par_trans.panel_transform(
+    theta_out = par_trans._panel_transform(
         cast(dict[str, pd.DataFrame | None], theta), direction="to_est"
     )
 
@@ -74,14 +74,14 @@ def test_ParTrans_to_est_panel_none_cases():
     par_trans = pp.ParTrans(to_est, from_est)
 
     # Test both None
-    theta_out = par_trans.panel_transform(
+    theta_out = par_trans._panel_transform(
         cast(dict[str, pd.DataFrame | None], {}), direction="to_est"
     )
     assert theta_out == {"shared": None, "unit_specific": None}
 
     # Test shared only
     shared = pd.DataFrame(index=pd.Index(["param1"])).assign(shared=[5.0])
-    theta_out = par_trans.panel_transform(
+    theta_out = par_trans._panel_transform(
         cast(dict[str, pd.DataFrame | None], {"shared": shared, "unit_specific": None}),
         direction="to_est",
     )
@@ -99,7 +99,7 @@ def test_ParTrans_to_est_panel_none_cases():
 
     # Test unit-specific only
     unit_specific = pd.DataFrame(index=pd.Index(["param2"])).assign(unit1=[3.0])
-    theta_out = par_trans.panel_transform(
+    theta_out = par_trans._panel_transform(
         cast(
             dict[str, pd.DataFrame | None],
             {"shared": None, "unit_specific": unit_specific},

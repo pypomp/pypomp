@@ -39,7 +39,7 @@ def london():
     del theta["alpha"]
     measles = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=theta,
+        theta=pp.PompParameters(theta),
         clean=True,
         model="001b",
         # dt=7 / 365.25,
@@ -76,7 +76,7 @@ def london_003():
     theta = BASE_THETA.copy()
     measles = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=theta,
+        theta=pp.PompParameters(theta),
         model="003",
     )
     return measles
@@ -113,7 +113,7 @@ def test_other_models(model, theta):
     key = jax.random.key(0)
     mod_obj = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=theta,
+        theta=pp.PompParameters(theta),
         model=model,
         clean=True,
     )

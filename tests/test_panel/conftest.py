@@ -8,15 +8,15 @@ from copy import deepcopy
 @pytest.fixture(scope="module")
 def measles_panel_setup_pomps_module():
     AK_mles = pp.models.UKMeasles.AK_mles()
-    london_theta = AK_mles["London"].to_dict()
-    hastings_theta = AK_mles["Hastings"].to_dict()
+    london_theta = {str(k): float(v) for k, v in AK_mles["London"].items()}
+    hastings_theta = {str(k): float(v) for k, v in AK_mles["Hastings"].items()}
     london = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=london_theta,
+        theta=pp.PompParameters(london_theta),
     )
     hastings = pp.models.UKMeasles.Pomp(
         unit=["Hastings"],
-        theta=hastings_theta,
+        theta=pp.PompParameters(hastings_theta),
     )
     return london, hastings, AK_mles
 

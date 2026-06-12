@@ -6,6 +6,15 @@ Always activate the virtual environment before running tests or commands:
 source .venv/bin/activate
 ```
 
+## Development 
+
+### Type checking
+Always run type-checking with `pyright` to catch type errors before concluding tasks or code changes:
+```bash
+pyright
+```
+
+
 ## Running Tests
 To run all tests:
 ```bash

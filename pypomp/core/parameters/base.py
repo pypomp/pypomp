@@ -231,11 +231,12 @@ class ParameterSet(ABC, Generic[T_data]):
             return self._to_list()
         return self._data
 
+    @abstractmethod
     def set_params(self, value: Any) -> None:
         """
         Set or overwrite the parameter values.
         """
-        self._set_theta(value)
+        pass
 
     @property
     @abstractmethod
@@ -275,6 +276,3 @@ class ParameterSet(ABC, Generic[T_data]):
     ) -> None:
         pass
 
-    @abstractmethod
-    def _set_theta(self, value: Any) -> None:
-        pass

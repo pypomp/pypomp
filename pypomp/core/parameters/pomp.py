@@ -23,6 +23,7 @@ def _standardize_pomp_theta(
     theta: Mapping[str, Numeric]
     | Sequence[Mapping[str, Numeric]]
     | PompParameters
+    | xr.DataArray
     | None,
 ) -> xr.DataArray:
     if isinstance(theta, xr.DataArray):
@@ -297,7 +298,10 @@ class PompParameters(ParameterSet[xr.DataArray]):
             - A list of dictionaries: ``list[dict[str, Numeric]]`` (must have identical keys)
             - An ``xarray.DataArray`` of shape ``(theta_idx, unit, parameter)``
         """
-        super().set_params(value)
+        if value is None:
+            raise ValueError("theta cannot be None")
+        self._data = _standardize_pomp_theta(value)
+        self._logLik = self._format_logLik(None, self.num_replicates())
 
     def _to_list(self) -> list[dict[str, float]]:
         """Return the parameter sets as a list of dictionaries."""
@@ -331,11 +335,6 @@ class PompParameters(ParameterSet[xr.DataArray]):
         ]
         self._data = _standardize_pomp_theta(transformed_list)
 
-    def _set_theta(self, value: Any) -> None:
-        if value is None:
-            raise ValueError("theta cannot be None")
-        self._data = _standardize_pomp_theta(value)
-        self._logLik = self._format_logLik(None, self.num_replicates())
 
     @staticmethod
     def merge(*param_objs: "PompParameters") -> "PompParameters":

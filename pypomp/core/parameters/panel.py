@@ -531,7 +531,37 @@ class PanelParameters(ParameterSet[xr.Dataset]):
             - A list of such dictionaries.
             - An existing :class:`xarray.Dataset` of panel parameters.
         """
-        super().set_params(value)
+        if value is None:
+            raise ValueError("theta cannot be None")
+        if isinstance(value, xr.Dataset):
+            self._data = value.copy(deep=True)
+            raw_s = self._data.attrs.get("shared_names")
+            if raw_s is None:
+                raw_s = (
+                    list(self._data["shared"].coords["parameter"].values)
+                    if "shared" in self._data
+                    else []
+                )
+            s_names = [str(x) for x in raw_s]
+
+            raw_u = self._data.attrs.get("unit_specific_names")
+            if raw_u is None:
+                raw_u = (
+                    list(self._data["unit_specific"].coords["parameter"].values)
+                    if "unit_specific" in self._data
+                    else []
+                )
+            u_names = [str(x) for x in raw_u]
+        else:
+            self._data, s_names, u_names = _standardize_panel_theta(value)
+            s_names = [str(x) for x in s_names]
+            u_names = [str(x) for x in u_names]
+
+        self._canonical_shared_param_names = s_names
+        self._canonical_unit_param_names = u_names
+        self._canonical_param_names = list(set(s_names + u_names))
+        self._logLik_unit = self._format_logLik_unit(None, self.num_replicates())
+        self._logLik = self._logLik_unit.sum(axis=1)
 
     def _to_list(self) -> list[dict[str, pd.DataFrame | None]]:
         """Return the parameter sets as a list of dictionaries with 'shared' and 'unit_specific' DataFrames."""
@@ -609,38 +639,6 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._canonical_shared_param_names = [str(x) for x in s_names]
         self._canonical_unit_param_names = [str(x) for x in u_names]
 
-    def _set_theta(self, value: Any) -> None:
-        if value is None:
-            raise ValueError("theta cannot be None")
-        if isinstance(value, xr.Dataset):
-            self._data = value.copy(deep=True)
-            raw_s = self._data.attrs.get("shared_names")
-            if raw_s is None:
-                raw_s = (
-                    list(self._data["shared"].coords["parameter"].values)
-                    if "shared" in self._data
-                    else []
-                )
-            s_names = [str(x) for x in raw_s]
-
-            raw_u = self._data.attrs.get("unit_specific_names")
-            if raw_u is None:
-                raw_u = (
-                    list(self._data["unit_specific"].coords["parameter"].values)
-                    if "unit_specific" in self._data
-                    else []
-                )
-            u_names = [str(x) for x in raw_u]
-        else:
-            self._data, s_names, u_names = _standardize_panel_theta(value)
-            s_names = [str(x) for x in s_names]
-            u_names = [str(x) for x in u_names]
-
-        self._canonical_shared_param_names = s_names
-        self._canonical_unit_param_names = u_names
-        self._canonical_param_names = list(set(s_names + u_names))
-        self._logLik_unit = self._format_logLik_unit(None, self.num_replicates())
-        self._logLik = self._logLik_unit.sum(axis=1)
 
     @staticmethod
     def merge(*param_objs: "PanelParameters") -> "PanelParameters":

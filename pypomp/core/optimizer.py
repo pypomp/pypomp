@@ -33,6 +33,7 @@ class Optimizer:
 
     def __str__(self) -> str:
         from dataclasses import fields
+
         field_strs = []
         for f in fields(self):
             val = getattr(self, f.name)
@@ -41,7 +42,6 @@ class Optimizer:
             else:
                 field_strs.append(f"{f.name}={val}")
         return f"{self.__class__.__name__}({', '.join(field_strs)})"
-
 
 
 @dataclass(frozen=True)

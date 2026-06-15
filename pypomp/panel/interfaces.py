@@ -11,10 +11,12 @@ from ..core.results import ResultsHistory
 # This Protocol defines what attributes the Mixins can expect to exist
 class PanelPompInterface(Protocol):
     unit_objects: dict[str, Pomp]
+
     @property
     def theta(self) -> PanelParameters: ...
     @theta.setter
     def theta(self, value: PanelParameters) -> None: ...
+
     results_history: ResultsHistory
     fresh_key: jax.Array | None
     canonical_param_names: list[str]

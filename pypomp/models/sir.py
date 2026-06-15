@@ -299,6 +299,7 @@ def sir(
     accumvars = ("cases", "logw")
 
     from pypomp.core.parameters import PompParameters
+
     sir_temp = Pomp(
         ys=ys_dummy,
         theta=PompParameters(theta),

@@ -146,6 +146,7 @@ def spx():
     """
     assert isinstance(sp500, pd.DataFrame)
     from pypomp.core.parameters import PompParameters
+
     return Pomp(
         ys=sp500,
         theta=PompParameters(theta),

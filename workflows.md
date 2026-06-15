@@ -41,9 +41,9 @@ pip install pytest-xdist
 
 ## Pushing edits to main
 
-* The unit tests are run by a GitHub Action, and a flag is raised if these tests fail.
+* The unit tests, Pyright, and Ruff compliance are run by GitHub Actions, and flags are raised if any of these checks fail.
 
-* New code should be unit tested and usually should not break existing unit tests.
+* New code should be unit tested, conform to Ruff's linting/formatting rules, and usually should not break existing unit tests.
 
 * If a previous unit test is broken, then the new code is not backward compatible and a discussion with the entire development team may be appropriate. If the change is desirable, the previous unit test should be fixed accordingly.
 

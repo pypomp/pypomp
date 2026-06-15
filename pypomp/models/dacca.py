@@ -485,6 +485,7 @@ def dhaka(
         raise ValueError("Cannot specify both dt and nstep")
 
     from pypomp.core.parameters import PompParameters
+
     dhaka_obj = Pomp(
         rinit=_rinit,
         rproc=rproc_func,

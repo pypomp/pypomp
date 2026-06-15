@@ -360,7 +360,9 @@ def test_prune(lg_panel_mp):
     original_theta = original_results.theta
     if original_theta is not None:
         original_shared = [t.get("shared") for t in original_theta.params()]
-        original_unit_specific = [t.get("unit_specific") for t in original_theta.params()]
+        original_unit_specific = [
+            t.get("unit_specific") for t in original_theta.params()
+        ]
     else:
         original_shared = None
         original_unit_specific = None

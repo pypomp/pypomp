@@ -8,9 +8,7 @@ import pypomp as pp
 
 def _mixed_panel():
     """Two replicates, two units, mix of shared and unit-specific params."""
-    shared_df = pd.DataFrame(
-        {"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"])
-    )
+    shared_df = pd.DataFrame({"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"]))
     unit_specific_df = pd.DataFrame(
         {"unit1": [1.0, 2.0, 3.0], "unit2": [4.0, 5.0, 6.0]},
         index=pd.Index(["u1", "u2", "u3"]),
@@ -34,9 +32,7 @@ def _specific_only_panel():
 
 
 def _shared_only_panel():
-    shared_df = pd.DataFrame(
-        {"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"])
-    )
+    shared_df = pd.DataFrame({"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"]))
     return pp.PanelParameters(theta=[{"shared": shared_df, "unit_specific": None}])
 
 
@@ -96,9 +92,7 @@ def test_to_jax_array_unknown_param_raises():
 def test_to_jax_array_unknown_unit_raises():
     panel = _mixed_panel()
     with pytest.raises(KeyError):
-        panel.to_jax_array(
-            ["s1", "u1"], unit_names=["unit1", "unit_does_not_exist"]
-        )
+        panel.to_jax_array(["s1", "u1"], unit_names=["unit1", "unit_does_not_exist"])
 
 
 def test_to_jax_array_defaults():
@@ -119,4 +113,3 @@ def test_to_jax_array_defaults():
     # Check that calling without any arguments also works (inferred units)
     arr_panel_all_defaults = panel.to_jax_array()
     assert arr_panel_all_defaults.shape == (2, 2, len(names_panel))
-

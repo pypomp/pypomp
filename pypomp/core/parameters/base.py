@@ -275,4 +275,3 @@ class ParameterSet(ABC, Generic[T_data]):
         direction: Literal["to_est", "from_est"],
     ) -> None:
         pass
-

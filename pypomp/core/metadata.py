@@ -4,10 +4,11 @@ import datetime
 import jax
 from dataclasses import dataclass, field
 
+
 @dataclass(frozen=True)
 class ModelMetadata:
     """Stores environment and instantiation metadata for reproducibility."""
-    
+
     pypomp_version: str = field(
         default_factory=lambda: importlib.metadata.version("pypomp")
     )

@@ -639,7 +639,6 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._canonical_shared_param_names = [str(x) for x in s_names]
         self._canonical_unit_param_names = [str(x) for x in u_names]
 
-
     @staticmethod
     def merge(*param_objs: "PanelParameters") -> "PanelParameters":
         """Merge replications from multiple PanelParameters objects."""

@@ -93,6 +93,7 @@ def test_mif_functional(model_setup):
 
     a_val = 0.5
     factor = a_val ** (1 / 50)
+
     def cooling_fn(nt, m, ntimes):
         return factor ** (nt / ntimes + m - 1)
 

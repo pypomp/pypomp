@@ -529,9 +529,7 @@ def test_filtering_methods_validation(base_pomp):
         pomp_no_dmeas.mif(J=10, M=1, rw_sd=pp.RWSigma({"X0": 0.01, "sigma": 0.01}))
 
     with pytest.raises(ValueError, match="self.dmeas cannot be None"):
-        pomp_no_dmeas.train(
-            J=10, M=1, eta=pp.LearningRate({"X0": 0.1, "sigma": 0.1})
-        )
+        pomp_no_dmeas.train(J=10, M=1, eta=pp.LearningRate({"X0": 0.1, "sigma": 0.1}))
 
     # 2. J < 1
     with pytest.raises(ValueError, match="J should be greater than 0"):
@@ -581,9 +579,7 @@ def test_dpop_train_validation(base_pomp):
         base_pomp.dpop_train(J=5, M=1, eta="not_lr", process_weight_state="logw")
 
     # 3. missing process_weight_state
-    with pytest.raises(
-        ValueError, match="dpop_train requires a process-weight state"
-    ):
+    with pytest.raises(ValueError, match="dpop_train requires a process-weight state"):
         base_pomp.dpop_train(J=5, M=1, eta=eta, process_weight_state=None)
 
     # 4. process_weight_state not in statenames
@@ -616,9 +612,7 @@ def test_dpop_train_validation(base_pomp):
 def test_merge_validation(base_pomp):
     """Test merge validation exceptions."""
     # 1. No arguments
-    with pytest.raises(
-        ValueError, match="At least one Pomp object must be provided"
-    ):
+    with pytest.raises(ValueError, match="At least one Pomp object must be provided"):
         pp.Pomp.merge()
 
     # 2. Different type
@@ -758,4 +752,3 @@ def test_pickle_setstate_fallback_warning(base_pomp):
         pomp_unpickled.__setstate__(state)
 
     assert pomp_unpickled.rinit is None
-

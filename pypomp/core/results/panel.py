@@ -79,7 +79,8 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             specific_names = self.theta.get_unit_param_names()
             if specific_names and "unit_specific" in self.theta._data:
                 p_u = (
-                    self.theta._data["unit_specific"].sel(parameter=specific_names)
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
                     .to_dataset(dim="parameter")
                     .to_dataframe()
                     .reset_index()
@@ -144,7 +145,8 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             specific_names = self.theta.get_unit_param_names()
             if specific_names and "unit_specific" in self.theta._data:
                 p_u = (
-                    self.theta._data["unit_specific"].sel(parameter=specific_names)
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
                     .to_dataset(dim="parameter")
                     .to_dataframe()
                     .reset_index()

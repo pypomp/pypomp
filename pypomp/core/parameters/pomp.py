@@ -335,7 +335,6 @@ class PompParameters(ParameterSet[xr.DataArray]):
         ]
         self._data = _standardize_pomp_theta(transformed_list)
 
-
     @staticmethod
     def merge(*param_objs: "PompParameters") -> "PompParameters":
         """

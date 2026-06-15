@@ -5,6 +5,9 @@ This module implements helper functions for POMP algorithms.
 import jax
 import jax.numpy as jnp
 import numpy as np
+from typing import Any, Callable
+from functools import partial
+from pypomp.functional.structs import PompStruct
 
 
 # TODO remove this function, as covars should always be dim 2
@@ -300,24 +303,6 @@ def _calc_ys_covars(
     return interp_covars, dt_extended, nstep_array, max_nstep
 
 
-def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
-    """
-    Calculate geometric cooling parameters for mif.
-
-    Args:
-        nt (int): Current time step, starting from 0.
-        m (int): Current iteration, starting from 1.
-        ntimes (int): Total number of time steps
-        a (float): Amount to cool over 50 iterations
-
-    Returns:
-        float: The fraction to cool sigmas and sigmas_init by.
-    """
-    factor = a ** (1 / 50)
-    alpha = factor ** (nt / ntimes + m)
-    return alpha
-
-
 def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
     """
     Calculate cosine cooling parameters for train.
@@ -333,48 +318,337 @@ def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
     return c + (1.0 - c) * 0.5 * (1.0 + jnp.cos(jnp.pi * i / M))
 
 
-def shard_arrays(
-    arrays: list[jax.Array],
-    axes: list[int],
-    axis_name: str = "devices",
-) -> list[jax.Array]:
+def is_dynamic(val: Any) -> bool:
+    """Helper to detect if a value is/contains a JAX array or PyTree structure."""
+    if isinstance(val, (jax.Array, np.ndarray, PompStruct)):
+        return True
+    if isinstance(val, (list, tuple)):
+        return any(is_dynamic(x) for x in val)
+    if isinstance(val, dict):
+        return any(is_dynamic(x) for x in val.values())
+    return False
+
+
+@partial(jax.jit, static_argnums=(0, 1, 2, 3, 4, 5))
+def _scan_jit(
+    func_static: Callable[..., Any],
+    shard_axes_static: tuple[tuple[int, int], ...],
+    static_idxs_static: tuple[int, ...],
+    static_args_static: tuple[Any, ...],
+    static_kwargs_static: tuple[tuple[str, Any], ...],
+    dynamic_idxs_static: tuple[int, ...],
+    sharded_inputs: dict[int, jax.Array],
+    *dynamic_args: Any,
+    **dynamic_kwargs: Any,
+) -> Any:
+    """JIT-compiled scan wrapper to run the batches sequentially inside XLA."""
+
+    def step_fn(carry, step_inputs):
+        total_args_count = (
+            len(shard_axes_static) + len(static_idxs_static) + len(dynamic_idxs_static)
+        )
+        current_args = [None] * total_args_count
+
+        # 1. Fill sharded inputs
+        for arg_idx, sliced in step_inputs.items():
+            orig_axis = dict(shard_axes_static)[arg_idx]
+            restored = jnp.moveaxis(sliced, 0, orig_axis)
+            current_args[arg_idx] = restored
+
+        # 2. Fill static args
+        for idx, val in zip(static_idxs_static, static_args_static):
+            current_args[idx] = val
+
+        # 3. Fill dynamic args
+        for idx, val in zip(dynamic_idxs_static, dynamic_args):
+            current_args[idx] = val
+
+        # 4. Reconstruct kwargs
+        current_kwargs = dict(dynamic_kwargs)
+        current_kwargs.update(dict(static_kwargs_static))
+
+        out = func_static(*current_args, **current_kwargs)
+        return carry, out
+
+    _, scan_outputs = jax.lax.scan(step_fn, None, sharded_inputs)
+    return scan_outputs
+
+
+def merge_and_slice(
+    arr: Any, out_axis: int | None, size: int, num_batches: int, batch_size: int
+) -> Any:
+    """Merges scan batches back into the original shape and slices away padding."""
+    if out_axis is None:
+        if isinstance(arr, (jax.Array, np.ndarray)):
+            if arr.ndim == 0:
+                return arr
+            # For un-sharded outputs, take the first batch's value if it was scanned
+            if num_batches > 1:
+                return arr[0]
+            return arr
+        return arr
+
+    if not isinstance(arr, (jax.Array, np.ndarray)):
+        return arr
+
+    if arr.ndim == 0:
+        return arr
+
+    if num_batches == 1:
+        # No need to reshape/merge, just slice the padded dimension
+        slice_obj = [slice(None)] * arr.ndim
+        slice_obj[out_axis] = slice(0, size)
+        return arr[tuple(slice_obj)]
+
+    # 1. Move scan batch axis to the sharded axis position
+    arr_moved = jnp.moveaxis(arr, 0, out_axis)
+    shape = list(arr_moved.shape)
+
+    # 2. Reshape to combine the scan batch dimension and batch size dimension
+    new_shape = shape[:out_axis] + [num_batches * batch_size] + shape[out_axis + 2 :]
+    arr_merged = arr_moved.reshape(new_shape)
+
+    # 3. Slice to original unpadded size
+    slice_obj = [slice(None)] * arr_merged.ndim
+    slice_obj[out_axis] = slice(0, size)
+    return arr_merged[tuple(slice_obj)]
+
+
+def merge_outputs(
+    scanned_out: Any,
+    shard_output_axes: Any,
+    size: int,
+    num_batches: int,
+    batch_size: int,
+) -> Any:
+    """Recursively processes output PyTree to merge and slice scanned batches."""
+    if isinstance(shard_output_axes, int) or shard_output_axes is None:
+        return jax.tree_util.tree_map(
+            lambda x: merge_and_slice(
+                x, shard_output_axes, size, num_batches, batch_size
+            ),
+            scanned_out,
+        )
+    elif isinstance(shard_output_axes, (list, tuple)):
+        merged = []
+        for i, axis in enumerate(shard_output_axes):
+            merged.append(
+                merge_and_slice(scanned_out[i], axis, size, num_batches, batch_size)
+            )
+        return tuple(merged) if isinstance(shard_output_axes, tuple) else merged
+    elif isinstance(shard_output_axes, dict):
+        merged_dict = {}
+        for key, val in scanned_out.items():
+            axis = shard_output_axes.get(key, None)
+            merged_dict[key] = merge_and_slice(val, axis, size, num_batches, batch_size)
+        return merged_dict
+    raise TypeError(f"Unsupported shard_output_axes type: {type(shard_output_axes)}")
+
+
+def pad_array(arr: jax.Array, axis: int, padded_size: int, size: int) -> jax.Array:
+    """Pads an array along a given axis to padded_size by repeating the last element."""
+    pad_width = padded_size - size
+    if pad_width > 0:
+        slice_obj = [slice(None)] * arr.ndim
+        slice_obj[axis] = slice(-1, None)
+        last_element = arr[tuple(slice_obj)]
+
+        repeats = [1] * arr.ndim
+        repeats[axis] = pad_width
+        padded_slice = jnp.tile(last_element, repeats)
+        return jnp.concatenate([arr, padded_slice], axis=axis)
+    return arr
+
+
+def run_jax_batch_sharded(
+    func: Callable[..., Any],
+    shard_axes: dict[int, int],
+    shard_output_axes: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     """
-    Shards JAX arrays across available devices along the specified axes.
+    Executes a JAX function in sharded parallel batches or direct SPMD sharding.
+
+    Depending on the device type and replicate dimension size, the execution will
+    follow one of two paths:
+
+    1. **CPU Sequential Batching Path** (Running on CPU and replicate size R > device count C):
+       - If the device kind is 'cpu' and the size of the sharded axis exceeds the number of
+         available CPU devices (cores), the execution is split into sequential batches.
+       - The sharded arguments are padded to a size that is the next multiple of the CPU core
+         count (i.e. padded_size = num_batches * C) by repeating the last element of each array
+         along the sharded axis using :func:`pad_array`.
+       - The padded arrays are reshaped from (padded_size, ...) to (num_batches, C, ...).
+       - A JIT-compiled `jax.lax.scan` loop runs sequentially over the `num_batches`.
+       - For each batch step of the scan, the batch of size C is sharded across the C CPU cores
+         using `NamedSharding` (PartitionSpec specifying the batch axis 1 to map to 'devices').
+       - This ensures that each CPU core processes exactly one replicate at a time, avoiding core
+         juggling/context switching and preserving L1/L2 cache locality.
+       - Finally, outputs from the scan are merged, and the extra padded replicates are sliced
+         off to restore the original size R.
+
+    2. **Direct Parallel SPMD Sharding Path** (GPU/TPU, or CPU when R <= C):
+       - If running on GPU/TPU, or on CPU when the replicate size R is less than or equal to the
+         device count D, the replicates are executed in a single parallel step.
+       - The sharded arguments are padded to the next multiple of the total device count D (i.e.
+         padded_size = ceil(R / D) * D) by repeating the last element along the sharded axis.
+       - The padded arguments are sharded directly across all D devices using `NamedSharding`
+         (PartitionSpec mapping the sharded axis to 'devices').
+       - The function is called directly on these sharded inputs, executing completely in parallel.
+       - The outputs are merged and sliced back to the original size R.
 
     Args:
-        arrays: List of JAX arrays to shard.
-        axes: The dimension/axis index to shard for each array.
-        axis_name: Logical axis name for the physical device mesh.
+        func: The functional JAX algorithm (e.g., F.pfilter, F.mif, or a custom function).
+        shard_axes: Dictionary mapping positional argument indices (in `args`) to their sharded axis index.
+        shard_output_axes: Structure mapping output PyTree leaves to their sharded axes (int, list, tuple, dict, or None).
+                           If a leaf output axis is None, it indicates the leaf is a global metric/scalar and not sharded.
+        *args: Positional arguments for `func`.
+        **kwargs: Keyword arguments for `func`.
 
     Returns:
-        List of sharded JAX arrays.
+        The outputs of `func`, merged and sliced back to the original replicate count.
 
-    Example:
-        To expose and use multiple CPU cores in JAX, configure the environment variables
-        before JAX is imported:
+    Examples:
+        **Example 1: Setting up multi-device CPU parallelization**
+        Configure the environment before importing JAX to simulate a multi-core CPU cluster:
 
         >>> import os
-        >>> # Set JAX platform before importing JAX
         >>> os.environ["JAX_PLATFORMS"] = "cpu"
-        >>> cpus = 8
-        >>> os.environ["XLA_FLAGS"] = (
-        ...     os.environ.get("XLA_FLAGS", "")
-        ...     + f" --xla_force_host_platform_device_count={cpus}"
+        >>> os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
+        >>>
+        >>> import jax
+        >>> import pypomp as pp
+        >>>
+        >>> LG = pp.models.LG()
+        >>> # If we run 10 replicates, run_jax_batch_sharded executes them in parallel
+        >>> # batches of 4 (i.e., batches of [4, 4, 4] where the last 2 replicates are padded).
+        >>> LG.pfilter(J=1000, reps=10)
+
+        **Example 2: Direct call to run_jax_batch_sharded**
+        We can run a custom sharded function across devices. Here is a simple example using 4 CPU cores:
+
+        >>> import os
+        >>> os.environ["JAX_PLATFORMS"] = "cpu"
+        >>> os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> from pypomp.core.algorithms.helpers import run_jax_batch_sharded
+        >>>
+        >>> # Define a simple function that adds a constant to a sharded input array
+        >>> def add_const(x, c):
+        ...     return x + c
+        >>>
+        >>> # Input data: 10 replicates, sharded along axis 0
+        >>> x = jnp.arange(10.0)
+        >>> const = 5.0
+        >>>
+        >>> # Call the helper. Shard axis of the 1st positional argument (index 0) is 0.
+        >>> # The output is also sharded along axis 0.
+        >>> result = run_jax_batch_sharded(
+        ...     add_const,
+        ...     shard_axes={0: 0},
+        ...     shard_output_axes=0,
+        ...     x,
+        ...     const
         ... )
+        >>> print(result)
+        [ 5.  6.  7.  8.  9. 10. 11. 12. 13. 14.]
     """
-    num_devices = len(jax.devices())
-    if num_devices <= 1:
-        return arrays
+    devices = jax.devices()
+    num_devices = len(devices)
+    device_kind = devices[0].device_kind.lower()
 
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=(axis_name,))
-    sharded_arrays: list[jax.Array] = []
+    # Get size of the sharded dimension from the first sharded argument
+    first_arg_idx = list(shard_axes.keys())[0]
+    first_axis = shard_axes[first_arg_idx]
+    size = args[first_arg_idx].shape[first_axis]
 
-    for arr, axis in zip(arrays, axes):
-        spec_list: list[str | None] = [None] * arr.ndim
-        spec_list[axis] = axis_name
-        spec = jax.sharding.PartitionSpec(*spec_list)
+    if device_kind == "cpu" and size > num_devices:
+        batch_size = num_devices
+        num_batches = (size + batch_size - 1) // batch_size
+    else:
+        batch_size = ((size + num_devices - 1) // num_devices) * num_devices
+        num_batches = 1
+    padded_size = num_batches * batch_size
 
-        sharding_spec = jax.sharding.NamedSharding(mesh, spec)
-        sharded_arrays.append(jax.device_put(arr, sharding_spec))
+    padded_args = list(args)
+    for arg_idx, axis in shard_axes.items():
+        padded_args[arg_idx] = pad_array(args[arg_idx], axis, padded_size, size)
 
-    return sharded_arrays
+    mesh = jax.sharding.Mesh(devices, axis_names=("devices",))
+
+    # CPU Sequential Batching Path
+    if num_batches > 1:
+        sharded_inputs = {}
+        for arg_idx, axis in shard_axes.items():
+            arr = padded_args[arg_idx]
+            arr_trans = jnp.moveaxis(arr, axis, 0)
+            reshaped_trans = arr_trans.reshape(
+                num_batches, batch_size, *arr_trans.shape[1:]
+            )
+
+            spec_list: list[str | None] = [None] * reshaped_trans.ndim
+            spec_list[1] = "devices"
+            spec = jax.sharding.PartitionSpec(*spec_list)
+            sharding_spec = jax.sharding.NamedSharding(mesh, spec)
+            sharded_inputs[arg_idx] = jax.device_put(reshaped_trans, sharding_spec)
+
+        dynamic_args = []
+        static_args = []
+        dynamic_idxs = []
+        static_idxs = []
+
+        for i, arg in enumerate(padded_args):
+            if i in shard_axes:
+                continue
+            if is_dynamic(arg):
+                dynamic_args.append(arg)
+                dynamic_idxs.append(i)
+            else:
+                static_args.append(arg)
+                static_idxs.append(i)
+
+        dynamic_kwargs = {}
+        static_kwargs = {}
+        for k, v in kwargs.items():
+            if is_dynamic(v):
+                dynamic_kwargs[k] = v
+            else:
+                static_kwargs[k] = v
+
+        shard_axes_static = tuple(shard_axes.items())
+        static_idxs_static = tuple(static_idxs)
+        static_args_static = tuple(static_args)
+        static_kwargs_static = tuple(static_kwargs.items())
+        dynamic_idxs_static = tuple(dynamic_idxs)
+
+        scanned_outputs = _scan_jit(
+            func,
+            shard_axes_static,
+            static_idxs_static,
+            static_args_static,
+            static_kwargs_static,
+            dynamic_idxs_static,
+            sharded_inputs,
+            *dynamic_args,
+            **dynamic_kwargs,
+        )
+
+        return merge_outputs(
+            scanned_outputs, shard_output_axes, size, num_batches, batch_size
+        )
+
+    # Parallel Path (GPU/TPU or CPU with size <= num_devices)
+    else:
+        sharded_args = list(padded_args)
+        for arg_idx, axis in shard_axes.items():
+            arr = padded_args[arg_idx]
+            spec_list: list[str | None] = [None] * arr.ndim
+            spec_list[axis] = "devices"
+            spec = jax.sharding.PartitionSpec(*spec_list)
+            sharding_spec = jax.sharding.NamedSharding(mesh, spec)
+            sharded_args[arg_idx] = jax.device_put(arr, sharding_spec)
+
+        outputs = func(*sharded_args, **kwargs)
+        return merge_outputs(outputs, shard_output_axes, size, 1, padded_size)

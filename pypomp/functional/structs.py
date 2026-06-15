@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from typing import NamedTuple, Callable
 
@@ -25,3 +26,63 @@ class PompStruct(NamedTuple):
     rproc_per: Callable
     dmeas_per: Callable | None
     rmeas_pf: Callable | None
+
+
+def pomp_struct_flatten(struct: PompStruct):
+    # Dynamic children (JAX arrays)
+    children = (
+        struct.ys,
+        struct.dt_array_extended,
+        struct.nstep_array,
+        struct.times,
+        struct.covars_extended,
+    )
+    # Static auxiliary data (non-arrays)
+    aux_data = (
+        struct.t0,
+        struct.accumvars,
+        struct.rinit_pf,
+        struct.rproc_pf,
+        struct.dmeas_pf,
+        struct.rinit_per,
+        struct.rproc_per,
+        struct.dmeas_per,
+        struct.rmeas_pf,
+    )
+    return children, aux_data
+
+
+def pomp_struct_unflatten(aux_data, children):
+    ys, dt_array_extended, nstep_array, times, covars_extended = children
+    (
+        t0,
+        accumvars,
+        rinit_pf,
+        rproc_pf,
+        dmeas_pf,
+        rinit_per,
+        rproc_per,
+        dmeas_per,
+        rmeas_pf,
+    ) = aux_data
+    return PompStruct(
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        covars_extended=covars_extended,
+        accumvars=accumvars,
+        rinit_pf=rinit_pf,
+        rproc_pf=rproc_pf,
+        dmeas_pf=dmeas_pf,
+        rinit_per=rinit_per,
+        rproc_per=rproc_per,
+        dmeas_per=dmeas_per,
+        rmeas_pf=rmeas_pf,
+    )
+
+
+jax.tree_util.register_pytree_node(
+    PompStruct, pomp_struct_flatten, pomp_struct_unflatten
+)

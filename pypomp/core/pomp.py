@@ -20,7 +20,7 @@ from .metadata import ModelMetadata
 from pypomp import functional as F
 from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
-from .algorithms.helpers import _calc_ys_covars, shard_arrays
+from .algorithms.helpers import _calc_ys_covars, run_jax_batch_sharded
 from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .par_trans import ParTrans
@@ -469,9 +469,8 @@ class Pomp:
         start_time = time.time()
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-        n_theta_reps = theta_obj_in.num_replicates()
-
         new_key, old_key = self._update_fresh_key(key)
+        n_theta_reps = theta_obj_in.num_replicates()
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -485,11 +484,10 @@ class Pomp:
             n_theta_reps, reps, *new_key.shape
         )
 
-        thetas_array, rep_keys = shard_arrays(
-            [thetas_array, rep_keys], [0, 0], axis_name="theta_reps"
-        )
-
-        results_jax = F.pfilter(
+        results_jax = run_jax_batch_sharded(
+            F.pfilter,
+            {1: 0, 4: 0},
+            {"logLik": 0, "CLL": 0, "ESS": 0, "filter_mean": 0, "prediction_mean": 0},
             self.to_struct(),
             thetas_array,
             J,
@@ -622,9 +620,9 @@ class Pomp:
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
-        n_reps = theta_obj_in.num_replicates()
 
         new_key, old_key = self._update_fresh_key(key)
+        n_reps = theta_obj_in.num_replicates()
         theta_obj_in.transform(self.par_trans, direction="to_est")
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
@@ -640,11 +638,10 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        theta_tiled, keys = shard_arrays(
-            [theta_tiled, keys], [1, 0], axis_name="reps"
-        )
-
-        nLLs_jax, theta_traces_jax, final_thetas_jax = F.mif(
+        nLLs_jax, theta_traces_jax, final_thetas_jax = run_jax_batch_sharded(
+            F.mif,
+            {1: 1, 8: 0},
+            [0, 0, 0],
             self.to_struct(),
             theta_tiled,
             sigmas_array,
@@ -780,8 +777,9 @@ class Pomp:
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
 
-        theta_obj_in.transform(self.par_trans, direction="to_est")
         n_reps = theta_obj_in.num_replicates()
+
+        theta_obj_in.transform(self.par_trans, direction="to_est")
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -798,10 +796,6 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        theta_array, keys = shard_arrays(
-            [theta_array, keys], [0, 0], axis_name="reps"
-        )
-
         opt_name = optimizer.__class__.__name__
         beta1 = getattr(optimizer, "beta1", 0.9)
         beta2 = getattr(optimizer, "beta2", 0.999)
@@ -812,7 +806,10 @@ class Pomp:
         scale = optimizer.scale
         ls = optimizer.ls
 
-        nLLs, theta_ests = F.train(
+        nLLs, theta_ests = run_jax_batch_sharded(
+            F.train,
+            {1: 0, 12: 0},
+            [0, 0],
             self.to_struct(),
             theta_array,
             J,

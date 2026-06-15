@@ -12,7 +12,7 @@ import warnings
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
 from ..core.algorithms.mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
 from ..core.algorithms.train import _vmapped_panel_train_internal
-from ..core.algorithms.helpers import shard_arrays
+from ..core.algorithms.helpers import run_jax_batch_sharded
 from ..core.rw_sigma import RWSigma
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Optimizer, Adam
@@ -401,7 +401,6 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-
         new_key, old_key = self._update_fresh_key(key)
 
         n_theta_reps = theta_obj_in.num_replicates()
@@ -454,11 +453,16 @@ class PanelEstimationMixin(Base):
                     covars_per_unit, ((0, padding), (0, 0), (0, 0))
                 )
 
-        thetas_panel_repl, rep_unit_keys = shard_arrays(
-            [thetas_panel_repl, rep_unit_keys], [0, 0], axis_name="reps"
-        )
-
-        results_jax = _chunked_panel_pfilter_internal(
+        results_jax = run_jax_batch_sharded(
+            _chunked_panel_pfilter_internal,
+            {0: 0, 7: 0},
+            {
+                "neg_loglik": 0,
+                "CLL": 0,
+                "ESS": 0,
+                "filter_mean": 0,
+                "prediction_mean": 0,
+            },
             thetas_panel_repl,
             rep_unit._dt_array_extended,
             rep_unit._nstep_array,
@@ -497,7 +501,8 @@ class PanelEstimationMixin(Base):
             results_np, axis=-1, ignore_nan=False
         )  # shape: (n_theta_reps, len(self.unit_objects))
 
-        self.theta.logLik_unit = logLik_unit
+        theta_obj_in.logLik_unit = logLik_unit
+        self.theta = theta_obj_in
 
         def _reshape_and_stack_diagnostics(arr, dims, coord_names):
             if arr is None or arr.size == 0:
@@ -608,6 +613,7 @@ class PanelEstimationMixin(Base):
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         theta_for_result = deepcopy(theta_obj_in)
+
         n_reps = theta_obj_in.num_replicates()
         unit_names = self.get_unit_names()
         U = len(unit_names)
@@ -654,10 +660,6 @@ class PanelEstimationMixin(Base):
         key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(key, n_reps)
 
-        shared_array, unit_array, keys = shard_arrays(
-            [shared_array, unit_array, keys], [0, 0, 0], axis_name="reps"
-        )
-
         # TODO: if the vmap mode works well, remove the sequential mode
         if vmap_chunk_size is not None:
             U_padded = U + (vmap_chunk_size - (U % vmap_chunk_size)) % vmap_chunk_size
@@ -681,7 +683,10 @@ class PanelEstimationMixin(Base):
                         unit_array, ((0, 0), (0, 0), (0, 0), (0, padding))
                     )
 
-            res = _jv_panel_mif_internal_vmap(
+            res = run_jax_batch_sharded(
+                _jv_panel_mif_internal_vmap,
+                {0: 0, 1: 0, 21: 0},
+                [0, 0, 0, 0],
                 shared_array,
                 unit_array,
                 rep_unit._dt_array_extended,
@@ -718,7 +723,10 @@ class PanelEstimationMixin(Base):
                 unit_traces = unit_traces[:, :, :, :U]
         else:
             shared_array_f, unit_array_f, shared_traces, unit_traces = (
-                _jv_panel_mif_internal(
+                run_jax_batch_sharded(
+                    _jv_panel_mif_internal,
+                    {0: 0, 1: 0, 20: 0},
+                    [0, 0, 0, 0],
                     shared_array,
                     unit_array,
                     rep_unit._dt_array_extended,
@@ -885,6 +893,8 @@ class PanelEstimationMixin(Base):
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
 
+        n_reps = theta_obj_in.num_replicates()
+
         key, old_key = self._update_fresh_key(key)
         if J < 1 or M < 1:
             raise ValueError("J and M must be greater than 0.")
@@ -897,7 +907,6 @@ class PanelEstimationMixin(Base):
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
         chunk_size = max(1, int(chunk_size))
-        n_reps = theta_obj_in.num_replicates()
 
         unit_param_permutations = jnp.stack(
             [self._get_unit_param_permutation(u) for u in unit_names], axis=0
@@ -940,10 +949,6 @@ class PanelEstimationMixin(Base):
             (n_reps, M, U) + key.shape[1:]
         )
 
-        shared_array, unit_array, keys = shard_arrays(
-            [shared_array, unit_array, keys], [0, 0, 0], axis_name="reps"
-        )
-
         opt_name = optimizer.__class__.__name__
         beta1 = getattr(optimizer, "beta1", 0.9)
         beta2 = getattr(optimizer, "beta2", 0.999)
@@ -953,7 +958,10 @@ class PanelEstimationMixin(Base):
             logliks_history,
             shared_history,
             unit_history,
-        ) = _vmapped_panel_train_internal(
+        ) = run_jax_batch_sharded(
+            _vmapped_panel_train_internal,
+            {0: 0, 1: 0, 9: 0},
+            [0, 0, 0],
             shared_array,
             unit_array,
             unit_param_permutations,

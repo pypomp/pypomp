@@ -59,3 +59,6 @@ class PanelPompInterface(Protocol):
         nsim: int = 1,
         as_pomp: bool = False,
     ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Any]: ...
+
+    @staticmethod
+    def merge(*panel_pomp_objs: Any) -> Any: ...

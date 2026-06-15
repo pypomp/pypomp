@@ -63,7 +63,7 @@ class RWSigma:
             factor = 0.5 ** (1 / 50)
 
             def geometric_fn(nt, m, ntimes):
-                return factor ** (nt / ntimes + m - 1)
+                return factor ** (nt / ntimes + m)
 
             self.cooling_fn = geometric_fn
 
@@ -86,7 +86,7 @@ class RWSigma:
             factor = a ** (1 / 50)
 
             def geometric_fn(nt, m, ntimes):
-                return factor ** (nt / ntimes + m - 1)
+                return factor ** (nt / ntimes + m)
 
             self.cooling_fn = geometric_fn
         elif ctype == "cosine":
@@ -135,7 +135,7 @@ class RWSigma:
         factor = a ** (1 / 50)
 
         def fn(nt, m, ntimes):
-            return factor ** (nt / ntimes + m - 1)
+            return factor ** (nt / ntimes + m)
 
         obj = RWSigma(self.sigmas, init_names=self.init_names, cooling_fn=fn)
         obj.a = a

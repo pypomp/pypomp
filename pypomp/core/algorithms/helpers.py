@@ -314,7 +314,7 @@ def _geometric_cooling(nt: int, m: int, ntimes: int, a: float) -> float:
         float: The fraction to cool sigmas and sigmas_init by.
     """
     factor = a ** (1 / 50)
-    alpha = factor ** (nt / ntimes + m - 1)
+    alpha = factor ** (nt / ntimes + m)
     return alpha
 
 
@@ -331,3 +331,50 @@ def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
         float: The fraction to cool by.
     """
     return c + (1.0 - c) * 0.5 * (1.0 + jnp.cos(jnp.pi * i / M))
+
+
+def shard_arrays(
+    arrays: list[jax.Array],
+    axes: list[int],
+    axis_name: str = "devices",
+) -> list[jax.Array]:
+    """
+    Shards JAX arrays across available devices along the specified axes.
+
+    Args:
+        arrays: List of JAX arrays to shard.
+        axes: The dimension/axis index to shard for each array.
+        axis_name: Logical axis name for the physical device mesh.
+
+    Returns:
+        List of sharded JAX arrays.
+
+    Example:
+        To expose and use multiple CPU cores in JAX, configure the environment variables
+        before JAX is imported:
+
+        >>> import os
+        >>> # Set JAX platform before importing JAX
+        >>> os.environ["JAX_PLATFORMS"] = "cpu"
+        >>> cpus = 8
+        >>> os.environ["XLA_FLAGS"] = (
+        ...     os.environ.get("XLA_FLAGS", "")
+        ...     + f" --xla_force_host_platform_device_count={cpus}"
+        ... )
+    """
+    num_devices = len(jax.devices())
+    if num_devices <= 1:
+        return arrays
+
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=(axis_name,))
+    sharded_arrays: list[jax.Array] = []
+
+    for arr, axis in zip(arrays, axes):
+        spec_list: list[str | None] = [None] * arr.ndim
+        spec_list[axis] = axis_name
+        spec = jax.sharding.PartitionSpec(*spec_list)
+
+        sharding_spec = jax.sharding.NamedSharding(mesh, spec)
+        sharded_arrays.append(jax.device_put(arr, sharding_spec))
+
+    return sharded_arrays

@@ -12,6 +12,7 @@ import warnings
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
 from ..core.algorithms.mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
 from ..core.algorithms.train import _vmapped_panel_train_internal
+from ..core.algorithms.helpers import shard_arrays
 from ..core.rw_sigma import RWSigma
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Optimizer, Adam
@@ -453,6 +454,10 @@ class PanelEstimationMixin(Base):
                     covars_per_unit, ((0, padding), (0, 0), (0, 0))
                 )
 
+        thetas_panel_repl, rep_unit_keys = shard_arrays(
+            [thetas_panel_repl, rep_unit_keys], [0, 0], axis_name="reps"
+        )
+
         results_jax = _chunked_panel_pfilter_internal(
             thetas_panel_repl,
             rep_unit._dt_array_extended,
@@ -648,6 +653,10 @@ class PanelEstimationMixin(Base):
 
         key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(key, n_reps)
+
+        shared_array, unit_array, keys = shard_arrays(
+            [shared_array, unit_array, keys], [0, 0, 0], axis_name="reps"
+        )
 
         # TODO: if the vmap mode works well, remove the sequential mode
         if vmap_chunk_size is not None:
@@ -929,6 +938,10 @@ class PanelEstimationMixin(Base):
 
         keys = jax.random.split(key, n_reps * M * U).reshape(
             (n_reps, M, U) + key.shape[1:]
+        )
+
+        shared_array, unit_array, keys = shard_arrays(
+            [shared_array, unit_array, keys], [0, 0, 0], axis_name="reps"
         )
 
         opt_name = optimizer.__class__.__name__

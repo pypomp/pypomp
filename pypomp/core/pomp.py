@@ -20,7 +20,7 @@ from .metadata import ModelMetadata
 from pypomp import functional as F
 from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
-from .algorithms.helpers import _calc_ys_covars
+from .algorithms.helpers import _calc_ys_covars, shard_arrays
 from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .par_trans import ParTrans
@@ -485,19 +485,9 @@ class Pomp:
             n_theta_reps, reps, *new_key.shape
         )
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("theta_reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec("theta_reps", None)
-            )
-            rep_keys_sharding_spec = jax.sharding.NamedSharding(
-                mesh,
-                jax.sharding.PartitionSpec(
-                    "theta_reps", *([None] * (rep_keys.ndim - 1))
-                ),
-            )
-            thetas_array = jax.device_put(thetas_array, sharding_spec)
-            rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
+        thetas_array, rep_keys = shard_arrays(
+            [thetas_array, rep_keys], [0, 0], axis_name="theta_reps"
+        )
 
         results_jax = F.pfilter(
             self.to_struct(),
@@ -650,12 +640,9 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec(None, "reps", None)
-            )
-            theta_tiled = jax.device_put(theta_tiled, sharding_spec)
+        theta_tiled, keys = shard_arrays(
+            [theta_tiled, keys], [1, 0], axis_name="reps"
+        )
 
         nLLs_jax, theta_traces_jax, final_thetas_jax = F.mif(
             self.to_struct(),
@@ -810,6 +797,10 @@ class Pomp:
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
+
+        theta_array, keys = shard_arrays(
+            [theta_array, keys], [0, 0], axis_name="reps"
+        )
 
         opt_name = optimizer.__class__.__name__
         beta1 = getattr(optimizer, "beta1", 0.9)

@@ -260,13 +260,13 @@ class TestRWSigma:
         rw = pp.RWSigma(sigmas)
         assert rw.a == 0.5
         factor = 0.5 ** (1 / 50)
-        assert np.isclose(rw.cooling_fn(10, 5, 20), factor ** (10 / 20 + 5 - 1))
+        assert np.isclose(rw.cooling_fn(10, 5, 20), factor ** (10 / 20 + 5))
 
         # 2. geometric_cooling
         rw_geom = rw.geometric_cooling(0.3)
         assert rw_geom.a == 0.3
         f_geom = rw_geom.cooling_fn(0, 0, 50)
-        assert np.isclose(f_geom, (0.3 ** (1 / 50)) ** -1)
+        assert np.isclose(f_geom, 1.0)
 
         # 3. cosine_cooling
         rw_cos = rw.cosine_cooling(0.1, 10)

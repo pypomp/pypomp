@@ -229,14 +229,14 @@ class LearningRate:
                     vals_str = ", ".join(f"{x:.4g}" for x in val)
                     rate_strs.append(f"'{name}': [{vals_str}]")
                 else:
-                    rate_strs.append(f"'{name}': [{val[0]:.4g} ... {val[-1]:.4g}] (len={val.size})")
+                    rate_strs.append(
+                        f"'{name}': [{val[0]:.4g} ... {val[-1]:.4g}] (len={val.size})"
+                    )
             else:
                 rate_strs.append(f"'{name}': {val}")
-        
+
         indented_rates = "\n    ".join(rate_strs)
         return f"LearningRate(\n    {indented_rates}\n)"
 
-
     def __repr__(self) -> str:
         return self.__str__()
-

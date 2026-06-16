@@ -3,7 +3,6 @@ import jax.numpy as jnp
 from jax import jit
 from typing import Callable
 from .helpers import _normalize_weights
-from .helpers import _keys_helper
 from .helpers import _resampler_thetas
 from .helpers import _no_resampler_thetas
 
@@ -169,7 +168,9 @@ def _perfilter_internal(
         shape=thetas_Jd.shape, key=subkey
     )
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF_Jx = rinitializers(thetas_Jd, keys, covars0, t0, SHOULD_TRANS)
 
@@ -285,7 +286,7 @@ def _perfilter_helper(
         shape=thetas_Jd.shape, key=key_perturb
     )
 
-    _, keys = _keys_helper(key=key_process, J=J, covars=covars_extended)
+    keys = jax.random.split(key_process, num=J + 1)[1:]
 
     nstep = nstep.astype(int)
 
@@ -309,8 +310,6 @@ def _perfilter_helper(
         dmeasures(y, particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
         nan=jnp.log(1e-18),
     )
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
 
     weights = norm_weights + measurements
     norm_weights, loglik_t = _normalize_weights(weights)

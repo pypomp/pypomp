@@ -29,6 +29,7 @@ def mif(
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (J, n_reps, n_params).
             Note that the batch dimension for `vmap` is the second axis (`n_reps`).
+            These should be provided on the estimation scale.
         sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
         sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
         M (int): Number of iterations.
@@ -44,6 +45,7 @@ def mif(
             Parameter trace history: Shape (n_reps, M+1, n_params).
             Final particle swarm: Shape (n_reps, J, n_params).
     """
+    # TODO: transform parameters to the estimation scale so the user does not have to
     res = _jv_mif_internal(
         thetas_array,
         struct.dt_array_extended,

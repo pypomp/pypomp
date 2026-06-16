@@ -10,22 +10,6 @@ from functools import partial
 from pypomp.functional.structs import PompStruct
 
 
-# TODO remove this function, as covars should always be dim 2
-def _keys_helper(
-    key: jax.Array, J: int, covars: jax.Array | None
-) -> tuple[jax.Array, jax.Array]:
-    """
-    This function is a helper for generating random keys for resampling in the
-    particle filtering algorithms.
-    """
-    if covars is not None and len(covars.shape) > 2:
-        keys = jax.random.split(key, num=J * covars.shape[1] + 1)
-        res_keys = keys[1:].reshape(J, covars.shape[1], 2).astype(jnp.uint32)
-    else:
-        keys = jax.random.split(key, num=J + 1)
-        res_keys = keys[1:]
-    return keys[0], res_keys
-
 
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     """

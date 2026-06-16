@@ -1,7 +1,6 @@
 """
 Tests for parameter transformation applied to traces in mif and train methods.
 """
-# TODO: Consider deleting this file? Not sure these tests are necessary.
 
 import numpy as np
 import jax.numpy as jnp
@@ -307,3 +306,143 @@ def test_transform_roundtrip():
     assert not np.allclose(est_space, original)
     # In log space, values should be different
     assert np.all(est_space < original)  # log(x) < x for x > 1
+
+
+def test_transform_array_invalid_direction():
+    """Test that _transform_array raises ValueError on invalid direction."""
+    import pytest
+
+    par_trans = pp.ParTrans()
+    with pytest.raises(ValueError, match="Invalid direction"):
+        par_trans._transform_array(np.array([1.0]), ["p1"], direction="invalid")  # type: ignore
+
+
+def test_transform_array_3d():
+    """Test _transform_array with a 3D parameter trace (e.g. n_reps, n_iters, n_params)."""
+
+    def to_est(theta: ParamDict) -> ParamDict:
+        return {k: jnp.log(v) for k, v in theta.items()}
+
+    def from_est(theta: ParamDict) -> ParamDict:
+        return {k: jnp.exp(v) for k, v in theta.items()}
+
+    par_trans = pp.ParTrans(to_est, from_est)
+
+    # shape: (2, 3, 2)
+    original = np.array(
+        [
+            [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]],
+            [[4.0, 5.0], [5.0, 6.0], [6.0, 7.0]],
+        ]
+    )
+    param_names = ["p1", "p2"]
+
+    est = par_trans._transform_array(original, param_names, direction="to_est")
+    assert est.shape == (2, 3, 2)
+    assert np.allclose(est, np.log(original))
+
+    nat = par_trans._transform_array(est, param_names, direction="from_est")
+    assert nat.shape == (2, 3, 2)
+    assert np.allclose(nat, original)
+
+
+def test_transform_panel_traces_invalid_direction():
+    """Test that _transform_panel_traces raises ValueError on invalid direction."""
+    import pytest
+
+    par_trans = pp.ParTrans()
+    with pytest.raises(ValueError, match="Invalid direction"):
+        par_trans._transform_panel_traces(None, None, [], [], direction="invalid")  # type: ignore
+
+
+def test_transform_panel_traces_both_none():
+    """Test that _transform_panel_traces returns (None, None) when both traces are None."""
+    par_trans = pp.ParTrans()
+    shared_out, unit_out = par_trans._transform_panel_traces(
+        shared_traces=None,
+        unit_traces=None,
+        shared_param_names=["shared"],
+        unit_param_names=["unit"],
+        direction="to_est",
+    )
+    assert shared_out is None
+    assert unit_out is None
+
+
+def test_transform_panel_traces_unit_traces_only_no_spec():
+    """Test that unit_traces is simply copied when unit_traces is not None but n_spec == 0."""
+    par_trans = pp.ParTrans()
+
+    # unit_traces has shape (n_reps, n_iters, n_spec+1, n_units)
+    # Here n_spec is 0, so shape is (1, 2, 1, 3)
+    unit_traces = np.array([[[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]]])
+
+    shared_out, unit_out = par_trans._transform_panel_traces(
+        shared_traces=None,
+        unit_traces=unit_traces,
+        shared_param_names=["shared"],
+        unit_param_names=[],  # n_spec = 0
+        direction="to_est",
+    )
+
+    assert shared_out is None
+    assert unit_out is not None
+    assert np.allclose(unit_out, unit_traces)
+
+
+def test_transform_panel_traces_no_shared_context():
+    """Test unit trace transformation when shared_traces is None but n_shared > 0."""
+
+    def to_est(theta: ParamDict) -> ParamDict:
+        # unit transformation depends on shared value (e.g. unit + shared)
+        # but if shared is missing/None in ctx, it will fall back to 0.0 in zeros context
+        return {
+            "unit": theta["unit"] + theta.get("shared", 0.0),
+            "shared": theta.get("shared", 0.0),
+        }
+
+    par_trans = pp.ParTrans(to_est=to_est)
+
+    # unit_traces shape (1, 1, 2, 1) -> n_reps=1, n_iters=1, n_spec=1, n_units=1
+    unit_traces = np.array([[[[0.5], [10.0]]]])  # loglik=0.5, unit=10.0
+
+    shared_out, unit_out = par_trans._transform_panel_traces(
+        shared_traces=None,
+        unit_traces=unit_traces,
+        shared_param_names=["shared"],  # n_shared = 1
+        unit_param_names=["unit"],
+        direction="to_est",
+    )
+
+    assert shared_out is None
+    assert unit_out is not None
+    # 10.0 + shared_context (which should be 0.0 because shared_traces is None) = 10.0
+    assert abs(unit_out[0, 0, 1, 0] - 10.0) < 1e-6
+
+
+def test_transform_panel_traces_no_unit_context():
+    """Test shared trace transformation when unit_traces is None but n_spec > 0."""
+
+    def to_est(theta: ParamDict) -> ParamDict:
+        return {
+            "shared": theta["shared"] + theta.get("unit", 0.0),
+            "unit": theta.get("unit", 0.0),
+        }
+
+    par_trans = pp.ParTrans(to_est=to_est)
+
+    # shared_traces shape (1, 1, 2) -> n_reps=1, n_iters=1, n_shared=1
+    shared_traces = np.array([[[0.5, 10.0]]])  # loglik=0.5, shared=10.0
+
+    shared_out, unit_out = par_trans._transform_panel_traces(
+        shared_traces=shared_traces,
+        unit_traces=None,
+        shared_param_names=["shared"],
+        unit_param_names=["unit"],  # n_spec = 1
+        direction="to_est",
+    )
+
+    assert unit_out is None
+    assert shared_out is not None
+    # 10.0 + unit_context (which should be 0.0 because unit_traces is None) = 10.0
+    assert abs(shared_out[0, 0, 1] - 10.0) < 1e-6

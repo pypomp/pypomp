@@ -1,3 +1,4 @@
+import warnings
 import jax
 import pandas as pd
 from typing import TYPE_CHECKING, Any
@@ -111,7 +112,7 @@ class PanelAnalysisMixin(Base):
         traces = self.traces()
         assert isinstance(traces, pd.DataFrame)
         if traces.empty:
-            print("No trace data to plot.")
+            warnings.warn("No trace data to plot.", UserWarning)
             return None
 
         value_cols = [
@@ -134,7 +135,7 @@ class PanelAnalysisMixin(Base):
 
         if which == "shared":
             if not has_shared_rows:
-                print("No shared rows to plot.")
+                warnings.warn("No shared rows to plot.", UserWarning)
                 return None
             df_plot = traces[traces["unit"] == "shared"]
             title = "Shared Parameter Traces"

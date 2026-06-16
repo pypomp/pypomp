@@ -22,12 +22,11 @@ def test_prune_and_mix_and_match(lg_panel_mp):
     panel.mix_and_match()
 
 
-def test_plot_traces_empty_history(lg_panel_setup_some_shared, capsys):
+def test_plot_traces_empty_history(lg_panel_setup_some_shared):
     panel, _, _ = lg_panel_setup_some_shared
-    result = panel.plot_traces(which="shared", show=False)
+    with pytest.warns(UserWarning, match="No trace data to plot."):
+        result = panel.plot_traces(which="shared", show=False)
     assert result is None
-    captured = capsys.readouterr()
-    assert "No trace data to plot." in captured.out
 
 
 def test_plot_traces_shared(lg_panel_mp):

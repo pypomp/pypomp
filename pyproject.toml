@@ -10,13 +10,23 @@ description = "Modeling and inference using partially observed Markov process (P
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+keywords = ["POMP", "state-space models", "particle filter", "iterated filtering", "JAX", "time series"]
 
 dependencies = [
-    "jax>=0.4.31",
+    "jax>=0.5.3",
     "tqdm>=4.66.4",
     "numpy>=1.24",
     "pandas",
@@ -36,6 +46,8 @@ viz = ["plotly"]
 [project.urls]
 Homepage = "https://github.com/pypomp/pypomp"
 Issues = "https://github.com/pypomp/pypomp/issues"
+Documentation = "https://pypomp.readthedocs.io"
+Repository = "https://github.com/pypomp/pypomp"
 
 [build-system]
 requires = ["hatchling"]

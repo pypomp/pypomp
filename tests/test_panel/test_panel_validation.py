@@ -399,7 +399,7 @@ def test_train_traces_both_none(lg_panel_setup_some_shared, monkeypatch):
         panel.train(J=2, M=2, eta=eta, key=key)
 
 
-def test_plot_traces_no_shared_rows(lg_panel_setup_some_shared, capsys, monkeypatch):
+def test_plot_traces_no_shared_rows(lg_panel_setup_some_shared, monkeypatch):
     panel, _, _ = lg_panel_setup_some_shared
     dummy_traces = pd.DataFrame(
         {
@@ -411,10 +411,9 @@ def test_plot_traces_no_shared_rows(lg_panel_setup_some_shared, capsys, monkeypa
         }
     )
     monkeypatch.setattr(panel, "traces", lambda: dummy_traces)
-    res = panel.plot_traces(which="shared", show=False)
+    with pytest.warns(UserWarning, match="No shared rows to plot."):
+        res = panel.plot_traces(which="shared", show=False)
     assert res is None
-    captured = capsys.readouterr()
-    assert "No shared rows to plot." in captured.out
 
 
 def test_plot_simulations_invalid_theta(lg_panel_setup_some_shared):

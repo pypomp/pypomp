@@ -1,6 +1,7 @@
 [![Project Status: Active](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 [![codecov](https://codecov.io/gh/pypomp/pypomp/graph/badge.svg?token=8TA2X3DRML)](https://codecov.io/gh/pypomp/pypomp)
 [![Documentation Status](https://app.readthedocs.org/projects/pypomp/badge/?version=latest)](https://pypomp.readthedocs.io/en/latest/?badge=latest)
+[![PyPI version](https://badge.fury.io/py/pypomp.svg)](https://badge.fury.io/py/pypomp)
 
 # Pypomp
 
@@ -70,3 +71,18 @@ print(f"Log-Likelihood: {log_lik:.4f}")
 
 The Pypomp library is run by the [Pypomp organization](https://github.com/pypomp).
 All contributions are welcome. Please raise issues or make pull requests on the [Pypomp GitHub site](https://github.com/pypomp/pypomp) or contact the [core development team](https://github.com/pypomp/.github/blob/main/profile/Governance.md).
+
+
+### 📚 Citation
+
+If you use `pypomp` in your research, please cite it as:
+
+```bibtex
+@software{pypomp2024github,
+  author  = {Aaron Abkemeier and Jun Chen and Edward Ionides and Jesse Wheeler and Kevin Tan},
+  title   = {pypomp},
+  url     = {https://github.com/pypomp/pypomp},
+  version = {0.4.6.0},
+  year    = {2026}
+}
+```

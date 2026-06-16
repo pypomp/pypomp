@@ -160,7 +160,8 @@ def _num_fixedstep_steps(
     """
     Calculate the number of steps and the step size for a fixed number of steps.
     """
-    assert nstep is not None
+    if nstep is None:
+        raise ValueError("nstep must be provided")
     return nstep, (t2 - t1) / nstep
 
 
@@ -170,7 +171,8 @@ def _num_euler_steps(
     """
     Calculate the number of steps and the step size for a given time step size.
     """
-    assert dt is not None
+    if dt is None:
+        raise ValueError("dt must be provided")
     tol = np.sqrt(np.finfo(float).eps)
 
     if t1 >= t2:

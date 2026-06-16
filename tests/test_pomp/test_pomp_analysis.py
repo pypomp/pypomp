@@ -18,11 +18,11 @@ def test_plot_traces_happy_path():
     assert hasattr(fig, "show")
 
 
-def test_plot_traces_empty_history(capsys):
+def test_plot_traces_empty_history():
     LG = pp.models.LG()
-    result = LG.plot_traces(show=False)
+    with pytest.warns(UserWarning, match="No trace data to plot."):
+        result = LG.plot_traces(show=False)
     assert result is None
-    assert "No trace data to plot." in capsys.readouterr().out
 
 
 def test_plot_simulations_happy_path():

@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 import pandas as pd
 import numpy as np
@@ -22,7 +23,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
     Internal function to plot traces using Plotly.
     """
     if traces.empty:
-        print("No trace data to plot.")
+        warnings.warn("No trace data to plot.", UserWarning)
         return None
 
     go, px, make_subplots = _check_plotly()
@@ -39,7 +40,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
     df_long = df_long.dropna(subset=["value"])
 
     if df_long.empty:
-        print("No valid trace data to plot.")
+        warnings.warn("No valid trace data to plot.", UserWarning)
         return None
 
     variables = df_long["variable"].unique()

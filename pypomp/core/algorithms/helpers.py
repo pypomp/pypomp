@@ -10,7 +10,6 @@ from functools import partial
 from pypomp.functional.structs import PompStruct
 
 
-
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     """
     Systematic resampling method based on input normalized weights.
@@ -27,13 +26,7 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     J = norm_weights.shape[-1]
     unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J
     csum = jnp.cumsum(jnp.exp(norm_weights))
-    counts = jnp.repeat(
-        jnp.arange(J),
-        jnp.histogram(
-            unifs, bins=jnp.pad(csum / csum[-1], pad_width=(1, 0)), density=False
-        )[0].astype(int),
-        total_repeat_length=J,
-    )
+    counts = jnp.searchsorted(csum / csum[-1], unifs, side="right")
     return counts
 
 
@@ -53,8 +46,13 @@ def _normalize_weights(weights: jax.Array) -> tuple[jax.Array, jax.Array]:
                 assumptions.
     """
     mw = jnp.max(weights)
-    loglik_t = mw + jnp.log(jnp.nansum(jnp.exp(weights - mw)))
-    norm_weights = weights - loglik_t
+    is_collapsed = mw == -jnp.inf
+    mw_safe = jnp.where(is_collapsed, 0.0, mw)
+    loglik_t = mw_safe + jnp.log(jnp.nansum(jnp.exp(weights - mw_safe)))
+    loglik_t = jnp.where(is_collapsed, -jnp.inf, loglik_t)
+    norm_weights = jnp.where(
+        is_collapsed, -jnp.log(weights.shape[-1]), weights - loglik_t
+    )
     return norm_weights, loglik_t
 
 
@@ -84,7 +82,7 @@ def _resampler(
                 resampled particles.
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights, subkey=subkey)
+    counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
     particlesF = particlesP[counts]
     norm_weights = (
         norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - jnp.log(J)
@@ -133,7 +131,7 @@ def _resampler_thetas(
                 the latest perturbed particles (particlesF).
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights, subkey=subkey)
+    counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
     particlesF = particlesP[counts]
     norm_weights = (
         norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - jnp.log(J)

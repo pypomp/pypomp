@@ -12,12 +12,12 @@ Parameters
 
    ~PompParameters.logLik
    ~PompParameters.to_jax_array
-   ~PompParameters.to_jax_array_canonical
    ~PompParameters.num_replicates
    ~PompParameters.num_params
    ~PompParameters.subset
    ~PompParameters.get_param_names
-   ~PompParameters.to_list
+   ~PompParameters.params
+   ~PompParameters.set_params
    ~PompParameters.transform
    ~PompParameters.prune
    ~PompParameters.merge
@@ -31,7 +31,8 @@ Parameters
 
    ~PanelParameters.logLik
    ~PanelParameters.logLik_unit
-   ~PanelParameters.theta
+   ~PanelParameters.params
+   ~PanelParameters.set_params
    ~PanelParameters.num_replicates
    ~PanelParameters.get_param_names
    ~PanelParameters.get_shared_param_names

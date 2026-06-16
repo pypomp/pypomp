@@ -6,7 +6,7 @@ import importlib
 import cloudpickle
 from copy import deepcopy
 import time
-from typing import Callable, Any
+from typing import Callable, Any, cast
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -15,12 +15,12 @@ import warnings
 from typing import Union, overload, Literal
 from .viz import plot_traces_internal, plot_simulations_internal
 
-from pypomp.types import ThetaInput
+from pypomp.types import ParamDict
 from .metadata import ModelMetadata
 from pypomp import functional as F
 from .model_struct import _RInit, _RProc, _DMeas, _RMeas
 import xarray as xr
-from .algorithms.helpers import _calc_ys_covars
+from .algorithms.helpers import _calc_ys_covars, run_jax_batch_sharded
 from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .par_trans import ParTrans
@@ -67,14 +67,10 @@ class Pomp:
     ----------
     ys : pd.DataFrame
         The measurement data frame. The row index must contain the observation times.
-    theta : ThetaInput
+    theta : PompParameters
         Initial parameter(s) for the model. Accepts:
-        - A single dictionary: dict[str, Numeric]
-        - A list of dictionaries: list[dict[str, Numeric]]
-        - An existing PompParameters object
-        Numeric values (e.g. jax.Array, int) are automatically coerced to
-        standard Python floats for internal storage. Vectorized methods
-        (like pfilter) will run in parallel over list/PompParameters inputs.
+        - An existing :class:`~pypomp.core.parameters.PompParameters` object
+        Vectorized methods (like pfilter) will run in parallel over multiple parameter sets stored inside the `PompParameters` object.
     statenames : list[str]
         List of all latent state variable names.
     t0 : float
@@ -87,7 +83,7 @@ class Pomp:
         Measurement density function (log-likelihood).
     rmeas : Callable, optional
         Measurement simulator function.
-    par_trans : ParTrans, optional
+    par_trans : :class:`~pypomp.core.par_trans.ParTrans`, optional
         Parameter transformation object used to move parameters
         between the natural space and the estimation space. Defaults to the identity transformation.
     covars : pd.DataFrame, optional
@@ -107,7 +103,7 @@ class Pomp:
     ys: pd.DataFrame
     """The measurement data frame with observation times as the index."""
 
-    _theta: PompParameters
+    _theta: PompParameters | None
     """Internal storage for model parameters in canonical order."""
 
     canonical_param_names: list[str]
@@ -156,10 +152,10 @@ class Pomp:
     """Indices of accumulator state variables within the full state vector."""
 
     results_history: ResultsHistory
-    """History of results from `pfilter`, `mif`, and `train` calls."""
+    """A :class:`~pypomp.core.results.ResultsHistory` object storing the history of results from :meth:`pfilter`, :meth:`mif`, and :meth:`train` calls."""
 
     fresh_key: jax.Array | None
-    """Running a method that takes a key will store a fresh, unused key here."""
+    """Running a method that accepts a JAX PRNG key will store a fresh, unused key here."""
 
     metadata: ModelMetadata
     """Environment and version metadata initialized when this instance was built."""
@@ -167,7 +163,7 @@ class Pomp:
     def __init__(
         self,
         ys: pd.DataFrame,
-        theta: ThetaInput,
+        theta: PompParameters,
         statenames: tuple[str, ...] | list[str],
         t0: float,
         rinit: Callable,
@@ -186,10 +182,9 @@ class Pomp:
         if covars is not None and not isinstance(covars, pd.DataFrame):
             raise TypeError("covars must be a pandas DataFrame or None")
 
-        if isinstance(theta, PompParameters):
-            self._theta = theta
-        else:
-            self._theta = PompParameters(theta)
+        if not isinstance(theta, PompParameters):
+            raise TypeError("theta must be a PompParameters instance")
+        self._theta = theta
 
         # Extract parameter names from first theta dict
         self.canonical_param_names = self._theta.get_param_names()
@@ -300,32 +295,28 @@ class Pomp:
 
     @property
     def theta(self) -> PompParameters:
+        """The parameter object for the model."""
+        if self._theta is None:
+            raise ValueError("Model parameters have not been set (theta is None).")
         return self._theta
 
     @theta.setter
-    def theta(self, value: ThetaInput):
-        if isinstance(value, PompParameters):
-            self._theta = value
-        else:
-            self._theta = PompParameters(value)
+    def theta(self, value: PompParameters | None):
+        if value is not None and not isinstance(value, PompParameters):
+            raise TypeError("theta must be a PompParameters instance")
+        self._theta = value
 
     def _prepare_theta_input(
         self,
-        theta: ThetaInput,
+        theta: PompParameters | None,
     ) -> PompParameters:
         """
         Prepare the theta input for the method.
         """
         if theta is None:
             return self.theta
-        elif isinstance(theta, dict) or isinstance(theta, list):
-            theta = PompParameters(theta)
-        elif isinstance(theta, PompParameters):
-            pass
-        else:
-            raise TypeError(
-                "theta must be a dictionary, a list of dictionaries, or a PompParameters object"
-            )
+        if not isinstance(theta, PompParameters):
+            raise TypeError("theta must be a PompParameters object or None")
         if set(theta.get_param_names()) != set(self.canonical_param_names):
             raise ValueError(
                 "theta parameter names must match canonical_param_names up to reordering"
@@ -381,7 +372,7 @@ class Pomp:
     @staticmethod
     def sample_params(
         param_bounds: dict[str, tuple[float, float]], n: int, key: jax.Array
-    ) -> list[dict[str, float]]:
+    ) -> PompParameters:
         """
         Samples multiple sets of parameters from independent uniform distributions.
 
@@ -395,21 +386,26 @@ class Pomp:
             key (jax.Array): JAX random key for reproducibility
 
         Returns:
-            list[dict]: List of n dictionaries containing sampled parameters
+            PompParameters: A PompParameters object containing the sampled parameters
         """
-        keys = jax.random.split(key, len(param_bounds))
-        param_sets = []
+        param_names = list(param_bounds.keys())
+        low = jnp.array([param_bounds[p][0] for p in param_names])
+        high = jnp.array([param_bounds[p][1] for p in param_names])
 
-        for i in range(n):
-            params = {}
-            for j, (param_name, (lower, upper)) in enumerate(param_bounds.items()):
-                subkey = jax.random.split(keys[j], n)[i]
-                params[param_name] = float(
-                    jax.random.uniform(subkey, shape=(), minval=lower, maxval=upper)
-                )
-            param_sets.append(params)
+        sampled = jax.random.uniform(
+            key, shape=(n, len(param_names)), minval=low, maxval=high
+        )
 
-        return param_sets
+        da = xr.DataArray(
+            np.expand_dims(np.array(sampled), axis=1),
+            dims=["theta_idx", "unit", "parameter"],
+            coords={
+                "theta_idx": np.arange(n),
+                "unit": ["shared"],
+                "parameter": param_names,
+            },
+        )
+        return PompParameters(da)
 
     def print_metadata(self) -> None:
         """
@@ -425,7 +421,7 @@ class Pomp:
         self,
         J: int,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         thresh: float = 0,
         reps: int = 1,
         CLL: bool = False,
@@ -444,17 +440,13 @@ class Pomp:
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple parameter sets simultaneously. Results are automatically stored in the
-        model's history and can be accessed using `self.results()`.
+        model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles
             key (jax.Array, optional): The random key. Defaults to self.fresh_key.
-            theta (ThetaInput, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Accepts:
-                - A single dictionary: dict[str, Numeric]
-                - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+            theta (PompParameters, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
                 execution across all parameter sets.
             thresh (float, optional): Threshold value to determine whether to
                 resample particles. Defaults to 0.
@@ -470,16 +462,15 @@ class Pomp:
             track_time (bool, optional): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-            None. Updates `self.results_history` with a `PompPFilterResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompPFilterResult` containing the log-likelihoods,
             and optionally the conditional log-likelihoods (CLL), effective sample size (ESS),
             filtered means, and prediction means if requested.
         """
         start_time = time.time()
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-        n_theta_reps = theta_obj_in.num_replicates()
-
         new_key, old_key = self._update_fresh_key(key)
+        n_theta_reps = theta_obj_in.num_replicates()
 
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
@@ -493,21 +484,10 @@ class Pomp:
             n_theta_reps, reps, *new_key.shape
         )
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("theta_reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec("theta_reps", None)
-            )
-            rep_keys_sharding_spec = jax.sharding.NamedSharding(
-                mesh,
-                jax.sharding.PartitionSpec(
-                    "theta_reps", *([None] * (rep_keys.ndim - 1))
-                ),
-            )
-            thetas_array = jax.device_put(thetas_array, sharding_spec)
-            rep_keys = jax.device_put(rep_keys, rep_keys_sharding_spec)
-
-        results_jax = F.pfilter(
+        results_jax = run_jax_batch_sharded(
+            F.pfilter,
+            {1: 0, 4: 0},
+            {"logLik": 0, "CLL": 0, "ESS": 0, "filter_mean": 0, "prediction_mean": 0},
             self.to_struct(),
             thetas_array,
             J,
@@ -574,7 +554,7 @@ class Pomp:
             method="pfilter",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj_in.to_list(),
+            theta=theta_obj_in,
             logLiks=logLik_da,
             J=J,
             reps=reps,
@@ -592,9 +572,8 @@ class Pomp:
         J: int,
         M: int,
         rw_sd: RWSigma,
-        a: float,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         thresh: float = 0,
         n_monitors: int = 0,
         track_time: bool = True,
@@ -609,21 +588,16 @@ class Pomp:
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple initial parameter sets simultaneously. Results are automatically stored in
-        the model's history and can be accessed using `self.results()`.
+        the model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles.
             M (int): Number of algorithm iterations.
-            rw_sd (RWSigma): Random walk sigma object.
-            a (float): Decay factor for RWSigma over 50 iterations.
+            rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk sigma object.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (ThetaInput, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Accepts:
-                - A single dictionary: dict[str, Numeric]
-                - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+            theta (PompParameters, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
                 execution across all parameter sets.
             thresh (float): Resampling threshold. Defaults to 0.
             n_monitors (int): Number of particle filter runs to average for
@@ -632,7 +606,7 @@ class Pomp:
             track_time (bool): Boolean flag controlling whether to track the
                 execution time.
         Returns:
-            None. Updates `self.results_history` with a `PompMIFResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompMIFResult` containing the log-likelihoods,
             parameter traces, and diagnostic information from the Iterated Filtering (IF2) run.
         """
         start_time = time.time()
@@ -645,10 +619,10 @@ class Pomp:
             )
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-        theta_list_in = theta_obj_in.to_list()
-        n_reps = theta_obj_in.num_replicates()
+        theta_obj_for_result = deepcopy(theta_obj_in)
 
         new_key, old_key = self._update_fresh_key(key)
+        n_reps = theta_obj_in.num_replicates()
         theta_obj_in.transform(self.par_trans, direction="to_est")
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
@@ -664,20 +638,16 @@ class Pomp:
 
         theta_tiled = jnp.tile(theta_array, (J, 1, 1))
 
-        if len(jax.devices()) > 1:
-            mesh = jax.sharding.Mesh(jax.devices(), axis_names=("reps",))
-            sharding_spec = jax.sharding.NamedSharding(
-                mesh, jax.sharding.PartitionSpec(None, "reps", None)
-            )
-            theta_tiled = jax.device_put(theta_tiled, sharding_spec)
-
-        nLLs_jax, theta_traces_jax, final_thetas_jax = F.mif(
+        nLLs_jax, theta_traces_jax, final_thetas_jax = run_jax_batch_sharded(
+            F.mif,
+            {1: 1, 8: 0},
+            [0, 0, 0],
             self.to_struct(),
             theta_tiled,
             sigmas_array,
             sigmas_init_array,
             M,
-            a,
+            rw_sd.cooling_fn,
             J,
             thresh,
             keys,
@@ -690,24 +660,20 @@ class Pomp:
 
         del nLLs_jax, theta_traces_jax, final_thetas_jax
 
-        final_theta_ests = []
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
-        trace_data = np.zeros((n_reps, M + 1, len(trace_vars)), dtype=float)
 
-        for i in range(n_reps):
-            # Prepend nan for the log-likelihood of the initial parameters
-            logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
+        # Prepend nan for the log-likelihood of the initial parameters (at iteration 0)
+        nans = np.full((n_reps, 1), np.nan)
+        logliks_with_nan = np.concatenate([nans, -nLLs], axis=1)  # shape: (n_reps, M+1)
 
-            param_traces = theta_traces[i]  # shape: (M+1, n_params)
+        theta_traces_natural = self.par_trans._transform_array(
+            theta_traces, param_names, direction="from_est"
+        )
 
-            # Transform traces from estimation space to natural space
-            param_traces = self.par_trans.transform_array(
-                param_traces, param_names, direction="from_est"
-            )
-            trace_data[i, :, 0] = logliks_with_nan
-            trace_data[i, :, 1:] = param_traces
-            final_theta_ests.append(final_thetas[i])
+        trace_data = np.concatenate(
+            [logliks_with_nan[:, :, np.newaxis], theta_traces_natural], axis=-1
+        )
 
         traces_da = xr.DataArray(
             trace_data,
@@ -719,22 +685,20 @@ class Pomp:
             },
         )
 
-        theta = [
-            self.par_trans.to_floats(
-                theta=dict(
-                    zip(
-                        self.canonical_param_names,
-                        np.mean(theta_est, axis=0).tolist(),
-                    )
-                ),
-                direction="from_est",
-            )
-            for theta_est in final_theta_ests
-        ]
-        logLik_estimates = -nLLs
-        self.theta = PompParameters(theta, logLik=logLik_estimates)
+        final_thetas_mean = np.mean(final_thetas, axis=1)  # shape: (n_reps, n_params)
+        final_thetas_natural = self.par_trans._transform_array(
+            final_thetas_mean, param_names, direction="from_est"
+        )
 
-        del final_theta_ests
+        final_theta_da = xr.DataArray(
+            final_thetas_natural,
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "parameter": param_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=-nLLs)
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -745,12 +709,11 @@ class Pomp:
             method="mif",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_list_in,
+            theta=theta_obj_for_result,
             traces_da=traces_da,
             J=J,
             M=M,
             rw_sd=rw_sd,
-            a=a,
             thresh=thresh,
             n_monitors=n_monitors,
         )
@@ -763,7 +726,7 @@ class Pomp:
         M: int,
         eta: LearningRate,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         thresh: int = 0,
@@ -772,34 +735,28 @@ class Pomp:
         track_time: bool = True,
     ) -> None:
         """
-        Optimizes model parameters using a differentiable particle filter and gradient-based methods.
+        Optimizes parameters for a continuous-state model using a differentiable particle filter and gradient-based methods.
 
-        This method performs Maximum Likelihood Estimation (MLE) by treating the particle filter
-        as a differentiable computational graph. It computes gradients of the log-likelihood
-        with respect to the parameters via reverse-mode automatic differentiation (using JAX),
-        and updates the parameters using optimizers (e.g., Adam, SGD).
+        This method performs Maximum Likelihood Estimation (MLE) using MOP, a differentiable particle filter for continuous-state POMPs. It computes gradients of the log-likelihood with respect to the parameters via reverse-mode automatic differentiation (using JAX), and updates the parameters using optimizers (e.g., Adam, SGD).
+
+        It bears repeating that this optimizer is only valid for continuous-state POMPs! For discrete-state models, use :meth:`Pomp.mif()` or :meth:`Pomp.dpop_train()`.
 
         This implementation leverages JAX to efficiently vectorize the algorithm across
         multiple initial parameter sets simultaneously.
-        Results are automatically stored in the model's history and can be accessed using
-        `self.results()`.
+        Results are automatically stored in the model's history and can be accessed using :meth:`Pomp.results()`.
 
         Args:
             J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
             M (int): Maximum iteration for the gradient descent optimization.
-            eta (LearningRate): Learning rates per parameter as a LearningRate object.
+            eta (:class:`~pypomp.core.learning_rate.LearningRate`): Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
             key (jax.Array, optional): The random key for reproducibility.
                 Defaults to self.fresh_key.
-            theta (ThetaInput, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Accepts:
-                - A single dictionary: dict[str, Numeric]
-                - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+            theta (PompParameters, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
                 execution across all parameter sets.
-            optimizer (Optimizer, optional): The optimizer configuration object to use
-                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.Newton()`, `pp.FullMatrixAdam()`, etc.).
-                Defaults to `pp.Adam()`. Hyperparameters like learning rate scaling, line search
+            optimizer (:class:`~pypomp.core.optimizer.Optimizer`, optional): The optimizer configuration object to use
+                (e.g., `pypomp.Adam()`, `pypomp.SGD()`, `pypomp.Newton()`, `pypomp.FullMatrixAdam()`, etc.).
+                Defaults to `pypomp.Adam()`. Hyperparameters like learning rate scaling, line search
                 (`scale`, `ls`, `c`, `max_ls_itn`), gradient clipping (`clip_norm`), or Adam beta values
                 are configured directly inside the optimizer instance.
             alpha (float, optional): Discount factor for MOP.
@@ -812,16 +769,17 @@ class Pomp:
                 execution time.
 
         Returns:
-            None. Updates `self.results_history` with a `PompTrainResult` containing the log-likelihoods,
+            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompTrainResult` containing the log-likelihoods,
             parameter traces, and optimizer details from the training run.
         """
         start_time = time.time()
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
-        theta_list_in = theta_obj_in.to_list()
+        theta_obj_for_result = deepcopy(theta_obj_in)
+
+        n_reps = theta_obj_in.num_replicates()
 
         theta_obj_in.transform(self.par_trans, direction="to_est")
-        n_reps = theta_obj_in.num_replicates()
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -848,7 +806,10 @@ class Pomp:
         scale = optimizer.scale
         ls = optimizer.ls
 
-        nLLs, theta_ests = F.train(
+        nLLs, theta_ests = run_jax_batch_sharded(
+            F.train,
+            {1: 0, 12: 0},
+            [0, 0],
             self.to_struct(),
             theta_array,
             J,
@@ -870,16 +831,10 @@ class Pomp:
             epsilon,
         )
 
-        theta_ests_natural = np.stack(
-            [
-                self.par_trans.transform_array(
-                    np.asarray(theta_ests[i]),
-                    self.canonical_param_names,
-                    direction="from_est",
-                )
-                for i in range(n_reps)
-            ],
-            axis=0,
+        theta_ests_natural = self.par_trans._transform_array(
+            np.asarray(theta_ests),
+            self.canonical_param_names,
+            direction="from_est",
         )
 
         joined_array = xr.DataArray(
@@ -898,17 +853,15 @@ class Pomp:
             },
         )
 
-        theta = [
-            self.par_trans.to_floats(
-                theta=dict(
-                    zip(self.canonical_param_names, theta_ests[i, -1, :].tolist())
-                ),
-                direction="from_est",
-            )
-            for i in range(n_reps)
-        ]
-        logLik_estimates = np.asarray(-nLLs)
-        self.theta = PompParameters(theta, logLik=logLik_estimates)
+        final_theta_da = xr.DataArray(
+            theta_ests_natural[:, -1, :],
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "parameter": self.canonical_param_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
 
         if track_time is True:
             nLLs.block_until_ready()
@@ -920,7 +873,7 @@ class Pomp:
             method="train",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_list_in,
+            theta=theta_obj_for_result,
             traces_da=joined_array,
             optimizer=optimizer,
             J=J,
@@ -943,7 +896,7 @@ class Pomp:
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
     ) -> tuple[jax.Array, jax.Array]:
         """
         Optimizes model parameters using the DPOP differentiable particle filter and gradient-based methods.
@@ -958,8 +911,8 @@ class Pomp:
             Number of particles.
         M : int
             Number of gradient steps.
-        eta : LearningRate
-            Learning rates per parameter as a LearningRate object.
+        eta : :class:`~pypomp.core.learning_rate.LearningRate`
+            Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
         optimizer : str, default "Adam"
             Optimizer to use: "Adam" or "SGD".
         alpha : float, default 0.8
@@ -972,10 +925,8 @@ class Pomp:
             process log-weight (e.g. ``"logw"``).
         key : jax.Array or None, default None
             Random key. If None, uses ``self.fresh_key``.
-        theta : ThetaInput, default None
-            Optional initial parameter(s). Accepts dict[str, Numeric],
-            list[dict[str, Numeric]], or PompParameters.
-            Numeric values are coerced to floats. Defaults to self.theta.
+        theta : PompParameters, default None
+            Optional initial parameter(s). Defaults to self.theta.
 
         Returns
         -------
@@ -988,9 +939,9 @@ class Pomp:
 
         new_key, _ = self._update_fresh_key(key)
         theta_obj = self._prepare_theta_input(theta)
-        theta_nat = theta_obj.to_list()[0]
+        theta_nat = theta_obj.params()[0]
         param_names = self.canonical_param_names
-        theta_est_dict = self.par_trans.to_est(theta_nat)
+        theta_est_dict = self.par_trans.to_est(cast(ParamDict, theta_nat))
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
 
         if not isinstance(eta, LearningRate):
@@ -1062,7 +1013,7 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: Literal[False] = False,
@@ -1072,7 +1023,7 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         *,
@@ -1082,7 +1033,7 @@ class Pomp:
     def simulate(
         self,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
@@ -1100,12 +1051,8 @@ class Pomp:
         Args:
             key (jax.Array, optional): The random key for random number generation.
                 Defaults to self.fresh_key.
-            theta (ThetaInput, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Accepts:
-                - A single dictionary: dict[str, Numeric]
-                - A list of dictionaries: list[dict[str, Numeric]]
-                - An existing PompParameters object
-                Providing a list or PompParameters object enables faster, vectorized
+            theta (PompParameters, optional): Parameters involved in the POMP model.
+                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
                 execution across all parameter sets.
             times (jax.Array, optional): Times at which to generate observations.
                 Defaults to self.ys.index.
@@ -1198,7 +1145,7 @@ class Pomp:
         probes: dict[str, Callable[[pd.DataFrame], float]],
         nsim: int = 100,
         key: jax.Array | None = None,
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
     ) -> pd.DataFrame:
         """
         Evaluates model diagnostics by comparing 'probes' (summary statistics) of real data against simulated data.
@@ -1216,7 +1163,7 @@ class Pomp:
                 Example: `{"mean": lambda df: df["obs"].mean()}`
             nsim (int, optional): Number of simulations to run per parameter set. Defaults to 100.
             key (jax.Array, optional): JAX random key for the simulations.
-            theta (ThetaInput, optional): Parameters to simulate from.
+            theta (PompParameters, optional): Parameters to simulate from.
 
 
         Returns:
@@ -1366,7 +1313,7 @@ class Pomp:
         key: jax.Array,
         nsim: int = 20,
         mode: str = "lines",
-        theta: ThetaInput = None,
+        theta: PompParameters | None = None,
         show: bool = True,
     ) -> Any:
         """
@@ -1382,7 +1329,7 @@ class Pomp:
             nsim (int): Number of simulations to perform. Defaults to 20.
             mode (str): Plotting mode, either "lines" (individual sims) or "quantiles" (shaded region).
                 Defaults to "lines".
-            theta (ThetaInput, optional): Parameters to use for simulation. Defaults to the first replicate in self.theta.
+            theta (PompParameters, optional): Parameters to use for simulation. Defaults to the first replicate in self.theta.
             show (bool): Whether to display the plot. Defaults to True.
         """
         if theta is None:
@@ -1391,6 +1338,8 @@ class Pomp:
                 if self.theta and self.theta.num_replicates() > 1
                 else self.theta
             )
+        elif not isinstance(theta, PompParameters):
+            raise TypeError("theta must be a PompParameters instance")
 
         _, sims = self.simulate(nsim=nsim, theta=theta, key=key)
         fig = plot_simulations_internal(sims, self.ys, mode=mode)
@@ -1438,8 +1387,11 @@ class Pomp:
             return False
 
         # Parameter sets
-        if self.theta != other.theta:
+        if (self._theta is None) != (other._theta is None):
             return False
+        if self._theta is not None and other._theta is not None:
+            if self._theta != other._theta:
+                return False
 
         # Data and covariates
         if not self.ys.equals(other.ys):
@@ -1545,7 +1497,13 @@ class Pomp:
             if obj.par_trans != first.par_trans:
                 raise ValueError("All Pomp objects must have the same par_trans.")
 
-        merged_theta = PompParameters.merge(*[obj._theta for obj in pomp_objs])
+        thetas = []
+        for obj in pomp_objs:
+            if obj._theta is None:
+                raise ValueError("Cannot merge Pomp objects with no parameters.")
+            thetas.append(obj._theta)
+
+        merged_theta = PompParameters.merge(*thetas)
         merged_history = ResultsHistory.merge(
             *[obj.results_history for obj in pomp_objs]
         )

@@ -27,7 +27,7 @@ def train(
     """
     This is a pure functional implementation of the optimization algorithm, intended
     for users who need to compose it within custom JAX loops or higher-order
-    functions. For a more user-friendly (but non-functional) interface, see
+    functions. For a more user-friendly (but impurely-functional) interface, see
     :meth:`pypomp.core.pomp.Pomp.train`.
 
     This function performs Maximum Likelihood Estimation (MLE) by treating the particle filter

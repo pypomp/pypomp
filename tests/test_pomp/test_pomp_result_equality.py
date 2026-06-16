@@ -16,8 +16,8 @@ def lg_with_mif_result():
     LG = pp.models.LG()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names}, init_names=[]
-    )
-    LG.mif(J=2, M=2, a=0.5, rw_sd=rw_sd, key=jax.random.key(0))
+    ).geometric_cooling(0.5)
+    LG.mif(J=2, M=2, rw_sd=rw_sd, key=jax.random.key(0))
     res = LG.results_history[-1]
     assert isinstance(res, PompMIFResult)
     return res

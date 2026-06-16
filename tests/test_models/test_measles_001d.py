@@ -29,7 +29,7 @@ DEFAULT_KEY = jax.random.key(1)
 def london_001d():
     measles = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=BASE_THETA_001D.copy(),
+        theta=pp.PompParameters(BASE_THETA_001D.copy()),
         clean=True,
         model="001d",
         last_year=1951,  # Use less data for faster testing

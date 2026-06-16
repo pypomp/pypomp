@@ -69,30 +69,23 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             )
         )
 
-        if self.theta is not None:
-            shared = [
-                t.get("shared")
-                for t in self.theta._theta
-                if t.get("shared") is not None
-            ]
-            if shared:
-                df = df.join(
-                    pd.concat(shared, axis=1).T.reset_index(drop=True), on="theta_idx"
-                )
-            unit_spec = [
-                t.get("unit_specific")
-                for t in self.theta._theta
-                if t.get("unit_specific") is not None
-            ]
-            if unit_spec:
-                u_params = (
-                    pd.concat(unit_spec, keys=range(len(unit_spec)))
-                    .stack()
-                    .unstack(level=1)
+        if self.theta is not None and self.theta.num_replicates() > 0:
+            shared_names = self.theta.get_shared_param_names()
+            if shared_names and "shared" in self.theta._data:
+                s_vals = self.theta._data["shared"].sel(parameter=shared_names).values
+                p_s = pd.DataFrame(s_vals, columns=shared_names)
+                df = df.join(p_s, on="theta_idx")
+
+            specific_names = self.theta.get_unit_param_names()
+            if specific_names and "unit_specific" in self.theta._data:
+                p_u = (
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
+                    .to_dataset(dim="parameter")
+                    .to_dataframe()
                     .reset_index()
                 )
-                u_params.columns = ["theta_idx", "unit"] + list(u_params.columns[2:])
-                df = df.merge(u_params, on=["theta_idx", "unit"], how="left")
+                df = df.merge(p_u, on=["theta_idx", "unit"], how="left")
         return df
 
     def CLL(self, average: bool = False) -> pd.DataFrame:
@@ -139,27 +132,26 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             .rename(columns={"index": "theta_idx"})
         )
 
-        if self.theta is not None:
-            shared = [
-                t.get("shared")
-                for t in self.theta._theta
-                if t.get("shared") is not None
-            ]
-            if shared:
-                p_s = pd.concat(shared, axis=1).T.set_axis(reps, axis=0)
+        if self.theta is not None and self.theta.num_replicates() > 0:
+            shared_names = self.theta.get_shared_param_names()
+            if shared_names and "shared" in self.theta._data:
+                s_vals = self.theta._data["shared"].sel(parameter=shared_names).values
+                p_s = pd.DataFrame(s_vals, columns=shared_names)
                 df_s, df_u = (
                     df_s.join(p_s, on="theta_idx"),
                     df_u.join(p_s, on="theta_idx"),
                 )
-            unit_spec = [
-                t.get("unit_specific")
-                for t in self.theta._theta
-                if t.get("unit_specific") is not None
-            ]
-            if unit_spec:
-                p_u = pd.concat(unit_spec, keys=reps).stack().unstack(level=1)
-                p_u.index.names = ["theta_idx", "unit"]
-                df_u = df_u.join(p_u, on=["theta_idx", "unit"])
+
+            specific_names = self.theta.get_unit_param_names()
+            if specific_names and "unit_specific" in self.theta._data:
+                p_u = (
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
+                    .to_dataset(dim="parameter")
+                    .to_dataframe()
+                    .reset_index()
+                )
+                df_u = df_u.merge(p_u, on=["theta_idx", "unit"], how="left")
         dfs_to_concat = [df for df in [df_s, df_u] if not df.empty]
         if not dfs_to_concat:
             return pd.DataFrame()
@@ -202,8 +194,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
     """The number of iterations performed."""
     rw_sd: RWSigma | None = None
     """The random walk standard deviations for parameter perturbation."""
-    a: float = 0.0
-    """The cooling fraction used."""
     thresh: float = 0.0
     """The resampling threshold used."""
     n_monitors: int = 0
@@ -220,7 +210,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
             ("Number of parameter sets", "theta"),
             ("Number of particles (J)", "J"),
             ("Number of iterations (M)", "M"),
-            ("Cooling fraction (a)", "a"),
             ("Resampling threshold", "thresh"),
             ("Number of monitors", "n_monitors"),
             ("Block", "block"),
@@ -231,7 +220,7 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
         return _merge_results(
             PanelPompMIFResult,
             results,
-            ["J", "M", "a", "thresh", "n_monitors", "block", "rw_sd", "method"],
+            ["J", "M", "thresh", "n_monitors", "block", "rw_sd", "method"],
             ["shared_traces", "unit_traces", "logLiks"],
         )
 

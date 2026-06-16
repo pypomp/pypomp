@@ -43,11 +43,10 @@ def test_spx_pfilter_basic(simple):
 def test_spx_mif_basic(simple):
     spx_model, rw_sd, J, key = simple
     spx_model.mif(
-        rw_sd=rw_sd,
+        rw_sd=rw_sd.geometric_cooling(a=0.5),
         J=J,
         key=key,
         M=1,
-        a=0.5,
     )
 
     assert isinstance(spx_model.results_history, ResultsHistory)

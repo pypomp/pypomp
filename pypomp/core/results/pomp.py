@@ -8,14 +8,15 @@ from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
 from ..optimizer import Optimizer, Adam
+from ..parameters import PompParameters
 
 
 @dataclass(eq=False)
 class PompBaseResult(BaseResult):
     """Base class for Pomp results."""
 
-    theta: list[dict] = field(default_factory=list)
-    """The list of parameter sets used for the computation."""
+    theta: PompParameters | None = None
+    """The parameter object used for the computation."""
 
 
 @dataclass(eq=False)
@@ -62,7 +63,7 @@ class PompPFilterResult(PompBaseResult):
             if arr.shape[-1] > 1
             else np.full_like(logLik, np.nan)
         )
-        theta_df = pd.DataFrame(self.theta)
+        theta_df = pd.DataFrame(self.theta.params())
         df = pd.DataFrame(
             {"theta_idx": np.arange(len(theta_df)), "logLik": logLik, "se": se}
         )
@@ -114,7 +115,7 @@ class PompPFilterResult(PompBaseResult):
         )
         if not self.theta:
             return base_df
-        return pd.concat([base_df, pd.DataFrame(self.theta)], axis=1)
+        return pd.concat([base_df, pd.DataFrame(self.theta.params())], axis=1)
 
     @staticmethod
     def merge(*results: "PompPFilterResult") -> "PompPFilterResult":
@@ -138,8 +139,6 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
     """The number of iterations performed."""
     rw_sd: RWSigma | None = None
     """The random walk standard deviations for parameter perturbation."""
-    a: float = 0.0
-    """The cooling fraction used."""
     thresh: float = 0.0
     """The resampling threshold used."""
     n_monitors: int = 0
@@ -154,7 +153,6 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
             ("Number of parameter sets", "theta"),
             ("Number of particles (J)", "J"),
             ("Number of iterations (M)", "M"),
-            ("Cooling fraction (a)", "a"),
             ("Resampling threshold", "thresh"),
             ("Number of monitors", "n_monitors"),
         ]
@@ -164,7 +162,7 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
         return _merge_results(
             PompMIFResult,
             results,
-            ["J", "M", "a", "thresh", "n_monitors", "rw_sd", "method"],
+            ["J", "M", "thresh", "n_monitors", "rw_sd", "method"],
             ["traces_da"],
         )
 

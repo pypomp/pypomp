@@ -9,18 +9,16 @@ Monte Carlo Adjusted Profile
    :no-members:
 
 .. rubric:: Attributes
-.. autosummary::
-   :toctree: generated/
 
-   ~MCAPResult.level
-   ~MCAPResult.mle
-   ~MCAPResult.ci
-   ~MCAPResult.delta
-   ~MCAPResult.se_stat
-   ~MCAPResult.se_mc
-   ~MCAPResult.se_total
-   ~MCAPResult.fit
-   ~MCAPResult.quadratic_max
-   ~MCAPResult.quadratic_coef
-   ~MCAPResult.vcov
+.. autoattribute:: MCAPResult.level
+.. autoattribute:: MCAPResult.mle
+.. autoattribute:: MCAPResult.ci
+.. autoattribute:: MCAPResult.delta
+.. autoattribute:: MCAPResult.se_stat
+.. autoattribute:: MCAPResult.se_mc
+.. autoattribute:: MCAPResult.se_total
+.. autoattribute:: MCAPResult.fit
+.. autoattribute:: MCAPResult.quadratic_max
+.. autoattribute:: MCAPResult.quadratic_coef
+.. autoattribute:: MCAPResult.vcov
 

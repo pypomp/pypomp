@@ -10,7 +10,7 @@ def simple_panel():
     unit_names = ["unit1", "unit2"]
     units = {name: pp.models.LG() for name in unit_names}
 
-    unit_theta = units["unit1"].theta.to_list()[0]
+    unit_theta = units["unit1"].theta.params()[0]
     shared_names = [
         n for n in unit_theta.keys() if n.startswith("A") or n.startswith("C")
     ]

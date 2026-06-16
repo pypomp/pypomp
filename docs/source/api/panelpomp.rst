@@ -8,18 +8,17 @@ PanelPomp Class
 
 
 .. rubric:: Attributes
-.. autosummary::
-   :toctree: generated/
 
-   ~PanelPomp.ys
-   ~PanelPomp.unit_objects
-   ~PanelPomp.theta
-   ~PanelPomp.results_history
-   ~PanelPomp.fresh_key
-   ~PanelPomp.metadata
-   ~PanelPomp.canonical_param_names
-   ~PanelPomp.canonical_shared_param_names
-   ~PanelPomp.canonical_unit_param_names
+.. autoattribute:: PanelPomp.ys
+.. autoattribute:: PanelPomp.unit_objects
+.. autoattribute:: PanelPomp.theta
+.. autoattribute:: PanelPomp.results_history
+.. autoattribute:: PanelPomp.fresh_key
+.. autoattribute:: PanelPomp.metadata
+.. autoattribute:: PanelPomp.canonical_param_names
+.. autoattribute:: PanelPomp.canonical_shared_param_names
+.. autoattribute:: PanelPomp.canonical_unit_param_names
+
 
 .. rubric:: Core Algorithmic Methods
 .. autosummary::

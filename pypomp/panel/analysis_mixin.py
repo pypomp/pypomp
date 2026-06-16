@@ -3,6 +3,8 @@ import pandas as pd
 from typing import TYPE_CHECKING, Any
 from ..core.viz import plot_traces_internal, plot_panel_simulations_internal
 
+from ..core.parameters import PanelParameters
+
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
 else:
@@ -162,7 +164,7 @@ class PanelAnalysisMixin(Base):
         key: jax.Array,
         nsim: int = 20,
         mode: str = "lines",
-        theta: Any = None,
+        theta: PanelParameters | None = None,
         show: bool = True,
     ) -> Any:
         """
@@ -181,6 +183,8 @@ class PanelAnalysisMixin(Base):
                 if self.theta and self.theta.num_replicates() > 1
                 else self.theta
             )
+        elif not isinstance(theta, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance")
 
         _, sims = self.simulate(nsim=nsim, theta=theta, key=key)
         fig = plot_panel_simulations_internal(sims, self.ys, mode=mode)

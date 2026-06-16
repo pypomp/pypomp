@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 import numpy as np
 import pytest
 import pypomp as pp
@@ -79,8 +78,8 @@ def test_lg_par_trans_enforces_psd():
 
 def test_lg_covariance_validation():
     # Symmetric check
-    asymmetric_cov = jnp.array([[1.0, 0.5], [0.2, 1.0]])
-    valid_cov = jnp.array([[1.0, 0.2], [0.2, 1.0]])
+    asymmetric_cov = np.array([[1.0, 0.5], [0.2, 1.0]])
+    valid_cov = np.array([[1.0, 0.2], [0.2, 1.0]])
 
     with pytest.raises(ValueError, match="Covariance matrix Q must be symmetric"):
         pp.models.LG(Q=asymmetric_cov)
@@ -89,7 +88,7 @@ def test_lg_covariance_validation():
         pp.models.LG(R=asymmetric_cov)
 
     # Positive-definite check
-    non_pd_cov = jnp.array([[1.0, 2.0], [2.0, 1.0]])  # determinant is 1 - 4 = -3 < 0
+    non_pd_cov = np.array([[1.0, 2.0], [2.0, 1.0]])  # determinant is 1 - 4 = -3 < 0
     with pytest.raises(
         ValueError, match="Covariance matrix Q must be positive-definite"
     ):

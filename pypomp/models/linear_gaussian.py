@@ -119,12 +119,12 @@ def _from_est(theta: ParamDict) -> ParamDict:
 
 def LG(
     T: int = 4,
-    A: jax.Array = jnp.array(
+    A: np.ndarray = np.array(
         [[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]
     ),
-    C: jax.Array = jnp.eye(2),
-    Q: jax.Array = jnp.array([[1, 2e-2], [2e-2, 1]]) / 100,
-    R: jax.Array = jnp.array([[1, 0.1], [0.1, 1]]) / 10,
+    C: np.ndarray = np.eye(2),
+    Q: np.ndarray = np.array([[1, 2e-2], [2e-2, 1]]) / 100,
+    R: np.ndarray = np.array([[1, 0.1], [0.1, 1]]) / 10,
     key: jax.Array = jax.random.key(1),
 ) -> Pomp:
     """
@@ -134,13 +134,13 @@ def LG(
     ----------
     T : int, optional
         The number of time steps to generate data for. Defaults to 4.
-    A : jax.Array, optional
+    A : np.ndarray, optional
         The transition matrix.
-    C : jax.Array, optional
+    C : np.ndarray, optional
         The measurement matrix.
-    Q : jax.Array, optional
+    Q : np.ndarray, optional
         The covariance matrix of the state noise.
-    R : jax.Array, optional
+    R : np.ndarray, optional
         The covariance matrix of the measurement noise.
     key : jax.Array, optional
         The random key used to generate the data.
@@ -181,6 +181,8 @@ def LG(
         0, index=np.arange(1, T + 1, dtype=float), columns=pd.Index(["Y1", "Y2"])
     )
 
+    from pypomp.core.parameters import PompParameters
+
     LG_obj_temp = Pomp(
         rinit=_rinit,
         rproc=_rproc,
@@ -190,7 +192,7 @@ def LG(
         t0=0.0,
         nstep=1,
         dt=None,
-        theta=theta,
+        theta=PompParameters(theta),
         covars=None,
         statenames=["X1", "X2"],
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),

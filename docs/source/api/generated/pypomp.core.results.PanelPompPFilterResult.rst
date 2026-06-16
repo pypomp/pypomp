@@ -7,11 +7,32 @@
    :show-inheritance:
 
    
+   
+   .. rubric:: Attributes
 
+   
+   .. autoattribute:: PanelPompPFilterResult.CLL_da
+   .. autoattribute:: PanelPompPFilterResult.ESS_da
+   .. autoattribute:: PanelPompPFilterResult.J
+   .. autoattribute:: PanelPompPFilterResult.filter_mean
+   .. autoattribute:: PanelPompPFilterResult.prediction_mean
+   .. autoattribute:: PanelPompPFilterResult.reps
+   .. autoattribute:: PanelPompPFilterResult.theta
+   .. autoattribute:: PanelPompPFilterResult.thresh
+   .. autoattribute:: PanelPompPFilterResult.logLiks
+   .. autoattribute:: PanelPompPFilterResult.method
+   .. autoattribute:: PanelPompPFilterResult.execution_time
+   .. autoattribute:: PanelPompPFilterResult.key
+   .. autoattribute:: PanelPompPFilterResult.timestamp
+   
+   
+
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~PanelPompPFilterResult.CLL
       ~PanelPompPFilterResult.ESS
@@ -20,27 +41,5 @@
       ~PanelPompPFilterResult.print_summary
       ~PanelPompPFilterResult.to_dataframe
       ~PanelPompPFilterResult.traces
-   
-   
-
-   
-   
-   .. rubric:: Attributes
-
-   .. autosummary::
-   
-      ~PanelPompPFilterResult.CLL_da
-      ~PanelPompPFilterResult.ESS_da
-      ~PanelPompPFilterResult.J
-      ~PanelPompPFilterResult.filter_mean
-      ~PanelPompPFilterResult.prediction_mean
-      ~PanelPompPFilterResult.reps
-      ~PanelPompPFilterResult.theta
-      ~PanelPompPFilterResult.thresh
-      ~PanelPompPFilterResult.logLiks
-      ~PanelPompPFilterResult.method
-      ~PanelPompPFilterResult.execution_time
-      ~PanelPompPFilterResult.key
-      ~PanelPompPFilterResult.timestamp
    
    

@@ -171,6 +171,22 @@ class BaseResult(ABC):
                 )
             else:
                 print(f"{label}: {val}")
+
+        rw_sd = getattr(self, "rw_sd", None)
+        if rw_sd is not None:
+            info = getattr(rw_sd, "_cooling_info", ("none",))
+            ctype = info[0]
+            if ctype == "geometric":
+                print(f"Cooling fraction (a): {rw_sd.a}")
+            elif ctype == "hyperbolic":
+                print(f"Cooling rate (s): {rw_sd.s}")
+            elif ctype == "cosine":
+                print(f"Cosine min cooling (c): {rw_sd.c}")
+                print(f"Cosine duration (M): {rw_sd.M}")
+            elif ctype == "custom":
+                fn = rw_sd.cooling_fn
+                print(f"Cooling function: {getattr(fn, '__name__', str(fn))}")
+
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
@@ -199,7 +215,7 @@ class PompEstimationTracesMixin:
             .to_dataframe()
             .reset_index()
         )
-        param_names = list(self.theta[0].keys())
+        param_names = self.theta.get_param_names() if self.theta is not None else []
         df = df[["theta_idx", "logLik"] + param_names]
         df.insert(2, "se", np.nan)
         return df

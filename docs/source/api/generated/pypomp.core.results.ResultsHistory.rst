@@ -7,11 +7,15 @@
    :show-inheritance:
 
    
+   
+   
 
+   
    
    .. rubric:: Methods
 
    .. autosummary::
+      :toctree: .
    
       ~ResultsHistory.CLL
       ~ResultsHistory.ESS
@@ -25,9 +29,5 @@
       ~ResultsHistory.results
       ~ResultsHistory.time
       ~ResultsHistory.traces
-   
-   
-
-   
    
    

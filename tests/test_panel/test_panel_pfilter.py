@@ -10,7 +10,11 @@ def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
     assert isinstance(result.logLiks, xr.DataArray)
     assert result.logLiks.dims == ("theta_idx", "unit", "rep")
     assert result.logLiks.shape == (n_theta, n_units, reps)
-    assert result.theta == theta_orig
+    theta_orig_expected = deepcopy(theta_orig)
+    theta_orig_expected.logLik_unit = (
+        result.theta.logLik_unit
+    )  # just checking equality of parameter values
+    assert result.theta == theta_orig_expected
     assert result.J == J
     assert result.reps == reps
     assert result.thresh == thresh

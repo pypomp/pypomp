@@ -54,16 +54,13 @@ You can do this by adding the following snippet at the beginning of your script:
 .. code-block:: python
 
     import os
-
     # Set JAX platform before importing JAX
-    USE_CPU = os.environ.get("USE_CPU", "false").lower() == "true"
-    if USE_CPU:
-        os.environ["JAX_PLATFORMS"] = "cpu"
-        if "SLURM_CPUS_PER_TASK" in os.environ:
-            os.environ["XLA_FLAGS"] = (
-                os.environ.get("XLA_FLAGS", "")
-                + f" --xla_force_host_platform_device_count={os.environ['SLURM_CPUS_PER_TASK']}"
-            )
+    os.environ["JAX_PLATFORMS"] = "cpu"
+    cpus = 8
+    os.environ["XLA_FLAGS"] = (
+        os.environ.get("XLA_FLAGS", "")
+        + f" --xla_force_host_platform_device_count={cpus}"
+    )
 
 The current implementation is experimental and subject to change.
 

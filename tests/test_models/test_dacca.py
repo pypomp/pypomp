@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 import pypomp as pp
 import pytest
 
@@ -70,3 +71,125 @@ def test_dacca_dt():
 def test_dhaka_alias():
     # Check that dhaka is an alias for dacca
     assert pp.models.dhaka is pp.models.dacca
+
+
+def test_dacca_gamma_noise():
+    """Verify that using gamma process noise works and runs basic pfilter."""
+    dacca_gamma = pp.models.dacca(gamma=True)
+    assert dacca_gamma.rproc.original_func.__name__ == "_rproc_gamma"
+    dacca_gamma.pfilter(J=5, key=jax.random.key(1))
+    logLiks = dacca_gamma.results_history[-1].logLiks  # type: ignore
+    assert jnp.isfinite(logLiks.data).all()
+
+
+def test_dacca_parameter_transformations(simple):
+    """Verify that parameter transformations round-trip correctly."""
+    dacca, _, _, _, _ = simple
+    theta = dacca.theta[0]
+
+    est_theta = dacca.par_trans.to_est(theta)
+    recovered_theta = dacca.par_trans.from_est(est_theta)
+
+    assert set(theta.keys()) == set(recovered_theta.keys())
+
+    # IVPs are normalized on the simplex during conversion to estimation space
+    IVP_list = ["S_0", "I_0", "Y_0", "R1_0", "R2_0", "R3_0"]
+    ivp_sum = sum(theta[k] for k in IVP_list)
+
+    for k in theta.keys():
+        if k in IVP_list:
+            expected = theta[k] / ivp_sum
+        else:
+            expected = theta[k]
+        assert jnp.allclose(expected, recovered_theta[k], atol=1e-5, rtol=1e-5), (
+            f"Mismatch for parameter {k}: expected {expected} vs recovered {recovered_theta[k]}"
+        )
+
+
+def test_dacca_invalid_init():
+    """Verify initialization exception for specifying both dt and nstep."""
+    with pytest.raises(ValueError, match="Cannot specify both dt and nstep"):
+        pp.models.dacca(dt=0.1, nstep=10)
+
+
+def test_dacca_dmeas_edge_cases(simple):
+    """Test all branches of _dmeas likelihood logic."""
+    dacca, _, _, _, _ = simple
+    statenames = dacca.statenames
+    param_names = dacca.canonical_param_names
+    covar_names = dacca.covar_names
+
+    Y_arr = jnp.array([10.0])
+
+    X_dict = {
+        "S": 1000.0,
+        "I": 10.0,
+        "Y": 5.0,
+        "Mn": 10.0,
+        "R1": 1.0,
+        "R2": 1.0,
+        "R3": 1.0,
+        "count": 0.0,
+    }
+    X_arr = jnp.array([X_dict[name] for name in statenames])
+
+    theta_dict = dacca.theta[0]
+    theta_arr = jnp.array([theta_dict[name] for name in param_names])
+
+    covars_dict = {name: 1.0 for name in covar_names}
+    covar_arr = jnp.array([covars_dict[name] for name in covar_names])
+
+    t = 1900.0
+
+    # 1. Normal call (happy path)
+    loglik = dacca.dmeas.struct(Y_arr, X_arr, theta_arr, covar_arr, t, False)
+    assert jnp.isfinite(loglik)
+
+    # 2. State violation: count > 0
+    X_dict_invalid = X_dict.copy()
+    X_dict_invalid["count"] = 1.0
+    X_arr_invalid = jnp.array([X_dict_invalid[name] for name in statenames])
+    loglik_invalid = dacca.dmeas.struct(
+        Y_arr, X_arr_invalid, theta_arr, covar_arr, t, False
+    )
+    assert jnp.allclose(loglik_invalid, jnp.log(1e-18))
+
+    # 3. Variance violation (non-finite scale)
+    theta_dict_bad = dict(theta_dict)
+    theta_dict_bad["tau"] = jnp.nan
+    theta_arr_bad = jnp.array([theta_dict_bad[name] for name in param_names])
+    loglik_bad_var = dacca.dmeas.struct(
+        Y_arr, X_arr, theta_arr_bad, covar_arr, t, False
+    )
+    assert jnp.allclose(loglik_bad_var, jnp.log(1e-18))
+
+
+def test_dacca_rmeas(simple):
+    """Verify that _rmeas simulates valid observations."""
+    dacca, _, _, key, _ = simple
+    statenames = dacca.statenames
+    param_names = dacca.canonical_param_names
+    covar_names = dacca.covar_names
+
+    X_dict = {
+        "S": 1000.0,
+        "I": 10.0,
+        "Y": 5.0,
+        "Mn": 10.0,
+        "R1": 1.0,
+        "R2": 1.0,
+        "R3": 1.0,
+        "count": 0.0,
+    }
+    X_arr = jnp.array([X_dict[name] for name in statenames])
+
+    theta_dict = dacca.theta[0]
+    theta_arr = jnp.array([theta_dict[name] for name in param_names])
+
+    covars_dict = {name: 1.0 for name in covar_names}
+    covar_arr = jnp.array([covars_dict[name] for name in covar_names])
+
+    t = 1900.0
+
+    sim_obs = dacca.rmeas.struct(X_arr, theta_arr, key, covar_arr, t, False)
+    assert jnp.isfinite(sim_obs).all()

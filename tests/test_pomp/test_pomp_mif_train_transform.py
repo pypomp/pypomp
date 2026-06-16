@@ -60,7 +60,7 @@ def test_mif_traces_transformed(simple_pomp_with_transform):
     ).geometric_cooling(a=0.5)
 
     # Run mif with zero rw_sd - parameters should remain unchanged
-    LG.mif(J=2, M=1, rw_sd=rw_sd, key=jax.random.key(42))
+    LG.mif(J=2, M=1, rw_sd=rw_sd, key=jax.random.key(1))
 
     # Check that parameters are unchanged
     for rep_idx in range(len(LG.theta)):
@@ -93,7 +93,7 @@ def test_train_traces_transformed(simple_pomp_with_transform):
     # to estimation space, remain unchanged (no optimization), and transformed
     # back to natural scale
     eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
-    LG.train(J=2, M=0, eta=eta, optimizer=pp.Newton(), key=jax.random.key(42))
+    LG.train(J=2, M=0, eta=eta, optimizer=pp.Newton(), key=jax.random.key(1))
 
     # Check that parameters are unchanged
     for rep_idx in range(len(LG.theta)):

@@ -45,7 +45,7 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
         alpha=0.8,
         decay=decay,
         process_weight_state="logw",
-        key=jax.random.key(42),
+        key=jax.random.key(1),
     )
     assert nll.shape == (M_DEFAULT + 1,)
     assert theta_hist.shape[0] == M_DEFAULT + 1

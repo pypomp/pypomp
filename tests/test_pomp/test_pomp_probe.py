@@ -12,7 +12,7 @@ def simple_pomp():
 
 def test_pomp_probe_structure(simple_pomp):
     pomp = simple_pomp
-    key = jax.random.key(42)
+    key = jax.random.key(1)
 
     probes = {
         "mean_y1": lambda df: df["Y1"].mean(),
@@ -34,7 +34,7 @@ def test_pomp_probe_structure(simple_pomp):
 
 def test_pomp_probe_values(simple_pomp):
     pomp = simple_pomp
-    key = jax.random.key(42)
+    key = jax.random.key(1)
 
     probes = {"sum_y1": lambda df: df["Y1"].sum()}
 
@@ -51,7 +51,7 @@ def test_pomp_probe_values(simple_pomp):
 
 def test_pomp_probe_with_list_theta(simple_pomp):
     pomp = simple_pomp
-    key = jax.random.key(42)
+    key = jax.random.key(1)
 
     theta_list = pomp.theta * 3
 

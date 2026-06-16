@@ -2,10 +2,11 @@ import jax
 import pytest
 import numpy as np
 import pypomp as pp
+from copy import deepcopy
 
 
-@pytest.fixture(scope="function")
-def simple():
+@pytest.fixture(scope="module")
+def simple_setup_module():
     # Set default values for tests
     LG = pp.models.LG()
     ys = LG.ys
@@ -14,6 +15,15 @@ def simple():
     J = 2
     key = jax.random.key(111)
     M = 2
+    return LG, ys, covars, theta, J, key, M
+
+
+@pytest.fixture(scope="function")
+def simple(simple_setup_module):
+    LG_orig, ys, covars, theta, J, key, M = simple_setup_module
+    LG = deepcopy(LG_orig)
+    LG.results_history.clear()
+    LG.theta = theta
     return LG, ys, covars, theta, J, key, M
 
 
@@ -97,6 +107,10 @@ def test_train_validation(simple):
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
         LG.train(J=J, M=M, eta=eta, key=key, theta=pp.PompParameters(bad_theta))
+
+    # Wrong eta type should raise TypeError
+    with pytest.raises(TypeError, match="eta must be a LearningRate object"):
+        LG.train(J=J, M=M, eta={"A11": 0.2}, key=key)  # type: ignore
 
 
 def test_train_param_order_invariance(simple):

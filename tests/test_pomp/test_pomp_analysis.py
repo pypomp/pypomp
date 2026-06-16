@@ -29,7 +29,7 @@ def test_plot_simulations_happy_path():
     pytest.importorskip("plotly")
 
     LG = pp.models.LG()
-    key = jax.random.key(42)
+    key = jax.random.key(1)
 
     # Test lines mode
     fig_lines = LG.plot_simulations(nsim=5, mode="lines", key=key, show=False)

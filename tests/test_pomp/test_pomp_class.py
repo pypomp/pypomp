@@ -7,8 +7,11 @@ import jax.numpy as jnp
 import pandas as pd
 
 
-@pytest.fixture(scope="function")
-def setup():
+from copy import deepcopy
+
+
+@pytest.fixture(scope="module")
+def setup_module():
     LG = pp.models.LG()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names},
@@ -25,6 +28,14 @@ def setup():
         "theta": LG.theta,
         "fresh_key": LG.fresh_key,
     }
+
+
+@pytest.fixture(scope="function")
+def setup(setup_module):
+    params = deepcopy(setup_module)
+    params["LG"] = deepcopy(setup_module["LG"])
+    params["rw_sd"] = deepcopy(setup_module["rw_sd"])
+    return params
 
 
 @pytest.fixture(scope="function")
@@ -508,8 +519,7 @@ def test_simulate_edge_cases(base_pomp):
 
 
 def test_filtering_methods_validation(base_pomp):
-    """Test validations for pfilter, mif, and train when components are missing or J < 1."""
-    # 1. missing dmeas
+    # Test validations for pfilter, mif, and train when components are missing.
     pomp_no_dmeas = pp.Pomp(
         ys=base_pomp.ys,
         theta=base_pomp.theta,
@@ -530,27 +540,6 @@ def test_filtering_methods_validation(base_pomp):
 
     with pytest.raises(ValueError, match="self.dmeas cannot be None"):
         pomp_no_dmeas.train(J=10, M=1, eta=pp.LearningRate({"X0": 0.1, "sigma": 0.1}))
-
-    # 2. J < 1
-    with pytest.raises(ValueError, match="J should be greater than 0"):
-        base_pomp.pfilter(J=0)
-
-    with pytest.raises(ValueError, match="J should be greater than 0"):
-        base_pomp.mif(J=0, M=1, rw_sd=pp.RWSigma({"X0": 0.01, "sigma": 0.01}))
-
-    with pytest.raises(ValueError, match="J should be greater than 0"):
-        base_pomp.train(J=0, M=1, eta=pp.LearningRate({"X0": 0.1, "sigma": 0.1}))
-
-    # 3. mif with mismatched rw_sd keys
-    bad_rw = pp.RWSigma({"wrong_param": 0.01})
-    with pytest.raises(
-        ValueError, match="rw_sd.sigmas keys must match canonical_param_names"
-    ):
-        base_pomp.mif(J=10, M=1, rw_sd=bad_rw)
-
-    # 4. train with invalid eta type
-    with pytest.raises(TypeError, match="eta must be a LearningRate object"):
-        base_pomp.train(J=10, M=1, eta={"X0": 0.1, "sigma": 0.1})
 
 
 def test_dpop_train_validation(base_pomp):

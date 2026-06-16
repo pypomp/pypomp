@@ -116,7 +116,11 @@ def test_theta_carryover(model, method):
 
     assert list(LG.results_history[-1].theta[0].values()) == last_val
     traces = LG.traces()
-    assert traces.iloc[-1, 4:].values.tolist() == traces.iloc[-2, 4:].values.tolist()
+    param_cols = list(LG.theta[0].keys())
+    assert (
+        traces[param_cols].iloc[-1].values.tolist()
+        == traces[param_cols].iloc[-2].values.tolist()
+    )
 
 
 def test_pickle(model):

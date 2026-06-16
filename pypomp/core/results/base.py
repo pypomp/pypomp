@@ -229,9 +229,9 @@ class PompEstimationTracesMixin:
             traces_da.to_dataset(dim="variable")
             .to_dataframe()
             .reset_index()
-            .assign(method=self.method)
+            .assign(method=self.method, se=np.nan)
         )
-        cols = ["theta_idx", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
         return df[cols + other_cols]
 
@@ -260,7 +260,17 @@ class PanelPompEstimationTracesMixin:
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
         u_df = u_df.join(s_df, on="theta_idx").reset_index()
-        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"]
+        u_df["shared logLik se"] = np.nan
+        u_df["unit logLik se"] = np.nan
+        cols = [
+            "theta_idx",
+            "iteration",
+            "shared logLik",
+            "shared logLik se",
+            "unit",
+            "unit logLik",
+            "unit logLik se",
+        ]
         return u_df[cols + [c for c in u_df.columns if c not in cols]]
 
     def traces(self: Any) -> pd.DataFrame:
@@ -300,8 +310,8 @@ class PanelPompEstimationTracesMixin:
             warnings.filterwarnings("ignore", category=FutureWarning)
             df = pd.concat(dfs_to_concat, ignore_index=True)
 
-        df = df.assign(method=self.method)
+        df = df.assign(method=self.method, se=np.nan)
 
-        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
         return df[cols + other_cols]

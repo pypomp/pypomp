@@ -5,7 +5,7 @@ import numpy as np
 import warnings
 
 from .base import BaseResult, PanelPompEstimationTracesMixin, _merge_results
-from ...maths import logmeanexp
+from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
 from ..parameters import PanelParameters
@@ -56,7 +56,14 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
-        df = (
+        se_unit = (
+            logmeanexp_se(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
+            if self.logLiks.shape[-1] > 1
+            else np.full_like(ll, np.nan)
+        )
+        se_shared = np.sqrt(np.sum(se_unit**2, axis=1))
+
+        df_ll = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
             .assign(
                 theta_idx=lambda x: range(len(x)),
@@ -68,6 +75,28 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 value_name="unit logLik",
             )
         )
+        df_se = (
+            pd.DataFrame(se_unit, columns=self.logLiks.coords["unit"].values)
+            .assign(
+                theta_idx=lambda x: range(len(x)),
+                **{"shared logLik se": se_shared},
+            )
+            .melt(
+                id_vars=["theta_idx", "shared logLik se"],
+                var_name="unit",
+                value_name="unit logLik se",
+            )
+        )
+        df = pd.merge(df_ll, df_se, on=["theta_idx", "unit"])
+        cols = [
+            "theta_idx",
+            "shared logLik",
+            "shared logLik se",
+            "unit",
+            "unit logLik",
+            "unit logLik se",
+        ]
+        df = df[cols]
 
         if self.theta is not None and self.theta.num_replicates() > 0:
             shared_names = self.theta.get_shared_param_names()
@@ -121,9 +150,21 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def traces(self) -> pd.DataFrame:
         """Return pfilter results formatted as traces (long format)."""
         ll = logmeanexp(self.logLiks.values, axis=-1)
+        se_unit = (
+            logmeanexp_se(self.logLiks.values, axis=-1)
+            if self.logLiks.shape[-1] > 1
+            else np.full_like(ll, np.nan)
+        )
+        se_shared = np.sqrt(np.sum(se_unit**2, axis=1))
+
         reps = np.arange(len(ll))
         df_s = pd.DataFrame(
-            {"theta_idx": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
+            {
+                "theta_idx": reps,
+                "unit": "shared",
+                "logLik": ll.sum(axis=1),
+                "se": se_shared,
+            }
         )
         df_u = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values, index=reps)
@@ -131,6 +172,15 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             .reset_index()
             .rename(columns={"index": "theta_idx"})
         )
+        df_se_u = (
+            pd.DataFrame(
+                se_unit, columns=self.logLiks.coords["unit"].values, index=reps
+            )
+            .melt(ignore_index=False, var_name="unit", value_name="se")
+            .reset_index()
+            .rename(columns={"index": "theta_idx"})
+        )
+        df_u = pd.merge(df_u, df_se_u, on=["theta_idx", "unit"], how="left")
 
         if self.theta is not None and self.theta.num_replicates() > 0:
             shared_names = self.theta.get_shared_param_names()
@@ -164,7 +214,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             warnings.filterwarnings("ignore", category=FutureWarning)
             df = pd.concat(dfs_to_concat, ignore_index=True)
         df = df.assign(method="pfilter", iteration=0)
-        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
         return df[cols + other_cols]
 

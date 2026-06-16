@@ -102,8 +102,12 @@ class PompPFilterResult(PompBaseResult):
         """Return traces DataFrame for this pfilter result."""
         if not self.theta or not len(self.logLiks):
             return pd.DataFrame()
-        logliks = logmeanexp(
-            np.asarray(getattr(self.logLiks, "values", self.logLiks)), axis=-1
+        arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
+        logliks = logmeanexp(arr, axis=-1)
+        se = (
+            logmeanexp_se(arr, axis=-1)
+            if arr.shape[-1] > 1
+            else np.full_like(logliks, np.nan)
         )
         base_df = pd.DataFrame(
             {
@@ -111,6 +115,7 @@ class PompPFilterResult(PompBaseResult):
                 "iteration": 0,
                 "method": self.method,
                 "logLik": logliks,
+                "se": se,
             }
         )
         if not self.theta:

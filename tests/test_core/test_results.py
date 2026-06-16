@@ -538,6 +538,7 @@ def test_pomp_pfilter_result():
     assert len(df) == 1
     assert "logLik" in df.columns
     assert "se" in df.columns
+    assert not pd.isna(df.loc[0, "se"])
     assert "param1" in df.columns
 
     # CLL
@@ -563,6 +564,8 @@ def test_pomp_pfilter_result():
     assert len(df_tr) == 1
     assert df_tr.loc[0, "iteration"] == 0
     assert df_tr.loc[0, "param1"] == 1.0
+    assert "se" in df_tr.columns
+    assert not pd.isna(df_tr.loc[0, "se"])
 
     # Merge
     res2 = PompPFilterResult(
@@ -615,7 +618,13 @@ def test_pomp_mif_result():
     df_to = res.to_dataframe()
     assert len(df_to) == 1
     assert df_to.loc[0, "logLik"] == 2.5
+    assert "se" in df_to.columns
+    assert pd.isna(df_to.loc[0, "se"])
     assert df_to.loc[0, "param1"] == 1.1
+
+    df_tr = res.traces()
+    assert "se" in df_tr.columns
+    assert df_tr["se"].isna().all()
 
     # Merge
     res2 = PompMIFResult(
@@ -737,7 +746,11 @@ def test_panel_pomp_pfilter_result():
     df = res.to_dataframe()
     assert len(df) == 2  # 2 units
     assert "shared logLik" in df.columns
+    assert "shared logLik se" in df.columns
     assert "unit logLik" in df.columns
+    assert "unit logLik se" in df.columns
+    assert not pd.isna(df["shared logLik se"].iloc[0])
+    assert not pd.isna(df["unit logLik se"].iloc[0])
     assert "s1" in df.columns
     assert "up1" in df.columns
 
@@ -762,6 +775,8 @@ def test_panel_pomp_pfilter_result():
     # 1 shared trace, 2 unit-specific traces -> total 3 rows
     assert len(df_tr) == 3
     assert set(df_tr["unit"]) == {"shared", "u1", "u2"}
+    assert "se" in df_tr.columns
+    assert not df_tr["se"].isna().any()
 
     # Merge
     res2 = PanelPompPFilterResult(
@@ -822,6 +837,14 @@ def test_panel_pomp_mif_result():
     assert len(df_to) == 1
     assert df_to.loc[0, "shared logLik"] == 1.0
     assert df_to.loc[0, "unit logLik"] == 2.0
+    assert "shared logLik se" in df_to.columns
+    assert "unit logLik se" in df_to.columns
+    assert pd.isna(df_to.loc[0, "shared logLik se"])
+    assert pd.isna(df_to.loc[0, "unit logLik se"])
+
+    df_tr = res.traces()
+    assert "se" in df_tr.columns
+    assert df_tr["se"].isna().all()
 
     # Merge
     res2 = PanelPompMIFResult(

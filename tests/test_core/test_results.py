@@ -922,3 +922,39 @@ def test_panel_pomp_train_result():
     res_merged = PanelPompTrainResult.merge(res, res2)
     assert res_merged.alpha == 0.9
     assert res_merged.execution_time == 1.2
+
+
+def test_pfilter_result_single_parameter_set_0d_array():
+    key = jax.random.key(0)
+    theta = PompParameters({"param1": 1.0, "param2": 2.0})
+    logLiks = xr.DataArray(
+        [1.5],  # 1D array of shape (1,)
+        dims=["theta_idx"],
+    )
+
+    res = PompPFilterResult(
+        method="pfilter",
+        execution_time=1.5,
+        key=key,
+        theta=theta,
+        logLiks=logLiks,
+        J=1000,
+        reps=1,
+        thresh=0.5,
+    )
+
+    # to_dataframe should work and not raise length mismatch error
+    df = res.to_dataframe()
+    assert len(df) == 1
+    assert "logLik" in df.columns
+    assert "se" in df.columns
+    assert df.loc[0, "logLik"] == 1.5
+    assert pd.isna(df.loc[0, "se"])
+    assert df.loc[0, "param1"] == 1.0
+
+    # traces should also work
+    df_tr = res.traces()
+    assert len(df_tr) == 1
+    assert "logLik" in df_tr.columns
+    assert df_tr.loc[0, "logLik"] == 1.5
+

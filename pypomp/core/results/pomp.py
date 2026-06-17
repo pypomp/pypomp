@@ -57,12 +57,13 @@ class PompPFilterResult(PompBaseResult):
         if not self.theta or self.logLiks.size == 0:
             return pd.DataFrame()
         arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
-        logLik = logmeanexp(arr, axis=-1, ignore_nan=ignore_nan)
+        logLik = np.atleast_1d(logmeanexp(arr, axis=-1, ignore_nan=ignore_nan))
         se = (
             logmeanexp_se(arr, axis=-1, ignore_nan=ignore_nan)
             if arr.shape[-1] > 1
             else np.full_like(logLik, np.nan)
         )
+        se = np.atleast_1d(se)
         theta_df = pd.DataFrame(self.theta.params())
         df = pd.DataFrame(
             {"theta_idx": np.arange(len(theta_df)), "logLik": logLik, "se": se}
@@ -103,12 +104,13 @@ class PompPFilterResult(PompBaseResult):
         if not self.theta or not len(self.logLiks):
             return pd.DataFrame()
         arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
-        logliks = logmeanexp(arr, axis=-1)
+        logliks = np.atleast_1d(logmeanexp(arr, axis=-1))
         se = (
             logmeanexp_se(arr, axis=-1)
             if arr.shape[-1] > 1
             else np.full_like(logliks, np.nan)
         )
+        se = np.atleast_1d(se)
         base_df = pd.DataFrame(
             {
                 "theta_idx": np.arange(len(self.theta)),

@@ -957,4 +957,3 @@ def test_pfilter_result_single_parameter_set_0d_array():
     assert len(df_tr) == 1
     assert "logLik" in df_tr.columns
     assert df_tr.loc[0, "logLik"] == 1.5
-

@@ -469,6 +469,7 @@ class Pomp:
         start_time = time.time()
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_for_results = deepcopy(theta_obj_in)
         new_key, old_key = self._update_fresh_key(key)
         n_theta_reps = theta_obj_in.num_replicates()
 
@@ -554,7 +555,7 @@ class Pomp:
             method="pfilter",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj_in,
+            theta=theta_for_results,
             logLiks=logLik_da,
             J=J,
             reps=reps,

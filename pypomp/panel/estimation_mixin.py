@@ -401,6 +401,7 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_for_result = deepcopy(theta_obj_in)
         new_key, old_key = self._update_fresh_key(key)
 
         n_theta_reps = theta_obj_in.num_replicates()
@@ -561,7 +562,7 @@ class PanelEstimationMixin(Base):
             method="pfilter",
             execution_time=execution_time,
             key=old_key,
-            theta=theta_obj_in,
+            theta=theta_for_result,
             logLiks=results_da,
             J=J,
             reps=reps,
@@ -892,6 +893,7 @@ class PanelEstimationMixin(Base):
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
+        theta_for_result = deepcopy(theta_obj_in)
 
         n_reps = theta_obj_in.num_replicates()
 
@@ -1079,7 +1081,7 @@ class PanelEstimationMixin(Base):
             method="train",
             execution_time=time.time() - start_time,
             key=old_key,
-            theta=theta_obj_in,
+            theta=theta_for_result,
             shared_traces=shared_da,
             unit_traces=unit_da,
             logLiks=xr.DataArray(  # Placeholder as we don't have unit logliks separated

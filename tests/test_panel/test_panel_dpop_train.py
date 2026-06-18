@@ -270,7 +270,7 @@ def test_panel_dpop_train_multi_replicate():
     unit_names = panel.get_unit_names()
 
     # Build 2-replicate theta
-    base_theta = panel.theta.theta[0]
+    base_theta = panel.theta.params()[0]
     theta = pp.PanelParameters(theta=[deepcopy(base_theta), deepcopy(base_theta)])
 
     J, M = 2, 2

@@ -51,7 +51,7 @@ def test_001d_dpop_train(london_001d):
         J=DEFAULT_J,
         M=2,
         eta=eta,
-        optimizer="Adam",
+        optimizer=pp.Adam(),
         alpha=0.8,
         process_weight_state="logw",
         key=DEFAULT_KEY,

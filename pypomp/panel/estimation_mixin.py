@@ -1110,8 +1110,7 @@ class PanelEstimationMixin(Base):
         M: int,
         eta: "LearningRate | dict[str, float] | float",
         chunk_size: Union[int, str] = 1,
-        optimizer: str = "Adam",
-        beta1: float = 0.9,
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
         decay: float = 0.0,
@@ -1143,11 +1142,11 @@ class PanelEstimationMixin(Base):
                 LR decay; for a LearningRate the schedule is used as-is.
             chunk_size (Union[int, str], optional): Number of units to process
                 per gradient calculation step.
-            optimizer (str, optional): Optimizer type. Supported: 'Adam', 'SGD'.
-            beta1 (float, optional): Adam first-moment (momentum) coefficient.
-                Default 0.9. Set to 0.0 to disable momentum (e.g. for the
-                high-variance alpha=0 arm, matching the dmop/IFAD convention).
-                Ignored when optimizer='SGD'.
+            optimizer (Optimizer, optional): Optimizer configuration object,
+                e.g. ``Adam()`` or ``SGD()``. Adam hyperparameters (beta1, beta2,
+                epsilon) are read from the object; pass ``Adam(beta1=0.0)`` to
+                disable momentum (e.g. for the high-variance alpha=0 arm,
+                matching the dmop/IFAD convention).
             alpha (float, optional): DPOP discount / cooling factor.
             alpha_cooling (float, optional): Cosine cooling factor for alpha.
                 This factor represents the multiplier for the distance of alpha
@@ -1327,6 +1326,11 @@ class PanelEstimationMixin(Base):
         keys = jax.random.split(key, n_reps * M * U)
         keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
 
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8)
+
         (
             logliks_history,
             shared_history,
@@ -1348,7 +1352,7 @@ class PanelEstimationMixin(Base):
             dmeasures,
             accumvars,
             chunk_size,
-            optimizer,
+            opt_name,
             M,
             eta_shared,
             eta_spec,
@@ -1360,6 +1364,8 @@ class PanelEstimationMixin(Base):
             ntimes,
             decay,
             beta1,
+            beta2,
+            epsilon,
         )
         logliks_trace = -np.array(logliks_history)
 

@@ -174,6 +174,8 @@ def _panel_dpop_train_internal(
     ntimes: int,
     decay: float,
     beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -191,12 +193,11 @@ def _panel_dpop_train_internal(
     )
 
     def _adam_step(m, v, grad, step):
-        beta2, eps = 0.999, 1e-8
         m = beta1 * m + (1 - beta1) * grad
         v = beta2 * v + (1 - beta2) * (grad**2)
         m_hat = m / (1 - beta1**step)
         v_hat = v / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + eps), m, v
+        return -m_hat / (jnp.sqrt(v_hat) + epsilon), m, v
 
     def _compute_direction(grad, m, v, step):
         if optimizer == "SGD":
@@ -341,9 +342,9 @@ def _panel_dpop_train_internal(
 # Arguments: shared_array, unit_array, unit_param_permutations, dt_array_extended,
 #   nstep_array, t0, times, ys, covars_extended, keys, J, rinitializer, rprocess_interp,
 #   dmeasure, accumvars, chunk_size, optimizer, M, eta_shared, eta_spec, alpha,
-#   alpha_cooling, n_obs, U, process_weight_index, ntimes, decay, beta1
+#   alpha_cooling, n_obs, U, process_weight_index, ntimes, decay, beta1, beta2, epsilon
 _vmapped_panel_dpop_train_internal = jax.vmap(
     _panel_dpop_train_internal,
-    # indices:  0     1     2     3     4   5  6  7   8     9    10-27 (Nones except keys at 9)
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
+    # indices:  0     1     2     3     4   5  6  7   8     9    10-29 (Nones except keys at 9)
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 20,
 )

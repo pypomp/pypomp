@@ -897,8 +897,7 @@ class Pomp:
         J: int,
         M: int,
         eta: LearningRate,
-        optimizer: str = "Adam",
-        beta1: float = 0.9,
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.8,
         alpha_cooling: float = 1.0,
         decay: float = 0.0,
@@ -923,12 +922,11 @@ class Pomp:
             Per-parameter learning rates as a LearningRate object. A full
             per-iteration schedule is applied (row m used at iteration m), so
             ``LearningRate(rates).cosine_decay(0.05, M)`` works as expected.
-        optimizer : str, default "Adam"
-            Optimizer to use: "Adam" or "SGD".
-        beta1 : float, default 0.9
-            Adam first-moment (momentum) coefficient. Set to 0.0 to disable
-            momentum (e.g. for the high-variance alpha=0 arm, matching the
-            dmop/IFAD convention). Ignored when optimizer="SGD".
+        optimizer : Optimizer, default Adam()
+            Optimizer configuration object, e.g. ``Adam()`` or ``SGD()``. Adam
+            hyperparameters (``beta1``, ``beta2``, ``epsilon``) are read from the
+            object; pass ``Adam(beta1=0.0)`` to disable momentum (e.g. for the
+            high-variance alpha=0 arm, matching the dmop/IFAD convention).
         alpha : float, default 0.8
             DPOP discount / cooling factor.
         alpha_cooling : float, default 1.0
@@ -1002,6 +1000,10 @@ class Pomp:
             ) from e
 
         ntimes = len(self.ys)
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8)
         theta_hist, nll_hist = _dpop_train(
             theta_init=theta_init,
             ys=ys_array,
@@ -1021,9 +1023,11 @@ class Pomp:
             key=new_key,
             M=M,
             eta=eta_array,
-            optimizer=optimizer,
+            optimizer=opt_name,
             decay=decay,
             beta1=beta1,
+            beta2=beta2,
+            epsilon=epsilon,
             alpha_cooling=alpha_cooling,
         )
 

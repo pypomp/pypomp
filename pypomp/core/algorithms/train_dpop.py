@@ -147,6 +147,8 @@ def dpop_train(
     optimizer: str = "Adam",  # static
     decay: float = 0.0,
     beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
     alpha_cooling: float = 1.0,
 ) -> tuple[jax.Array, jax.Array]:
     """
@@ -228,8 +230,6 @@ def dpop_train(
         eta_scaled = eta[m] * lr_scale
 
         if optimizer == "Adam":
-            beta2 = 0.999
-            eps = 1e-8
             # Update biased moments (m is 0-indexed iteration)
             m_adam_new = beta1 * m_adam + (1.0 - beta1) * grad_safe
             v_adam_new = beta2 * v_adam + (1.0 - beta2) * grad_safe**2
@@ -237,7 +237,7 @@ def dpop_train(
             step = (m_f + 1.0).astype(jnp.float32)
             m_hat = m_adam_new / (1.0 - beta1**step)
             v_hat = v_adam_new / (1.0 - beta2**step)
-            direction = -m_hat / (jnp.sqrt(v_hat) + eps)
+            direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
             theta_new = theta + eta_scaled * direction
         else:
             # SGD

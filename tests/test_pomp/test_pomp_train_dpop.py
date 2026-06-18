@@ -21,10 +21,10 @@ def simple_sir_for_dpop():
 @pytest.mark.parametrize(
     "optimizer, decay, eta_type",
     [
-        ("Adam", 0.0, "dict"),
-        ("SGD", 0.1, "dict"),
-        ("Adam", 0.1, "dict"),
-        ("SGD", 0.1, "scalar"),
+        (pp.Adam(), 0.0, "dict"),
+        (pp.SGD(), 0.1, "dict"),
+        (pp.Adam(), 0.1, "dict"),
+        (pp.SGD(), 0.1, "scalar"),
     ],
 )
 def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
@@ -69,7 +69,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
         J=J,
         M=M,
         eta=eta,
-        optimizer="SGD",
+        optimizer=pp.SGD(),
         decay=0.1,
         alpha=0.8,
         key=key1,
@@ -88,7 +88,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
         J=J,
         M=M,
         eta=eta,
-        optimizer="SGD",
+        optimizer=pp.SGD(),
         decay=0.1,
         alpha=0.8,
         key=key2,
@@ -109,7 +109,7 @@ def test_dpop_train_alpha_cooling_one_matches_default(simple_sir_for_dpop):
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
-        optimizer="SGD",
+        optimizer=pp.SGD(),
         decay=0.1,
         alpha=0.8,
         process_weight_state="logw",

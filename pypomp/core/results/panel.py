@@ -332,7 +332,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
     unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
     theta: "PanelParameters | None" = None
-    optimizer: str = "Adam"
+    optimizer: Optimizer = field(default_factory=Adam)
     J: int = 0
     M: int = 0
     eta: LearningRate | dict[str, float] | float = field(default_factory=lambda: {})

@@ -596,7 +596,7 @@ def test_dpop_train_validation(base_pomp):
     )
     pomp_dpop.fresh_key = jax.random.key(1)
     nll_h, theta_h = pomp_dpop.dpop_train(
-        J=2, M=2, eta=eta, process_weight_state="logw", optimizer="SGD", decay=0.1
+        J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD(), decay=0.1
     )
     assert nll_h.shape == (3,)
     assert theta_h.shape == (3, 2)

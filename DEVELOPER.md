@@ -62,6 +62,24 @@ pip install pyright
 pyright
 ```
 
+### Pre-commit Hooks
+
+We use `pre-commit` to automatically run code formatting and linting checks on every git commit.
+
+To set up pre-commit in your local repository:
+```bash
+# Install the git hook scripts
+pre-commit install
+
+# (Optional) Run the hooks manually against all files
+pre-commit run --all-files
+```
+
+Once installed, the hooks configured in `.pre-commit-config.yaml` will run automatically whenever you commit changes.
+
+> [!IMPORTANT]
+> The pre-commit hooks include a local **Pyright** type-checking step. Because this hook runs in your system shell, **you must execute `git commit` from an active virtual environment** (`source .venv/bin/activate`) so that `pyright` can resolve third-party imports (like `jax`, `numpy`, etc.) and find the `pyright` executable. If the virtual environment is not active, the commit check will fail.
+
 ---
 
 ## 3. Running Tests

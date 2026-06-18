@@ -947,6 +947,7 @@ class Pomp:
         optimizer: str = "Adam",
         beta1: float = 0.9,
         alpha: float = 0.8,
+        alpha_cooling: float = 1.0,
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
@@ -977,6 +978,10 @@ class Pomp:
             dmop/IFAD convention). Ignored when optimizer="SGD".
         alpha : float, default 0.8
             DPOP discount / cooling factor.
+        alpha_cooling : float, default 1.0
+            Cosine cooling factor for alpha. This factor represents the
+            multiplier for the distance of alpha from 1.0 by the end of
+            training. The default keeps alpha fixed.
         decay : float, default 0.0
             Learning-rate decay coefficient. At iteration m, the effective
             learning rate is ``eta / (1 + decay * m)``.
@@ -1068,6 +1073,7 @@ class Pomp:
             optimizer=optimizer,
             decay=decay,
             beta1=beta1,
+            alpha_cooling=alpha_cooling,
         )
 
         return nll_hist, theta_hist

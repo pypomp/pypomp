@@ -187,6 +187,29 @@ def test_panel_dpop_train_with_decay():
     assert res.decay == 0.1
 
 
+def test_panel_dpop_train_with_alpha_cooling():
+    panel = _get_sir_panel()
+    J, M = 2, 2
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer="Adam",
+        alpha=0.8,
+        alpha_cooling=0.5,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, PanelPompDpopTrainResult)
+    assert res.alpha == 0.8
+    assert res.alpha_cooling == 0.5
+    assert np.all(np.isfinite(np.asarray(res.shared_traces.sel(variable="logLik"))))
+
+
 def test_panel_dpop_train_with_shared():
     panel = _get_sir_panel_with_shared()
     J, M = 2, 2

@@ -4,6 +4,7 @@ from jax import jit
 import jax.numpy as jnp
 from typing import Callable
 from .dpop import _dpop_internal
+from .helpers import _cosine_cooling
 
 
 _panel_dpop_internal_vmap = jax.vmap(
@@ -166,6 +167,7 @@ def _panel_dpop_train_internal(
     eta_shared: jax.Array,   # (M, n_shared) per-iteration LR schedule
     eta_spec: jax.Array,     # (M, n_spec)   per-iteration LR schedule
     alpha: float,
+    alpha_cooling: float,
     n_obs: int,     # ys.shape[1]
     U: int,         # ys.shape[0]
     process_weight_index: int | None,
@@ -204,7 +206,9 @@ def _panel_dpop_train_internal(
         else:
             raise ValueError(f"Optimizer '{optimizer}' not supported for panel dpop_train")
 
-    def _chunk_obj(s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, keys_chunk):
+    def _chunk_obj(
+        s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, curr_alpha, keys_chunk
+    ):
         shared_tiled = jnp.tile(s_ests, (chunk_size, 1))
         theta_unordered = jnp.concatenate([shared_tiled, u_ests], axis=1)
         theta_chunk = jax.vmap(lambda t, p: t[p])(theta_unordered, perm_chunk)
@@ -221,7 +225,7 @@ def _panel_dpop_train_internal(
             dmeasure,
             accumvars,
             covars_chunk,
-            alpha,
+            curr_alpha,
             process_weight_index,
             ntimes,
             keys_chunk,
@@ -237,6 +241,7 @@ def _panel_dpop_train_internal(
         lr_scale = 1.0 / (1.0 + decay * i_f)
         eta_shared_scaled = eta_shared[i] * lr_scale
         eta_spec_scaled = eta_spec[i] * lr_scale
+        curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         def chunk_scan_step(chunk_carry, chunk_idx):
             c_s, c_m_s, c_v_s, c_step = chunk_carry
@@ -250,6 +255,7 @@ def _panel_dpop_train_internal(
                 unit_param_permutations_c[chunk_idx],
                 ys_c[chunk_idx],
                 covars_chunk,
+                curr_alpha,
                 iter_keys_c[chunk_idx],
             )
             loglik *= ylen
@@ -334,10 +340,10 @@ def _panel_dpop_train_internal(
 # vmap over replicates: shared_array(0), unit_array(0), then Nones, keys(0), then Nones
 # Arguments: shared_array, unit_array, unit_param_permutations, dt_array_extended,
 #   nstep_array, t0, times, ys, covars_extended, keys, J, rinitializer, rprocess_interp,
-#   dmeasure, accumvars, chunk_size, optimizer, M, eta_shared, eta_spec, alpha, n_obs, U,
-#   process_weight_index, ntimes, decay, beta1
+#   dmeasure, accumvars, chunk_size, optimizer, M, eta_shared, eta_spec, alpha,
+#   alpha_cooling, n_obs, U, process_weight_index, ntimes, decay, beta1
 _vmapped_panel_dpop_train_internal = jax.vmap(
     _panel_dpop_train_internal,
-    # indices:  0     1     2     3     4   5  6  7   8     9    10-26 (Nones except keys at 9)
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 17,
+    # indices:  0     1     2     3     4   5  6  7   8     9    10-27 (Nones except keys at 9)
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
 )

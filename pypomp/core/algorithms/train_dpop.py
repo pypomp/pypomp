@@ -6,6 +6,7 @@ from typing import Callable
 from .dpop import (
     _dpop_internal_mean,
 )  # DPOP mean negative log-likelihood per observation
+from .helpers import _cosine_cooling
 
 # ----------------------------------------------------------------------
 # DPOP gradient helpers
@@ -146,6 +147,7 @@ def dpop_train(
     optimizer: str = "Adam",  # static
     decay: float = 0.0,
     beta1: float = 0.9,
+    alpha_cooling: float = 1.0,
 ) -> tuple[jax.Array, jax.Array]:
     """
     Train on the DPOP objective with Adam or SGD, optional LR decay.
@@ -166,6 +168,9 @@ def dpop_train(
     decay : float
         Learning-rate decay coefficient. At iteration m, the effective
         learning rate is ``eta / (1 + decay * m)``.
+    alpha_cooling : float
+        Cosine cooling factor for alpha. A value of 1.0 keeps alpha fixed;
+        smaller values move alpha toward 1.0 over training.
     M : int
         Number of optimization iterations.
 
@@ -192,6 +197,7 @@ def dpop_train(
         theta, key, theta_history, nll_history, m_adam, v_adam = carry
 
         key, subkey = jax.random.split(key)
+        curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(m, M, alpha_cooling)
         nll_mean, grad = jax.value_and_grad(_dpop_internal_mean)(
             theta,
             ys=ys,
@@ -205,7 +211,7 @@ def dpop_train(
             dmeasure=dmeasure,
             accumvars=accumvars,
             covars_extended=covars_extended,
-            alpha=alpha,
+            alpha=curr_alpha,
             process_weight_index=process_weight_index,
             ntimes=ntimes,
             key=subkey,
@@ -252,6 +258,7 @@ def dpop_train(
 
     # Compute final NLL
     key_final, subkey = jax.random.split(key_final)
+    final_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(M, M, alpha_cooling)
     final_nll = _dpop_internal_mean(
         theta_final,
         ys=ys,
@@ -265,7 +272,7 @@ def dpop_train(
         dmeasure=dmeasure,
         accumvars=accumvars,
         covars_extended=covars_extended,
-        alpha=alpha,
+        alpha=final_alpha,
         process_weight_index=process_weight_index,
         ntimes=ntimes,
         key=subkey,

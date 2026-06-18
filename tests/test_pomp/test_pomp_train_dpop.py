@@ -99,3 +99,25 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     # Histories should match exactly up to numerical precision
     np.testing.assert_allclose(nll1, nll2, atol=1e-7)
     np.testing.assert_allclose(theta_hist1, theta_hist2, atol=1e-7)
+
+
+def test_dpop_train_alpha_cooling_one_matches_default(simple_sir_for_dpop):
+    """alpha_cooling=1.0 should preserve fixed-alpha DPOP behavior."""
+    model = simple_sir_for_dpop
+    eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+    kwargs = dict(
+        J=J_DEFAULT,
+        M=M_DEFAULT,
+        eta=eta,
+        optimizer="SGD",
+        decay=0.1,
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(321),
+    )
+
+    nll_default, theta_default = model.dpop_train(**kwargs)
+    nll_fixed, theta_fixed = model.dpop_train(alpha_cooling=1.0, **kwargs)
+
+    np.testing.assert_allclose(nll_default, nll_fixed, atol=1e-7)
+    np.testing.assert_allclose(theta_default, theta_fixed, atol=1e-7)

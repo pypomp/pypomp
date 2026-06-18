@@ -1186,6 +1186,7 @@ class PanelEstimationMixin(Base):
         optimizer: str = "Adam",
         beta1: float = 0.9,
         alpha: float = 0.97,
+        alpha_cooling: float = 1.0,
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
@@ -1221,6 +1222,9 @@ class PanelEstimationMixin(Base):
                 high-variance alpha=0 arm, matching the dmop/IFAD convention).
                 Ignored when optimizer='SGD'.
             alpha (float, optional): DPOP discount / cooling factor.
+            alpha_cooling (float, optional): Cosine cooling factor for alpha.
+                This factor represents the multiplier for the distance of alpha
+                from 1.0 by the end of training. The default keeps alpha fixed.
             decay (float, optional): Learning-rate decay coefficient. At iteration m,
                 the effective learning rate is ``eta / (1 + decay * m)``.
             process_weight_state (str or None): Name of the state component that
@@ -1463,6 +1467,7 @@ class PanelEstimationMixin(Base):
             eta_shared,
             eta_spec,
             alpha,
+            alpha_cooling,
             n_obs,
             U,
             process_weight_index,
@@ -1592,6 +1597,7 @@ class PanelEstimationMixin(Base):
             eta=eta,
             optimizer=optimizer,
             alpha=alpha,
+            alpha_cooling=alpha_cooling,
             process_weight_state=process_weight_state,
             decay=decay,
         )

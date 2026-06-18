@@ -298,6 +298,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
     M: int = 0
     eta: LearningRate | dict[str, float] | float = field(default_factory=lambda: {})
     alpha: float = 0.97
+    alpha_cooling: float = 1.0
     process_weight_state: str | None = None
     decay: float = 0.0
 
@@ -313,6 +314,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
             ("Number of iterations (M)", "M"),
             ("Learning rate (eta)", "eta"),
             ("Discount factor (alpha)", "alpha"),
+            ("Cooling factor for alpha", "alpha_cooling"),
             ("Process weight state", "process_weight_state"),
             ("Decay", "decay"),
         ]
@@ -328,6 +330,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
             or self.M != other.M
             or self.eta != other.eta
             or self.alpha != other.alpha
+            or self.alpha_cooling != other.alpha_cooling
             or self.process_weight_state != other.process_weight_state
             or self.decay != other.decay
         ):
@@ -427,6 +430,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
         print(f"Number of iterations (M): {self.M}")
         print(f"Learning rate (eta): {self.eta}")
         print(f"Discount factor (alpha): {self.alpha}")
+        print(f"Cooling factor for alpha: {self.alpha_cooling}")
         print(f"Process weight state: {self.process_weight_state}")
         print(f"Decay: {self.decay}")
         print(f"Execution time: {self.execution_time} seconds")
@@ -456,9 +460,10 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
                 or result.M != first.M
                 or result.eta != first.eta
                 or result.alpha != first.alpha
+                or result.alpha_cooling != first.alpha_cooling
             ):
                 raise ValueError(
-                    "All PanelPompDpopTrainResult objects must have the same optimizer, J, M, eta, and alpha."
+                    "All PanelPompDpopTrainResult objects must have the same optimizer, J, M, eta, alpha, and alpha_cooling."
                 )
 
         merged_theta = (
@@ -525,6 +530,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
             M=first.M,
             eta=first.eta,
             alpha=first.alpha,
+            alpha_cooling=first.alpha_cooling,
             process_weight_state=first.process_weight_state,
             decay=first.decay,
         )

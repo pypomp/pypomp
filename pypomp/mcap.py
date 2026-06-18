@@ -4,6 +4,7 @@ This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Any
 
@@ -57,7 +58,10 @@ def _loess_smooth_1d(
         # Retrying with a tiny sigy forces it to avoid mad-based scaling.
         # TODO: This is just a bandaid so GitHub Actions will pass the CI tests for
         # now. Figure out a more permanent solution.
-        print("LinAlgError in loess_1d, retrying with 1e-10 sigy")
+        warnings.warn(
+            "LinAlgError in loess_1d, retrying with 1e-10 sigy",
+            RuntimeWarning,
+        )
         res = loess_1d(
             x,
             y,

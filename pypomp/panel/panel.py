@@ -3,8 +3,6 @@ This module implements the OOP structure for PanelPOMP models.
 """
 
 import jax
-import pandas as pd
-from typing import cast
 from pypomp.core.pomp import Pomp
 from .validation_mixin import PanelValidationMixin
 from .estimation_mixin import PanelEstimationMixin
@@ -30,37 +28,42 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
     Parameters
     ----------
-    Pomp_dict : dict[str, Pomp]
-        A dictionary mapping unit names to Pomp objects. Each Pomp object represents a single unit in the panel data.
+    Pomp_dict : dict[str, :class:`~pypomp.core.pomp.Pomp`]
+        A dictionary mapping unit names to :class:`~pypomp.core.pomp.Pomp` objects. Each :class:`~pypomp.core.pomp.Pomp` object represents a single unit in the panel data.
         The keys are used as unit identifiers.
-    theta : PanelParameters | dict | list, optional
-        A PanelParameters object, a dictionary with "shared" and "unit_specific" keys, or a list of such dictionaries.
+    theta : :class:`~pypomp.core.parameters.PanelParameters`, optional
+        A :class:`~pypomp.core.parameters.PanelParameters` object containing the model parameters.
     """
 
     unit_objects: dict[str, Pomp]
-    theta: PanelParameters
+    """A dictionary mapping unit names to their corresponding :class:`~pypomp.core.pomp.Pomp` objects."""
     results_history: ResultsHistory
+    """A :class:`~pypomp.core.results.ResultsHistory` object storing the history of results from method calls."""
     fresh_key: jax.Array | None
+    """Running a method that accepts a JAX PRNG key will store a fresh, unused key here."""
     metadata: ModelMetadata
+    """Environment and version metadata initialized when this instance was built."""
     canonical_param_names: list[str]
+    """All unique parameter names present in either the shared or unit-specific parameters."""
     canonical_shared_param_names: list[str]
+    """Parameter names of parameters with values shared across all units in the panel."""
     canonical_unit_param_names: list[str]
+    """Parameter names of parameters with values specific to individual units in the panel."""
+
+    _theta: PanelParameters
+    """The internal parameter object storage."""
 
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
     ):
         if theta is not None:
-            if isinstance(theta, PanelParameters):
-                self.theta = theta
-            else:
-                self.theta = PanelParameters(theta=theta)
+            if not isinstance(theta, PanelParameters):
+                raise TypeError("theta must be a PanelParameters instance")
+            self._theta = theta
         else:
-            self.theta = PanelParameters(theta=None)
+            self._theta = PanelParameters(theta=None)
 
         self.unit_objects = Pomp_dict
         self.results_history = ResultsHistory()
@@ -75,7 +78,26 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         for unit in self.unit_objects.keys():
             self.unit_objects[unit].theta = None  # type: ignore
 
+    @property
+    def theta(self) -> PanelParameters:
+        """The parameter object for the panel model."""
+        return self._theta
+
+    @theta.setter
+    def theta(self, value: PanelParameters):
+        if not isinstance(value, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance")
+        self._theta = value
+
     def get_unit_names(self) -> list[str]:
+        """
+        Returns a list of the names of the units in the panel.
+
+        Returns
+        -------
+        list[str]
+            The names of the units in the panel.
+        """
         return list(self.unit_objects.keys())
 
     def print_metadata(self) -> None:
@@ -222,9 +244,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         self.__dict__.update(state)
 
         if "_fresh_key_data" in state:
-            self.fresh_key = cast(
-                jax.Array, jax.random.wrap_key_data(state["_fresh_key_data"])
-            )
+            self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
         elif "fresh_key" not in self.__dict__:
             self.fresh_key = None
         self.__dict__.pop("_fresh_key_data", None)

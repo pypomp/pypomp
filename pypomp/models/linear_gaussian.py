@@ -20,15 +20,34 @@ from pypomp.types import (
 
 
 def _get_thetas(theta):
-    A = jnp.array([theta["A1"], theta["A2"], theta["A3"], theta["A4"]]).reshape(2, 2)
-    C = jnp.array([theta["C1"], theta["C2"], theta["C3"], theta["C4"]]).reshape(2, 2)
-    Q = jnp.array([theta["Q1"], theta["Q2"], theta["Q3"], theta["Q4"]]).reshape(2, 2)
-    R = jnp.array([theta["R1"], theta["R2"], theta["R3"], theta["R4"]]).reshape(2, 2)
+    A = jnp.array([theta["A11"], theta["A12"], theta["A21"], theta["A22"]]).reshape(
+        2, 2
+    )
+    C = jnp.array([theta["C11"], theta["C12"], theta["C21"], theta["C22"]]).reshape(
+        2, 2
+    )
+
+    def make_pd(m11_val, m12_val, m22_val):
+        m11 = jnp.maximum(m11_val, 1e-12)
+        m22 = jnp.maximum(m22_val, 1e-12)
+        limit = 0.999 * jnp.sqrt(m11 * m22)
+        m_off_clipped = jnp.clip(m12_val, -limit, limit)
+        return jnp.array([[m11, m_off_clipped], [m_off_clipped, m22]])
+
+    Q = make_pd(theta["Q11"], theta["Q12"], theta["Q22"])
+    R = make_pd(theta["R11"], theta["R12"], theta["R22"])
     return A, C, Q, R
 
 
 def _transform_thetas(A, C, Q, R):
-    return jnp.concatenate([A.flatten(), C.flatten(), Q.flatten(), R.flatten()])
+    return jnp.concatenate(
+        [
+            A.flatten(),
+            C.flatten(),
+            jnp.array([Q[0, 0], Q[0, 1], Q[1, 1]]),
+            jnp.array([R[0, 0], R[0, 1], R[1, 1]]),
+        ]
+    )
 
 
 # TODO: Add custom starting position.
@@ -85,28 +104,28 @@ def _rmeas(
 def _to_est(theta: ParamDict) -> ParamDict:
     new_theta = {**theta}
     for name in "ACQR":
-        new_theta[f"{name}1"] = jnp.log(theta[f"{name}1"])
-        new_theta[f"{name}4"] = jnp.log(theta[f"{name}4"])
+        new_theta[f"{name}11"] = jnp.log(theta[f"{name}11"])
+        new_theta[f"{name}22"] = jnp.log(theta[f"{name}22"])
     return new_theta
 
 
 def _from_est(theta: ParamDict) -> ParamDict:
     new_theta = {**theta}
     for name in "ACQR":
-        new_theta[f"{name}1"] = jnp.exp(theta[f"{name}1"])
-        new_theta[f"{name}4"] = jnp.exp(theta[f"{name}4"])
+        new_theta[f"{name}11"] = jnp.exp(theta[f"{name}11"])
+        new_theta[f"{name}22"] = jnp.exp(theta[f"{name}22"])
     return new_theta
 
 
 def LG(
     T: int = 4,
-    A: jax.Array = jnp.array(
+    A: np.ndarray = np.array(
         [[jnp.cos(0.2), -jnp.sin(0.2)], [jnp.sin(0.2), jnp.cos(0.2)]]
     ),
-    C: jax.Array = jnp.eye(2),
-    Q: jax.Array = jnp.array([[1, 2e-2], [2e-2, 1]]) / 100,
-    R: jax.Array = jnp.array([[1, 0.1], [0.1, 1]]) / 10,
-    key: jax.Array = jax.random.key(111),
+    C: np.ndarray = np.eye(2),
+    Q: np.ndarray = np.array([[1, 2e-2], [2e-2, 1]]) / 100,
+    R: np.ndarray = np.array([[1, 0.1], [0.1, 1]]) / 10,
+    key: jax.Array = jax.random.key(1),
 ) -> Pomp:
     """
     Initialize a Pomp object with the linear Gaussian model.
@@ -115,30 +134,54 @@ def LG(
     ----------
     T : int, optional
         The number of time steps to generate data for. Defaults to 4.
-    A : jax.Array, optional
-        The transition matrix. Defaults to the identity matrix.
-    C : jax.Array, optional
-        The measurement matrix. Defaults to the identity matrix.
-    Q : jax.Array, optional
-        The covariance matrix of the state noise. Defaults to the identity
-        matrix.
-    R : jax.Array, optional
-        The covariance matrix of the measurement noise. Defaults to the identity
-        matrix.
+    A : np.ndarray, optional
+        The transition matrix.
+    C : np.ndarray, optional
+        The measurement matrix.
+    Q : np.ndarray, optional
+        The covariance matrix of the state noise.
+    R : np.ndarray, optional
+        The covariance matrix of the measurement noise.
     key : jax.Array, optional
-        The random key used to generate the data. Defaults to
-        jax.random.key(111).
+        The random key used to generate the data.
 
     Returns
     -------
     A Pomp object initialized with the linear Gaussian model parameters and the generated data.
     """
-    theta_names = [f"{name}{i}" for name in "ACQR" for i in range(1, 5)]
+    # Validate covariance matrices Q and R
+    for name, mat in [("Q", Q), ("R", R)]:
+        mat_np = np.asarray(mat)
+        if not np.allclose(mat_np, mat_np.T, atol=1e-8, rtol=1e-5):
+            raise ValueError(f"Covariance matrix {name} must be symmetric.")
+        try:
+            np.linalg.cholesky(mat_np)
+        except np.linalg.LinAlgError:
+            raise ValueError(f"Covariance matrix {name} must be positive-definite.")
+
+    theta_names = [
+        "A11",
+        "A12",
+        "A21",
+        "A22",
+        "C11",
+        "C12",
+        "C21",
+        "C22",
+        "Q11",
+        "Q12",
+        "Q22",
+        "R11",
+        "R12",
+        "R22",
+    ]
     theta = dict(zip(theta_names, _transform_thetas(A, C, Q, R).tolist()))
 
     ys_temp = pd.DataFrame(
         0, index=np.arange(1, T + 1, dtype=float), columns=pd.Index(["Y1", "Y2"])
     )
+
+    from pypomp.core.parameters import PompParameters
 
     LG_obj_temp = Pomp(
         rinit=_rinit,
@@ -149,7 +192,7 @@ def LG(
         t0=0.0,
         nstep=1,
         dt=None,
-        theta=theta,
+        theta=PompParameters(theta),
         covars=None,
         statenames=["X1", "X2"],
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),

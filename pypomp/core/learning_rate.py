@@ -113,8 +113,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with cosine decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with cosine decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")
@@ -151,8 +151,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with geometric decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with geometric decay applied.
         """
         if not (0 <= decay_rate <= 1):
             raise ValueError("decay_rate should be between 0 and 1")
@@ -186,8 +186,8 @@ class LearningRate:
 
         Returns
         -------
-        LearningRate
-            A new LearningRate object with linear decay applied.
+        :class:`~pypomp.core.learning_rate.LearningRate`
+            A new :class:`~pypomp.core.learning_rate.LearningRate` object with linear decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")
@@ -229,14 +229,14 @@ class LearningRate:
                     vals_str = ", ".join(f"{x:.4g}" for x in val)
                     rate_strs.append(f"'{name}': [{vals_str}]")
                 else:
-                    rate_strs.append(f"'{name}': [{val[0]:.4g} ... {val[-1]:.4g}] (len={val.size})")
+                    rate_strs.append(
+                        f"'{name}': [{val[0]:.4g} ... {val[-1]:.4g}] (len={val.size})"
+                    )
             else:
                 rate_strs.append(f"'{name}': {val}")
-        
+
         indented_rates = "\n    ".join(rate_strs)
         return f"LearningRate(\n    {indented_rates}\n)"
 
-
     def __repr__(self) -> str:
         return self.__str__()
-

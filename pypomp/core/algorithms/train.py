@@ -786,7 +786,7 @@ def _line_search(
         return eta_new, itn_new, should_continue & (itn < tau)
 
     eta_final, _, _ = jax.lax.while_loop(
-        lambda carry: carry[2], line_search_body, (eta, 0, False)
+        lambda carry: carry[2], line_search_body, (eta, 0, True)
     )
     return eta_final
 

@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 
-from .helpers import _keys_helper, _normalize_weights, _resampler
+from .helpers import _normalize_weights, _resampler
 
 # Should transformations be applied to the parameters?
 SHOULD_TRANS = True
@@ -91,7 +91,9 @@ def _dpop_internal(
     times = times.astype(float)
 
     # Initialize particles from the prior.
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
 
@@ -179,7 +181,9 @@ def _dpop_helper(
     weightsP = alpha * weightsF
 
     # Keys for the process model.
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
 
     # Predict forward within the current observation interval.
     nstep = nstep_array[i].astype(int)
@@ -207,10 +211,6 @@ def _dpop_helper(
     # Measurement update.
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS)
-    if measurements.ndim > 1:
-        # Sum over any extra dimension if the measurement density
-        # returns a multi-component log-density.
-        measurements = measurements.sum(axis=-1)
 
     # Update the global log-likelihood (data term).
     loglik = (

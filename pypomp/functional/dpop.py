@@ -14,7 +14,8 @@ def dpop(
     """
     This is a pure functional implementation of the DPOP differentiable particle
     filter, intended for users who need to compose it within custom JAX
-    loops or higher-order functions.
+    loops or higher-order functions. For a more user-friendly (but impurely-functional) interface, see
+    :meth:`pypomp.core.pomp.Pomp.dpop_train`.
 
     This function is analogous to :func:`pypomp.functional.mop` as a fully differentiable objective function
     for parameter estimation. However, it additionally

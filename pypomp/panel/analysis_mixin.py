@@ -1,7 +1,10 @@
+import warnings
 import jax
 import pandas as pd
 from typing import TYPE_CHECKING, Any, cast
 from ..core.viz import plot_traces_internal, plot_panel_simulations_internal
+
+from ..core.parameters import PanelParameters
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base
@@ -109,7 +112,7 @@ class PanelAnalysisMixin(Base):
         traces = self.traces()
         assert isinstance(traces, pd.DataFrame)
         if traces.empty:
-            print("No trace data to plot.")
+            warnings.warn("No trace data to plot.", UserWarning)
             return None
 
         value_cols = [
@@ -132,7 +135,7 @@ class PanelAnalysisMixin(Base):
 
         if which == "shared":
             if not has_shared_rows:
-                print("No shared rows to plot.")
+                warnings.warn("No shared rows to plot.", UserWarning)
                 return None
             df_plot = cast(pd.DataFrame, traces.loc[traces["unit"] == "shared"])
             title = "Shared Parameter Traces"
@@ -170,7 +173,7 @@ class PanelAnalysisMixin(Base):
         key: jax.Array,
         nsim: int = 20,
         mode: str = "lines",
-        theta: Any = None,
+        theta: PanelParameters | None = None,
         show: bool = True,
     ) -> Any:
         """
@@ -189,6 +192,8 @@ class PanelAnalysisMixin(Base):
                 if self.theta and self.theta.num_replicates() > 1
                 else self.theta
             )
+        elif not isinstance(theta, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance")
 
         _, sims = self.simulate(nsim=nsim, theta=theta, key=key)
         fig = plot_panel_simulations_internal(sims, self.ys, mode=mode)

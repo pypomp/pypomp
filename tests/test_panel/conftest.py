@@ -8,15 +8,15 @@ from copy import deepcopy
 @pytest.fixture(scope="module")
 def measles_panel_setup_pomps_module():
     AK_mles = pp.models.UKMeasles.AK_mles()
-    london_theta = AK_mles["London"].to_dict()
-    hastings_theta = AK_mles["Hastings"].to_dict()
+    london_theta = {str(k): float(v) for k, v in AK_mles["London"].items()}
+    hastings_theta = {str(k): float(v) for k, v in AK_mles["Hastings"].items()}
     london = pp.models.UKMeasles.Pomp(
         unit=["London"],
-        theta=london_theta,
+        theta=pp.PompParameters(london_theta),
     )
     hastings = pp.models.UKMeasles.Pomp(
         unit=["Hastings"],
-        theta=hastings_theta,
+        theta=pp.PompParameters(hastings_theta),
     )
     return london, hastings, AK_mles
 
@@ -114,7 +114,7 @@ def measles_panel_mp_module(measles_panel_setup_specific_only_module):
     J = 2
     M = 2
     a = 0.5
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
     panel.pfilter(J=J)
     results_history = panel.results_history
     fresh_key = panel.fresh_key
@@ -155,7 +155,7 @@ def lg_panel_setup_some_shared_module():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()
     # Create PanelParameters with some shared and some unit-specific
-    shared_names = ["A1", "C1"]
+    shared_names = ["A11", "C11"]
     unit_specific_names = [
         n for n in lg1.canonical_param_names if n not in shared_names
     ]
@@ -256,7 +256,7 @@ def lg_panel_mp_module(lg_panel_setup_some_shared_module):
     J = 2
     M = 2
     a = 0.5
-    panel.mif(J=J, rw_sd=rw_sd, M=M, a=a, key=key)
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
     panel.pfilter(J=J)
     results_history = deepcopy(panel.results_history)
     fresh_key = panel.fresh_key

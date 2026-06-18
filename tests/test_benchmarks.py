@@ -165,8 +165,7 @@ def test_benchmark_warning_suppression(dummy_data):
             summary_warnings = [
                 warn
                 for warn in w_list
-                if "arma: 1 warnings were produced by statsmodels"
-                in str(warn.message)
+                if "arma: 1 warnings were produced by statsmodels" in str(warn.message)
             ]
             assert len(summary_warnings) == 1
 

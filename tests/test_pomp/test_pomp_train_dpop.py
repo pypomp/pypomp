@@ -45,7 +45,7 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
         alpha=0.8,
         decay=decay,
         process_weight_state="logw",
-        key=jax.random.key(42),
+        key=jax.random.key(1),
     )
     assert nll.shape == (M_DEFAULT + 1,)
     assert theta_hist.shape[0] == M_DEFAULT + 1
@@ -92,7 +92,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
         decay=0.1,
         alpha=0.8,
         key=key2,
-        theta=permuted_theta,
+        theta=pp.PompParameters(permuted_theta),
         process_weight_state="logw",
     )
 

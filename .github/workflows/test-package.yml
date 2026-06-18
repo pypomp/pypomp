@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11"]  # Currently doesn't work on "pypy3.10" due to dependencies.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]  # Currently doesn't work on "pypy3.10" due to dependencies.
 
     steps:
     - uses: actions/checkout@v4

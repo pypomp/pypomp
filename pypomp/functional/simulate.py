@@ -14,7 +14,7 @@ def simulate(
     """
     This is a pure functional implementation of the simulation algorithm, intended
     for users who need to compose it within custom JAX loops or higher-order
-    functions. For a more user-friendly (but non-functional) interface, see
+    functions. For a more user-friendly (but impurely-functional) interface, see
     :meth:`pypomp.core.pomp.Pomp.simulate`.
 
     This function propagates the system's latent state through time according to the

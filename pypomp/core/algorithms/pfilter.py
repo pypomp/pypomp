@@ -5,7 +5,6 @@ from jax import jit
 from typing import Callable
 from .helpers import _resampler
 from .helpers import _no_resampler
-from .helpers import _keys_helper
 from .helpers import _normalize_weights
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
@@ -53,7 +52,9 @@ def _pfilter_internal(
     If diagnostics are requested, return a tuple with the negative log likelihood and the requested diagnostics.
     """
     times = times.astype(float)
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF = rinitializer(theta, keys, covars0, t0, should_trans)
     norm_weights = jnp.log(jnp.ones(J) / J)
@@ -438,7 +439,9 @@ def _pfilter_helper(
     ) = inputs
     J = len(particlesF)
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     nstep = nstep_array[i]
     particlesP, t_idx = rprocess_interp(
         particlesF,
@@ -456,9 +459,6 @@ def _pfilter_helper(
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, should_trans)
-
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
 
     weights = norm_weights + measurements
     norm_weights, loglik_t = _normalize_weights(weights)

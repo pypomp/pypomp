@@ -8,9 +8,7 @@ import pypomp as pp
 
 def _mixed_panel():
     """Two replicates, two units, mix of shared and unit-specific params."""
-    shared_df = pd.DataFrame(
-        {"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"])
-    )
+    shared_df = pd.DataFrame({"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"]))
     unit_specific_df = pd.DataFrame(
         {"unit1": [1.0, 2.0, 3.0], "unit2": [4.0, 5.0, 6.0]},
         index=pd.Index(["u1", "u2", "u3"]),
@@ -34,9 +32,7 @@ def _specific_only_panel():
 
 
 def _shared_only_panel():
-    shared_df = pd.DataFrame(
-        {"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"])
-    )
+    shared_df = pd.DataFrame({"shared": [10.0, 20.0]}, index=pd.Index(["s1", "s2"]))
     return pp.PanelParameters(theta=[{"shared": shared_df, "unit_specific": None}])
 
 
@@ -94,11 +90,26 @@ def test_to_jax_array_unknown_param_raises():
 
 
 def test_to_jax_array_unknown_unit_raises():
-    """Asking for a unit that isn't a column in unit_specific re-raises the
-    underlying KeyError (the 'missing' list stays empty because all
-    parameter names *are* present)."""
     panel = _mixed_panel()
     with pytest.raises(KeyError):
-        panel.to_jax_array(
-            ["s1", "u1"], unit_names=["unit1", "unit_does_not_exist"]
-        )
+        panel.to_jax_array(["s1", "u1"], unit_names=["unit1", "unit_does_not_exist"])
+
+
+def test_to_jax_array_defaults():
+    # 1. PompParameters defaults
+    pomp_params = pp.PompParameters({"s1": 10.0, "s2": 20.0})
+    arr_pomp = pomp_params.to_jax_array()
+    assert arr_pomp.shape == (1, 2)
+    names = pomp_params.get_param_names()
+    expected_values = [pomp_params.params()[0][name] for name in names]
+    np.testing.assert_allclose(np.asarray(arr_pomp[0]), expected_values)
+
+    # 2. PanelParameters defaults
+    panel = _mixed_panel()
+    names_panel = panel.get_param_names()
+    arr_panel = panel.to_jax_array(unit_names=["unit1", "unit2"])
+    assert arr_panel.shape == (2, 2, len(names_panel))
+
+    # Check that calling without any arguments also works (inferred units)
+    arr_panel_all_defaults = panel.to_jax_array()
+    assert arr_panel_all_defaults.shape == (2, 2, len(names_panel))

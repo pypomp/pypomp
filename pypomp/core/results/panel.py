@@ -5,7 +5,7 @@ import numpy as np
 import warnings
 
 from .base import BaseResult, PanelPompEstimationTracesMixin, _merge_results
-from ...maths import logmeanexp
+from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
 from ..parameters import PanelParameters
@@ -57,7 +57,14 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         """Convert panel pfilter result to DataFrame."""
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
         unit_names = self.logLiks.coords["unit"].values
-        df = (
+        se_unit = (
+            logmeanexp_se(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
+            if self.logLiks.shape[-1] > 1
+            else np.full_like(ll, np.nan)
+        )
+        se_shared = np.sqrt(np.sum(se_unit**2, axis=1))
+
+        df_ll = (
             pd.DataFrame(ll, columns=unit_names)
             .assign(
                 theta_idx=lambda x: range(len(x)),
@@ -69,31 +76,46 @@ class PanelPompPFilterResult(PanelPompBaseResult):
                 value_name="unit logLik",
             )
         )
+        df_se = (
+            pd.DataFrame(se_unit, columns=self.logLiks.coords["unit"].values)
+            .assign(
+                theta_idx=lambda x: range(len(x)),
+                **{"shared logLik se": se_shared},
+            )
+            .melt(
+                id_vars=["theta_idx", "shared logLik se"],
+                var_name="unit",
+                value_name="unit logLik se",
+            )
+        )
+        df = pd.merge(df_ll, df_se, on=["theta_idx", "unit"])
+        cols = [
+            "theta_idx",
+            "shared logLik",
+            "shared logLik se",
+            "unit",
+            "unit logLik",
+            "unit logLik se",
+        ]
+        df = df[cols]
 
-        if self.theta is not None:
-            shared: list[pd.DataFrame] = []
-            for t in self.theta._theta:
-                shared_df = t.get("shared")
-                if shared_df is not None:
-                    shared.append(shared_df)
-            if shared:
-                df = df.join(
-                    pd.concat(shared, axis=1).T.reset_index(drop=True), on="theta_idx"
-                )
-            unit_spec: list[pd.DataFrame] = []
-            for t in self.theta._theta:
-                unit_specific_df = t.get("unit_specific")
-                if unit_specific_df is not None:
-                    unit_spec.append(unit_specific_df)
-            if unit_spec:
-                u_params = (
-                    pd.concat(unit_spec, keys=range(len(unit_spec)))
-                    .stack()
-                    .unstack(level=1)
+        if self.theta is not None and self.theta.num_replicates() > 0:
+            shared_names = self.theta.get_shared_param_names()
+            if shared_names and "shared" in self.theta._data:
+                s_vals = self.theta._data["shared"].sel(parameter=shared_names).values
+                p_s = pd.DataFrame(s_vals, columns=shared_names)
+                df = df.join(p_s, on="theta_idx")
+
+            specific_names = self.theta.get_unit_param_names()
+            if specific_names and "unit_specific" in self.theta._data:
+                p_u = (
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
+                    .to_dataset(dim="parameter")
+                    .to_dataframe()
                     .reset_index()
                 )
-                u_params.columns = ["theta_idx", "unit"] + list(u_params.columns[2:])
-                df = df.merge(u_params, on=["theta_idx", "unit"], how="left")
+                df = df.merge(p_u, on=["theta_idx", "unit"], how="left")
         return df
 
     def CLL(self, average: bool = False) -> pd.DataFrame:
@@ -129,9 +151,21 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def traces(self) -> pd.DataFrame:
         """Return pfilter results formatted as traces (long format)."""
         ll = logmeanexp(self.logLiks.values, axis=-1)
+        se_unit = (
+            logmeanexp_se(self.logLiks.values, axis=-1)
+            if self.logLiks.shape[-1] > 1
+            else np.full_like(ll, np.nan)
+        )
+        se_shared = np.sqrt(np.sum(se_unit**2, axis=1))
+
         reps = np.arange(len(ll))
         df_s = pd.DataFrame(
-            {"theta_idx": reps, "unit": "shared", "logLik": ll.sum(axis=1)}
+            {
+                "theta_idx": reps,
+                "unit": "shared",
+                "logLik": ll.sum(axis=1),
+                "se": se_shared,
+            }
         )
         df_u = (
             pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values, index=reps)
@@ -139,28 +173,36 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             .reset_index()
             .rename(columns={"index": "theta_idx"})
         )
+        df_se_u = (
+            pd.DataFrame(
+                se_unit, columns=self.logLiks.coords["unit"].values, index=reps
+            )
+            .melt(ignore_index=False, var_name="unit", value_name="se")
+            .reset_index()
+            .rename(columns={"index": "theta_idx"})
+        )
+        df_u = pd.merge(df_u, df_se_u, on=["theta_idx", "unit"], how="left")
 
-        if self.theta is not None:
-            shared: list[pd.DataFrame] = []
-            for t in self.theta._theta:
-                shared_df = t.get("shared")
-                if shared_df is not None:
-                    shared.append(shared_df)
-            if shared:
-                p_s = pd.concat(shared, axis=1).T.set_axis(reps, axis=0)
+        if self.theta is not None and self.theta.num_replicates() > 0:
+            shared_names = self.theta.get_shared_param_names()
+            if shared_names and "shared" in self.theta._data:
+                s_vals = self.theta._data["shared"].sel(parameter=shared_names).values
+                p_s = pd.DataFrame(s_vals, columns=shared_names)
                 df_s, df_u = (
                     df_s.join(p_s, on="theta_idx"),
                     df_u.join(p_s, on="theta_idx"),
                 )
-            unit_spec: list[pd.DataFrame] = []
-            for t in self.theta._theta:
-                unit_specific_df = t.get("unit_specific")
-                if unit_specific_df is not None:
-                    unit_spec.append(unit_specific_df)
-            if unit_spec:
-                p_u = pd.concat(unit_spec, keys=reps).stack().unstack(level=1)
-                p_u.index.names = ["theta_idx", "unit"]
-                df_u = df_u.join(p_u, on=["theta_idx", "unit"])
+
+            specific_names = self.theta.get_unit_param_names()
+            if specific_names and "unit_specific" in self.theta._data:
+                p_u = (
+                    self.theta._data["unit_specific"]
+                    .sel(parameter=specific_names)
+                    .to_dataset(dim="parameter")
+                    .to_dataframe()
+                    .reset_index()
+                )
+                df_u = df_u.merge(p_u, on=["theta_idx", "unit"], how="left")
         dfs_to_concat = [df for df in [df_s, df_u] if not df.empty]
         if not dfs_to_concat:
             return pd.DataFrame()
@@ -173,7 +215,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
             warnings.filterwarnings("ignore", category=FutureWarning)
             df = pd.concat(dfs_to_concat, ignore_index=True)
         df = df.assign(method="pfilter", iteration=0)
-        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
         return df.loc[:, cols + other_cols].copy()
 
@@ -203,8 +245,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
     """The number of iterations performed."""
     rw_sd: RWSigma | None = None
     """The random walk standard deviations for parameter perturbation."""
-    a: float = 0.0
-    """The cooling fraction used."""
     thresh: float = 0.0
     """The resampling threshold used."""
     n_monitors: int = 0
@@ -221,7 +261,6 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
             ("Number of parameter sets", "theta"),
             ("Number of particles (J)", "J"),
             ("Number of iterations (M)", "M"),
-            ("Cooling fraction (a)", "a"),
             ("Resampling threshold", "thresh"),
             ("Number of monitors", "n_monitors"),
             ("Block", "block"),
@@ -232,7 +271,7 @@ class PanelPompMIFResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
         return _merge_results(
             PanelPompMIFResult,
             results,
-            ["J", "M", "a", "thresh", "n_monitors", "block", "rw_sd", "method"],
+            ["J", "M", "thresh", "n_monitors", "block", "rw_sd", "method"],
             ["shared_traces", "unit_traces", "logLiks"],
         )
 

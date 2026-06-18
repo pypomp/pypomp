@@ -2,7 +2,7 @@
 Example POMP models.
 """
 
-from .dacca import dacca
+from .dacca import dacca, dhaka
 from .linear_gaussian import LG
 from .measles.measlesPomp import UKMeasles
 from .sir import sir
@@ -11,6 +11,7 @@ from .spx import spx
 
 __all__ = [
     "dacca",
+    "dhaka",
     "LG",
     "UKMeasles",
     "sir",

@@ -54,6 +54,7 @@ autodoc_default_options = {
     "show-inheritance": True,
 }
 autodoc_member_order = "bysource"
+autodoc_use_legacy_class_based = True  # fixes bug where Sphinx 9.1.0 fails to generate hyperlinks for base classes defined in the same module
 
 # Enable domain objects (classes, functions, methods) to appear in the floating right-sidebar TOC
 toc_object_entries = True

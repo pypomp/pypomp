@@ -6,7 +6,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from typing import Callable
-from .helpers import _keys_helper
+
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 
@@ -30,7 +30,9 @@ def _simulate_internal(
     times0 = jnp.concatenate([jnp.array([t0]), times])
 
     covars0 = None if covars_extended is None else covars_extended[0]
-    key, keys = _keys_helper(key=key, J=nsim, covars=covars0)
+    split_keys = jax.random.split(key, num=nsim + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     X_sims = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
 
     n_obs = times.shape[0]
@@ -102,7 +104,9 @@ def _simulate_helper(
 ) -> tuple[jax.Array, int, jax.Array, jax.Array, jax.Array, jax.Array]:
     (t, t_idx, X_sims, X_array, Y_array, key) = inputs
 
-    key, keys = _keys_helper(key=key, J=nsim, covars=covars_extended)
+    split_keys = jax.random.split(key, num=nsim + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
 
     nstep = nstep_array[i].astype(int)
 

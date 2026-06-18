@@ -11,7 +11,7 @@ def _get_lg_panel():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()
     # Create PanelParameters with some shared and some unit-specific
-    shared_names = ["A1", "C1"]
+    shared_names = ["A11", "C11"]
     unit_specific_names = [
         n for n in lg1.canonical_param_names if n not in shared_names
     ]
@@ -69,7 +69,7 @@ def test_panel_train(chunk_size, opt_instance):
     df = res.to_dataframe()
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns
-    assert "A1" in df.columns
+    assert "A11" in df.columns
 
 
 def test_panel_train_clipping():

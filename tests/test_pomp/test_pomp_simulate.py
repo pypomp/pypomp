@@ -31,11 +31,11 @@ def test_simulate_param_order_invariance(simple):
     nsim = 1
     X_sims, Y_sims = LG.simulate(nsim=nsim, key=key, theta=theta)
 
-    param_keys = list(theta.to_list()[0].keys())
+    param_keys = list(theta.params()[0].keys())
     rev_keys = list(reversed(param_keys))
-    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta]
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params()]
 
-    X2, Y2 = LG.simulate(nsim=nsim, key=key, theta=permuted_theta)
+    X2, Y2 = LG.simulate(nsim=nsim, key=key, theta=pp.PompParameters(permuted_theta))
     pd.testing.assert_frame_equal(X_sims, X2)
     pd.testing.assert_frame_equal(Y_sims, Y2)
 
@@ -50,7 +50,7 @@ def test_simulate_invalid_theta_keys(simple):
         ValueError,
         match="theta parameter names must match canonical_param_names up to reordering",
     ):
-        LG.simulate(nsim=1, key=key, theta=bad_theta)
+        LG.simulate(nsim=1, key=key, theta=pp.PompParameters(bad_theta))
 
 
 def test_simulate_as_pomp(simple):

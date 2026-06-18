@@ -11,7 +11,12 @@ from ..core.results import ResultsHistory
 # This Protocol defines what attributes the Mixins can expect to exist
 class PanelPompInterface(Protocol):
     unit_objects: dict[str, Pomp]
-    theta: PanelParameters
+
+    @property
+    def theta(self) -> PanelParameters: ...
+    @theta.setter
+    def theta(self, value: PanelParameters) -> None: ...
+
     results_history: ResultsHistory
     fresh_key: jax.Array | None
     canonical_param_names: list[str]
@@ -31,10 +36,7 @@ class PanelPompInterface(Protocol):
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: Literal[False] = False,
@@ -44,10 +46,7 @@ class PanelPompInterface(Protocol):
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         *,
@@ -57,11 +56,11 @@ class PanelPompInterface(Protocol):
     def simulate(
         self,
         key: jax.Array,
-        theta: PanelParameters
-        | dict[str, pd.DataFrame | None]
-        | list[dict[str, pd.DataFrame | None]]
-        | None = None,
+        theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
     ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Any]: ...
+
+    @staticmethod
+    def merge(*panel_pomp_objs: Any) -> Any: ...

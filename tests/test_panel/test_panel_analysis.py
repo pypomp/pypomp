@@ -22,12 +22,11 @@ def test_prune_and_mix_and_match(lg_panel_mp):
     panel.mix_and_match()
 
 
-def test_plot_traces_empty_history(lg_panel_setup_some_shared, capsys):
+def test_plot_traces_empty_history(lg_panel_setup_some_shared):
     panel, _, _ = lg_panel_setup_some_shared
-    result = panel.plot_traces(which="shared", show=False)
+    with pytest.warns(UserWarning, match="No trace data to plot."):
+        result = panel.plot_traces(which="shared", show=False)
     assert result is None
-    captured = capsys.readouterr()
-    assert "No trace data to plot." in captured.out
 
 
 def test_plot_traces_shared(lg_panel_mp):
@@ -49,11 +48,10 @@ def test_plot_traces_unitLogLik(lg_panel_mp):
 def test_plot_traces_unit_param(lg_panel_mp):
     pytest.importorskip("plotly")
     panel, _, _, _, _, _ = lg_panel_mp
-    # Q1 is unit-specific (shared params are A1, C1 in the lg fixture).
-    fig = panel.plot_traces(which="Q1", show=False)
+    # Q11 is unit-specific (shared params are A11, C11 in the lg fixture).
+    fig = panel.plot_traces(which="Q11", show=False)
     assert fig is not None
     assert hasattr(fig, "show")
-
 
     with pytest.raises(ValueError, match="not found among unit-specific parameters"):
         panel.plot_traces(which="nonexistent_param", show=False)
@@ -70,7 +68,6 @@ def test_plot_panel_simulations(lg_panel_mp):
     fig_lines = panel.plot_simulations(nsim=2, mode="lines", key=key, show=False)
     assert fig_lines is not None
     # 2 units, each with 2 sims + 1 actual data = 3 traces per subplot
-    # (Though plotly might organize traces differently)
     assert len(fig_lines.data) >= 6
 
     # Test quantiles mode

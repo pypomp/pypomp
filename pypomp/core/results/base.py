@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, fields
 from abc import ABC, abstractmethod
-from typing import Any, Sequence, TypeVar, Type, cast
+from typing import Any, Sequence, TypeVar, Type
 import pandas as pd
 import xarray as xr
 import numpy as np
@@ -134,7 +134,7 @@ class BaseResult(ABC):
         """Custom unpickling: reconstruct JAX key from raw bits."""
         vars(self).update(state)
         if "_key_data" in state:
-            self.key = cast(jax.Array, jax.random.wrap_key_data(state["_key_data"]))
+            self.key = jax.random.wrap_key_data(state["_key_data"])
         vars(self).pop("_key_data", None)
 
     @abstractmethod
@@ -171,6 +171,22 @@ class BaseResult(ABC):
                 )
             else:
                 print(f"{label}: {val}")
+
+        rw_sd = getattr(self, "rw_sd", None)
+        if rw_sd is not None:
+            info = getattr(rw_sd, "_cooling_info", ("none",))
+            ctype = info[0]
+            if ctype == "geometric":
+                print(f"Cooling fraction (a): {rw_sd.a}")
+            elif ctype == "hyperbolic":
+                print(f"Cooling rate (s): {rw_sd.s}")
+            elif ctype == "cosine":
+                print(f"Cosine min cooling (c): {rw_sd.c}")
+                print(f"Cosine duration (M): {rw_sd.M}")
+            elif ctype == "custom":
+                fn = rw_sd.cooling_fn
+                print(f"Cooling function: {getattr(fn, '__name__', str(fn))}")
+
         print(f"Execution time: {self.execution_time} seconds")
         df = self.to_dataframe()
         if not df.empty:
@@ -199,7 +215,7 @@ class PompEstimationTracesMixin:
             .to_dataframe()
             .reset_index()
         )
-        param_names = list(self.theta[0].keys())
+        param_names = self.theta.get_param_names() if self.theta is not None else []
         df = df[["theta_idx", "logLik"] + param_names]
         df.insert(2, "se", np.nan)
         return df
@@ -213,11 +229,11 @@ class PompEstimationTracesMixin:
             traces_da.to_dataset(dim="variable")
             .to_dataframe()
             .reset_index()
-            .assign(method=self.method)
+            .assign(method=self.method, se=np.nan)
         )
-        cols = ["theta_idx", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df.loc[:, cols + other_cols].copy()
+        return df[cols + other_cols]
 
 
 class PanelPompEstimationTracesMixin:
@@ -244,8 +260,18 @@ class PanelPompEstimationTracesMixin:
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
         u_df = u_df.join(s_df, on="theta_idx").reset_index()
-        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"]
-        return u_df.loc[:, cols + [c for c in u_df.columns if c not in cols]].copy()
+        u_df["shared logLik se"] = np.nan
+        u_df["unit logLik se"] = np.nan
+        cols = [
+            "theta_idx",
+            "iteration",
+            "shared logLik",
+            "shared logLik se",
+            "unit",
+            "unit logLik",
+            "unit logLik se",
+        ]
+        return u_df[cols + [c for c in u_df.columns if c not in cols]]
 
     def traces(self: Any) -> pd.DataFrame:
         """Return panel result formatted as traces (long format)."""
@@ -284,8 +310,8 @@ class PanelPompEstimationTracesMixin:
             warnings.filterwarnings("ignore", category=FutureWarning)
             df = pd.concat(dfs_to_concat, ignore_index=True)
 
-        df = df.assign(method=self.method)
+        df = df.assign(method=self.method, se=np.nan)
 
-        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df.loc[:, cols + other_cols].copy()
+        return df[cols + other_cols]

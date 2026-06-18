@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from typing import Callable
-from .helpers import _keys_helper
 from .helpers import _normalize_weights
 from .helpers import _resampler
 
@@ -36,7 +35,9 @@ def _mop_internal(
     iteratively.
     """
     times = times.astype(float)
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     covars0 = None if covars_extended is None else covars_extended[0]
     particlesF = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
     weightsF = jnp.log(jnp.ones(J) / J)
@@ -134,7 +135,9 @@ def _mop_helper(
 
     weightsP = alpha * weightsF
 
-    key, keys = _keys_helper(key=key, J=J, covars=covars_extended)
+    split_keys = jax.random.split(key, num=J + 1)
+    key = split_keys[0]
+    keys = split_keys[1:]
     nstep = nstep_array[i].astype(int)
     particlesP, t_idx = rprocess_interp(
         particlesF,
@@ -152,8 +155,6 @@ def _mop_helper(
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     measurements = dmeasure(ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS)
-    if len(measurements.shape) > 1:
-        measurements = measurements.sum(axis=-1)
 
     loglik = (
         loglik

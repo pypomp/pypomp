@@ -13,6 +13,7 @@ from scipy.interpolate import make_smoothing_spline
 from pypomp.core.pomp import Pomp
 import copy
 from pypomp.core.par_trans import ParTrans
+from pypomp.core.parameters import PompParameters
 
 
 # Not sure if this is the best way to implement this.
@@ -152,7 +153,7 @@ class UKMeasles:
     @staticmethod
     def Pomp(
         unit: list[str],
-        theta: dict | list[dict],
+        theta: PompParameters,
         model: str = "001b",
         interp_method: str = "shifted_splines",
         first_year: int = 1950,
@@ -167,8 +168,8 @@ class UKMeasles:
         ----------
         unit : list[str]
             Which unit to use. Currently only supports one unit.
-        theta : dict | list[dict]
-            Parameters for the model. Can be a single dict or a list of dicts.
+        theta : PompParameters
+            Parameters for the model.
         model : str
             The model to use. Can be "001b", "001c", "001d" or "002".
         interp_method : str

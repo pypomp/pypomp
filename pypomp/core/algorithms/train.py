@@ -154,6 +154,7 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "U",
         "clip_norm",
         "alpha_cooling",
+        "scale",
     ),
 )
 def _panel_train_internal(
@@ -185,6 +186,7 @@ def _panel_train_internal(
     beta1: float = 0.9,
     beta2: float = 0.999,
     epsilon: float = 1e-8,
+    scale: bool = False,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -295,6 +297,11 @@ def _panel_train_internal(
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
+            if scale:
+                dir_s = dir_s / jnp.maximum(jnp.linalg.norm(dir_s), epsilon)
+                norm_u = jnp.linalg.norm(dir_u, axis=-1, keepdims=True)
+                dir_u = dir_u / jnp.maximum(norm_u, epsilon)
+
             c_s = c_s + (eta_shared[i] / n_chunks) * dir_s
             c_u = c_u + eta_spec[i] * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
@@ -373,7 +380,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 19,
 )
 
 

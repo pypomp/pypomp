@@ -51,6 +51,16 @@ Each commit message must follow the structure:
 [optional body]
 ```
 
+#### Commits Spanning Multiple Types
+If a commit contains changes spanning multiple types (e.g., a feature implementation along with associated doc updates or bug fixes), we recommend splitting them into separate commits. If splitting is not practical, use the most significant type (e.g., `feat` or `fix`) for the commit header, and use the following template in the body to document the other change types:
+```
+<primary-type>(<primary-scope>): <primary-description>
+
+This commit also includes:
+- <secondary-type>(<secondary-scope>): <description>
+- <secondary-type>(<secondary-scope>): <description>
+```
+
 ### Allowed Types
 * `feat`: A new feature (e.g., `feat(panel): add random walk cooling schedule`)
 * `fix`: A bug fix (e.g., `fix(pfilter): resolve index out of bounds error`)

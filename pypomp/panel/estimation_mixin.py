@@ -992,11 +992,12 @@ class PanelEstimationMixin(Base):
             beta1,
             beta2,
             epsilon,
+            optimizer.scale,
         )
 
         shared_traces_in = None
         if n_shared > 0:
-            shared_ll_expanded = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_ll_expanded = np.expand_dims(-np.array(logliks_history), axis=-1)
             shared_traces_in = np.concatenate(
                 [shared_ll_expanded, np.array(shared_history)], axis=-1
             )
@@ -1020,7 +1021,7 @@ class PanelEstimationMixin(Base):
                     "Both shared_traces and unit_traces are None; cannot build traces."
                 )
             n_reps = unit_traces.shape[0]
-            shared_traces = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_traces = np.expand_dims(-np.array(logliks_history), axis=-1)
             shared_index = []
 
         if unit_traces is None:

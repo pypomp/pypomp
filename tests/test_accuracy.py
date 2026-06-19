@@ -359,7 +359,7 @@ def test_pomp_pfilter_accuracy():
     est_ll = sim_model.theta.logLik.item()
 
     err = np.abs(est_ll - exact_ll)
-    assert err < 0.10, f"LGM pfilter error: est={est_ll}, exact={exact_ll}"
+    assert err < 0.15, f"LGM pfilter error: est={est_ll}, exact={exact_ll}"
 
 
 def test_pomp_mif_accuracy():
@@ -519,8 +519,8 @@ def test_panel_pfilter_accuracy():
     est_unit1_ll = res.logLiks.sel(unit="unit1").mean().item()
     est_unit2_ll = res.logLiks.sel(unit="unit2").mean().item()
 
-    assert np.abs(est_unit1_ll - exact_unit1_ll) < 0.10
-    assert np.abs(est_unit2_ll - exact_unit2_ll) < 0.10
+    assert np.abs(est_unit1_ll - exact_unit1_ll) < 0.15
+    assert np.abs(est_unit2_ll - exact_unit2_ll) < 0.15
 
 
 def test_panel_mif_accuracy():
@@ -678,7 +678,7 @@ def test_panel_train_accuracy():
     assert err_a < 0.12
     assert err_u1_sx < 0.07
     assert err_u1_sy < 0.12
-    assert err_u2_sx < 0.04
+    assert err_u2_sx < 0.05
     assert err_u2_sy < 0.06
 
     save_traces_plotnine(

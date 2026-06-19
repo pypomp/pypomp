@@ -70,7 +70,10 @@ print(f"Log-Likelihood: {log_lik:.4f}")
 ### Governance and Contributions
 
 The Pypomp library is run by the [Pypomp organization](https://github.com/pypomp).
-All contributions are welcome. Please raise issues or make pull requests on the [Pypomp GitHub site](https://github.com/pypomp/pypomp) or contact the [core development team](https://github.com/pypomp/.github/blob/main/profile/Governance.md).
+
+All contributions are welcome. Please review our [Contributing Guide](CONTRIBUTING.md) before submitting pull requests or raising issues.
+
+For governance details, you can contact the core development team or refer to the [pypomp governance profile](https://github.com/pypomp/.github/blob/main/profile/Governance.md).
 
 
 ### 📚 Citation

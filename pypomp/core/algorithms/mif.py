@@ -129,11 +129,24 @@ def _mif_internal(
 
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
-    in_axes=(1,) + (None,) * 17 + (0,) + (None,) * 5,
+    in_axes=(0,) + (None,) * 17 + (0,) + (None,) * 5,
 )
 
 _jv_mif_internal = jit(
-    _vmapped_mif_internal, static_argnums=(6, 7, 8, 13, 14, 16, 19, 20, 21, 22, 23)
+    _vmapped_mif_internal,
+    static_argnames=(
+        "rinitializers",
+        "rprocesses_interp",
+        "dmeasures",
+        "M",
+        "cooling_fn",
+        "J",
+        "rinitializer_pf",
+        "rprocess_pf",
+        "dmeasure_pf",
+        "n_monitors",
+        "return_ancestry",
+    ),
 )
 
 
@@ -344,8 +357,8 @@ def _perfilter_helper(
 
 
 def _panel_mif_internal(
-    shared_array: jax.Array,  # (n_shared, J)
-    unit_array: jax.Array,  # (n_spec, J, U)
+    shared_array: jax.Array,  # (J, n_shared)
+    unit_array: jax.Array,  # (J, U, n_spec)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
     t0: float,
@@ -375,22 +388,22 @@ def _panel_mif_internal(
     Fully JIT-compiled Panel IF2 across M iterations and U units.
 
     Returns
-        shared_array_final: (n_shared, J)
-        unit_array_final: (n_spec, J, U)
+        shared_array_final: (J, n_shared)
+        unit_array_final: (J, U, n_spec)
         shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
-        unit_traces: (M+1, n_spec+1, U) where [:,0,:] is per-unit logLik per iter, [:,1:,:] are means
+        unit_traces: (M+1, U, n_spec+1) where [:,:,0] is per-unit logLik per iter, [:,:,1:] are means
     """
-    n_shared = shared_array.shape[0]
-    n_spec = unit_array.shape[0]
+    n_shared = shared_array.shape[1]
+    n_spec = unit_array.shape[2]
     inv_perms = jax.vmap(jnp.argsort)(unit_param_permutations)
 
-    shared_means0 = jnp.mean(shared_array, axis=1) if n_shared > 0 else jnp.zeros((0,))
-    unit_means0 = jnp.mean(unit_array, axis=1) if n_spec > 0 else jnp.zeros((0, U))
+    shared_means0 = jnp.mean(shared_array, axis=0) if n_shared > 0 else jnp.zeros((0,))
+    unit_means0 = jnp.mean(unit_array, axis=0) if n_spec > 0 else jnp.zeros((U, 0))
 
     shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
-    unit_trace_0 = jnp.concatenate(
-        [jnp.array([jnp.nan] * U)[None, :], unit_means0], axis=0
-    )[None, :, :]
+    unit_trace_0 = jnp.concatenate([jnp.full((U, 1), jnp.nan), unit_means0], axis=-1)[
+        None, :, :
+    ]
 
     all_keys = jax.random.split(key, num=M + 1)
     m_keys = all_keys[1:]
@@ -424,13 +437,13 @@ def _panel_mif_internal(
 
             # Build per-unit thetas: (J, n_params) in unit's canonical order
             if n_spec > 0:
-                unit_array_u_m_single = unit_array_m_carry[:, :, u_idx]
+                unit_array_u_m_single = unit_array_m_carry[:, u_idx, :]
             else:
-                unit_array_u_m_single = jnp.zeros((0, J))
+                unit_array_u_m_single = jnp.zeros((J, 0))
 
             if (n_shared + n_spec) > 0:
                 thetas_u_panel_order = jnp.concatenate(
-                    [shared_array_u.T, unit_array_u_m_single.T], axis=1
+                    [shared_array_u, unit_array_u_m_single], axis=1
                 )
             else:
                 thetas_u_panel_order = jnp.zeros((J, 0))
@@ -474,15 +487,15 @@ def _panel_mif_internal(
             updated_thetas_panel = updated_thetas_u[:, inv_perm_u]
 
             if n_shared > 0:
-                new_shared_array = updated_thetas_panel[:, :n_shared].T
+                new_shared_array = updated_thetas_panel[:, :n_shared]
             else:
                 new_shared_array = shared_array_u
 
             if n_spec > 0:
-                updated_spec_u = updated_thetas_panel[:, n_shared:].T
+                updated_spec_u = updated_thetas_panel[:, n_shared:]
                 if not block:
-                    unit_array_m_carry = unit_array_m_carry[:, ancestry_u, :]
-                new_unit_array_carry = unit_array_m_carry.at[:, :, u_idx].set(
+                    unit_array_m_carry = unit_array_m_carry[ancestry_u, :, :]
+                new_unit_array_carry = unit_array_m_carry.at[:, u_idx, :].set(
                     updated_spec_u
                 )
             else:
@@ -494,7 +507,7 @@ def _panel_mif_internal(
 
             if n_spec > 0:
                 unit_traces_u_m_local = jnp.concatenate(
-                    [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=1)]
+                    [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=0)]
                 )
             else:
                 unit_traces_u_m_local = jnp.array([loglik_u])
@@ -540,11 +553,10 @@ def _panel_mif_internal(
             sum_loglik_iter,
         ) = final_inner_carry
 
-        # unit_traces_m_new_seq: (U, n_spec + 1) -> (n_spec + 1, U)
-        unit_traces_m_row = jnp.moveaxis(unit_traces_m_new_seq, 0, 1)
+        unit_traces_m_row = unit_traces_m_new_seq
 
         if n_shared > 0:
-            shared_means = jnp.mean(shared_array_m, axis=1)
+            shared_means = jnp.mean(shared_array_m, axis=0)
             shared_traces_m_row = jnp.concatenate(
                 [jnp.array([sum_loglik_iter]), shared_means]
             )
@@ -579,336 +591,18 @@ _vmapped_panel_mif_internal = jax.vmap(
 
 _jv_panel_mif_internal = jit(
     _vmapped_panel_mif_internal,
-    static_argnums=(
-        7,  # rinitializers
-        8,  # rprocesses_interp
-        9,  # dmeasures
-        15,  # M
-        16,  # cooling_fn
-        17,  # J
-        18,  # U
-        21,  # rinitializer_pf
-        22,  # rprocess_pf
-        23,  # dmeasure_pf
-        24,  # n_monitors
-        25,  # block
-    ),
-)
-
-
-def _panel_mif_internal_vmap(
-    shared_array: jax.Array,  # (n_shared, J)
-    unit_array: jax.Array,  # (n_spec, J, U_padded)
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_per_unit: jax.Array,  # (U_padded, T, ...)
-    rinitializers: Callable,  # static
-    rprocesses_interp: Callable,  # static
-    dmeasures: Callable,  # static
-    sigmas: jax.Array,
-    sigmas_init: jax.Array,
-    accumvars: jax.Array | None,
-    covars_per_unit: jax.Array | None,  # (U_padded, ...) or None
-    unit_param_permutations: jax.Array,  # (U_padded, n_params)
-    unit_mask: jax.Array,  # (U_padded,) - 1.0 for real units, 0.0 for padding
-    M: int,
-    cooling_fn: Callable,
-    J: int,
-    U: int,  # U_padded
-    thresh: float,
-    key: jax.Array,
-    vmap_chunk_size: int,  # static
-    rinitializer_pf: Callable,
-    rprocess_pf: Callable,
-    dmeasure_pf: Callable,
-    n_monitors: int,
-    block: bool,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """
-    Panel IF2 with chunked vmap over units instead of sequential scan.
-
-    Within each iteration, units are processed in chunks via jax.vmap.
-    Each unit in a chunk receives the same shared parameters and independently
-    perturbs them. After each chunk, the shared parameter update is the
-    masked mean across units in that chunk. Subsequent chunks see the
-    updated shared parameters.
-
-    Returns same shapes as _panel_mif_internal:
-        shared_array_final: (n_shared, J)
-        unit_array_final: (n_spec, J, U_padded)
-        shared_traces: (M+1, n_shared+1)
-        unit_traces: (M+1, n_spec+1, U_padded)
-    """
-    n_shared = shared_array.shape[0]
-    n_spec = unit_array.shape[0]
-    inv_perms = jax.vmap(jnp.argsort)(unit_param_permutations)
-    n_chunks = U // vmap_chunk_size
-
-    shared_means0 = jnp.mean(shared_array, axis=1) if n_shared > 0 else jnp.zeros((0,))
-    unit_means0 = jnp.mean(unit_array, axis=1) if n_spec > 0 else jnp.zeros((0, U))
-
-    shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
-    unit_trace_0 = jnp.concatenate(
-        [jnp.array([jnp.nan] * U)[None, :], unit_means0], axis=0
-    )[None, :, :]
-
-    all_keys = jax.random.split(key, num=M + 1)
-    m_keys = all_keys[1:]
-
-    perms_chunked = unit_param_permutations.reshape(n_chunks, vmap_chunk_size, -1)
-    ys_chunked = ys_per_unit.reshape(
-        (n_chunks, vmap_chunk_size) + ys_per_unit.shape[1:]
-    )
-    covars_chunked = (
-        None
-        if covars_per_unit is None
-        else covars_per_unit.reshape(
-            (n_chunks, vmap_chunk_size) + covars_per_unit.shape[1:]
-        )
-    )
-    inv_perms_chunked = inv_perms.reshape(n_chunks, vmap_chunk_size, -1)
-    mask_chunked = unit_mask.reshape(n_chunks, vmap_chunk_size)
-
-    def iter_body(carry, scan_inputs):
-        shared_array_m, unit_array_m = carry
-        m, iter_key = scan_inputs
-
-        unit_keys = jax.random.split(iter_key, num=U)
-        keys_chunked = unit_keys.reshape(
-            (n_chunks, vmap_chunk_size) + unit_keys.shape[1:]
-        )
-
-        def chunk_scan_body(chunk_carry, chunk_inputs):
-            shared_array_c, unit_array_m_carry = chunk_carry
-            (
-                chunk_idx,
-                perm_chunk,
-                ys_chunk,
-                covars_chunk_dummy,
-                key_chunk,
-                inv_perm_chunk,
-                mask_chunk,
-            ) = chunk_inputs
-
-            start_idx = chunk_idx * vmap_chunk_size
-            u_indices = start_idx + jnp.arange(vmap_chunk_size)
-
-            if n_spec > 0:
-                # unit_array_m_carry: (n_spec, J, U_padded)
-                # Slice size is static: (n_spec, J, vmap_chunk_size)
-                # start_indices: (0, 0, start_idx)
-                sliced_val = jax.lax.dynamic_slice(
-                    unit_array_m_carry,
-                    (0, 0, start_idx),
-                    (n_spec, J, vmap_chunk_size),
-                )
-                # Then transpose to match process_one_unit input: (vmap_chunk_size, n_spec, J)
-                unit_arr_chunk = jnp.moveaxis(sliced_val, 2, 0)
-            else:
-                unit_arr_chunk = jnp.zeros((vmap_chunk_size, 0, J))
-
-            def process_one_unit(
-                unit_arr_single, perm, ys_u, covars_u_dummy, key_u, inv_perm, u_idx
-            ):
-                covars_u = None if covars_per_unit is None else covars_u_dummy
-
-                if (n_shared + n_spec) > 0:
-                    thetas_u_panel_order = jnp.concatenate(
-                        [shared_array_c.T, unit_arr_single.T], axis=1
-                    )
-                else:
-                    thetas_u_panel_order = jnp.zeros((J, 0))
-
-                thetas_u = thetas_u_panel_order[:, perm]
-                sigmas_u = sigmas[perm]
-                sigmas_init_u = sigmas_init[perm]
-
-                nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
-                    thetas_u,
-                    dt_array_extended,
-                    nstep_array,
-                    t0,
-                    times,
-                    ys_u,
-                    rinitializers,
-                    rprocesses_interp,
-                    dmeasures,
-                    sigmas_u,
-                    sigmas_init_u,
-                    accumvars,
-                    covars_u,
-                    1,
-                    cooling_fn,
-                    m,
-                    J,
-                    thresh,
-                    key_u,
-                    rinitializer_pf,
-                    rprocess_pf,
-                    dmeasure_pf,
-                    n_monitors,
-                    return_ancestry=not block,
-                )
-                nLL_u = nLL_u[0]
-                updated_thetas_u = updated_final_thetas_u  # (J, n_params)
-
-                updated_thetas_panel = updated_thetas_u[:, inv_perm]
-
-                if n_shared > 0:
-                    new_shared = updated_thetas_panel[:, :n_shared].T
-                else:
-                    new_shared = shared_array_c
-
-                if n_spec > 0:
-                    updated_spec_u = updated_thetas_panel[:, n_shared:].T
-                    if block:
-                        updated_spec_ret = updated_spec_u
-                    else:
-                        resampled_spec_all = unit_array_m_carry[:, ancestry_u, :]
-                        updated_spec_ret = resampled_spec_all.at[:, :, u_idx].set(
-                            updated_spec_u
-                        )
-                else:
-                    updated_spec_u = unit_arr_single
-                    updated_spec_ret = unit_arr_single
-
-                loglik_u = -nLL_u
-
-                if n_spec > 0:
-                    traces_u = jnp.concatenate(
-                        [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=1)]
-                    )
-                else:
-                    traces_u = jnp.array([loglik_u])
-
-                return new_shared, updated_spec_ret, loglik_u, traces_u
-
-            new_shareds, new_specs, logliks, traces = jax.vmap(process_one_unit)(
-                unit_arr_chunk,
-                perm_chunk,
-                ys_chunk,
-                covars_chunk_dummy,
-                key_chunk,
-                inv_perm_chunk,
-                u_indices,
-            )
-            # new_shareds: (vmap_chunk_size, n_shared, J)
-            # new_specs: (vmap_chunk_size, n_spec, J) if block else (vmap_chunk_size, n_spec, J, U)
-            # logliks: (vmap_chunk_size,)
-            # traces: (vmap_chunk_size, n_spec+1)
-
-            if n_shared > 0:
-                mask_exp = mask_chunk[:, None, None]  # (vmap_chunk_size, 1, 1)
-                n_real = jnp.maximum(mask_chunk.sum(), 1.0)
-                avg_shared = jnp.sum(new_shareds * mask_exp, axis=0) / n_real
-            else:
-                avg_shared = shared_array_c
-
-            if n_spec > 0:
-                if block:
-                    new_specs_t = jnp.moveaxis(new_specs, 0, 2)
-                    new_unit_array_carry = jax.lax.dynamic_update_slice(
-                        unit_array_m_carry,
-                        new_specs_t,
-                        (0, 0, start_idx),
-                    )
-                else:
-                    mask_exp = mask_chunk[
-                        :, None, None, None
-                    ]  # (vmap_chunk_size, 1, 1, 1)
-                    n_real = jnp.maximum(mask_chunk.sum(), 1.0)
-                    avg_specs = jnp.sum(new_specs * mask_exp, axis=0) / n_real
-                    new_unit_array_carry = avg_specs
-            else:
-                new_unit_array_carry = unit_array_m_carry
-
-            sum_loglik_chunk = jnp.sum(logliks * mask_chunk)
-
-            new_chunk_carry = (avg_shared, new_unit_array_carry)
-            scan_outputs = (traces, sum_loglik_chunk)
-
-            return new_chunk_carry, scan_outputs
-
-        chunk_scan_xs = (
-            jnp.arange(n_chunks),
-            perms_chunked,
-            ys_chunked,
-            covars_chunked
-            if covars_chunked is not None
-            else jnp.zeros((n_chunks, vmap_chunk_size, 0)),
-            keys_chunked,
-            inv_perms_chunked,
-            mask_chunked,
-        )
-
-        initial_chunk_carry = (shared_array_m, unit_array_m)
-
-        final_chunk_carry, (all_traces, chunk_logliks) = jax.lax.scan(
-            chunk_scan_body, initial_chunk_carry, chunk_scan_xs
-        )
-
-        (
-            shared_array_m,
-            unit_array_m,
-        ) = final_chunk_carry
-
-        sum_loglik_iter = chunk_logliks.sum()
-
-        # all_traces: (n_chunks, vmap_chunk_size, n_spec+1) -> (U, n_spec+1) -> (n_spec+1, U)
-        unit_traces_m_row = jnp.moveaxis(all_traces.reshape(U, -1), 0, 1)
-
-        if n_shared > 0:
-            shared_means = jnp.mean(shared_array_m, axis=1)
-            shared_traces_m_row = jnp.concatenate(
-                [jnp.array([sum_loglik_iter]), shared_means]
-            )
-        else:
-            shared_traces_m_row = jnp.array([sum_loglik_iter])
-
-        return (
-            (shared_array_m, unit_array_m),
-            (shared_traces_m_row, unit_traces_m_row),
-        )
-
-    initial_iter_carry = (shared_array, unit_array)
-    iter_scan_xs = (jnp.arange(M), m_keys)
-
-    (final_iter_state, (shared_traces_history, unit_traces_history)) = jax.lax.scan(
-        f=iter_body,
-        init=initial_iter_carry,
-        xs=iter_scan_xs,
-    )
-
-    (shared_array, unit_array) = final_iter_state
-
-    shared_traces = jnp.concatenate([shared_trace_0, shared_traces_history], axis=0)
-    unit_traces = jnp.concatenate([unit_trace_0, unit_traces_history], axis=0)
-
-    return (shared_array, unit_array, shared_traces, unit_traces)
-
-
-_vmapped_panel_mif_internal_vmap = jax.vmap(
-    _panel_mif_internal_vmap,
-    in_axes=((0, 0) + (None,) * 19 + (0,) + (None,) + (None,) * 5),
-)
-
-_jv_panel_mif_internal_vmap = jit(
-    _vmapped_panel_mif_internal_vmap,
-    static_argnums=(
-        7,  # rinitializers
-        8,  # rprocesses_interp
-        9,  # dmeasures
-        16,  # M
-        17,  # cooling_fn
-        18,  # J
-        19,  # U
-        22,  # vmap_chunk_size
-        23,  # rinitializer_pf
-        24,  # rprocess_pf
-        25,  # dmeasure_pf
-        26,  # n_monitors
-        27,  # block
+    static_argnames=(
+        "rinitializers",
+        "rprocesses_interp",
+        "dmeasures",
+        "M",
+        "cooling_fn",
+        "J",
+        "U",
+        "rinitializer_pf",
+        "rprocess_pf",
+        "dmeasure_pf",
+        "n_monitors",
+        "block",
     ),
 )

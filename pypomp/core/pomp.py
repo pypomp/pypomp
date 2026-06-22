@@ -793,39 +793,21 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        opt_name = optimizer.__class__.__name__
-        beta1 = getattr(optimizer, "beta1", 0.9)
-        beta2 = getattr(optimizer, "beta2", 0.999)
-        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
-        c = optimizer.c
-        max_ls_itn = optimizer.max_ls_itn
-        clip_norm = optimizer.clip_norm
-        scale = optimizer.scale
-        ls = optimizer.ls
-
         nLLs, theta_ests = run_jax_batch_sharded(
             F.train,
-            {1: 0, 12: 0},
+            {1: 0, 8: 0},
             [0, 0],
             self.to_struct(),
             theta_array,
             J,
-            opt_name,
+            optimizer,
             M,
             eta_array,
-            c,
-            max_ls_itn,
             thresh,
-            scale,
-            ls,
             alpha,
             keys,
             alpha_cooling,
             n_monitors,
-            clip_norm,
-            beta1,
-            beta2,
-            epsilon,
         )
 
         theta_ests_natural = self.par_trans._transform_array(

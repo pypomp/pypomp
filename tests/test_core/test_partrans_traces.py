@@ -162,19 +162,19 @@ def test_transform_panel_traces_unit_only():
 
     par_trans = pp.ParTrans(to_est, from_est)
 
-    # Shape: (n_reps, n_iters, n_spec+1, n_units)
+    # Shape: (n_reps, n_iters, n_units, n_spec+1)
     unit_traces = np.array(
         [
             [
                 [
-                    [np.nan, np.nan],  # iter 0: unit logliks
-                    [1.0, 1.5],
-                ],  # iter 0: unit_param1 for unit1, unit2
-                [
-                    [-5.0, -6.0],  # iter 1: unit logliks
-                    [2.0, 2.5],
+                    [np.nan, 1.0],  # iter 0, unit 1: loglik, unit_param1
+                    [np.nan, 1.5],  # iter 0, unit 2: loglik, unit_param1
                 ],
-            ],  # iter 1: unit_param1 for unit1, unit2
+                [
+                    [-5.0, 2.0],  # iter 1, unit 1: loglik, unit_param1
+                    [-6.0, 2.5],  # iter 1, unit 2: loglik, unit_param1
+                ],
+            ],
         ]
     )
 
@@ -198,9 +198,9 @@ def test_transform_panel_traces_unit_only():
     assert np.abs(unit_out[0, 1, 0, 0] - (-5.0)) < 1e-6
 
     # Check parameters are transformed
-    assert np.abs(unit_out[0, 0, 1, 0] - np.exp(1.0)) < 1e-6
+    assert np.abs(unit_out[0, 0, 0, 1] - np.exp(1.0)) < 1e-6
     assert np.abs(unit_out[0, 0, 1, 1] - np.exp(1.5)) < 1e-6
-    assert np.abs(unit_out[0, 1, 1, 0] - np.exp(2.0)) < 1e-6
+    assert np.abs(unit_out[0, 1, 0, 1] - np.exp(2.0)) < 1e-6
     assert np.abs(unit_out[0, 1, 1, 1] - np.exp(2.5)) < 1e-6
 
 
@@ -227,19 +227,19 @@ def test_transform_panel_traces_both():
         ]
     )
 
-    # Shape: (n_reps, n_iters, n_spec+1, n_units)
+    # Shape: (n_reps, n_iters, n_units, n_spec+1)
     unit_traces = np.array(
         [
             [
                 [
-                    [np.nan, np.nan],  # iter 0: unit logliks
-                    [2.0, 2.5],
-                ],  # iter 0: unit_param
-                [
-                    [-5.0, -6.0],  # iter 1: unit logliks
-                    [3.0, 3.5],
+                    [np.nan, 2.0],  # iter 0, unit 1: unit_param
+                    [np.nan, 2.5],  # iter 0, unit 2: unit_param
                 ],
-            ],  # iter 1: unit_param
+                [
+                    [-5.0, 3.0],  # iter 1, unit 1: unit_param
+                    [-6.0, 3.5],  # iter 1, unit 2: unit_param
+                ],
+            ],
         ]
     )
 
@@ -268,7 +268,7 @@ def test_transform_panel_traces_both():
     # Check transformed parameters
     assert np.abs(shared_out[0, 0, 1] - np.exp(1.0)) < 1e-6
     assert np.abs(shared_out[0, 1, 1] - np.exp(1.5)) < 1e-6
-    assert np.abs(unit_out[0, 0, 1, 0] - np.exp(2.0)) < 1e-6
+    assert np.abs(unit_out[0, 0, 0, 1] - np.exp(2.0)) < 1e-6
     assert np.abs(unit_out[0, 1, 1, 1] - np.exp(3.5)) < 1e-6
 
 
@@ -373,9 +373,9 @@ def test_transform_panel_traces_unit_traces_only_no_spec():
     """Test that unit_traces is simply copied when unit_traces is not None but n_spec == 0."""
     par_trans = pp.ParTrans()
 
-    # unit_traces has shape (n_reps, n_iters, n_spec+1, n_units)
-    # Here n_spec is 0, so shape is (1, 2, 1, 3)
-    unit_traces = np.array([[[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]]])
+    # unit_traces has shape (n_reps, n_iters, n_units, n_spec+1)
+    # Here n_spec is 0, so shape is (1, 2, 3, 1)
+    unit_traces = np.array([[[[1.0], [2.0], [3.0]], [[4.0], [5.0], [6.0]]]])
 
     shared_out, unit_out = par_trans._transform_panel_traces(
         shared_traces=None,
@@ -403,8 +403,8 @@ def test_transform_panel_traces_no_shared_context():
 
     par_trans = pp.ParTrans(to_est=to_est)
 
-    # unit_traces shape (1, 1, 2, 1) -> n_reps=1, n_iters=1, n_spec=1, n_units=1
-    unit_traces = np.array([[[[0.5], [10.0]]]])  # loglik=0.5, unit=10.0
+    # unit_traces shape (1, 1, 1, 2) -> n_reps=1, n_iters=1, n_units=1, n_spec=1
+    unit_traces = np.array([[[[0.5, 10.0]]]])  # loglik=0.5, unit=10.0
 
     shared_out, unit_out = par_trans._transform_panel_traces(
         shared_traces=None,
@@ -417,7 +417,7 @@ def test_transform_panel_traces_no_shared_context():
     assert shared_out is None
     assert unit_out is not None
     # 10.0 + shared_context (which should be 0.0 because shared_traces is None) = 10.0
-    assert abs(unit_out[0, 0, 1, 0] - 10.0) < 1e-6
+    assert abs(unit_out[0, 0, 0, 1] - 10.0) < 1e-6
 
 
 def test_transform_panel_traces_no_unit_context():

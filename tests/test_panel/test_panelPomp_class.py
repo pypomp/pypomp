@@ -252,13 +252,13 @@ def test_performance_comprehensive():
 
     # Create dummy unit traces
     unit_traces = xr.DataArray(
-        np.random.randn(n_reps, n_iter + 1, 3, n_units),  # +1 for initial values
-        dims=["theta_idx", "iteration", "variable", "unit"],
+        np.random.randn(n_reps, n_iter + 1, n_units, 3),  # +1 for initial values
+        dims=["theta_idx", "iteration", "unit", "variable"],
         coords={
             "theta_idx": range(n_reps),
             "iteration": range(n_iter + 1),
-            "variable": ["unitLogLik", "unit_param1", "unit_param2"],
             "unit": units,
+            "variable": ["unitLogLik", "unit_param1", "unit_param2"],
         },
     )
 

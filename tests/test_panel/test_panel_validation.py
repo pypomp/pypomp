@@ -376,11 +376,12 @@ def test_train_invalid_eta(lg_panel_setup_some_shared):
 
 def test_mif_traces_both_none(lg_panel_setup_some_shared, monkeypatch):
     panel, rw_sd, key = lg_panel_setup_some_shared
-    first_unit = list(panel.unit_objects.values())[0]
+    import pypomp.functional as F
+
     monkeypatch.setattr(
-        first_unit.par_trans,
-        "_transform_panel_traces",
-        lambda *args, **kwargs: (None, None),
+        F,
+        "panel_mif",
+        lambda *args, **kwargs: (None, None, None, None),
     )
     with pytest.raises(ValueError, match="Both shared_traces and unit_traces are None"):
         panel.mif(J=2, M=2, rw_sd=rw_sd, key=key)
@@ -389,11 +390,12 @@ def test_mif_traces_both_none(lg_panel_setup_some_shared, monkeypatch):
 def test_train_traces_both_none(lg_panel_setup_some_shared, monkeypatch):
     panel, _, key = lg_panel_setup_some_shared
     eta = pp.LearningRate({n: 0.01 for n in panel.canonical_param_names})
-    first_unit = list(panel.unit_objects.values())[0]
+    import pypomp.functional as F
+
     monkeypatch.setattr(
-        first_unit.par_trans,
-        "_transform_panel_traces",
-        lambda *args, **kwargs: (None, None),
+        F,
+        "panel_train",
+        lambda *args, **kwargs: (None, None, None),
     )
     with pytest.raises(ValueError, match="Both shared_traces and unit_traces are None"):
         panel.train(J=2, M=2, eta=eta, key=key)

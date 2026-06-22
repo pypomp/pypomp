@@ -327,12 +327,12 @@ def test_panel_pomp_estimation_traces_mixin():
         coords={"theta_idx": [0], "iteration": [0], "variable": ["logLik", "sh1"]},
     )
     unit_traces = xr.DataArray(
-        [[[[2.5, 20.0]]]],  # shape: (theta_idx=1, unit=1, iteration=1, variable=2)
-        dims=["theta_idx", "unit", "iteration", "variable"],
+        [[[[2.5, 20.0]]]],  # shape: (theta_idx=1, iteration=1, unit=1, variable=2)
+        dims=["theta_idx", "iteration", "unit", "variable"],
         coords={
             "theta_idx": [0],
-            "unit": ["unit1"],
             "iteration": [0],
+            "unit": ["unit1"],
             "variable": ["unitLogLik", "un1"],
         },
     )
@@ -805,12 +805,12 @@ def test_panel_pomp_mif_result():
         coords={"theta_idx": [0], "iteration": [0], "variable": ["logLik"]},
     )
     unit_traces = xr.DataArray(
-        [[[[2.0]]]],  # (theta_idx=1, unit=1, iteration=1, variable=1)
-        dims=["theta_idx", "unit", "iteration", "variable"],
+        [[[[2.0]]]],  # (theta_idx=1, iteration=1, unit=1, variable=1)
+        dims=["theta_idx", "iteration", "unit", "variable"],
         coords={
             "theta_idx": [0],
-            "unit": ["u1"],
             "iteration": [0],
+            "unit": ["u1"],
             "variable": ["unitLogLik"],
         },
     )
@@ -875,12 +875,12 @@ def test_panel_pomp_train_result():
         coords={"theta_idx": [0], "iteration": [0], "variable": ["logLik"]},
     )
     unit_traces = xr.DataArray(
-        [[[[2.0]]]],  # (theta_idx=1, unit=1, iteration=1, variable=1)
-        dims=["theta_idx", "unit", "iteration", "variable"],
+        [[[[2.0]]]],  # (theta_idx=1, iteration=1, unit=1, variable=1)
+        dims=["theta_idx", "iteration", "unit", "variable"],
         coords={
             "theta_idx": [0],
-            "unit": ["u1"],
             "iteration": [0],
+            "unit": ["u1"],
             "variable": ["unitLogLik"],
         },
     )

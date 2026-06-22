@@ -229,64 +229,6 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
         )
 
 
-def test_mif_vmap_some_shared(lg_panel_setup_some_shared):
-    """Test vmap MIF with shared + unit-specific params, chunk_size = U."""
-    panel, rw_sd, key = lg_panel_setup_some_shared
-    J, M, a = 2, 2, 0.5
-    U = len(panel.unit_objects)
-    theta_orig = deepcopy(panel.theta)
-    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
-    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U)
-
-    check_mif_result(
-        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
-    )
-
-
-def test_mif_vmap_specific_only(lg_panel_setup_specific_only):
-    """Test vmap MIF with only unit-specific params."""
-    panel, rw_sd, key = lg_panel_setup_specific_only
-    J, M, a = 2, 2, 0.5
-    U = len(panel.unit_objects)
-    theta_orig = deepcopy(panel.theta)
-    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
-    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U)
-
-    check_mif_result(
-        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
-    )
-
-
-def test_mif_vmap_chunk_size_1(lg_panel_setup_some_shared):
-    """Test vmap MIF with chunk_size=1 (degenerate: one unit per chunk)."""
-    panel, rw_sd, key = lg_panel_setup_some_shared
-    J, M, a = 2, 2, 0.5
-    theta_orig = deepcopy(panel.theta)
-    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
-    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=1)
-
-    check_mif_result(
-        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
-    )
-
-
-def test_mif_vmap_with_padding(lg_panel_setup_some_shared):
-    """Test vmap MIF when chunk_size does not divide U (requires padding)."""
-    panel, rw_sd, key = lg_panel_setup_some_shared
-    J, M, a = 2, 2, 0.5
-    U = len(panel.unit_objects)
-    # Use a chunk_size that doesn't divide U
-    # U=2, so chunk_size=3 requires padding to 3
-    chunk_size = U + 1
-    theta_orig = deepcopy(panel.theta)
-    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
-    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=chunk_size)
-
-    check_mif_result(
-        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
-    )
-
-
 def test_pif(lg_panel_setup_some_shared):
     """Test sequential PIF (block=False)."""
     panel, rw_sd, key = lg_panel_setup_some_shared
@@ -300,30 +242,15 @@ def test_pif(lg_panel_setup_some_shared):
     )
 
 
-def test_pif_vmap(lg_panel_setup_some_shared):
-    """Test parallel vmap PIF (block=False)."""
-    panel, rw_sd, key = lg_panel_setup_some_shared
-    J, M, a = 2, 2, 0.5
-    U = len(panel.unit_objects)
-    theta_orig = deepcopy(panel.theta)
-    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
-    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key, vmap_chunk_size=U, block=False)
-
-    check_mif_result(
-        panel.results_history[-1], panel, J, M, a, rw_sd_cooled, theta_orig
-    )
-
-
 def test_panel_mif_cooling_schedules(lg_panel_setup_some_shared):
     """Test Panel MIF with other cooling schedules."""
     panel, rw_sd, key = lg_panel_setup_some_shared
     J, M = 2, 2
-    U = len(panel.unit_objects)
 
     # 1. Cosine cooling
     rw_cos = rw_sd.cosine_cooling(0.1, M)
     panel.results_history.clear()
-    panel.mif(J=J, M=M, rw_sd=rw_cos, key=key, vmap_chunk_size=U)
+    panel.mif(J=J, M=M, rw_sd=rw_cos, key=key)
     res_cos = panel.results_history[-1]
     assert res_cos.rw_sd.a is None
     assert res_cos.rw_sd == rw_cos
@@ -342,7 +269,7 @@ def test_panel_mif_cooling_schedules(lg_panel_setup_some_shared):
 
     rw_cust = rw_sd.custom_cooling(custom_fn)
     panel.results_history.clear()
-    panel.mif(J=J, M=M, rw_sd=rw_cust, key=key, vmap_chunk_size=U)
+    panel.mif(J=J, M=M, rw_sd=rw_cust, key=key)
     res_cust = panel.results_history[-1]
     assert res_cust.rw_sd.a is None
     assert res_cust.rw_sd == rw_cust

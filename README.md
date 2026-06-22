@@ -85,7 +85,7 @@ If you use Pypomp in your research, please cite it as:
   author  = {Aaron Abkemeier and Jun Chen and Edward Ionides and Jesse Wheeler and Kevin Tan},
   title   = {Pypomp},
   url     = {https://github.com/pypomp/pypomp},
-  version = {0.4.7.0},
+  version = {0.4.7.1},
   year    = {2026}
 }
 ```

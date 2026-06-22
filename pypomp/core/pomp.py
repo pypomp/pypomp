@@ -367,6 +367,8 @@ class Pomp:
             rproc_per=self.rproc.struct_per_interp,
             dmeas_per=self.dmeas.struct_per if self.dmeas is not None else None,
             rmeas_pf=self.rmeas.struct_pf if self.rmeas is not None else None,
+            par_trans=self.par_trans,
+            param_names=self.canonical_param_names,
         )
 
     @staticmethod
@@ -624,7 +626,6 @@ class Pomp:
 
         new_key, old_key = self._update_fresh_key(key)
         n_reps = theta_obj_in.num_replicates()
-        theta_obj_in.transform(self.par_trans, direction="to_est")
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
         )
@@ -637,14 +638,14 @@ class Pomp:
 
         keys = jax.random.split(new_key, n_reps)
 
-        theta_tiled = jnp.tile(theta_array, (J, 1, 1))
+        theta_array_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
 
-        nLLs_jax, theta_traces_jax, final_thetas_jax = run_jax_batch_sharded(
+        nLLs_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
-            {1: 1, 8: 0},
+            {1: 0, 8: 0},
             [0, 0, 0],
             self.to_struct(),
-            theta_tiled,
+            theta_array_3d,
             sigmas_array,
             sigmas_init_array,
             M,
@@ -657,9 +658,8 @@ class Pomp:
 
         nLLs = jax.device_get(nLLs_jax)
         theta_traces = jax.device_get(theta_traces_jax)
-        final_thetas = jax.device_get(final_thetas_jax)
 
-        del nLLs_jax, theta_traces_jax, final_thetas_jax
+        del nLLs_jax, theta_traces_jax, final_swarm_jax
 
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
@@ -668,12 +668,8 @@ class Pomp:
         nans = np.full((n_reps, 1), np.nan)
         logliks_with_nan = np.concatenate([nans, -nLLs], axis=1)  # shape: (n_reps, M+1)
 
-        theta_traces_natural = self.par_trans._transform_array(
-            theta_traces, param_names, direction="from_est"
-        )
-
         trace_data = np.concatenate(
-            [logliks_with_nan[:, :, np.newaxis], theta_traces_natural], axis=-1
+            [logliks_with_nan[:, :, np.newaxis], theta_traces], axis=-1
         )
 
         traces_da = xr.DataArray(
@@ -686,13 +682,10 @@ class Pomp:
             },
         )
 
-        final_thetas_mean = np.mean(final_thetas, axis=1)  # shape: (n_reps, n_params)
-        final_thetas_natural = self.par_trans._transform_array(
-            final_thetas_mean, param_names, direction="from_est"
-        )
+        final_thetas_mean = theta_traces[:, M, :]  # shape: (n_reps, n_params)
 
         final_theta_da = xr.DataArray(
-            final_thetas_natural,
+            final_thetas_mean,
             dims=["theta_idx", "parameter"],
             coords={
                 "theta_idx": np.arange(n_reps),

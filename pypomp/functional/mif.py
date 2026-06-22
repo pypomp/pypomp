@@ -27,9 +27,7 @@ def mif(
 
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (J, n_reps, n_params).
-            Note that the batch dimension for `vmap` is the second axis (`n_reps`).
-            These should be provided on the estimation scale.
+        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, J, n_params) on the natural scale.
         sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
         sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
         M (int): Number of iterations.
@@ -42,12 +40,20 @@ def mif(
     Returns:
         tuple[jax.Array, jax.Array, jax.Array]:
             Negative log-likelihood history: Shape (n_reps, M).
-            Parameter trace history: Shape (n_reps, M+1, n_params).
-            Final particle swarm: Shape (n_reps, J, n_params).
+            Parameter trace history: Shape (n_reps, M+1, n_params) on the natural scale.
+            Final particle swarm: Shape (n_reps, J, n_params) on the natural scale.
     """
-    # TODO: transform parameters to the estimation scale so the user does not have to
-    res = _jv_mif_internal(
+
+    thetas_est = struct.par_trans._transform_array_jax(
         thetas_array,
+        struct.param_names,
+        direction="to_est",
+    )
+
+    thetas_est_transposed = thetas_est.transpose(1, 0, 2)
+
+    res = _jv_mif_internal(
+        thetas_est_transposed,
         struct.dt_array_extended,
         struct.nstep_array,
         struct.t0,
@@ -72,4 +78,14 @@ def mif(
         n_monitors,
         False,
     )
-    return res[0], res[1], res[2]
+    traces_natural = struct.par_trans._transform_array_jax(
+        res[1],
+        struct.param_names,
+        direction="from_est",
+    )
+    final_thetas_natural = struct.par_trans._transform_array_jax(
+        res[2],
+        struct.param_names,
+        direction="from_est",
+    )
+    return res[0], traces_natural, final_thetas_natural

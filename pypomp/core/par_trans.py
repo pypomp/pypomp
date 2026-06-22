@@ -104,6 +104,37 @@ class ParTrans:
         theta_out = func(dict(theta))
         return {k: float(v) for k, v in theta_out.items()}
 
+    def _transform_array_jax(
+        self,
+        param_array: jax.Array,
+        param_names: list[str],
+        direction: Literal["to_est", "from_est"],
+    ) -> jax.Array:
+        """
+        Transform a JAX parameter array to or from the estimation parameter space.
+        """
+        if direction not in ["to_est", "from_est"]:
+            raise ValueError(f"Invalid direction: {direction}")
+
+        transform_fn = self.to_est if direction == "to_est" else self.from_est
+
+        original_shape = param_array.shape
+        n_params = original_shape[-1]
+        if n_params == 0:
+            return param_array
+
+        param_array_2d = param_array.reshape(-1, n_params)
+
+        def transform_single_row(row):
+            param_dict = dict(zip(param_names, row))
+            transformed_dict = transform_fn(param_dict)
+            return jnp.stack([transformed_dict[name] for name in param_names])
+
+        transform_vectorized = jax.vmap(transform_single_row)
+        transformed_jax = transform_vectorized(param_array_2d)
+
+        return transformed_jax.reshape(original_shape)
+
     def _transform_array(
         self,
         param_array: np.ndarray,
@@ -124,30 +155,10 @@ class ParTrans:
         Returns:
             Transformed parameter array with the same shape as input
         """
-        if direction not in ["to_est", "from_est"]:
-            raise ValueError(f"Invalid direction: {direction}")
-
-        transform_fn = self.to_est if direction == "to_est" else self.from_est
-
-        original_shape = param_array.shape
-
-        if len(original_shape) == 1:
-            param_array_2d = param_array.reshape(1, -1)
-        else:
-            param_array_2d = param_array.reshape(-1, original_shape[-1])
-
-        def transform_single_row(row):
-            param_dict = dict(zip(param_names, row))
-            transformed_dict = transform_fn(param_dict)
-            return jnp.array([transformed_dict[name] for name in param_names])
-
-        transform_vectorized = jax.vmap(transform_single_row)
-
-        param_jax = jnp.array(param_array_2d)
-        transformed_jax = transform_vectorized(param_jax)
-        transformed_array = np.array(transformed_jax)
-
-        return transformed_array.reshape(original_shape)
+        transformed_jax = self._transform_array_jax(
+            jnp.array(param_array), param_names, direction
+        )
+        return np.array(transformed_jax)
 
     def _transform_panel_traces(
         self,

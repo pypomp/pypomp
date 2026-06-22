@@ -88,8 +88,8 @@ def test_mif_functional(model_setup):
     M = 2
     sigmas = jnp.ones(len(param_names)) * 0.02
 
-    # thetas_array for mif needs to be (J, n_reps, n_params)
-    thetas_mif = jnp.repeat(thetas_array[jnp.newaxis, ...], J, axis=0)
+    # thetas_array for mif needs to be (n_reps, J, n_params)
+    thetas_mif = jnp.repeat(thetas_array[:, jnp.newaxis, :], J, axis=1)
 
     a_val = 0.5
     factor = a_val ** (1 / 50)

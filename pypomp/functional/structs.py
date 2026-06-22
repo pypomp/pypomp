@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from typing import NamedTuple, Callable
+from ..core.par_trans import ParTrans
 
 
 class PompStruct(NamedTuple):
@@ -26,6 +27,8 @@ class PompStruct(NamedTuple):
     rproc_per: Callable
     dmeas_per: Callable | None
     rmeas_pf: Callable | None
+    par_trans: ParTrans
+    param_names: list[str]
 
 
 def pomp_struct_flatten(struct: PompStruct):
@@ -48,6 +51,8 @@ def pomp_struct_flatten(struct: PompStruct):
         struct.rproc_per,
         struct.dmeas_per,
         struct.rmeas_pf,
+        struct.par_trans,
+        struct.param_names,
     )
     return children, aux_data
 
@@ -64,6 +69,8 @@ def pomp_struct_unflatten(aux_data, children):
         rproc_per,
         dmeas_per,
         rmeas_pf,
+        par_trans,
+        param_names,
     ) = aux_data
     return PompStruct(
         ys=ys,
@@ -80,6 +87,8 @@ def pomp_struct_unflatten(aux_data, children):
         rproc_per=rproc_per,
         dmeas_per=dmeas_per,
         rmeas_pf=rmeas_pf,
+        par_trans=par_trans,
+        param_names=param_names,
     )
 
 

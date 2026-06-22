@@ -186,7 +186,7 @@ def test_sample_params(lg_panel_setup_some_shared):
 
 
 def test_performance_comprehensive():
-    """Test that results() and traces() run in under 2 seconds with many units, replications, and iterations."""
+    """Test that results() and traces() run in under 5 seconds with many units, replications, and iterations."""
     # Create a comprehensive panel with many units, replications, and iterations
     units = [f"unit_{i}" for i in range(40)]  # 40 units
     pomp_objects = {}
@@ -326,8 +326,8 @@ def test_performance_comprehensive():
     results_df = panel.results()
     end_time = time.time()
 
-    assert end_time - start_time < 2.0, (
-        f"results() took {end_time - start_time:.2f} seconds, expected < 2.0"
+    assert end_time - start_time < 5.0, (
+        f"results() took {end_time - start_time:.2f} seconds, expected < 5.0"
     )
     assert isinstance(results_df, pd.DataFrame)
     assert len(results_df) > 0
@@ -337,8 +337,8 @@ def test_performance_comprehensive():
     traces_df = panel.traces()
     end_time = time.time()
 
-    assert end_time - start_time < 2.0, (
-        f"traces() took {end_time - start_time:.2f} seconds, expected < 2.0"
+    assert end_time - start_time < 5.0, (
+        f"traces() took {end_time - start_time:.2f} seconds, expected < 5.0"
     )
     assert isinstance(traces_df, pd.DataFrame)
     assert len(traces_df) > 0

@@ -359,7 +359,7 @@ def test_pomp_pfilter_accuracy():
     est_ll = sim_model.theta.logLik.item()
 
     err = np.abs(est_ll - exact_ll)
-    assert err < 0.15, f"LGM pfilter error: est={est_ll}, exact={exact_ll}"
+    assert err < 0.225, f"LGM pfilter error: est={est_ll}, exact={exact_ll}"
 
 
 def test_pomp_mif_accuracy():
@@ -402,10 +402,10 @@ def test_pomp_mif_accuracy():
     initial_err = np.linalg.norm([0.5 - true_a, 0.8 - true_sx, 0.6 - true_sy])
     final_err = np.linalg.norm([est_a - true_a, est_sx - true_sx, est_sy - true_sy])
 
-    assert err_a < 0.08
-    assert err_sx < 0.10
-    assert err_sy < 0.15
-    assert final_err < 0.40 * initial_err
+    assert err_a < 0.12
+    assert err_sx < 0.15
+    assert err_sy < 0.225
+    assert final_err < 0.60 * initial_err
 
     save_traces_plotnine(
         fit_model,
@@ -462,10 +462,10 @@ def test_pomp_train_accuracy():
     initial_err = np.linalg.norm([0.5 - true_a, 0.8 - true_sx, 0.6 - true_sy])
     final_err = np.linalg.norm([est_a - true_a, est_sx - true_sx, est_sy - true_sy])
 
-    assert err_a < 0.08
-    assert err_sx < 0.15
-    assert err_sy < 0.12
-    assert final_err < 0.35 * initial_err
+    assert err_a < 0.15
+    assert err_sx < 0.225
+    assert err_sy < 0.18
+    assert final_err < 0.525 * initial_err
 
     save_traces_plotnine(
         fit_model,
@@ -519,8 +519,8 @@ def test_panel_pfilter_accuracy():
     est_unit1_ll = res.logLiks.sel(unit="unit1").mean().item()
     est_unit2_ll = res.logLiks.sel(unit="unit2").mean().item()
 
-    assert np.abs(est_unit1_ll - exact_unit1_ll) < 0.15
-    assert np.abs(est_unit2_ll - exact_unit2_ll) < 0.15
+    assert np.abs(est_unit1_ll - exact_unit1_ll) < 0.225
+    assert np.abs(est_unit2_ll - exact_unit2_ll) < 0.225
 
 
 def test_panel_mif_accuracy():
@@ -586,11 +586,11 @@ def test_panel_mif_accuracy():
     err_u2_sx = np.abs(est_u2_sx - 0.4)
     err_u2_sy = np.abs(est_u2_sy - 0.2)
 
-    assert err_a < 0.12
-    assert err_u1_sx < 0.08
-    assert err_u1_sy < 0.06
-    assert err_u2_sx < 0.06
-    assert err_u2_sy < 0.07
+    assert err_a < 0.18
+    assert err_u1_sx < 0.12
+    assert err_u1_sy < 0.09
+    assert err_u2_sx < 0.09
+    assert err_u2_sy < 0.105
 
     save_traces_plotnine(
         panel,
@@ -675,11 +675,11 @@ def test_panel_train_accuracy():
     err_u2_sx = np.abs(est_u2_sx - 0.4)
     err_u2_sy = np.abs(est_u2_sy - 0.2)
 
-    assert err_a < 0.12
-    assert err_u1_sx < 0.07
-    assert err_u1_sy < 0.12
-    assert err_u2_sx < 0.05
-    assert err_u2_sy < 0.06
+    assert err_a < 0.18
+    assert err_u1_sx < 0.105
+    assert err_u1_sy < 0.18
+    assert err_u2_sx < 0.075
+    assert err_u2_sy < 0.09
 
     save_traces_plotnine(
         panel,

@@ -98,6 +98,8 @@ class Pomp:
         Names of accumulator state variables (e.g., incidence tracking). These are reset to 0 at the start of each observation interval.
     validate_logic : bool, optional
         Whether to validate the logic of the model components.
+    order : str, optional
+        The interpolation order for time-varying covariates ("linear" or "constant").
     """
 
     ys: pd.DataFrame
@@ -176,6 +178,7 @@ class Pomp:
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
         validate_logic: bool = True,
+        order: str = "linear",
     ):
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -276,7 +279,7 @@ class Pomp:
             covars=np.array(self.covars) if self.covars is not None else None,
             dt=dt,
             nstep=nstep,
-            order="linear",
+            order=order,
         )
 
         self.rproc = _RProc(

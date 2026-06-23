@@ -324,7 +324,17 @@ def is_dynamic(val: Any) -> bool:
     return False
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 3, 4, 5))
+@partial(
+    jax.jit,
+    static_argnames=(
+        "func_static",
+        "shard_axes_static",
+        "static_idxs_static",
+        "static_args_static",
+        "static_kwargs_static",
+        "dynamic_idxs_static",
+    ),
+)
 def _scan_jit(
     func_static: Callable[..., Any],
     shard_axes_static: tuple[tuple[int, int], ...],

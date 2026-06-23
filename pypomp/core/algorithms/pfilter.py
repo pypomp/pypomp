@@ -327,7 +327,17 @@ def _chunked_panel_pfilter_internal(
     return jax.vmap(process_rep)(thetas_c, keys_c)
 
 
-@partial(jit, static_argnums=(6, 7, 8, 9, 10, 14))
+@partial(
+    jit,
+    static_argnames=(
+        "J",
+        "rinitializer",
+        "rprocess_interp",
+        "dmeasure",
+        "accumvars",
+        "thresh",
+    ),
+)
 def _pfilter_internal_mean(
     theta: jax.Array,
     dt_array_extended: jax.Array,
@@ -335,10 +345,10 @@ def _pfilter_internal_mean(
     t0: float,
     times: jax.Array,
     ys: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess_interp: Callable,  # static
-    dmeasure: Callable,  # static
+    J: int,
+    rinitializer: Callable,
+    rprocess_interp: Callable,
+    dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     thresh: float,

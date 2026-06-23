@@ -1,7 +1,7 @@
 import warnings
 import jax
 import pandas as pd
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from ..core.viz import plot_traces_internal, plot_panel_simulations_internal
 
 from ..core.parameters import PanelParameters
@@ -137,29 +137,23 @@ class PanelAnalysisMixin(Base):
             if not has_shared_rows:
                 warnings.warn("No shared rows to plot.", UserWarning)
                 return None
-            df_plot = cast(pd.DataFrame, traces.loc[traces["unit"] == "shared"])
+            df_plot = traces.loc[traces["unit"] == "shared"]
             title = "Shared Parameter Traces"
         elif which == "unitLogLik":
-            df_plot = cast(
-                pd.DataFrame,
-                traces.loc[
-                    traces["unit"] != "shared",
-                    ["theta_idx", "iteration", "method", "unit", "logLik"],
-                ],
-            )
+            df_plot = traces.loc[
+                traces["unit"] != "shared",
+                ["theta_idx", "iteration", "method", "unit", "logLik"],
+            ]
             title = "Unit Log-Likelihood Traces"
         else:
             if which not in unit_params:
                 raise ValueError(
                     f"'{which}' not found among unit-specific parameters: {unit_params}"
                 )
-            df_plot = cast(
-                pd.DataFrame,
-                traces.loc[
-                    traces["unit"] != "shared",
-                    ["theta_idx", "iteration", "method", "unit", which],
-                ],
-            )
+            df_plot = traces.loc[
+                traces["unit"] != "shared",
+                ["theta_idx", "iteration", "method", "unit", which],
+            ]
             title = f"Unit Parameter Traces: {which}"
 
         fig = plot_traces_internal(df_plot, title=title)

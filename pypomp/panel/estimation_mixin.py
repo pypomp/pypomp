@@ -7,7 +7,7 @@ import numpy as np
 import time
 import pypomp.functional as F
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal, Any
+from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
@@ -350,7 +350,7 @@ class PanelEstimationMixin(Base):
                 )
 
         for grp_key, group in y_sims.groupby(["unit", "theta_idx", "sim"]):
-            unit_name, replicate_id, sim_id = cast(tuple[Any, Any, Any], grp_key)
+            unit_name, replicate_id, sim_id = grp_key
             obj = self.unit_objects[str(unit_name)]
             df = pd.DataFrame(group.drop(columns=["unit", "theta_idx", "sim", "time"]))
             df.index = pd.Index(group["time"])

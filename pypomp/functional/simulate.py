@@ -27,6 +27,7 @@ def simulate(
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         nsim (int): Number of simulations.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
         times (jax.Array | None): Custom observation times. Defaults to struct.times.
@@ -35,7 +36,12 @@ def simulate(
         tuple[jax.Array, jax.Array]:
             X_sims: simulated states. Shape (n_reps, nsim, len(times), n_states)
             Y_sims: simulated observations. Shape (n_reps, nsim, len(times), n_obs)
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, you can use :func:`pypomp.functional.align_params`.
     """
+
     _times = struct.times if times is None else times
     ydim = struct.ys.shape[1] if struct.ys is not None else 1
 

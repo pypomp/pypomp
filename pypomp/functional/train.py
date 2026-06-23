@@ -37,10 +37,12 @@ def train(
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         J (int): Number of particles.
         optimizer (Optimizer): Optimizer configuration object.
         M (int): Number of iterations.
         eta (jax.Array): Learning rates array. Shape (M, n_params).
+            Must be aligned with the canonical order of `struct.param_names` along the last axis.
         thresh (float): Resampling threshold.
         alpha (float | jax.Array): Alpha parameter.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
@@ -51,7 +53,12 @@ def train(
         tuple[jax.Array, jax.Array]:
             Negative logLik history: Shape (n_reps, M)
             Theta history: Shape (n_reps, M+1, n_params)
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, use :func:`pypomp.functional.align_params`.
     """
+
     opt_name = optimizer.__class__.__name__
     clip_norm = optimizer.clip_norm
     beta1 = getattr(optimizer, "beta1", 0.9)
@@ -120,14 +127,16 @@ def panel_train(
     Args:
         struct (PanelPompStruct): The compiled structural representation of the Panel POMP model.
         shared_array (jax.Array): Array of initial shared parameters on natural scale.
-            Shape (n_reps, n_shared).
+            Shape (n_reps, n_shared). Must be aligned with the canonical order of `struct.shared_param_names` (e.g. prepared via `align_params`).
         unit_array (jax.Array): Array of initial unit-specific parameters on natural scale.
-            Shape (n_reps, U, n_spec).
+            Shape (n_reps, U, n_spec). Must be aligned with the canonical order of `struct.unit_param_names` (e.g. prepared via `align_params`).
         J (int): Number of particles.
         optimizer (Optimizer): Optimizer configuration object (e.g. Adam, SGD, FullMatrixAdam).
         M (int): Number of iterations.
         eta_shared (jax.Array): Learning rates array for shared parameters. Shape (M, n_shared).
+            Must be aligned with the canonical order of `struct.shared_param_names` along the last axis.
         eta_spec (jax.Array): Learning rates array for unit-specific parameters. Shape (M, n_spec).
+            Must be aligned with the canonical order of `struct.unit_param_names` along the last axis.
         alpha (float): Discount factor for MOP updates.
         keys (jax.Array): Random keys. Shape (n_reps, M, U, ...).
         alpha_cooling (float): Cooling factor for discount factor alpha.
@@ -138,6 +147,10 @@ def panel_train(
             logliks_history: Average negative log-likelihood trace across iterations. Shape (n_reps, M + 1).
             shared_history_natural: Shared parameter history trace on natural scale. Shape (n_reps, M + 1, n_shared).
             unit_history_natural: Unit-specific parameter history trace on natural scale. Shape (n_reps, M + 1, U, n_spec).
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, you can use :func:`pypomp.functional.align_params`.
     """
 
     U = len(struct.unit_names)

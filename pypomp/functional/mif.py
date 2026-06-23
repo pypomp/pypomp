@@ -32,8 +32,11 @@ def mif(
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, J, n_params) on the natural scale.
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
+            Must be aligned with the canonical order of `struct.param_names`.
         sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
+            Must be aligned with the canonical order of `struct.param_names`.
         M (int): Number of iterations.
         cooling_fn (Callable | float): Cooling function taking (nt, m, ntimes) or float cooling factor.
         J (int): Number of particles.
@@ -46,6 +49,10 @@ def mif(
             Negative log-likelihood history: Shape (n_reps, M).
             Parameter trace history: Shape (n_reps, M+1, n_params) on the natural scale.
             Final particle swarm: Shape (n_reps, J, n_params) on the natural scale.
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, use :func:`pypomp.functional.align_params`.
     """
 
     thetas_est = struct.par_trans._transform_array_jax(
@@ -118,11 +125,13 @@ def panel_mif(
     Args:
         struct (PanelPompStruct): The compiled structural representation of the Panel POMP model.
         shared_array (jax.Array): Swarm of initial shared parameters on natural scale.
-            Shape (n_reps, J, n_shared).
+            Shape (n_reps, J, n_shared). Must be aligned with the canonical order of `struct.shared_param_names` (e.g. prepared via `align_params`).
         unit_array (jax.Array): Swarm of initial unit-specific parameters on natural scale.
-            Shape (n_reps, J, U, n_spec).
+            Shape (n_reps, J, U, n_spec). Must be aligned with the canonical order of `struct.unit_param_names` (e.g. prepared via `align_params`).
         sigmas_array (jax.Array): Random walk standard deviations. Shape (n_params,).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         sigmas_init_array (jax.Array): Initial random walk standard deviations. Shape (n_params,).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         M (int): Number of iterated filtering iterations.
         cooling_fn (Callable | float): Cooling schedule function or constant decay factor.
         J (int): Number of particles.
@@ -137,6 +146,10 @@ def panel_mif(
             unit_traces: Unit-specific parameter history trace. Shape (n_reps, M + 1, U, n_spec + 1).
             final_shared_swarm: Final swarm of shared parameters. Shape (n_reps, J, n_shared).
             final_unit_swarm: Final swarm of unit-specific parameters. Shape (n_reps, J, U, n_spec).
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, you can use :func:`pypomp.functional.align_params`.
     """
 
     U = len(struct.unit_names)

@@ -28,13 +28,19 @@ def mop(
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         J (int): Number of particles.
         alpha (float): Alpha parameter for MOP.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
 
     Returns:
         jax.Array: Negative MOP log-likelihood estimates.
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, you can use :func:`pypomp.functional.align_params`.
     """
+
     return _vmapped_mop_internal(
         thetas_array,
         struct.ys,

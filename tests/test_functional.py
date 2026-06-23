@@ -272,3 +272,64 @@ def test_panel_train_functional(panel_setup):
     assert neg_logliks.shape == (n_reps, M + 1)
     assert shared_history.shape == (n_reps, M + 1, n_shared)
     assert unit_history.shape == (n_reps, M + 1, U, n_spec)
+
+
+def test_align_params():
+    # 1. Test scalar float parameters
+    params_scalar = {"alpha": 1.0, "beta": 2.0, "gamma": 3.0}
+    names_scalar = ["gamma", "alpha", "beta"]
+    aligned_scalar = F.align_params(params_scalar, names_scalar)
+    expected_scalar = jnp.array([3.0, 1.0, 2.0])
+    assert jnp.array_equal(aligned_scalar, expected_scalar)
+
+    # 2. Test dynamic arrays stacked along the last axis
+    params_arrays = {
+        "alpha": jnp.ones((2, 5)) * 1.5,
+        "beta": jnp.ones((2, 5)) * 2.5,
+    }
+    names_arrays = ["beta", "alpha"]
+    aligned_arrays = F.align_params(params_arrays, names_arrays, axis=-1)
+    assert aligned_arrays.shape == (2, 5, 2)
+    assert jnp.all(aligned_arrays[..., 0] == 2.5)
+    assert jnp.all(aligned_arrays[..., 1] == 1.5)
+
+    # 3. Test dynamic arrays stacked along axis=0
+    aligned_arrays_axis0 = F.align_params(params_arrays, names_arrays, axis=0)
+    assert aligned_arrays_axis0.shape == (2, 2, 5)
+    assert jnp.all(aligned_arrays_axis0[0, ...] == 2.5)
+    assert jnp.all(aligned_arrays_axis0[1, ...] == 1.5)
+
+    # 4. Test KeyError handling for missing parameter
+    params_missing = {"alpha": 1.0}
+    names_missing = ["alpha", "beta"]
+    with pytest.raises(KeyError) as exc_info:
+        F.align_params(params_missing, names_missing)
+    assert "Parameter 'beta' is required by the model structure" in str(exc_info.value)
+
+
+def test_panel_pfilter_functional(panel_setup):
+    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+
+    # Construct thetas_array of shape (n_reps, U, n_params)
+    thetas_panel = jnp.stack(
+        [
+            jnp.concatenate([shared_array, unit_array[:, u, :]], axis=-1)
+            for u in range(U)
+        ],
+        axis=1,
+    )
+
+    keys = jax.random.split(key, n_reps * U).reshape(n_reps, U, *key.shape)
+
+    results = F.panel_pfilter(
+        struct,
+        thetas_panel,
+        J=J,
+        thresh=0.0,
+        keys=keys,
+        chunk_size=1,
+    )
+
+    assert "logLik" in results
+    assert results["logLik"].shape == (n_reps, U)
+    assert jnp.all(jnp.isfinite(results["logLik"]))

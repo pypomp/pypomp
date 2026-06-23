@@ -7,6 +7,7 @@ import pypomp.models.measles.model_001b as m001b
 import pypomp.models.measles.model_001c as m001c
 import pypomp.models.measles.model_001d as m001d
 import pypomp.models.measles.model_002 as m002
+import pypomp.models.measles.model_002d as m002d
 import pypomp.models.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
 from pypomp.core.pomp import Pomp
@@ -227,6 +228,18 @@ class UKMeasles:
         )
         covar_df.set_index("time", inplace=True)
 
+        # Add log(pop_1950) as constant covariate for iota log-log linear models
+        pop_1950_row = demog.loc[demog["year"] == 1950, "pop"]
+        if len(pop_1950_row) > 0:
+            covar_df["log_pop_1950"] = np.log(float(pop_1950_row.values[0]))
+        else:
+            # Fallback: use earliest available year
+            covar_df["log_pop_1950"] = np.log(float(demog["pop"].iloc[0]))
+
+        # Placeholder for standardized log(pop_1950); must be overwritten
+        # at the panel level with correct z-score across all units.
+        covar_df["std_log_pop_1950"] = 0.0
+
         # ----pomp-construction-----------------------------------------------
 
         mod = {
@@ -235,6 +248,7 @@ class UKMeasles:
             "001c": m001c,
             "001d": m001d,
             "002": m002,
+            "002d": m002d,
             "003": m003,
         }[model]
 

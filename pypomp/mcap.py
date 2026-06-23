@@ -12,7 +12,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.stats import chi2
 
-from loess.loess_1d import loess_1d
+from loess.loess_1d import loess_1d  # pyright: ignore[reportMissingImports]
 
 FloatArray = npt.NDArray[np.floating[Any]]
 

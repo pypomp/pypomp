@@ -25,7 +25,12 @@ from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .par_trans import ParTrans
 from .optimizer import Optimizer, Adam
-from .results import ResultsHistory, PompPFilterResult, PompMIFResult, PompTrainResult
+from .results import (
+    ResultsHistory,
+    PompPFilterResult,
+    PompMIFResult,
+    PompTrainResult,
+)
 from .parameters import PompParameters
 from pypomp.maths import logmeanexp
 from pypomp import benchmarks
@@ -870,8 +875,9 @@ class Pomp:
         J: int,
         M: int,
         eta: LearningRate,
-        optimizer: str = "Adam",
+        optimizer: Optimizer = Adam(),
         alpha: float = 0.8,
+        alpha_cooling: float = 1.0,
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
@@ -890,12 +896,21 @@ class Pomp:
             Number of particles.
         M : int
             Number of gradient steps.
-        eta : :class:`~pypomp.core.learning_rate.LearningRate`
-            Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
-        optimizer : str, default "Adam"
-            Optimizer to use: "Adam" or "SGD".
+        eta : LearningRate
+            Per-parameter learning rates as a LearningRate object. A full
+            per-iteration schedule is applied (row m used at iteration m), so
+            ``LearningRate(rates).cosine_decay(0.05, M)`` works as expected.
+        optimizer : Optimizer, default Adam()
+            Optimizer configuration object, e.g. ``Adam()`` or ``SGD()``. Adam
+            hyperparameters (``beta1``, ``beta2``, ``epsilon``) are read from the
+            object; pass ``Adam(beta1=0.0)`` to disable momentum (e.g. for the
+            high-variance alpha=0 arm, matching the dmop/IFAD convention).
         alpha : float, default 0.8
             DPOP discount / cooling factor.
+        alpha_cooling : float, default 1.0
+            Cosine cooling factor for alpha. This factor represents the
+            multiplier for the distance of alpha from 1.0 by the end of
+            training. The default keeps alpha fixed.
         decay : float, default 0.0
             Learning-rate decay coefficient. At iteration m, the effective
             learning rate is ``eta / (1 + decay * m)``.
@@ -926,9 +941,9 @@ class Pomp:
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
 
-        # For now, dpop_train only uses a constant learning rate across iterations
-        # Extract the first row of the schedule
-        eta_array = eta.to_array(param_names, M)[0]
+        # Full (M, p) per-iteration LR schedule (e.g. from
+        # LearningRate(...).cosine_decay(...)); the kernel indexes row m.
+        eta_array = eta.to_array(param_names, M)
 
         ys_array = jnp.array(self.ys.values)
         dt_array_extended = self._dt_array_extended
@@ -963,6 +978,10 @@ class Pomp:
             ) from e
 
         ntimes = len(self.ys)
+        opt_name = optimizer.__class__.__name__
+        beta1 = getattr(optimizer, "beta1", 0.9)
+        beta2 = getattr(optimizer, "beta2", 0.999)
+        epsilon = getattr(optimizer, "epsilon", 1e-8)
         theta_hist, nll_hist = _dpop_train(
             theta_init=theta_init,
             ys=ys_array,
@@ -982,8 +1001,12 @@ class Pomp:
             key=new_key,
             M=M,
             eta=eta_array,
-            optimizer=optimizer,
+            optimizer=opt_name,
             decay=decay,
+            beta1=beta1,
+            beta2=beta2,
+            epsilon=epsilon,
+            alpha_cooling=alpha_cooling,
         )
 
         return nll_hist, theta_hist
@@ -1546,7 +1569,9 @@ class Pomp:
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:
             try:
-                self.fresh_key = jax.random.wrap_key_data(state["_fresh_key_data"])
+                self.fresh_key = cast(
+                    jax.Array, jax.random.wrap_key_data(state["_fresh_key_data"])
+                )
             except Exception as e:
                 warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
                 self.fresh_key = None

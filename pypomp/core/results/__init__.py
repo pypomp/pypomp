@@ -14,6 +14,7 @@ from .panel import (
     PanelPompPFilterResult,
     PanelPompMIFResult,
     PanelPompTrainResult,
+    PanelPompDpopTrainResult,
 )
 from .history import ResultsHistory
 
@@ -29,5 +30,6 @@ __all__ = [
     "PanelPompPFilterResult",
     "PanelPompMIFResult",
     "PanelPompTrainResult",
+    "PanelPompDpopTrainResult",
     "ResultsHistory",
 ]

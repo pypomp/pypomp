@@ -56,6 +56,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
         """Convert panel pfilter result to DataFrame."""
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
+        unit_names = self.logLiks.coords["unit"].values
         se_unit = (
             logmeanexp_se(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
             if self.logLiks.shape[-1] > 1
@@ -64,10 +65,10 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         se_shared = np.sqrt(np.sum(se_unit**2, axis=1))
 
         df_ll = (
-            pd.DataFrame(ll, columns=self.logLiks.coords["unit"].values)
+            pd.DataFrame(ll, columns=unit_names)
             .assign(
                 theta_idx=lambda x: range(len(x)),
-                **{"shared logLik": lambda x: x.sum(axis=1)},
+                **{"shared logLik": lambda x: x.loc[:, unit_names].sum(axis=1)},
             )
             .melt(
                 id_vars=["theta_idx", "shared logLik"],
@@ -216,7 +217,7 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         df = df.assign(method="pfilter", iteration=0)
         cols = ["theta_idx", "unit", "iteration", "method", "logLik", "se"]
         other_cols = [c for c in df.columns if c not in cols]
-        return df[cols + other_cols]
+        return df.loc[:, cols + other_cols].copy()
 
     @staticmethod
     def merge(*results: "PanelPompPFilterResult") -> "PanelPompPFilterResult":
@@ -320,4 +321,255 @@ class PanelPompTrainResult(PanelPompEstimationTracesMixin, PanelPompBaseResult):
             results,
             ["optimizer", "J", "M", "eta", "alpha", "alpha_cooling", "method"],
             ["shared_traces", "unit_traces", "logLiks"],
+        )
+
+
+@dataclass(eq=False)
+class PanelPompDpopTrainResult(PanelPompBaseResult):
+    """Result from PanelPomp.dpop_train() method."""
+
+    shared_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    unit_traces: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    theta: "PanelParameters | None" = None
+    optimizer: Optimizer = field(default_factory=Adam)
+    J: int = 0
+    M: int = 0
+    eta: LearningRate | dict[str, float] | float = field(default_factory=lambda: {})
+    alpha: float = 0.97
+    alpha_cooling: float = 1.0
+    process_weight_state: str | None = None
+    decay: float = 0.0
+
+    def __post_init__(self):
+        self.method = "dpop_train"
+
+    @property
+    def _summary_config(self) -> list[tuple[str, str]]:
+        return [
+            ("Number of parameter sets", "theta"),
+            ("Optimizer", "optimizer"),
+            ("Number of particles (J)", "J"),
+            ("Number of iterations (M)", "M"),
+            ("Learning rate (eta)", "eta"),
+            ("Discount factor (alpha)", "alpha"),
+            ("Cooling factor for alpha", "alpha_cooling"),
+            ("Process weight state", "process_weight_state"),
+            ("Decay", "decay"),
+        ]
+
+    def __eq__(self, other) -> bool:  # type: ignore[override]
+        """Structural equality including traces, log-likelihoods, and settings."""
+        if not super().__eq__(other):
+            return False
+
+        if (
+            self.optimizer != other.optimizer
+            or self.J != other.J
+            or self.M != other.M
+            or self.eta != other.eta
+            or self.alpha != other.alpha
+            or self.alpha_cooling != other.alpha_cooling
+            or self.process_weight_state != other.process_weight_state
+            or self.decay != other.decay
+        ):
+            return False
+
+        for name in ["shared_traces", "unit_traces", "logLiks"]:
+            a = getattr(self, name)
+            b = getattr(other, name)
+            if isinstance(a, xr.DataArray) and isinstance(b, xr.DataArray):
+                if not a.equals(b):
+                    return False
+            else:
+                if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True):
+                    return False
+
+        return True
+
+    def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        rep_dim = "theta_idx" if "theta_idx" in self.shared_traces.dims else "replicate"
+        s_df = (
+            self.shared_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"logLik": "shared logLik"})
+        )
+
+        u_df = (
+            self.unit_traces.isel(iteration=-1)
+            .to_dataset(dim="variable")
+            .to_dataframe()
+            .rename(columns={"unitLogLik": "unit logLik"})
+        )
+
+        if "iteration" in s_df.columns:
+            s_df = s_df.drop(columns=["iteration"])
+
+        u_df = u_df.join(s_df, on=rep_dim).reset_index()
+        if rep_dim != "theta_idx":
+            u_df = u_df.rename(columns={rep_dim: "theta_idx"})
+
+        cols = ["theta_idx", "iteration", "shared logLik", "unit", "unit logLik"] + [
+            c
+            for c in u_df.columns
+            if c
+            not in {"theta_idx", "iteration", "shared logLik", "unit", "unit logLik"}
+        ]
+        u_df = u_df[cols]
+
+        assert isinstance(u_df, pd.DataFrame)
+
+        return u_df
+
+    def traces(self) -> pd.DataFrame:
+        """Return panel dpop_train results formatted as traces (long format)."""
+        if self.shared_traces.size == 0:
+            return pd.DataFrame()
+
+        df_s = (
+            self.shared_traces.to_dataset(dim="variable").to_dataframe().reset_index()
+        )
+        if "replicate" in df_s.columns and "theta_idx" not in df_s.columns:
+            df_s = df_s.rename(columns={"replicate": "theta_idx"})
+        df_s["unit"] = "shared"
+
+        df_u = self.unit_traces.to_dataset(dim="variable").to_dataframe().reset_index()
+        if "replicate" in df_u.columns and "theta_idx" not in df_u.columns:
+            df_u = df_u.rename(columns={"replicate": "theta_idx"})
+        df_u = df_u.rename(columns={"unitLogLik": "logLik"})
+
+        meta_cols = {"theta_idx", "iteration", "logLik", "unit"}
+        shared_params = [c for c in df_s.columns if c not in meta_cols]
+
+        if shared_params:
+            df_u = df_u.merge(
+                df_s[["theta_idx", "iteration"] + shared_params],
+                on=["theta_idx", "iteration"],
+                how="left",
+            )
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            df = pd.concat([df_s, df_u], ignore_index=True).assign(method="dpop_train")
+        cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
+        return df.loc[:, cols + [c for c in df.columns if c not in cols]].copy()
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def print_summary(self, n: int = 5):
+        """Print summary of panel dpop_train result."""
+        print(f"Method: {self.method}")
+        print(f"Optimizer: {self.optimizer}")
+        print(f"Number of particles (J): {self.J}")
+        print(f"Number of iterations (M): {self.M}")
+        print(f"Learning rate (eta): {self.eta}")
+        print(f"Discount factor (alpha): {self.alpha}")
+        print(f"Cooling factor for alpha: {self.alpha_cooling}")
+        print(f"Process weight state: {self.process_weight_state}")
+        print(f"Decay: {self.decay}")
+        print(f"Execution time: {self.execution_time} seconds")
+        df = self.to_dataframe()
+        if not df.empty:
+            print(f"\nTop {n} Results:")
+            df_sorted = df.sort_values("shared logLik", ascending=False).head(n)
+            print(df_sorted.to_string())
+
+    @staticmethod
+    def merge(*results: "PanelPompDpopTrainResult") -> "PanelPompDpopTrainResult":
+        """Merge parameter sets from multiple PanelPompDpopTrainResult objects."""
+        if len(results) == 0:
+            raise ValueError(
+                "At least one PanelPompDpopTrainResult object must be provided."
+            )
+        first = results[0]
+
+        for result in results:
+            if not isinstance(result, type(first)):
+                raise TypeError(
+                    "All merged objects must be of type PanelPompDpopTrainResult."
+                )
+            if (
+                result.optimizer != first.optimizer
+                or result.J != first.J
+                or result.M != first.M
+                or result.eta != first.eta
+                or result.alpha != first.alpha
+                or result.alpha_cooling != first.alpha_cooling
+            ):
+                raise ValueError(
+                    "All PanelPompDpopTrainResult objects must have the same optimizer, J, M, eta, alpha, and alpha_cooling."
+                )
+
+        merged_theta = (
+            PanelParameters.merge(*[r.theta for r in results if r.theta is not None])
+            if any(r.theta is not None for r in results)
+            else None
+        )
+
+        def _theta_idx_array(array: xr.DataArray) -> xr.DataArray:
+            if "replicate" in array.dims and "theta_idx" not in array.dims:
+                array = array.rename({"replicate": "theta_idx"})
+            return array
+
+        shared_trace_arrays = [
+            _theta_idx_array(r.shared_traces)
+            for r in results
+            if r.shared_traces.size > 0
+        ]
+        merged_shared_traces = (
+            xr.concat(shared_trace_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
+            if shared_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        unit_trace_arrays = [
+            _theta_idx_array(r.unit_traces) for r in results if r.unit_traces.size > 0
+        ]
+        merged_unit_traces = (
+            xr.concat(unit_trace_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
+            if unit_trace_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        logLik_arrays = [
+            _theta_idx_array(r.logLiks) for r in results if r.logLiks.size > 0
+        ]
+        merged_logLiks = (
+            xr.concat(logLik_arrays, dim="theta_idx").assign_coords(
+                theta_idx=lambda x: np.arange(x.sizes["theta_idx"])
+            )
+            if logLik_arrays
+            else xr.DataArray([])
+        )  # type: ignore[assignment]
+
+        execution_times = [
+            r.execution_time for r in results if r.execution_time is not None
+        ]
+        max_execution_time = max(execution_times) if execution_times else None
+
+        return PanelPompDpopTrainResult(
+            method=first.method,
+            execution_time=max_execution_time,
+            key=first.key,
+            theta=merged_theta,
+            shared_traces=merged_shared_traces,
+            unit_traces=merged_unit_traces,
+            logLiks=merged_logLiks,
+            optimizer=first.optimizer,
+            J=first.J,
+            M=first.M,
+            eta=first.eta,
+            alpha=first.alpha,
+            alpha_cooling=first.alpha_cooling,
+            process_weight_state=first.process_weight_state,
+            decay=first.decay,
         )

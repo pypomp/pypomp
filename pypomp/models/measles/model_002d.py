@@ -1,25 +1,46 @@
-"""He10 model without alpha or mu parameters - DPOP enabled with gradient-stable dmeas
+"""He10 model with iota log-log linear in 1950 population — DPOP enabled
 
-Gradient stability fixes:
-1. rproc: Use jax.random.gamma instead of fast_gamma (stable reparameterization)
-2. rproc: Use a score-only Euler multinomial log-weight for DPOP
-3. dmeas: Use custom JVP for log_cdf_diff (prevents 0 * inf = NaN in extreme z regions)
-4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
+This is the DPOP-enabled version of model_002, combining:
+- model_002's iota parameterization: iota = exp(iota1 + iota2 * log(pop_1950))
+  where iota1 and iota2 are shared parameters in a panel model
+- model_001d's gradient-stability fixes for DPOP training:
+  1. rproc: sample_and_log_prob for unified gradient path + logw accumulation
+  2. dmeas: custom JVP log_cdf_diff to prevent 0 * inf = NaN
+  3. dmeas: NaN-safe y handling
+
+The covariate "std_log_pop_1950" must be present in covars. This is the
+z-scored log(pop_1950): (log(pop_1950) - mean) / sd, where mean and sd are
+computed across all units in the panel. This standardization matches
+Wheeler et al. (2025). The raw "log_pop_1950" is added by measlesPomp.py;
+the standardized version must be computed at the panel level.
+
+Parameters:
+- R0: Basic reproduction number
+- sigma: 1/latent period
+- gamma: 1/infectious period
+- iota1: Intercept of log-log linear model for imported infections
+- iota2: Slope of log-log linear model (on log(pop_1950) scale)
+- rho: Reporting probability
+- sigmaSE: Extra-demographic stochasticity intensity
+- psi: Reporting overdispersion
+- cohort: Cohort effect
+- amplitude: Seasonal amplitude
+- S_0, E_0, I_0, R_0: Initial state proportions
 """
+
+from typing import cast
 
 import jax.numpy as jnp
 import jax
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
-from pypomp.models.ctmc_multinom import _euler_multinomial_probs
-from pypomp.random.binom import fast_multinomial
+from pypomp.models.ctmc_multinom import sample_and_log_prob
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
-from pypomp.types import ParamDict
 
 
 # =========================================================================
-# Custom JVP log_cdf_diff for gradient stability
+# Custom JVP log_cdf_diff for gradient stability (from model_001d)
 # =========================================================================
 LOG_SQRT_2PI = 0.5 * jnp.log(2.0 * jnp.pi)
 
@@ -48,18 +69,15 @@ def log_cdf_diff(zh, zl):
 def _log_cdf_diff_jvp(primals, tangents):
     zh, zl = primals
     tzh, tzl = tangents
-    y = log_cdf_diff(zh, zl)
+    y = cast(jax.Array, log_cdf_diff(zh, zl))
     lphi_h = _log_phi(zh)
     lphi_l = _log_phi(zl)
 
     LOG_MAX = jnp.log(jnp.finfo(zh.dtype).max)
 
-    # 计算 log-space 梯度
     diff_h = lphi_h - y
     diff_l = lphi_l - y
 
-    # 处理 y=-inf 退化情况（当 zh≈zl 时）
-    # diff = lphi - (-inf) = +inf，需要映射到 -LOG_MAX 使 exp() → 0
     safe_diff_h = jnp.where(
         jnp.isfinite(diff_h), jnp.clip(diff_h, -LOG_MAX, LOG_MAX), -LOG_MAX
     )
@@ -74,31 +92,8 @@ def _log_cdf_diff_jvp(primals, tangents):
 
 
 def log_cdf_single(z):
-    """log Φ(z)，使用相同的 stable JVP 路径"""
+    """log Φ(z), using the same stable JVP path"""
     return log_cdf_diff(z, -jnp.inf)
-
-
-def _sample_and_score_log_prob(N, rates, dt, key):
-    """Draw an Euler-multinomial increment and return its DPOP score surrogate."""
-    probs = _euler_multinomial_probs(rates, dt)
-    N = jnp.asarray(N, dtype=probs.dtype)
-    sample_full = fast_multinomial(
-        key, jax.lax.stop_gradient(N), jax.lax.stop_gradient(probs)
-    )
-    counts = jax.lax.stop_gradient(sample_full)
-    probs_safe = jnp.clip(probs, 1.0e-12, 1.0)
-    logw_score = jnp.sum(counts * jnp.log(probs_safe))
-    key, _ = jax.random.split(key)
-    return counts[1:], logw_score, key
-
-
-def _sample_poisson_and_score_log_prob(lam, key):
-    """Draw a Poisson increment and return its DPOP score surrogate."""
-    sample = fast_poisson(key, jax.lax.stop_gradient(lam)).astype(jnp.float32)
-    count = jax.lax.stop_gradient(sample)
-    lam_safe = jnp.clip(lam, 1.0e-12)
-    logw_score = count * jnp.log(lam_safe) - lam
-    return count, logw_score
 
 
 # =========================================================================
@@ -108,16 +103,17 @@ param_names = (
     "R0",  # 0 - basic reproduction number
     "sigma",  # 1 - 1/latent period
     "gamma",  # 2 - 1/infectious period
-    "iota",  # 3 - imported infections
-    "rho",  # 4 - reporting rate
-    "sigmaSE",  # 5 - extra-demographic stochasticity
-    "psi",  # 6 - overdispersion in measurement
-    "cohort",  # 7 - cohort effect
-    "amplitude",  # 8 - seasonal amplitude
-    "S_0",  # 9 - initial susceptible fraction
-    "E_0",  # 10 - initial exposed fraction
-    "I_0",  # 11 - initial infected fraction
-    "R_0",  # 12 - initial recovered fraction
+    "iota1",  # 3 - intercept of log-iota ~ log-pop regression
+    "iota2",  # 4 - slope of log-iota ~ log-pop regression
+    "rho",  # 5 - reporting rate
+    "sigmaSE",  # 6 - extra-demographic stochasticity
+    "psi",  # 7 - overdispersion in measurement
+    "cohort",  # 8 - cohort effect
+    "amplitude",  # 9 - seasonal amplitude
+    "S_0",  # 10 - initial susceptible fraction
+    "E_0",  # 11 - initial exposed fraction
+    "I_0",  # 12 - initial infected fraction
+    "R_0",  # 13 - initial recovered fraction
 )
 
 # State includes "logw" for DPOP process log-density
@@ -157,13 +153,20 @@ def rproc(X_, theta_, key, covars, t, dt):
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
     gamma = theta_["gamma"]
-    iota = theta_["iota"]
+    iota1 = theta_["iota1"]
+    iota2 = theta_["iota2"]
     sigmaSE = theta_["sigmaSE"]
     cohort = theta_["cohort"]
     amplitude = theta_["amplitude"]
     pop = covars["pop"]
     birthrate = covars["birthrate"]
     mu = 0.02
+
+    # iota from log-log linear model using standardized 1950 population
+    # std_log_pop_1950 = (log(pop_1950) - mean) / sd across panel units
+    # (computed at panel level, injected as covariate)
+    std_log_pop_1950 = covars["std_log_pop_1950"]
+    iota = jnp.exp(iota1 + iota2 * std_log_pop_1950)
 
     # Cohort effect timing
     t_mod = t - jnp.floor(t)
@@ -191,31 +194,25 @@ def rproc(X_, theta_, key, covars, t, dt):
     foi = beta * (I + iota) / pop
 
     # White noise (extrademographic stochasticity)
-    # FIX 1: Use jax.random.gamma for gradient stability
     keys = jax.random.split(key, 3)
     dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
 
     # Poisson births
-    births, lp_birth = _sample_poisson_and_score_log_prob(br * dt, keys[1])
+    births = fast_poisson(keys[1], br * dt).astype(jnp.float32)
 
     # Transition rates for Euler-multinomial steps
     rates_S = jnp.array([foi * dw / dt, mu])
     rates_E = jnp.array([sigma, mu])
     rates_I = jnp.array([gamma, mu])
 
+    # Use sample_and_log_prob for unified gradient path (DPOP fix)
     key_proc = keys[2]
-    (StoE, StoDeath), lp_S, key_proc = _sample_and_score_log_prob(
-        S, rates_S, dt, key_proc
-    )
-    (EtoI, EtoDeath), lp_E, key_proc = _sample_and_score_log_prob(
-        E, rates_E, dt, key_proc
-    )
-    (ItoR, ItoDeath), lp_I, key_proc = _sample_and_score_log_prob(
-        I, rates_I, dt, key_proc
-    )
+    (StoE, StoDeath), lp_S, key_proc = sample_and_log_prob(S, rates_S, dt, key_proc)
+    (EtoI, EtoDeath), lp_E, key_proc = sample_and_log_prob(E, rates_E, dt, key_proc)
+    (ItoR, ItoDeath), lp_I, key_proc = sample_and_log_prob(I, rates_I, dt, key_proc)
 
-    # Accumulate process log-density
-    logw_step = lp_birth + lp_S + lp_E + lp_I
+    # Accumulate process log-density for DPOP
+    logw_step = lp_S + lp_E + lp_I
     logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
     logw = logw + logw_step
 
@@ -231,13 +228,7 @@ def rproc(X_, theta_, key, covars, t, dt):
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):
-    """
-    Gradient-stable measurement density using custom JVP.
-
-    Fixes:
-    - FIX 3: Custom JVP for log_cdf_diff handles extreme z values without 0 * inf = NaN
-    - FIX 4: Replace NaN y before computing z, preventing NaN propagation
-    """
+    """Gradient-stable measurement density using custom JVP (from model_001d)."""
     rho = theta_["rho"]
     psi = theta_["psi"]
     C = X_["C"]
@@ -245,11 +236,9 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
 
     tol = 1e-12
 
-    # FIX 4: Replace NaN y before computing z
-    # jnp.where computes BOTH branches, so NaN in y propagates to gradient
-    # By replacing NaN with 0 first, z computation stays finite
+    # Replace NaN y before computing z (prevents NaN propagation through jnp.where)
     y_is_nan = jnp.isnan(y_raw)
-    y = jnp.array(jnp.where(y_is_nan, 0.0, y_raw))
+    y = cast(jax.Array, jnp.where(y_is_nan, 0.0, y_raw))
 
     # Mean and variance
     Cpos = jnp.maximum(C, 0.0)
@@ -262,13 +251,14 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     z_hi = (y + 0.5 - m) / s
     z_lo = (y - 0.5 - m) / s
 
-    # FIX 3: Use custom JVP log_cdf_diff for gradient stability
-    ll_box = jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
+    # Use custom JVP log_cdf_diff for gradient stability
+    ll_box = cast(
+        jax.Array, jnp.where(y > tol, log_cdf_diff(z_hi, z_lo), log_cdf_single(z_hi))
+    )
 
     loglik = jnp.maximum(ll_box, jnp.log(tol))
 
-    # FIX 4 continued: Zero out result for NaN y (instead of using where)
-    # Multiplying by 0 gives gradient 0, not NaN
+    # Zero out result for NaN y (multiplying by 0 gives gradient 0, not NaN)
     loglik = loglik * (1.0 - y_is_nan.astype(loglik.dtype))
 
     return loglik
@@ -285,14 +275,15 @@ def rmeas(X_, theta_, key, covars=None, t=None):
     return jnp.where(cases > 0.0, jnp.round(cases), 0.0)
 
 
-def to_est(theta: ParamDict) -> ParamDict:
+def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     SEIR_0 = jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     S_0, E_0, I_0, R_0 = jnp.log(SEIR_0 / jnp.sum(SEIR_0))
     return {
         "R0": jnp.log(theta["R0"]),
         "sigma": jnp.log(theta["sigma"]),
         "gamma": jnp.log(theta["gamma"]),
-        "iota": jnp.log(theta["iota"]),
+        "iota1": theta["iota1"],  # already unconstrained
+        "iota2": theta["iota2"],  # already unconstrained
         "sigmaSE": jnp.log(theta["sigmaSE"]),
         "psi": jnp.log(theta["psi"]),
         "cohort": jspecial.logit(theta["cohort"]),
@@ -305,7 +296,7 @@ def to_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def from_est(theta: ParamDict) -> ParamDict:
+def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
     SEIR_0 = jnp.exp(
         jnp.array([theta["S_0"], theta["E_0"], theta["I_0"], theta["R_0"]])
     )
@@ -314,7 +305,8 @@ def from_est(theta: ParamDict) -> ParamDict:
         "R0": jnp.exp(theta["R0"]),
         "sigma": jnp.exp(theta["sigma"]),
         "gamma": jnp.exp(theta["gamma"]),
-        "iota": jnp.exp(theta["iota"]),
+        "iota1": theta["iota1"],  # already unconstrained
+        "iota2": theta["iota2"],  # already unconstrained
         "sigmaSE": jnp.exp(theta["sigmaSE"]),
         "psi": jnp.exp(theta["psi"]),
         "cohort": jspecial.expit(theta["cohort"]),

@@ -169,3 +169,15 @@ def test_measles_clean():
         .values
     )
     assert not london_cleaned2
+
+
+def test_measles_invalid_interp_method():
+    theta = BASE_THETA.copy()
+    del theta["mu"]
+    del theta["alpha"]
+    with pytest.raises(ValueError, match="interp_method invalid_method not recognized"):
+        pp.models.UKMeasles.Pomp(
+            unit=["London"],
+            theta=pp.PompParameters(theta),
+            interp_method="invalid_method",
+        )

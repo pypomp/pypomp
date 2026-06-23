@@ -104,7 +104,7 @@ def _dpop_internal(
 
     # Use checkpointing to keep memory usage manageable when backpropagating
     # through many observation times.
-    dpop_helper_2 = jax.checkpoint(
+    dpop_helper_2 = jax.checkpoint(  # pyright: ignore[reportPrivateImportUsage]
         partial(
             _dpop_helper,
             ys=ys,

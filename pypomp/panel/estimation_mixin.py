@@ -990,6 +990,9 @@ class PanelEstimationMixin(Base):
         """
         Estimate parameters using DPOP gradient-descent optimization (SGD/Adam).
 
+        .. warning::
+            This method is experimental. Its API and behavior are subject to change in future releases.
+
         This method performs stochastic gradient descent (or Adam) iterations over
         the DPOP likelihood of the panel POMP. It operates by drawing particles for a
         subset of units (defined by `chunk_size`), calculating gradients for both
@@ -1024,6 +1027,12 @@ class PanelEstimationMixin(Base):
             theta (PanelParameters, optional): Initial parameter estimates.
                 If None, uses the current `theta` attribute.
         """
+        warnings.warn(
+            "dpop_train is experimental and its API and behavior are subject to change.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         if theta_obj_in is None:

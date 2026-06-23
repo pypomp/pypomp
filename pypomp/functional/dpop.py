@@ -1,3 +1,4 @@
+import warnings
 import jax
 from .structs import PompStruct
 from ..core.algorithms.dpop import _vmapped_dpop_internal
@@ -16,6 +17,9 @@ def dpop(
     filter, intended for users who need to compose it within custom JAX
     loops or higher-order functions. For a more user-friendly (but impurely-functional) interface, see
     :meth:`pypomp.core.pomp.Pomp.dpop_train`.
+
+    .. warning::
+        This function is experimental. Its API and behavior are subject to change in future releases.
 
     This function is analogous to :func:`pypomp.functional.mop` as a fully differentiable objective function
     for parameter estimation. However, it additionally
@@ -44,6 +48,11 @@ def dpop(
         To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
         these arrays, you can use :func:`pypomp.functional.align_params`.
     """
+    warnings.warn(
+        "dpop is experimental and its API and behavior are subject to change.",
+        category=FutureWarning,
+        stacklevel=2,
+    )
 
     return _vmapped_dpop_internal(
         thetas_array,

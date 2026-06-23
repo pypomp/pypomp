@@ -886,6 +886,9 @@ class Pomp:
         """
         Optimizes model parameters using the DPOP differentiable particle filter and gradient-based methods.
 
+        .. warning::
+            This method is experimental. Its API and behavior are subject to change in future releases.
+
         This method trains the model parameters to maximize the DPOP objective function using
         first-order optimizers like Adam or SGD, with optional learning rate decay. Gradients
         are computed efficiently via JAX reverse-mode automatic differentiation.
@@ -929,6 +932,12 @@ class Pomp:
         theta_history : jax.Array, shape (M+1, p)
             Parameter vector (estimation space) at each step.
         """
+        warnings.warn(
+            "dpop_train is experimental and its API and behavior are subject to change.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+
         from .algorithms.train_dpop import dpop_train as _dpop_train
 
         new_key, _ = self._update_fresh_key(key)

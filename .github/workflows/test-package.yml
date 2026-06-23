@@ -9,6 +9,12 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_call:
+    inputs:
+      run-heavy:
+        description: 'Whether to run heavy tests'
+        required: false
+        type: boolean
+        default: false
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -45,9 +51,15 @@ jobs:
 #         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
 #         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
+      env:
+        RUN_HEAVY: ${{ inputs.run-heavy }}
       run: |
-        pytest --cov --junitxml=junit.xml -o junit_family=legacy
-        
+        if [ "$RUN_HEAVY" = "true" ]; then
+          pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        else
+          pytest -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
+        fi
+
     - name: Upload results to Codecov
       uses: codecov/codecov-action@v4
       with:

@@ -44,22 +44,26 @@ def _loess_smooth_1d(
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
     try:
-        res = loess_1d(
-            x,
-            y,
-            xnew=grid,
-            degree=int(degree),
-            frac=float(span),
-            rotate=False,
-        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            res = loess_1d(
+                x,
+                y,
+                xnew=grid,
+                degree=int(degree),
+                frac=float(span),
+                rotate=False,
+            )
     except np.linalg.LinAlgError:
         # loess_1d can fail with LinAlgError if the internal robust iterations
         # encounter mad=0 (perfect fit), leading to inf weights that clip to 0.
-        # Retrying with a tiny sigy forces it to avoid mad-based scaling.
-        # TODO: This is just a bandaid so GitHub Actions will pass the CI tests for
-        # now. Figure out a more permanent solution.
+        # Retrying with a large sigy forces it to bypass mad-based scaling and use
+        # robust weights of 1.0.
+        # When sigy is large, the biweight uu is essentially 0.0, resulting in robust
+        # weights of 1.0. This effectively bypasses robust downweighting and performs
+        # standard locally-weighted least squares (which is the default behavior in R's
+        # pomp package, i.e., family = "gaussian").
         warnings.warn(
-            "LinAlgError in loess_1d, retrying with 1e-10 sigy",
+            "LinAlgError in loess_1d, retrying with 1e10 sigy",
             RuntimeWarning,
         )
         res = loess_1d(
@@ -69,7 +73,7 @@ def _loess_smooth_1d(
             degree=int(degree),
             frac=float(span),
             rotate=False,
-            sigy=np.full_like(y, 1e-10),
+            sigy=np.full_like(y, 1e10),
         )
 
     y_sm = res[1]

@@ -123,3 +123,54 @@ def test_qchisq_matches_scipy():
     # Sanity check on the private helper; values are well-known.
     assert _qchisq(0.95, df=1) == pytest.approx(3.841458, rel=1e-4)
     assert _qchisq(0.99, df=1) == pytest.approx(6.634897, rel=1e-4)
+
+
+def test_mcap_r_comparison():
+    # Hardcoded test data used to compare with R pomp::mcap
+    x = np.linspace(0.1, 0.5, 10)
+    y = -0.5 * (x - 0.3) ** 2 + np.array(
+        [0.01, -0.02, 0.03, -0.01, 0.02, -0.03, 0.01, -0.02, 0.03, -0.01]
+    )
+
+    # R pomp::mcap reference outputs:
+    # mle: 0.23293293
+    # ci: (0.1, 0.5)
+    # delta: 1.93755414
+    # se_stat: 0.35499986
+    # se_mc: 0.03322532
+    # se_total: 0.35655129
+    # quadratic_max: 0.23196971
+
+    result = mcap(x, y)
+
+    # MLE and quadratic peak should be close to R values
+    assert abs(result.mle - 0.23293293) < 0.05
+    assert abs(result.quadratic_max - 0.23196971) < 0.05
+
+    # Confidence intervals should match
+    assert result.ci[0] is not None and result.ci[1] is not None
+    assert abs(result.ci[0] - 0.1) < 1e-5
+    assert abs(result.ci[1] - 0.5) < 1e-5
+
+    # Delta and SE components should match within a reasonable tolerance
+    # due to loess implementation differences
+    assert abs(result.delta - 1.93755414) < 0.1
+    assert abs(result.se_stat - 0.35499986) < 0.1
+    assert abs(result.se_mc - 0.03322532) < 0.05
+    assert abs(result.se_total - 0.35655129) < 0.1
+
+
+def test_mcap_loess_linalg_error_fallback():
+    # Construct input data that triggers mad = 0 (perfect fit in local window)
+    # leading to LinAlgError in standard loess_1d robust iterations.
+    x = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+    y = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+
+    # Calling mcap on this should trigger the fallback, raise the RuntimeWarning,
+    # and produce a valid, non-degenerate smoothed profile.
+    with pytest.warns(RuntimeWarning, match="LinAlgError in loess_1d"):
+        result = mcap(x, y, span=0.75, loess_degree=1)
+
+    # Verify the smoothed profile is NOT degenerate (all zeroes)
+    assert not np.allclose(result.fit["smoothed"], 0.0)
+    assert np.max(result.fit["smoothed"]) > 3.0

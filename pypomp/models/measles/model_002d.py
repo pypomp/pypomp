@@ -100,20 +100,20 @@ def log_cdf_single(z):
 # Model definition
 # =========================================================================
 param_names = (
-    "R0",         # 0 - basic reproduction number
-    "sigma",      # 1 - 1/latent period
-    "gamma",      # 2 - 1/infectious period
-    "iota1",      # 3 - intercept of log-iota ~ log-pop regression
-    "iota2",      # 4 - slope of log-iota ~ log-pop regression
-    "rho",        # 5 - reporting rate
-    "sigmaSE",    # 6 - extra-demographic stochasticity
-    "psi",        # 7 - overdispersion in measurement
-    "cohort",     # 8 - cohort effect
+    "R0",  # 0 - basic reproduction number
+    "sigma",  # 1 - 1/latent period
+    "gamma",  # 2 - 1/infectious period
+    "iota1",  # 3 - intercept of log-iota ~ log-pop regression
+    "iota2",  # 4 - slope of log-iota ~ log-pop regression
+    "rho",  # 5 - reporting rate
+    "sigmaSE",  # 6 - extra-demographic stochasticity
+    "psi",  # 7 - overdispersion in measurement
+    "cohort",  # 8 - cohort effect
     "amplitude",  # 9 - seasonal amplitude
-    "S_0",        # 10 - initial susceptible fraction
-    "E_0",        # 11 - initial exposed fraction
-    "I_0",        # 12 - initial infected fraction
-    "R_0",        # 13 - initial recovered fraction
+    "S_0",  # 10 - initial susceptible fraction
+    "E_0",  # 11 - initial exposed fraction
+    "I_0",  # 12 - initial infected fraction
+    "R_0",  # 13 - initial recovered fraction
 )
 
 # State includes "logw" for DPOP process log-density
@@ -142,8 +142,13 @@ def rinit(theta_, key, covars, t0=None):
 
 def rproc(X_, theta_, key, covars, t, dt):
     S, E, I, R, W, C, logw = (
-        X_["S"], X_["E"], X_["I"], X_["R"],
-        X_["W"], X_["C"], X_["logw"],
+        X_["S"],
+        X_["E"],
+        X_["I"],
+        X_["R"],
+        X_["W"],
+        X_["C"],
+        X_["logw"],
     )
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
@@ -277,8 +282,8 @@ def to_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "R0": jnp.log(theta["R0"]),
         "sigma": jnp.log(theta["sigma"]),
         "gamma": jnp.log(theta["gamma"]),
-        "iota1": theta["iota1"],       # already unconstrained
-        "iota2": theta["iota2"],       # already unconstrained
+        "iota1": theta["iota1"],  # already unconstrained
+        "iota2": theta["iota2"],  # already unconstrained
         "sigmaSE": jnp.log(theta["sigmaSE"]),
         "psi": jnp.log(theta["psi"]),
         "cohort": jspecial.logit(theta["cohort"]),
@@ -300,8 +305,8 @@ def from_est(theta: dict[str, jax.Array]) -> dict[str, jax.Array]:
         "R0": jnp.exp(theta["R0"]),
         "sigma": jnp.exp(theta["sigma"]),
         "gamma": jnp.exp(theta["gamma"]),
-        "iota1": theta["iota1"],       # already unconstrained
-        "iota2": theta["iota2"],       # already unconstrained
+        "iota1": theta["iota1"],  # already unconstrained
+        "iota2": theta["iota2"],  # already unconstrained
         "sigmaSE": jnp.exp(theta["sigmaSE"]),
         "psi": jnp.exp(theta["psi"]),
         "cohort": jspecial.expit(theta["cohort"]),

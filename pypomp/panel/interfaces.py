@@ -6,6 +6,7 @@ import jax
 from ..core.pomp import Pomp
 from ..core.parameters import PanelParameters
 from ..core.results import ResultsHistory
+from ..functional.structs import PanelPompStruct
 
 
 # This Protocol defines what attributes the Mixins can expect to exist
@@ -31,6 +32,7 @@ class PanelPompInterface(Protocol):
     ) -> jnp.ndarray: ...
 
     def get_unit_names(self) -> list[str]: ...
+    def to_struct(self) -> PanelPompStruct: ...
 
     @overload
     def simulate(

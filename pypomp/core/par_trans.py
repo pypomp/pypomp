@@ -25,6 +25,16 @@ class ParTrans:
         self.to_est: Callable[[ParamDict], ParamDict] = to_est or _to_est_default
         self.from_est: Callable[[ParamDict], ParamDict] = from_est or _from_est_default
 
+    def _get_transform_fn(
+        self, direction: Literal["to_est", "from_est"]
+    ) -> Callable[[ParamDict], ParamDict]:
+        """
+        Validate direction and return the corresponding transformation function.
+        """
+        if direction not in ("to_est", "from_est"):
+            raise ValueError(f"Invalid direction: {direction}")
+        return self.to_est if direction == "to_est" else self.from_est
+
     def _panel_transform(
         self,
         theta: dict[str, pd.DataFrame | None],
@@ -34,7 +44,7 @@ class ParTrans:
         Transform shared and unit-specific parameters for a single replicate.
         Input theta contains 'shared' and/or 'unit_specific' DataFrames.
         """
-        func = self.to_est if direction == "to_est" else self.from_est
+        func = self._get_transform_fn(direction)
 
         s_df = theta.get("shared")
         u_df = theta.get("unit_specific")
@@ -44,15 +54,18 @@ class ParTrans:
         # Pre-calculate shared dictionary (param -> value)
         s_vals = cast(dict, s_df.iloc[:, 0].to_dict()) if s_df is not None else {}
 
+        def get_trans(u_vals_dict: dict) -> ParamDict:
+            ctx = s_vals.copy()
+            ctx.update(u_vals_dict)
+            return func(cast(ParamDict, ctx))
+
         # 1. Transform Shared Parameters
         if s_df is not None:
             # Context: Shared values + First unit's specific values (if any)
-            ctx = s_vals.copy()
-            if u_df is not None:
-                first_unit = u_df.columns[0]
-                ctx.update(cast(dict, u_df[first_unit].to_dict()))
-
-            trans: ParamDict = func(cast(ParamDict, ctx))
+            first_u_vals = (
+                cast(dict, u_df.iloc[:, 0].to_dict()) if u_df is not None else {}
+            )
+            trans = get_trans(first_u_vals)
 
             # Filter output back to just shared keys
             new_s_vals = {k: trans[k] for k in s_vals}
@@ -67,10 +80,8 @@ class ParTrans:
             new_u_data = {}
             for unit in u_df.columns:
                 # Context: Shared values + This unit's specific values
-                ctx = s_vals.copy()
-                ctx.update(cast(dict, u_df[unit].to_dict()))
-
-                trans = func(cast(ParamDict, ctx))
+                unit_u_vals = cast(dict, u_df[unit].to_dict())
+                trans = get_trans(unit_u_vals)
 
                 # Filter output back to specific keys (maintaining order)
                 new_u_data[unit] = [trans[k] for k in u_df.index]
@@ -97,12 +108,37 @@ class ParTrans:
         """
         Convert the theta dictionary values from jax.Array to float.
         """
-        if direction not in ("to_est", "from_est"):
-            raise ValueError(f"Invalid direction: {direction}")
-
-        func = self.to_est if direction == "to_est" else self.from_est
+        func = self._get_transform_fn(direction)
         theta_out = func(dict(theta))
         return {k: float(v) for k, v in theta_out.items()}
+
+    def _transform_array_jax(
+        self,
+        param_array: jax.Array,
+        param_names: list[str],
+        direction: Literal["to_est", "from_est"],
+    ) -> jax.Array:
+        """
+        Transform a JAX parameter array to or from the estimation parameter space.
+        """
+        transform_fn = self._get_transform_fn(direction)
+
+        original_shape = param_array.shape
+        n_params = original_shape[-1]
+        if n_params == 0:
+            return param_array
+
+        param_array_2d = param_array.reshape(-1, n_params)
+
+        def transform_single_row(row):
+            param_dict = dict(zip(param_names, row))
+            transformed_dict = transform_fn(param_dict)
+            return jnp.stack([transformed_dict[name] for name in param_names])
+
+        transform_vectorized = jax.vmap(transform_single_row)
+        transformed_jax = transform_vectorized(param_array_2d)
+
+        return transformed_jax.reshape(original_shape)
 
     def _transform_array(
         self,
@@ -124,30 +160,90 @@ class ParTrans:
         Returns:
             Transformed parameter array with the same shape as input
         """
-        if direction not in ["to_est", "from_est"]:
-            raise ValueError(f"Invalid direction: {direction}")
+        transformed_jax = self._transform_array_jax(
+            jnp.array(param_array), param_names, direction
+        )
+        return np.array(transformed_jax)
 
-        transform_fn = self.to_est if direction == "to_est" else self.from_est
+    def _transform_panel_array_jax(
+        self,
+        shared_array: jax.Array,  # shape (..., n_shared)
+        unit_array: jax.Array,  # shape (..., U, n_spec)
+        shared_names: list[str],
+        unit_specific_names: list[str],
+        direction: Literal["to_est", "from_est"],
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Transform shared and unit-specific JAX array parameters using user-defined ParTrans.
+        Handles arbitrary batch dimensions by flattening.
+        """
+        n_shared = len(shared_names)
+        n_spec = len(unit_specific_names)
 
-        original_shape = param_array.shape
+        if n_shared == 0 and n_spec == 0:
+            return shared_array, unit_array
 
-        if len(original_shape) == 1:
-            param_array_2d = param_array.reshape(1, -1)
-        else:
-            param_array_2d = param_array.reshape(-1, original_shape[-1])
+        orig_shared_shape = shared_array.shape
+        orig_unit_shape = unit_array.shape
 
-        def transform_single_row(row):
-            param_dict = dict(zip(param_names, row))
-            transformed_dict = transform_fn(param_dict)
-            return jnp.array([transformed_dict[name] for name in param_names])
+        # Flatten leading dimensions
+        batch_size = 1
+        for dim in orig_shared_shape[:-1]:
+            batch_size *= dim
 
-        transform_vectorized = jax.vmap(transform_single_row)
+        shared_flat = (
+            shared_array.reshape(-1, n_shared)
+            if n_shared > 0
+            else jnp.zeros((batch_size, 0))
+        )
+        unit_flat = (
+            unit_array.reshape(-1, orig_unit_shape[-2], n_spec)
+            if n_spec > 0
+            else jnp.zeros((batch_size, orig_unit_shape[-2], 0))
+        )
 
-        param_jax = jnp.array(param_array_2d)
-        transformed_jax = transform_vectorized(param_jax)
-        transformed_array = np.array(transformed_jax)
+        func = self._get_transform_fn(direction)
 
-        return transformed_array.reshape(original_shape)
+        def transform_single_rep(s_val, u_vals):
+            # s_val: shape (n_shared,)
+            # u_vals: shape (U, n_spec)
+            def get_trans(u_val):
+                ctx = {}
+                if n_shared > 0:
+                    ctx.update(zip(shared_names, s_val))
+                if n_spec > 0:
+                    ctx.update(zip(unit_specific_names, u_val))
+                return func(ctx)
+
+            if n_shared > 0:
+                first_u_val = u_vals[0] if n_spec > 0 else jnp.zeros(0)
+                trans = get_trans(first_u_val)
+                s_val_new = jnp.stack([trans[name] for name in shared_names])
+            else:
+                s_val_new = s_val
+
+            if n_spec > 0:
+
+                def transform_unit(u_val):
+                    trans = get_trans(u_val)
+                    return jnp.stack([trans[name] for name in unit_specific_names])
+
+                u_vals_new = jax.vmap(transform_unit)(u_vals)
+            else:
+                u_vals_new = u_vals
+
+            return s_val_new, u_vals_new
+
+        shared_transformed, unit_transformed = jax.vmap(transform_single_rep)(
+            shared_flat, unit_flat
+        )
+
+        return (
+            shared_transformed.reshape(orig_shared_shape)
+            if n_shared > 0
+            else shared_array,
+            unit_transformed.reshape(orig_unit_shape) if n_spec > 0 else unit_array,
+        )
 
     def _transform_panel_traces(
         self,
@@ -182,72 +278,55 @@ class ParTrans:
         if shared_traces is None and unit_traces is None:
             return None, None
 
-        transform_fn = self.to_est if direction == "to_est" else self.from_est
-
         n_shared = len(shared_param_names)
         n_spec = len(unit_param_names)
 
         shared_out = None
         unit_out = None
 
-        if shared_traces is not None and n_shared > 0:
-            n_reps, n_iters, _ = shared_traces.shape
-            shared_out = shared_traces.copy()
-
-            def transform_shared_single(shared_vals, unit_vals_for_context):
-                param_dict = dict(zip(shared_param_names, shared_vals))
-                if n_spec > 0:
-                    param_dict.update(zip(unit_param_names, unit_vals_for_context))
-                transformed = transform_fn(param_dict)
-                return jnp.array([transformed[name] for name in shared_param_names])
-
-            transform_shared_vectorized = jax.vmap(jax.vmap(transform_shared_single))
-
-            shared_params_only = jnp.array(shared_traces[:, :, 1:])
-
-            if unit_traces is not None and n_spec > 0:
-                unit_context = jnp.array(unit_traces[:, :, 1:, 0])
-            else:
-                unit_context = jnp.zeros((n_reps, n_iters, max(1, n_spec)))
-
-            transformed_shared = transform_shared_vectorized(
-                shared_params_only, unit_context
-            )
-            shared_out[:, :, 1:] = np.array(transformed_shared)
-
-        if unit_traces is not None and n_spec > 0:
-            n_reps, n_iters, _, n_units = unit_traces.shape
-            unit_out = unit_traces.copy()
-
-            def transform_unit_single(shared_vals_for_context, unit_vals):
-                param_dict = dict(zip(unit_param_names, unit_vals))
-                if n_shared > 0:
-                    param_dict.update(zip(shared_param_names, shared_vals_for_context))
-                transformed = transform_fn(param_dict)
-                return jnp.array([transformed[name] for name in unit_param_names])
-
-            # At the per-iteration slice, unit_vals has shape (n_spec, n_units),
-            # so we need to vmap over axis=1 (units axis) here.
-            vmap_over_units = jax.vmap(transform_unit_single, in_axes=(None, 1))
-            vmap_over_iters = jax.vmap(vmap_over_units, in_axes=(0, 0))
-            transform_unit_vectorized = jax.vmap(vmap_over_iters, in_axes=(0, 0))
-
-            if shared_traces is not None and n_shared > 0:
-                shared_context = jnp.array(shared_traces[:, :, 1:])
-            else:
-                shared_context = jnp.zeros((n_reps, n_iters, max(1, n_shared)))
-
-            unit_params_only = jnp.array(unit_traces[:, :, 1:, :])
-
-            transformed_unit = transform_unit_vectorized(
-                shared_context, unit_params_only
-            )
-            # transformed shape: (n_reps, n_iters, n_units, n_spec)
-            # target slice shape: (n_reps, n_iters, n_spec, n_units)
-            transformed_unit = jnp.transpose(transformed_unit, (0, 1, 3, 2))
-            unit_out[:, :, 1:, :] = np.array(transformed_unit)
+        # Determine batch dimensions
+        if shared_traces is not None:
+            n_reps = shared_traces.shape[0]
+            n_iters = shared_traces.shape[1]
         elif unit_traces is not None:
+            n_reps = unit_traces.shape[0]
+            n_iters = unit_traces.shape[1]
+        else:
+            n_reps = 1
+            n_iters = 1
+
+        n_units = unit_traces.shape[2] if unit_traces is not None else 1
+
+        shared_params = None
+        if shared_traces is not None and n_shared > 0:
+            shared_params = jnp.array(shared_traces[:, :, 1:])
+        else:
+            shared_params = jnp.zeros((n_reps, n_iters, n_shared))
+
+        unit_params = None
+        if unit_traces is not None and n_spec > 0:
+            unit_params_only = unit_traces[:, :, :, 1:]
+            unit_params = jnp.array(unit_params_only)
+        else:
+            unit_params = jnp.zeros((n_reps, n_iters, n_units, n_spec))
+
+        shared_transformed, unit_transformed = self._transform_panel_array_jax(
+            shared_params,
+            unit_params,
+            shared_param_names,
+            unit_param_names,
+            direction,
+        )
+
+        if shared_traces is not None:
+            shared_out = shared_traces.copy()
+            if n_shared > 0:
+                shared_out[:, :, 1:] = np.array(shared_transformed)
+
+        if unit_traces is not None:
             unit_out = unit_traces.copy()
+            if n_spec > 0:
+                unit_out[:, :, :, 1:] = np.array(unit_transformed)
 
         return shared_out, unit_out
 

@@ -5,7 +5,7 @@
 
 # Pypomp
 
-Pypomp is a Python/JAX library for modeling and inference using partially observed Markov process (POMP) models (also called state-space models or hidden Markov models).
+Pypomp is a Python/JAX library for modeling and inference using partially observed Markov process (POMP) models, also called state-space models or hidden Markov models.
 
 ---
 
@@ -18,13 +18,13 @@ Pypomp is a Python/JAX library for modeling and inference using partially observ
 
 ### Installation
 
-Install `pypomp` using `pip`:
+Install Pypomp using pip:
 
 ```bash
 pip install pypomp
 ```
 
-> 📝 **Note:** `pypomp` is powered by **JAX** for GPU acceleration and just-in-time (JIT) compilation. To configure JAX for GPU computing, please follow the [JAX Installation Guide](https://jax.readthedocs.io/en/latest/installation.html).
+> 📝 **Note:** Pypomp is powered by **JAX** for GPU acceleration and just-in-time (JIT) compilation. To configure JAX for GPU computing, please follow the [JAX Installation Guide](https://jax.readthedocs.io/en/latest/installation.html).
 
 
 ### Quick Start
@@ -70,19 +70,22 @@ print(f"Log-Likelihood: {log_lik:.4f}")
 ### Governance and Contributions
 
 The Pypomp library is run by the [Pypomp organization](https://github.com/pypomp).
-All contributions are welcome. Please raise issues or make pull requests on the [Pypomp GitHub site](https://github.com/pypomp/pypomp) or contact the [core development team](https://github.com/pypomp/.github/blob/main/profile/Governance.md).
+
+All contributions are welcome. Please review our [Contributing Guide](CONTRIBUTING.md) before submitting pull requests or raising issues.
+
+For governance details, you can contact the core development team or refer to the [pypomp governance profile](https://github.com/pypomp/.github/blob/main/profile/Governance.md).
 
 
 ### 📚 Citation
 
-If you use `pypomp` in your research, please cite it as:
+If you use Pypomp in your research, please cite it as:
 
 ```bibtex
 @software{pypomp2024github,
   author  = {Aaron Abkemeier and Jun Chen and Edward Ionides and Jesse Wheeler and Kevin Tan},
-  title   = {pypomp},
+  title   = {Pypomp},
   url     = {https://github.com/pypomp/pypomp},
-  version = {0.4.6.0},
+  version = {0.4.7.1},
   year    = {2026}
 }
 ```

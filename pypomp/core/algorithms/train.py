@@ -53,7 +53,7 @@ _panel_mop_internal_vmap = jax.vmap(
 )
 def _chunked_panel_mop_internal(
     shared_array: jax.Array,  # (n_shared,)
-    unit_array: jax.Array,  # (n_spec, U)
+    unit_array: jax.Array,  # (U, n_spec)
     unit_param_permutations: jax.Array,  # (U, n_params)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -70,7 +70,7 @@ def _chunked_panel_mop_internal(
     chunk_size: int,
     alpha: float,
 ):
-    U = unit_array.shape[1]
+    U = unit_array.shape[0]
     n_params = unit_param_permutations.shape[1]
     n_chunks = U // chunk_size
 
@@ -82,8 +82,8 @@ def _chunked_panel_mop_internal(
     )
     keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
 
-    # unit_array: (n_spec, U) -> (n_chunks, chunk_size, n_spec)
-    unit_array_c = unit_array.T.reshape((n_chunks, chunk_size, -1))
+    # unit_array: (U, n_spec) -> (n_chunks, chunk_size, n_spec)
+    unit_array_c = unit_array.reshape((n_chunks, chunk_size, -1))
 
     # unit_param_permutations: (U, n_params) -> (n_chunks, chunk_size, n_params)
     unit_param_permutations_c = unit_param_permutations.reshape(
@@ -154,11 +154,12 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "U",
         "clip_norm",
         "alpha_cooling",
+        "scale",
     ),
 )
 def _panel_train_internal(
     shared_array: jax.Array,  # (n_shared,)
-    unit_array: jax.Array,  # (n_spec, U)
+    unit_array: jax.Array,  # (U, n_spec)
     unit_param_permutations: jax.Array,  # (U, n_params)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -185,6 +186,7 @@ def _panel_train_internal(
     beta1: float = 0.9,
     beta2: float = 0.999,
     epsilon: float = 1e-8,
+    scale: bool = False,
 ):
     times = times.astype(float)
     ylen = n_obs * U
@@ -196,7 +198,7 @@ def _panel_train_internal(
         if covars_extended is None
         else covars_extended.reshape((n_chunks, chunk_size) + covars_extended.shape[1:])
     )
-    unit_array_c = unit_array.T.reshape((n_chunks, chunk_size, -1))
+    unit_array_c = unit_array.reshape((n_chunks, chunk_size, -1))
     unit_param_permutations_c = unit_param_permutations.reshape(
         (n_chunks, chunk_size, -1)
     )
@@ -295,6 +297,11 @@ def _panel_train_internal(
             dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
             dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
 
+            if scale:
+                dir_s = dir_s / jnp.maximum(jnp.linalg.norm(dir_s), epsilon)
+                norm_u = jnp.linalg.norm(dir_u, axis=-1, keepdims=True)
+                dir_u = dir_u / jnp.maximum(norm_u, epsilon)
+
             c_s = c_s + (eta_shared[i] / n_chunks) * dir_s
             c_u = c_u + eta_spec[i] * dir_u
             return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
@@ -317,7 +324,7 @@ def _panel_train_internal(
             new_v_u_c,
             final_step,
         )
-        unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
+        unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1]))
         return new_carry, (jnp.mean(chunk_neg_logliks), final_s, unit_flat)
 
     if optimizer == "FullMatrixAdam":
@@ -373,7 +380,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 18,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 19,
 )
 
 

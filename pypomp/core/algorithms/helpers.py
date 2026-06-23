@@ -221,23 +221,34 @@ def _interp_covars(
     order: str = "linear",
 ) -> np.ndarray | None:
     """Interpolate covariates with numpy."""
-    # TODO: Add constant interpolation
     if covars is None or ctimes is None:
         return None
+
+    if order not in ("linear", "constant"):
+        raise ValueError(
+            f"Unsupported interpolation order: '{order}'. Must be 'linear' or 'constant'."
+        )
 
     is_scalar = np.isscalar(t)
     t_arr = np.atleast_1d(t)
 
-    upper_idx = np.searchsorted(ctimes, t_arr, side="left")
-    upper_idx = np.clip(upper_idx, 1, len(ctimes) - 1)
-    lower_idx = upper_idx - 1
+    if order == "linear":
+        upper_idx = np.searchsorted(ctimes, t_arr, side="left")
+        upper_idx = np.clip(upper_idx, 1, len(ctimes) - 1)
+        lower_idx = upper_idx - 1
 
-    t_diff = (t_arr - ctimes[lower_idx]) / (ctimes[upper_idx] - ctimes[lower_idx])
+        t_diff = (t_arr - ctimes[lower_idx]) / (ctimes[upper_idx] - ctimes[lower_idx])
 
-    if covars.ndim > 1:
-        t_diff = t_diff[:, None]
+        if covars.ndim > 1:
+            t_diff = t_diff[:, None]
 
-    interpolated = covars[lower_idx] + (covars[upper_idx] - covars[lower_idx]) * t_diff
+        interpolated = (
+            covars[lower_idx] + (covars[upper_idx] - covars[lower_idx]) * t_diff
+        )
+    else:  # constant
+        upper_idx = np.searchsorted(ctimes, t_arr, side="right")
+        idx = np.clip(upper_idx, 1, len(ctimes)) - 1
+        interpolated = covars[idx]
 
     return interpolated.ravel() if is_scalar else interpolated
 

@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 **pypomp** is a Python package for modeling and inference using Partially Observed Markov Process (POMP) models (also known as state-space models or hidden Markov models). It implements particle filtering, iterated filtering, gradient-based optimization, and other inference algorithms for highly nonlinear, non-Gaussian dynamical systems. The package leverages JAX for GPU support and just-in-time compilation, achieving significant performance improvements over the R **pomp** package.
@@ -11,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Environment Setup
 ```bash
 # Create virtual environment (Python 3.10+)
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies

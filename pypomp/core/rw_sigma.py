@@ -129,6 +129,21 @@ class RWSigma:
     def geometric_cooling(self, a: float) -> "RWSigma":
         """
         Configure the RWSigma instance to use geometric cooling.
+
+        The returned cooling function computes a cooling factor as:
+            cooling_factor = factor ** (nt / ntimes + m)
+        where:
+            factor = a ** (1 / 50)
+            nt: Time step index (integer).
+            m: Current iteration index (integer).
+            ntimes: Total number of time steps (integer).
+
+        Args:
+            a (float): The cooling parameter, representing the cooling factor
+                applied after 50 iterations of the algorithm. Must be in [0, 1].
+
+        Returns:
+            RWSigma: A new RWSigma instance configured with geometric cooling.
         """
         if not (0 <= a <= 1):
             raise ValueError("a should be between 0 and 1")
@@ -148,6 +163,23 @@ class RWSigma:
     def cosine_cooling(self, c: float, M: int) -> "RWSigma":
         """
         Configure the RWSigma instance to use cosine cooling.
+
+        The returned cooling function computes a cooling factor as:
+            cooling_factor = c + (1.0 - c) * 0.5 * (1.0 + cos(pi * progress))
+        where:
+            progress = (nt / ntimes + m) / M
+            nt: Time step index (integer).
+            m: Current iteration index (integer).
+            ntimes: Total number of time steps (integer).
+
+        Args:
+            c (float): The minimum cooling factor at the end of the schedule (when
+                progress >= 1). Must be in [0, 1].
+            M (int): The number of iterations over which the cooling schedule is
+                defined. Must be positive.
+
+        Returns:
+            RWSigma: A new RWSigma instance configured with cosine cooling.
         """
         if not (0 <= c <= 1):
             raise ValueError("c should be between 0 and 1")
@@ -169,6 +201,19 @@ class RWSigma:
     def hyperbolic_cooling(self, s: float) -> "RWSigma":
         """
         Configure the RWSigma instance to use hyperbolic cooling.
+
+        The returned cooling function computes a cooling factor as:
+            cooling_factor = 1.0 / (1.0 + s * (nt / ntimes + m))
+        where:
+            nt: Time step index (integer).
+            m: Current iteration index (integer).
+            ntimes: Total number of time steps (integer).
+
+        Args:
+            s (float): The hyperbolic cooling parameter/rate. Must be non-negative.
+
+        Returns:
+            RWSigma: A new RWSigma instance configured with hyperbolic cooling.
         """
         if s < 0:
             raise ValueError("s must be non-negative")

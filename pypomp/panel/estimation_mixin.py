@@ -5,13 +5,12 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 import time
+import pypomp.functional as F
 from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal, Any
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
-from ..core.algorithms.mif import _jv_panel_mif_internal, _jv_panel_mif_internal_vmap
-from ..core.algorithms.train import _vmapped_panel_train_internal
 from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
 from ..core.algorithms.helpers import run_jax_batch_sharded
 from ..core.rw_sigma import RWSigma
@@ -23,6 +22,7 @@ from ..core.results import (
     PanelPompTrainResult,
     PanelPompDpopTrainResult,
 )
+
 from ..core.parameters import PanelParameters
 from ..maths import logmeanexp
 from .. import benchmarks
@@ -587,7 +587,6 @@ class PanelEstimationMixin(Base):
         thresh: float = 0,
         n_monitors: int = 0,
         block: bool = True,
-        vmap_chunk_size: int | None = None,
     ) -> None:
         """
         Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for :class:`~pypomp.panel.panel.PanelPomp`.
@@ -604,17 +603,12 @@ class PanelEstimationMixin(Base):
                 log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
                 filter).
             block (bool): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF). Uses Panel Iterated Filtering (PIF) if False.
-            vmap_chunk_size (int, optional): (Experimental) If set, process units in parallel via
-                jax.vmap in chunks of this size instead of sequentially. Shared
-                parameters are independently perturbed per unit and averaged across
-                units at the end of each chunk. Padding is applied if the chunk
-                size does not evenly divide the number of units.
 
         Returns:
             None. Updates :attr:`self.theta` with final estimates and adds a :class:`~pypomp.core.results.PanelPompMIFResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
-        theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_for_result = deepcopy(theta_obj_in)
 
         n_reps = theta_obj_in.num_replicates()
@@ -631,151 +625,63 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        unit_param_permutations = jnp.stack(
-            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
-        )
-        covars_per_unit = self._get_covars_per_unit(unit_names)
-
-        theta_obj_in.transform(rep_unit.par_trans, direction="to_est")
-
         shared_index = self.canonical_shared_param_names
         n_shared = len(shared_index)
         if n_shared == 0:
-            shared_array = jnp.zeros((n_reps, 0, J))
+            shared_array = jnp.zeros((n_reps, J, 0))
         else:
             shared_vals = theta_obj_in.to_jax_array(shared_index, unit_names=unit_names)
-            shared_array = jnp.tile(shared_vals[:, 0, :, None], (1, 1, J))
+            shared_array = jnp.repeat(shared_vals[:, jnp.newaxis, 0, :], J, axis=1)
 
         spec_index = self.canonical_unit_param_names
         n_spec = len(spec_index)
         if n_spec == 0:
-            unit_array = jnp.zeros((n_reps, 0, J, U))
+            unit_array = jnp.zeros((n_reps, J, U, 0))
         else:
             spec_vals = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
-            unit_array = jnp.tile(
-                spec_vals.transpose(0, 2, 1)[:, :, None, :], (1, 1, J, 1)
-            )
-
-        ys_per_unit = jnp.stack(
-            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
-        )
+            unit_array = jnp.repeat(spec_vals[:, jnp.newaxis, :, :], J, axis=1)
 
         key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(key, n_reps)
 
-        # TODO: if the vmap mode works well, remove the sequential mode
-        if vmap_chunk_size is not None:
-            U_padded = U + (vmap_chunk_size - (U % vmap_chunk_size)) % vmap_chunk_size
-            padding = U_padded - U
-            unit_mask = jnp.concatenate([jnp.ones(U), jnp.zeros(padding)])
-
-            if padding > 0:
-                unit_param_permutations = jnp.pad(
-                    unit_param_permutations, ((0, padding), (0, 0))
-                )
-                ys_per_unit = jnp.pad(
-                    ys_per_unit, ((0, padding),) + ((0, 0),) * (ys_per_unit.ndim - 1)
-                )
-                if covars_per_unit is not None:
-                    covars_per_unit = jnp.pad(
-                        covars_per_unit,
-                        ((0, padding),) + ((0, 0),) * (covars_per_unit.ndim - 1),
-                    )
-                if unit_array.shape[1] > 0:
-                    unit_array = jnp.pad(
-                        unit_array, ((0, 0), (0, 0), (0, 0), (0, padding))
-                    )
-
-            res = run_jax_batch_sharded(
-                _jv_panel_mif_internal_vmap,
-                {0: 0, 1: 0, 21: 0},
-                [0, 0, 0, 0],
-                shared_array,
-                unit_array,
-                rep_unit._dt_array_extended,
-                rep_unit._nstep_array,
-                rep_unit.t0,
-                jnp.array(rep_unit.ys.index),
-                ys_per_unit,
-                rep_unit.rinit.struct_per,
-                rep_unit.rproc.struct_per_interp,
-                rep_unit.dmeas.struct_per,
-                sigmas_array,
-                sigmas_init_array,
-                rep_unit.rproc.accumvars,
-                covars_per_unit,
-                unit_param_permutations,
-                unit_mask,
-                M,
-                rw_sd.cooling_fn,
-                J,
-                U_padded,
-                thresh,
-                keys,
-                vmap_chunk_size,
-                rep_unit.rinit.struct_pf,
-                rep_unit.rproc.struct_pf_interp,
-                rep_unit.dmeas.struct_pf,
-                n_monitors,
-                block,
-            )
-            shared_array_f, unit_array_f, shared_traces, unit_traces = res
-            if padding > 0:
-                if unit_array_f.shape[1] > 0:
-                    unit_array_f = unit_array_f[:, :, :, :U]
-                unit_traces = unit_traces[:, :, :, :U]
-        else:
-            shared_array_f, unit_array_f, shared_traces, unit_traces = (
-                run_jax_batch_sharded(
-                    _jv_panel_mif_internal,
-                    {0: 0, 1: 0, 20: 0},
-                    [0, 0, 0, 0],
-                    shared_array,
-                    unit_array,
-                    rep_unit._dt_array_extended,
-                    rep_unit._nstep_array,
-                    rep_unit.t0,
-                    jnp.array(rep_unit.ys.index),
-                    ys_per_unit,
-                    rep_unit.rinit.struct_per,
-                    rep_unit.rproc.struct_per_interp,
-                    rep_unit.dmeas.struct_per,
-                    sigmas_array,
-                    sigmas_init_array,
-                    rep_unit.rproc.accumvars,
-                    covars_per_unit,
-                    unit_param_permutations,
-                    M,
-                    rw_sd.cooling_fn,
-                    J,
-                    U,
-                    thresh,
-                    keys,
-                    rep_unit.rinit.struct_pf,
-                    rep_unit.rproc.struct_pf_interp,
-                    rep_unit.dmeas.struct_pf,
-                    n_monitors,
-                    block,
-                )
-            )
-
-        shared_traces, unit_traces = rep_unit.par_trans._transform_panel_traces(
-            shared_traces=np.array(shared_traces),
-            unit_traces=np.array(unit_traces),
-            shared_param_names=shared_index,
-            unit_param_names=spec_index,
-            direction="from_est",
+        struct = self.to_struct()
+        (
+            shared_traces_jax,
+            unit_traces_jax,
+            final_shared_swarm_jax,
+            final_unit_swarm_jax,
+        ) = run_jax_batch_sharded(
+            F.panel_mif,
+            {1: 0, 2: 0, 9: 0},
+            [0, 0, 0, 0],
+            struct,
+            shared_array,
+            unit_array,
+            sigmas_array,
+            sigmas_init_array,
+            M,
+            rw_sd.cooling_fn,
+            J,
+            thresh,
+            keys,
+            n_monitors,
+            block,
         )
+
+        shared_traces = (
+            np.array(shared_traces_jax) if shared_traces_jax is not None else None
+        )
+        unit_traces = np.array(unit_traces_jax) if unit_traces_jax is not None else None
 
         if shared_traces is None:
             if unit_traces is None:
                 raise ValueError(
                     "Both shared_traces and unit_traces are None; cannot build traces."
                 )
-            shared_traces = np.sum(unit_traces[:, :, 0, :], axis=-1, keepdims=True)
+            shared_traces = np.sum(unit_traces[:, :, :, 0], axis=-1, keepdims=True)
             shared_index = []
         if unit_traces is None:
-            unit_traces = np.zeros((shared_traces.shape[0], M + 1, 1, U))
+            unit_traces = np.zeros((shared_traces.shape[0], M + 1, U, 1))
 
         shared_da = xr.DataArray(
             shared_traces,
@@ -788,12 +694,12 @@ class PanelEstimationMixin(Base):
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["theta_idx", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "unit", "variable"],
             coords={
                 "theta_idx": np.arange(unit_traces.shape[0]),
                 "iteration": np.arange(M + 1),
-                "variable": ["unitLogLik"] + spec_index,
                 "unit": unit_names,
+                "variable": ["unitLogLik"] + spec_index,
             },
         )
 
@@ -808,7 +714,7 @@ class PanelEstimationMixin(Base):
                     },
                 ),
                 "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, 1:, :].transpose(0, 2, 1).astype(float),
+                    unit_traces[:, -1, :, 1:].astype(float),
                     dims=["theta_idx", "unit", "parameter"],
                     coords={
                         "theta_idx": np.arange(n_reps),
@@ -823,7 +729,7 @@ class PanelEstimationMixin(Base):
 
         self.theta = PanelParameters(
             theta=ds,
-            logLik_unit=unit_traces[:, -1, 0, :].astype(float),
+            logLik_unit=unit_traces[:, -1, :, 0].astype(float),
             estimation_scale=False,
         )
 
@@ -842,7 +748,7 @@ class PanelEstimationMixin(Base):
             block=block,
             logLiks=xr.DataArray(
                 np.concatenate(
-                    [shared_traces[:, -1, 0:1], unit_traces[:, -1, 0, :]], axis=1
+                    [shared_traces[:, -1, 0:1], unit_traces[:, -1, :, 0]], axis=1
                 ),
                 dims=["theta_idx", "unit"],
                 coords={
@@ -912,13 +818,6 @@ class PanelEstimationMixin(Base):
 
         chunk_size = max(1, int(chunk_size))
 
-        unit_param_permutations = jnp.stack(
-            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
-        )
-        covars_per_unit = self._get_covars_per_unit(unit_names)
-
-        theta_obj_in.transform(rep_unit.par_trans, direction="to_est")
-
         shared_index = self.canonical_shared_param_names
         n_shared = len(shared_index)
         if n_shared == 0:
@@ -932,12 +831,10 @@ class PanelEstimationMixin(Base):
         spec_index = self.canonical_unit_param_names
         n_spec = len(spec_index)
         if n_spec == 0:
-            unit_array = jnp.zeros((n_reps, 0, U))
+            unit_array = jnp.zeros((n_reps, U, 0))
             spec_index = []
         else:
-            unit_array = theta_obj_in.to_jax_array(
-                spec_index, unit_names=unit_names
-            ).transpose(0, 2, 1)
+            unit_array = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
 
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
@@ -945,76 +842,48 @@ class PanelEstimationMixin(Base):
         eta_shared = eta.to_array(shared_index, M)
         eta_spec = eta.to_array(spec_index, M)
 
-        ys_per_unit = jnp.stack(
-            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
-        )
-
         keys = jax.random.split(key, n_reps * M * U).reshape(
             (n_reps, M, U) + key.shape[1:]
         )
 
-        opt_name = optimizer.__class__.__name__
-        beta1 = getattr(optimizer, "beta1", 0.9)
-        beta2 = getattr(optimizer, "beta2", 0.999)
-        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
-
+        struct = self.to_struct()
         (
             logliks_history,
-            shared_history,
-            unit_history,
+            shared_history_natural,
+            unit_history_natural,
         ) = run_jax_batch_sharded(
-            _vmapped_panel_train_internal,
-            {0: 0, 1: 0, 9: 0},
+            F.panel_train,
+            {1: 0, 2: 0, 9: 0},
             [0, 0, 0],
+            struct,
             shared_array,
             unit_array,
-            unit_param_permutations,
-            rep_unit._dt_array_extended,
-            rep_unit._nstep_array,
-            rep_unit.t0,
-            jnp.array(rep_unit.ys.index),
-            ys_per_unit,
-            covars_per_unit,
-            keys,
             J,
-            rep_unit.rinit.struct_pf,
-            rep_unit.rproc.struct_pf_interp,
-            rep_unit.dmeas.struct_pf,
-            rep_unit.rproc.accumvars,
-            chunk_size,
-            opt_name,
+            optimizer,
             M,
             eta_shared,
             eta_spec,
             alpha,
+            keys,
             alpha_cooling,
-            ys_per_unit.shape[1],
-            U,
-            optimizer.clip_norm,
-            beta1,
-            beta2,
-            epsilon,
+            chunk_size,
         )
 
-        shared_traces_in = None
-        if n_shared > 0:
-            shared_ll_expanded = np.expand_dims(np.array(logliks_history), axis=-1)
-            shared_traces_in = np.concatenate(
-                [shared_ll_expanded, np.array(shared_history)], axis=-1
+        shared_traces = None
+        if (
+            shared_history_natural is not None
+            and logliks_history is not None
+            and n_shared > 0
+        ):
+            shared_ll_expanded = np.expand_dims(-np.array(logliks_history), axis=-1)
+            shared_traces = np.concatenate(
+                [shared_ll_expanded, np.array(shared_history_natural)], axis=-1
             )
 
-        unit_traces_in = None
-        if n_spec > 0:
-            nan_ll = np.full((n_reps, M + 1, 1, U), np.nan, dtype=float)
-            unit_traces_in = np.concatenate([nan_ll, np.array(unit_history)], axis=-2)
-
-        shared_traces, unit_traces = rep_unit.par_trans._transform_panel_traces(
-            shared_traces=shared_traces_in,
-            unit_traces=unit_traces_in,
-            shared_param_names=shared_index,
-            unit_param_names=spec_index,
-            direction="from_est",
-        )
+        unit_traces = None
+        if unit_history_natural is not None and n_spec > 0:
+            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
+            unit_traces = np.concatenate([nan_ll, unit_history_natural], axis=-1)
 
         if shared_traces is None:
             if unit_traces is None:
@@ -1022,12 +891,12 @@ class PanelEstimationMixin(Base):
                     "Both shared_traces and unit_traces are None; cannot build traces."
                 )
             n_reps = unit_traces.shape[0]
-            shared_traces = np.expand_dims(np.array(logliks_history), axis=-1)
+            shared_traces = np.expand_dims(-np.array(logliks_history), axis=-1)
             shared_index = []
 
         if unit_traces is None:
             n_reps = shared_traces.shape[0]
-            unit_traces = np.zeros((n_reps, M + 1, 1, U), dtype=float)
+            unit_traces = np.zeros((n_reps, M + 1, U, 1), dtype=float)
 
         shared_da = xr.DataArray(
             shared_traces,
@@ -1040,12 +909,12 @@ class PanelEstimationMixin(Base):
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["theta_idx", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "unit", "variable"],
             coords={
                 "theta_idx": np.arange(unit_traces.shape[0]),
                 "iteration": np.arange(M + 1),
-                "variable": ["unitLogLik"] + spec_index,
                 "unit": unit_names,
+                "variable": ["unitLogLik"] + spec_index,
             },
         )
 
@@ -1060,7 +929,7 @@ class PanelEstimationMixin(Base):
                     },
                 ),
                 "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, 1:, :].transpose(0, 2, 1).astype(float),
+                    unit_traces[:, -1, :, 1:].astype(float),
                     dims=["theta_idx", "unit", "parameter"],
                     coords={
                         "theta_idx": np.arange(n_reps),
@@ -1116,12 +985,7 @@ class PanelEstimationMixin(Base):
         decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
-        theta: Union[
-            PanelParameters,
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
-            None,
-        ] = None,
+        theta: PanelParameters | None = None,
     ):
         """
         Estimate parameters using DPOP gradient-descent optimization (SGD/Adam).
@@ -1232,9 +1096,7 @@ class PanelEstimationMixin(Base):
                 "(e.g. 'logw')."
             )
         try:
-            process_weight_index = int(
-                rep_unit.statenames.index(process_weight_state)
-            )
+            process_weight_index = int(rep_unit.statenames.index(process_weight_state))
         except ValueError:
             raise ValueError(
                 f"process_weight_state '{process_weight_state}' not found in "
@@ -1312,9 +1174,7 @@ class PanelEstimationMixin(Base):
             eta_spec_vec = jnp.array(
                 [eta_dict.get(p, 0.0) for p in spec_index], dtype=float
             )
-            eta_shared = jnp.broadcast_to(
-                eta_shared_vec, (M, eta_shared_vec.shape[0])
-            )
+            eta_shared = jnp.broadcast_to(eta_shared_vec, (M, eta_shared_vec.shape[0]))
             eta_spec = jnp.broadcast_to(eta_spec_vec, (M, eta_spec_vec.shape[0]))
 
         ys_per_unit = jnp.stack(
@@ -1379,8 +1239,9 @@ class PanelEstimationMixin(Base):
             )
 
         if len(spec_index) > 0:
-            nan_ll = np.full((n_reps, M + 1, 1, U), np.nan, dtype=float)
-            unit_traces_in = np.concatenate([nan_ll, np.array(unit_history)], axis=-2)
+            unit_history_trans = np.transpose(np.array(unit_history), (0, 1, 3, 2))
+            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
+            unit_traces_in = np.concatenate([nan_ll, unit_history_trans], axis=-1)
 
         shared_traces, unit_traces = rep_unit.par_trans._transform_panel_traces(
             shared_traces=shared_traces_in,
@@ -1402,7 +1263,7 @@ class PanelEstimationMixin(Base):
 
         if unit_traces is None:
             n_reps = shared_traces.shape[0]
-            unit_ll = np.zeros((n_reps, M + 1, 1, U), dtype=float)
+            unit_ll = np.zeros((n_reps, M + 1, U, 1), dtype=float)
             unit_traces = unit_ll
 
         shared_vars = ["logLik"] + shared_index
@@ -1419,16 +1280,16 @@ class PanelEstimationMixin(Base):
         )
         unit_da = xr.DataArray(
             unit_traces,
-            dims=["theta_idx", "iteration", "variable", "unit"],
+            dims=["theta_idx", "iteration", "unit", "variable"],
             coords={
                 "theta_idx": jnp.arange(unit_traces.shape[0]),
                 "iteration": jnp.arange(M + 1),
-                "variable": unit_vars,
                 "unit": unit_names,
+                "variable": unit_vars,
             },
         )
 
-        logLik_unit_out = np.full((n_reps, U), np.nan)
+        logLik_unit_out = unit_traces[:, -1, :, 0].astype(float)
 
         ds = xr.Dataset(
             data_vars={
@@ -1441,7 +1302,7 @@ class PanelEstimationMixin(Base):
                     },
                 ),
                 "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, 1:, :].transpose(0, 2, 1).astype(float),
+                    unit_traces[:, -1, :, 1:].astype(float),
                     dims=["theta_idx", "unit", "parameter"],
                     coords={
                         "theta_idx": np.arange(n_reps),

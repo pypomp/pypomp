@@ -10,8 +10,8 @@ from .helpers import _cosine_cooling
 _panel_dpop_internal_vmap = jax.vmap(
     _dpop_internal,
     in_axes=(
-        0,     # theta (per unit)
-        0,     # ys (per unit)
+        0,  # theta (per unit)
+        0,  # ys (per unit)
         None,  # dt_array_extended
         None,  # nstep_array
         None,  # t0
@@ -21,11 +21,11 @@ _panel_dpop_internal_vmap = jax.vmap(
         None,  # rprocess_interp
         None,  # dmeasure
         None,  # accumvars
-        0,     # covars_extended (per unit)
+        0,  # covars_extended (per unit)
         None,  # alpha
         None,  # process_weight_index
         None,  # ntimes
-        0,     # key (per unit)
+        0,  # key (per unit)
     ),
 )
 
@@ -44,8 +44,8 @@ _panel_dpop_internal_vmap = jax.vmap(
     ),
 )
 def _chunked_panel_dpop_internal(
-    shared_array: jax.Array,       # (n_shared,)
-    unit_array: jax.Array,         # (n_spec, U)
+    shared_array: jax.Array,  # (n_shared,)
+    unit_array: jax.Array,  # (n_spec, U)
     unit_param_permutations: jax.Array,  # (U, n_params)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -88,7 +88,9 @@ def _chunked_panel_dpop_internal(
 
     def scan_fn(carry, chunk_idx):
         unit_array_chunk = unit_array_c[chunk_idx]  # (chunk_size, n_spec)
-        unit_param_perm_chunk = unit_param_permutations_c[chunk_idx]  # (chunk_size, n_params)
+        unit_param_perm_chunk = unit_param_permutations_c[
+            chunk_idx
+        ]  # (chunk_size, n_params)
 
         theta_chunk_unordered = jnp.concatenate(
             [shared_tiled, unit_array_chunk], axis=1
@@ -146,8 +148,8 @@ def _chunked_panel_dpop_internal(
     ),
 )
 def _panel_dpop_train_internal(
-    shared_array: jax.Array,       # (n_shared,)
-    unit_array: jax.Array,         # (n_spec, U)
+    shared_array: jax.Array,  # (n_shared,)
+    unit_array: jax.Array,  # (n_spec, U)
     unit_param_permutations: jax.Array,  # (U, n_params)
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
@@ -155,7 +157,7 @@ def _panel_dpop_train_internal(
     times: jax.Array,
     ys: jax.Array,
     covars_extended: jax.Array | None,
-    keys: jax.Array,               # (M, U, ...)
+    keys: jax.Array,  # (M, U, ...)
     J: int,
     rinitializer: Callable,
     rprocess_interp: Callable,
@@ -164,12 +166,12 @@ def _panel_dpop_train_internal(
     chunk_size: int,
     optimizer: str,
     M: int,
-    eta_shared: jax.Array,   # (M, n_shared) per-iteration LR schedule
-    eta_spec: jax.Array,     # (M, n_spec)   per-iteration LR schedule
+    eta_shared: jax.Array,  # (M, n_shared) per-iteration LR schedule
+    eta_spec: jax.Array,  # (M, n_spec)   per-iteration LR schedule
     alpha: float,
     alpha_cooling: float,
-    n_obs: int,     # ys.shape[1]
-    U: int,         # ys.shape[0]
+    n_obs: int,  # ys.shape[1]
+    U: int,  # ys.shape[0]
     process_weight_index: int | None,
     ntimes: int,
     decay: float,
@@ -205,7 +207,9 @@ def _panel_dpop_train_internal(
         elif optimizer == "Adam":
             return _adam_step(m, v, grad, step)
         else:
-            raise ValueError(f"Optimizer '{optimizer}' not supported for panel dpop_train")
+            raise ValueError(
+                f"Optimizer '{optimizer}' not supported for panel dpop_train"
+            )
 
     def _chunk_obj(
         s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, curr_alpha, keys_chunk

@@ -31,6 +31,7 @@ def dpop(
     Args:
         struct (PompStruct): The compiled structural representation of the POMP model.
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
+            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         J (int): Number of particles.
         alpha (float): Alpha parameter for DPOP.
         process_weight_index (int): Index of the process weight state.
@@ -38,7 +39,12 @@ def dpop(
 
     Returns:
         jax.Array: Negative DPOP log-likelihood estimates.
+
+    Note:
+        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
+        these arrays, you can use :func:`pypomp.functional.align_params`.
     """
+
     return _vmapped_dpop_internal(
         thetas_array,
         struct.ys,

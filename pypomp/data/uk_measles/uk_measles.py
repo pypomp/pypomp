@@ -47,8 +47,6 @@ coord = pd.concat([urr["coord_rural"], urr["coord_urban"]], axis=0)
 coord = pd.DataFrame({"unit": coord["X"], "long": coord["Long"], "lat": coord["Lat"]})
 coord = coord.sort_values(["unit"])
 
-# TODO: IIRC the he10 data has coordinates that the UK data doesn't have. These could be
-# added in later.
 # preexisting_units = uk_measles["coord"]["unit"][
 #     uk_measles["coord"]["unit"].isin(twentycities["coord"]["unit"])
 # ]

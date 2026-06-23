@@ -3,6 +3,8 @@ This module implements the OOP structure for PanelPOMP models.
 """
 
 import jax
+import jax.numpy as jnp
+from pypomp.functional.structs import PanelPompStruct
 from pypomp.core.pomp import Pomp
 from .validation_mixin import PanelValidationMixin
 from .estimation_mixin import PanelEstimationMixin
@@ -99,6 +101,50 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             The names of the units in the panel.
         """
         return list(self.unit_objects.keys())
+
+    def to_struct(self):
+        """
+        Exports the static data and compiled simulator functions into a lightweight
+        JAX PyTree (PanelPompStruct) for use with the functional API (pypomp.functional).
+
+        Returns:
+            PanelPompStruct: The compiled structural representation of the panel model.
+        """
+
+        unit_names = self.get_unit_names()
+        rep_unit = self.unit_objects[unit_names[0]]
+
+        ys_per_unit = jnp.stack(
+            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        )
+        covars_per_unit = self._get_covars_per_unit(unit_names)
+
+        unit_param_permutations = jnp.stack(
+            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
+        )
+
+        return PanelPompStruct(
+            ys_per_unit=ys_per_unit,
+            dt_array_extended=jnp.array(rep_unit._dt_array_extended),
+            nstep_array=jnp.array(rep_unit._nstep_array),
+            t0=rep_unit.t0,
+            times=jnp.array(rep_unit.ys.index),
+            covars_per_unit=covars_per_unit,
+            accumvars=rep_unit.rproc.accumvars,
+            rinit_pf=rep_unit.rinit.struct_pf,
+            rproc_pf=rep_unit.rproc.struct_pf_interp,
+            dmeas_pf=rep_unit.dmeas.struct_pf if rep_unit.dmeas is not None else None,
+            rinit_per=rep_unit.rinit.struct_per,
+            rproc_per=rep_unit.rproc.struct_per_interp,
+            dmeas_per=rep_unit.dmeas.struct_per if rep_unit.dmeas is not None else None,
+            rmeas_pf=rep_unit.rmeas.struct_pf if rep_unit.rmeas is not None else None,
+            par_trans=rep_unit.par_trans,
+            param_names=self.canonical_param_names,
+            shared_param_names=self.canonical_shared_param_names,
+            unit_param_names=self.canonical_unit_param_names,
+            unit_param_permutations=unit_param_permutations,
+            unit_names=unit_names,
+        )
 
     def print_metadata(self) -> None:
         """

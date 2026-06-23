@@ -1,7 +1,7 @@
 [project]
 name = "pypomp"
 
-version = "0.4.6.0"
+version = "0.4.7.1"
 
 authors = [
     { name = "The pypomp core developer team", email = "pypomp-org@umich.edu" }
@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmarks = ["statsmodels"]
-tests = ["pytest", "pytest-xdist", "pandas-stubs", "scipy-stubs"]
+tests = ["pytest", "pytest-xdist", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright"]
 viz = ["plotly"]
 
 
@@ -61,11 +61,11 @@ include = ["."]
 exclude = ["**/.venv"]
 venvPath = "."
 venv = ".venv"
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 typeCheckingMode = "strict"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false

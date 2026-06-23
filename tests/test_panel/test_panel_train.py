@@ -65,7 +65,7 @@ def test_panel_train(chunk_size, opt_instance):
     assert res.shared_traces.shape[1] == M + 1
     assert res.unit_traces.shape[0] == 1  # n_reps
     assert res.unit_traces.shape[1] == M + 1
-    assert res.unit_traces.shape[3] == len(panel.get_unit_names())  # U
+    assert res.unit_traces.shape[2] == len(panel.get_unit_names())  # U
     df = res.to_dataframe()
     assert "shared logLik" in df.columns
     assert "unit logLik" in df.columns

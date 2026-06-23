@@ -388,9 +388,7 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
         return True
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
-        rep_dim = (
-            "theta_idx" if "theta_idx" in self.shared_traces.dims else "replicate"
-        )
+        rep_dim = "theta_idx" if "theta_idx" in self.shared_traces.dims else "replicate"
         s_df = (
             self.shared_traces.isel(iteration=-1)
             .to_dataset(dim="variable")

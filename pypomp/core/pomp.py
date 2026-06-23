@@ -103,6 +103,8 @@ class Pomp:
         Names of accumulator state variables (e.g., incidence tracking). These are reset to 0 at the start of each observation interval.
     validate_logic : bool, optional
         Whether to validate the logic of the model components.
+    order : str, optional
+        The interpolation order for time-varying covariates ("linear" or "constant").
     """
 
     ys: pd.DataFrame
@@ -181,6 +183,7 @@ class Pomp:
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
         validate_logic: bool = True,
+        order: str = "linear",
     ):
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -281,7 +284,7 @@ class Pomp:
             covars=np.array(self.covars) if self.covars is not None else None,
             dt=dt,
             nstep=nstep,
-            order="linear",
+            order=order,
         )
 
         self.rproc = _RProc(
@@ -372,6 +375,8 @@ class Pomp:
             rproc_per=self.rproc.struct_per_interp,
             dmeas_per=self.dmeas.struct_per if self.dmeas is not None else None,
             rmeas_pf=self.rmeas.struct_pf if self.rmeas is not None else None,
+            par_trans=self.par_trans,
+            param_names=self.canonical_param_names,
         )
 
     @staticmethod
@@ -629,7 +634,6 @@ class Pomp:
 
         new_key, old_key = self._update_fresh_key(key)
         n_reps = theta_obj_in.num_replicates()
-        theta_obj_in.transform(self.par_trans, direction="to_est")
         sigmas_array, sigmas_init_array = rw_sd._return_arrays(
             param_names=self.canonical_param_names
         )
@@ -642,14 +646,14 @@ class Pomp:
 
         keys = jax.random.split(new_key, n_reps)
 
-        theta_tiled = jnp.tile(theta_array, (J, 1, 1))
+        theta_array_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
 
-        nLLs_jax, theta_traces_jax, final_thetas_jax = run_jax_batch_sharded(
+        nLLs_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
-            {1: 1, 8: 0},
+            {1: 0, 8: 0},
             [0, 0, 0],
             self.to_struct(),
-            theta_tiled,
+            theta_array_3d,
             sigmas_array,
             sigmas_init_array,
             M,
@@ -662,9 +666,8 @@ class Pomp:
 
         nLLs = jax.device_get(nLLs_jax)
         theta_traces = jax.device_get(theta_traces_jax)
-        final_thetas = jax.device_get(final_thetas_jax)
 
-        del nLLs_jax, theta_traces_jax, final_thetas_jax
+        del nLLs_jax, theta_traces_jax, final_swarm_jax
 
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
@@ -673,12 +676,8 @@ class Pomp:
         nans = np.full((n_reps, 1), np.nan)
         logliks_with_nan = np.concatenate([nans, -nLLs], axis=1)  # shape: (n_reps, M+1)
 
-        theta_traces_natural = self.par_trans._transform_array(
-            theta_traces, param_names, direction="from_est"
-        )
-
         trace_data = np.concatenate(
-            [logliks_with_nan[:, :, np.newaxis], theta_traces_natural], axis=-1
+            [logliks_with_nan[:, :, np.newaxis], theta_traces], axis=-1
         )
 
         traces_da = xr.DataArray(
@@ -691,13 +690,10 @@ class Pomp:
             },
         )
 
-        final_thetas_mean = np.mean(final_thetas, axis=1)  # shape: (n_reps, n_params)
-        final_thetas_natural = self.par_trans._transform_array(
-            final_thetas_mean, param_names, direction="from_est"
-        )
+        final_thetas_mean = theta_traces[:, M, :]  # shape: (n_reps, n_params)
 
         final_theta_da = xr.DataArray(
-            final_thetas_natural,
+            final_thetas_mean,
             dims=["theta_idx", "parameter"],
             coords={
                 "theta_idx": np.arange(n_reps),
@@ -802,39 +798,21 @@ class Pomp:
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        opt_name = optimizer.__class__.__name__
-        beta1 = getattr(optimizer, "beta1", 0.9)
-        beta2 = getattr(optimizer, "beta2", 0.999)
-        epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
-        c = optimizer.c
-        max_ls_itn = optimizer.max_ls_itn
-        clip_norm = optimizer.clip_norm
-        scale = optimizer.scale
-        ls = optimizer.ls
-
         nLLs, theta_ests = run_jax_batch_sharded(
             F.train,
-            {1: 0, 12: 0},
+            {1: 0, 8: 0},
             [0, 0],
             self.to_struct(),
             theta_array,
             J,
-            opt_name,
+            optimizer,
             M,
             eta_array,
-            c,
-            max_ls_itn,
             thresh,
-            scale,
-            ls,
             alpha,
             keys,
             alpha_cooling,
             n_monitors,
-            clip_norm,
-            beta1,
-            beta2,
-            epsilon,
         )
 
         theta_ests_natural = self.par_trans._transform_array(

@@ -229,4 +229,3 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
             ],
             ["traces_da"],
         )
-

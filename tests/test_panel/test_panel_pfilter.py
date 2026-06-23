@@ -159,9 +159,7 @@ def test_pfilter_dataframe_shared_loglik_excludes_theta_idx():
 
     df = result.to_dataframe()
     totals = (
-        df[["theta_idx", "shared logLik"]]
-        .drop_duplicates()
-        .sort_values("theta_idx")
+        df[["theta_idx", "shared logLik"]].drop_duplicates().sort_values("theta_idx")
     )
 
     assert np.allclose(totals["shared logLik"].to_numpy(), np.array([-30.0, -32.0]))

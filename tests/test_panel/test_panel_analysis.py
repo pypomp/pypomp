@@ -74,3 +74,32 @@ def test_plot_panel_simulations(lg_panel_mp):
     fig_q = panel.plot_simulations(nsim=5, mode="quantiles", key=key, show=False)
     assert fig_q is not None
     assert any(d.fill == "toself" for d in fig_q.data)
+
+
+def test_plot_traces_no_shared_rows(lg_panel_setup_specific_only):
+    pytest.importorskip("plotly")
+    panel, _, key = lg_panel_setup_specific_only
+    panel.pfilter(J=2, key=key)
+    # Mock traces to return a DataFrame that does not contain a "shared" unit
+    df_mock = pd.DataFrame(
+        {
+            "theta_idx": [0],
+            "iteration": [0],
+            "method": ["pfilter"],
+            "unit": ["unit1"],
+            "logLik": [-10.0],
+        }
+    )
+    panel.traces = lambda: df_mock
+    with pytest.warns(UserWarning, match="No shared rows to plot."):
+        result = panel.plot_traces(which="shared", show=False)
+    assert result is None
+
+
+def test_plot_simulations_invalid_theta_type(lg_panel_mp):
+    panel, _, _, _, _, _ = lg_panel_mp
+    import jax
+
+    key = jax.random.key(0)
+    with pytest.raises(TypeError, match="theta must be a PanelParameters instance"):
+        panel.plot_simulations(nsim=2, theta="invalid_theta_type", key=key, show=False)

@@ -326,3 +326,52 @@ def test_panel_dpop_train_invalid_process_weight_state():
             process_weight_state="nonexistent_state",
             key=jax.random.key(0),
         )
+
+
+def test_panel_dpop_train_invalid_optimizer():
+    panel = _get_sir_panel()
+    # FullMatrixAdam optimizer is unsupported in low-level _panel_dpop_train_internal
+    with pytest.raises(
+        ValueError,
+        match="Optimizer 'FullMatrixAdam' not supported for panel dpop_train",
+    ):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            optimizer=pp.FullMatrixAdam(),
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_invalid_theta_type():
+    panel = _get_sir_panel()
+    with pytest.raises(
+        TypeError, match="theta must be a PanelParameters instance or None"
+    ):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta="not_a_panel_parameters_object",  # type: ignore
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_missing_theta_and_self_theta():
+    panel = _get_sir_panel()
+    panel._theta = None  # type: ignore
+    with pytest.raises(
+        ValueError, match="theta must be provided or self.theta must exist"
+    ):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=None,
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )

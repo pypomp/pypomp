@@ -121,3 +121,79 @@ def test_dpop_train_alpha_cooling_one_matches_default(simple_sir_for_dpop):
 
     np.testing.assert_allclose(nll_default, nll_fixed, atol=1e-7)
     np.testing.assert_allclose(theta_default, theta_fixed, atol=1e-7)
+
+
+def test_jgrad_and_jvg_dpop(simple_sir_for_dpop):
+    """Directly test _jgrad_dpop and _jvg_dpop to ensure they are covered."""
+    from pypomp.core.algorithms.train_dpop import _jgrad_dpop, _jvg_dpop
+
+    model = simple_sir_for_dpop
+    theta_dict = model.theta[0]
+    theta_est_dict = model.par_trans.to_est(
+        {k: jnp.array(v) for k, v in theta_dict.items()}
+    )
+    theta_ests = jnp.array([theta_est_dict[p] for p in model.canonical_param_names])
+
+    ys = jnp.array(model.ys)
+    dt_array_extended = model._dt_array_extended
+    nstep_array = model._nstep_array
+    t0 = model.t0
+    times = jnp.array(model.ys.index)
+    J = J_DEFAULT
+    rinitializer = model.rinit.struct_pf
+    rprocess = model.rproc.struct_pf_interp
+    dmeasure = model.dmeas.struct_pf
+    accumvars = model.rproc.accumvars
+    covars_extended = (
+        jnp.array(model._covars_extended)
+        if model._covars_extended is not None
+        else None
+    )
+    alpha = 0.8
+    process_weight_index = int(model.statenames.index("logw"))
+    ntimes = len(times)
+    key = jax.random.key(123)
+
+    grad = _jgrad_dpop(
+        theta_ests=theta_ests,
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        accumvars=accumvars,
+        covars_extended=covars_extended,
+        alpha=alpha,
+        process_weight_index=process_weight_index,
+        ntimes=ntimes,
+        key=key,
+    )
+    assert grad.shape == theta_ests.shape
+    assert jnp.all(jnp.isfinite(grad))
+
+    val, grad_v = _jvg_dpop(
+        theta_ests=theta_ests,
+        ys=ys,
+        dt_array_extended=dt_array_extended,
+        nstep_array=nstep_array,
+        t0=t0,
+        times=times,
+        J=J,
+        rinitializer=rinitializer,
+        rprocess=rprocess,
+        dmeasure=dmeasure,
+        accumvars=accumvars,
+        covars_extended=covars_extended,
+        alpha=alpha,
+        process_weight_index=process_weight_index,
+        ntimes=ntimes,
+        key=key,
+    )
+    assert jnp.isfinite(val)
+    assert grad_v.shape == theta_ests.shape
+    assert jnp.all(jnp.isfinite(grad_v))
+    np.testing.assert_allclose(grad, grad_v, atol=1e-7)

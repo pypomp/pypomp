@@ -449,7 +449,9 @@ class PanelPompDpopTrainResult(PanelPompBaseResult):
                 how="left",
             )
 
-        df = pd.concat([df_s, df_u], ignore_index=True).assign(method="dpop_train")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            df = pd.concat([df_s, df_u], ignore_index=True).assign(method="dpop_train")
         cols = ["theta_idx", "unit", "iteration", "method", "logLik"]
         return df.loc[:, cols + [c for c in df.columns if c not in cols]].copy()
 

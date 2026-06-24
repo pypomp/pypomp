@@ -9,17 +9,17 @@ pypomp documentation
 * GPU support and just-in-time compilation via JAX, enabling significant speedups
 * New algorithms for model-fitting with gradient descent using improved gradient estimates
 * Support for both standard POMP models and panel POMP models
- 
- 
+
+
 Installation
 ------------
- 
+
 You can install **pypomp** from PyPI:
- 
+
 .. code-block:: bash
- 
+
     pip install pypomp              # install with core dependencies
-    pip install pypomp[benchmarks]  # install with packages for benchmarking
+    pip install pypomp[benchmarks]  # install with packages for log-likelihood benchmarking
     pip install pypomp[viz]         # install with plot dependencies
 
 To install the latest development branch:
@@ -27,12 +27,12 @@ To install the latest development branch:
 .. code-block:: bash
 
     pip install git+https://github.com/pypomp/pypomp.git
- 
-**pypomp** depends on **JAX**. 
-To take full advantage of GPU acceleration, we highly recommend installing the GPU-enabled version of JAX. 
+
+**pypomp** depends on **JAX**.
+To take full advantage of GPU acceleration, we highly recommend installing the GPU-enabled version of JAX.
 Please refer to the `JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_ for detailed instructions specific to your system.
 
-  
+
 Getting started
 ---------------
 
@@ -64,7 +64,7 @@ Contents
    Quantitative Tests <https://pypomp.github.io/quant>
    GitHub <https://github.com/pypomp>
 
-   
+
 Indices
 -------
 

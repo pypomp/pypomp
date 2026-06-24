@@ -10,7 +10,6 @@ from Section 2 of the paper.
 
 from __future__ import annotations
 
-import math
 from functools import partial
 
 import jax
@@ -65,7 +64,8 @@ def _q_n1(
     w3 = w2 * w
     numerator_t2 = (-2.0 + 14.0 * pq) * w + (-1.0 - 2.0 * pq) * w3
     denominator_t2 = 72.0 * sqrt_npq
-    term2 = numerator_t2 / jnp.maximum(denominator_t2, jnp.finfo(jnp.float32).tiny)
+    tiny = jnp.finfo(w.dtype).tiny
+    term2 = numerator_t2 / jnp.maximum(denominator_t2, tiny)
     return q_n0 + term2
 
 
@@ -91,7 +91,8 @@ def _q_n2(
     npq_ = sqrt_npq * sqrt_npq  # npq
     numerator_t3 = (p - q) * (2.0 + pq) * (16.0 - 7.0 * w2 - 3.0 * w4)
     denominator_t3 = 1620.0 * npq_
-    term3 = numerator_t3 / jnp.maximum(denominator_t3, jnp.finfo(jnp.float32).tiny)
+    tiny = jnp.finfo(w.dtype).tiny
+    term3 = numerator_t3 / jnp.maximum(denominator_t3, tiny)
     return q_n1 + term3
 
 
@@ -108,7 +109,7 @@ def _binom_bottom_up(
     Includes protection against float32 numerical stalling in the tail.
     """
     tiny = jnp.finfo(dtype).tiny
-    epsilon = 1e-7  # Approx machine epsilon for float32
+    epsilon = jnp.finfo(dtype).eps
 
     q = jnp.clip(1.0 - p, tiny, 1.0)
     p_safe = jnp.clip(p, 0.0, 1.0)
@@ -141,12 +142,10 @@ def _binom_bottom_up(
         cdf = cdf + pmf
 
         # Check for numerical stall:
-        # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further
-        # in float32. We claim any remaining u values belong to this tail bucket.
-        if dtype == jnp.float32:
-            is_stalled = (cdf > 0.95) & (pmf < epsilon)
-        else:
-            is_stalled = jnp.zeros_like(found, dtype=bool)
+        # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further.
+        # We claim any remaining u values belong to this tail bucket.
+        stall_threshold = 0.95 if dtype == jnp.float32 else 0.99999999
+        is_stalled = (cdf > stall_threshold) & (pmf < epsilon)
         found_now = (cdf >= u) | is_stalled
 
         is_new_discovery = jnp.logical_and(~found, found_now)
@@ -158,7 +157,12 @@ def _binom_bottom_up(
 
 
 def _binominv_scalar(
-    u: Array, n: Array, p: Array, exact_max: int, order: int = 2
+    u: Array,
+    n: Array,
+    p: Array,
+    exact_max: int,
+    order: int = 2,
+    dtype: np.dtype | None = None,
 ) -> Array:
     """
     Scalar version of inverse binomial CDF approximation using Giles and Beentjes (2024).
@@ -171,9 +175,18 @@ def _binominv_scalar(
         u: Probability in [0, 1]
         n: Number of trials
         p: Success probability
+        exact_max: Maximum number of loop iterations for bottom up search
         order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
+        dtype: Data type for computation.
     """
-    dtype = jnp.float32
+    if dtype is None:
+        dtype = jnp.result_type(u, n, p)
+        if not dtypes.issubdtype(dtype, np.floating):
+            dtype = jnp.float32
+
+    dtype = _get_available_dtype(dtype)
+    assert dtype is not None
+
     u = jnp.asarray(u, dtype=dtype)
     n = jnp.asarray(n, dtype=dtype)
     p = jnp.asarray(p, dtype=dtype)
@@ -206,7 +219,14 @@ def _binominv_scalar(
 
     n_safe: Array = jnp.where(invalid_n, 1.0, n)
     p_safe = jnp.clip(p_safe, 0.0, 1.0)
-    u_safe = jnp.clip(u_flipped, 1e-9, 1.0 - 1e-9)
+
+    # Clip u_safe based on dtype to avoid norm.ppf underflow/overflow
+    u_clip_min = (
+        jnp.array(1e-16, dtype=dtype)
+        if dtypes.issubdtype(dtype, np.float64)
+        else jnp.array(1e-9, dtype=dtype)
+    )
+    u_safe = jnp.clip(u_flipped, u_clip_min, 1.0 - u_clip_min)
 
     # Pre-compute shared values for the approximation formulas
     q = 1.0 - p_safe
@@ -221,7 +241,6 @@ def _binominv_scalar(
     args = (u_safe, n_safe, p_safe, q, w, w2, np_, sqrt_npq, pq)
 
     # Use lax.switch to select the correct function based on order
-    # Order is a static Python int, so we clamp it in Python and convert to JAX int
     safe_order = max(0, min(2, int(order)))
     order_idx = safe_order
     branches = [
@@ -234,6 +253,10 @@ def _binominv_scalar(
     # The paper states \overline{C}^{-1}(u) = floor(C^{-1}(u))
     # Clip to valid range [0, n] and take floor
     k_approx = jnp.clip(jnp.floor(q_u), 0.0, n_safe)
+
+    # Cap to prevent wild tail divergence of asymptotic expansions when np is small
+    max_reasonable = np_ + 6.0 * sqrt_npq + 5.0
+    k_approx = jnp.minimum(k_approx, max_reasonable)
 
     # Compute x from the bottom up if it is less than the cutoff
     x_cutoff = 10
@@ -262,16 +285,14 @@ def _binominv_scalar(
     return k_result
 
 
-_binominv_vmap = jax.vmap(_binominv_scalar, in_axes=(0, 0, 0, None, None))
-
-
-@partial(jax.jit, static_argnames=["order", "exact_max"])
+@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def binominv(
     u: Array,
     n: Array,
     p: Array,
     exact_max: int,
     order: int = 2,
+    dtype: np.dtype | None = None,
 ) -> Array:
     """
     Vectorized inverse binomial CDF approximation using Giles and Beentjes (2024).
@@ -292,20 +313,16 @@ def binominv(
         u: Probabilities (scalar or array) in the interval [0, 1].
         n: Number of trials (must be positive integer or positive float).
         p: Success probability (must be in [0, 1]).
-        dtype: Data type for computation.
         exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
-        order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
+        order: Order of approximation (0, 1, or 2).
+        dtype: Data type for computation.
 
     Returns:
         Array with the same broadcast shape as inputs, containing integer
         values k such that P(X <= k) >= u.
     """
     u_arr, n_arr, p_arr = jnp.broadcast_arrays(u, n, p)
-    flat_u = u_arr.reshape(-1)
-    flat_n = n_arr.reshape(-1)
-    flat_p = p_arr.reshape(-1)
-    flat_res = _binominv_vmap(flat_u, flat_n, flat_p, exact_max, order)
-    return flat_res.reshape(u_arr.shape)
+    return _binominv_scalar(u_arr, n_arr, p_arr, exact_max, order, dtype=dtype)
 
 
 @partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
@@ -355,10 +372,30 @@ def fast_binomial(
         dtype is not None
     )  # Type guard: _get_available_dtype only returns None if input is None
 
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
+
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
+
     shape = jnp.broadcast_shapes(n.shape, p.shape)
 
-    u = jax.random.uniform(key, shape)
-    x = binominv(u, n, p, exact_max, order=order)
+    u = jax.random.uniform(key, shape, dtype=float_dtype)
+    # Clamp u to avoid discretization artifacts (0.0) and extreme tail issues (1.0)
+    u_min = jnp.finfo(float_dtype).tiny
+    u_max = jnp.nextafter(
+        jnp.array(1.0, dtype=float_dtype), jnp.array(0.0, dtype=float_dtype)
+    )
+    u = jnp.clip(u, u_min, u_max)
+
+    n_float = jnp.asarray(n, dtype=float_dtype)
+    p_float = jnp.asarray(p, dtype=float_dtype)
+    x = binominv(u, n_float, p_float, exact_max, order=order, dtype=float_dtype)
 
     if jnp.issubdtype(dtype, jnp.integer):
         x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)
@@ -405,9 +442,6 @@ def fast_multinomial(
     shape_batch = p_shape[:-1]
     num_cat = int(p_shape[-1])  # Convert to Python int
 
-    # Compute batch_size as Python int (not JAX array)
-    batch_size = math.prod(shape_batch) if shape_batch else 1
-
     # Broadcast n to match batch shape if needed
     n_broadcast = jnp.broadcast_to(n, shape_batch)
 
@@ -417,33 +451,19 @@ def fast_multinomial(
     p_safe_sum = jnp.where(p_sum == 0, 1.0, p_sum)
     p = p / p_safe_sum
 
-    def single_multinomial(key, n_i, p_i):
-        """Sample a single multinomial row via sequential binomials."""
-        # p_i: (k,)
-        keys = jax.random.split(key, num_cat)
-        n_remaining = n_i
-        p_remain = jnp.array(1.0, dtype=p.dtype)
-        out = []
-        for j in range(num_cat - 1):
-            p_cur = p_i[j] / p_remain
-            p_cur = jnp.clip(p_cur, 0.0, 1.0)  # ensure numerically safe
-            x = fast_binomial(
-                keys[j], jnp.array(n_remaining), jnp.array(p_cur), dtype=dtype
-            )
-            out.append(x)
-            n_remaining = n_remaining - x
-            p_remain = p_remain - p_i[j]
-        out.append(n_remaining)  # last category gets the remainder
-        return jnp.stack(out, axis=-1)
+    keys = jax.random.split(key, num_cat - 1)
+    n_remaining = n_broadcast
+    p_remain = jnp.ones(shape_batch, dtype=p.dtype)
+    out = []
 
-    # Vectorize over leading dimensions
-    sample_fn = jax.vmap(single_multinomial, in_axes=(0, 0, 0))
+    for j in range(num_cat - 1):
+        p_remain_safe = jnp.where(p_remain > 0.0, p_remain, 1.0)
+        p_cur = p[..., j] / p_remain_safe
+        p_cur = jnp.clip(p_cur, 0.0, 1.0)  # ensure numerically safe
+        x = fast_binomial(keys[j], n_remaining, p_cur, dtype=dtype)
+        out.append(x)
+        n_remaining = n_remaining - x
+        p_remain = p_remain - p[..., j]
+    out.append(n_remaining)  # last category gets the remainder
 
-    # Split keys for each sample in the batch (batch_size must be Python int)
-    keys = jax.random.split(key, batch_size)
-    # Reshape the distributions for vectorization
-    n_flat = n_broadcast.reshape((batch_size,))
-    p_flat = p.reshape((batch_size, num_cat))
-    samples = sample_fn(keys, n_flat, p_flat)
-
-    return samples.reshape(shape_batch + (num_cat,)).astype(dtype)
+    return jnp.stack(out, axis=-1).astype(dtype)

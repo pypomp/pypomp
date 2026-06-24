@@ -84,9 +84,6 @@ def _gammainv_scalar(u: Array, alpha: Array, dtype) -> Array:
     return x
 
 
-_gammainv_vmap = jax.vmap(_gammainv_scalar, in_axes=(0, 0, None))
-
-
 @partial(jax.jit, static_argnames=["dtype"])
 def gammainv(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
     """
@@ -101,10 +98,7 @@ def gammainv(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
         DeviceArray with the same broadcast shape as `u` and `alpha`.
     """
     u_arr, alpha_arr = jnp.broadcast_arrays(u, alpha)
-    flat_u = u_arr.reshape(-1)
-    flat_alpha = alpha_arr.reshape(-1)
-    flat_res = _gammainv_vmap(flat_u, flat_alpha, dtype)
-    return flat_res.reshape(u_arr.shape)
+    return _gammainv_scalar(u_arr, alpha_arr, dtype)
 
 
 @partial(jax.jit, static_argnames=["adjustment_size", "dtype"])
@@ -178,92 +172,76 @@ def fast_gamma(
     return x.astype(dtype)
 
 
+_E1_COEFFS: tuple[float, ...] = (
+    -3224618478943.0 / 170264214140233973760000.0,
+    12699400547.0 / 153146779782796800000.0,
+    -756882301459.0 / 445517904822681600000.0,
+    -449.0 / 1595917323000.0,
+    119937661.0 / 30505427656704000.0,
+    -2152217.0 / 127673385840000.0,
+    2745493.0 / 84737299046400.0,
+    1231.0 / 15913705500.0,
+    -454973.0 / 498845952000.0,
+    37.0 / 9797760.0,
+    -101.0 / 16329600.0,
+    -11.0 / 382725.0,
+    5.0 / 18144.0,
+    -7.0 / 6480.0,
+    1.0 / 1620.0,
+    1.0 / 36.0,
+    -1.0 / 3.0,
+)
+
+_E2_COEFFS: tuple[float, ...] = (
+    52310527831.0 / 343186061137920000.0,
+    -311266223.0 / 899963447040000.0,
+    -100824673.0 / 571976768563200.0,
+    919081.0 / 185177664000.0,
+    -9281803.0 / 436490208000.0,
+    10217.0 / 251942400.0,
+    109.0 / 1749600.0,
+    -1579.0 / 2099520.0,
+    533.0 / 204120.0,
+    -7.0 / 2592.0,
+    -7.0 / 405.0,
+)
+
+_E3_COEFFS: tuple[float, ...] = (
+    987512909021.0 / 514779091706880000.0,
+    -69980826653.0 / 39598391669760000.0,
+    -1359578327.0 / 129994720128000.0,
+    14408797.0 / 246903552000.0,
+    -18442139.0 / 130947062400.0,
+    346793.0 / 5290790400.0,
+    29233.0 / 36741600.0,
+    -63149.0 / 20995200.0,
+    449.0 / 102060.0,
+)
+
+_E4_COEFFS: tuple[float, ...] = (
+    636178018081.0 / 48260539847520000.0,
+    -16004851139.0 / 26398927779840000.0,
+    -16968489929.0 / 194992080192000.0,
+    1981235233.0 / 6666395904000.0,
+    -449882243.0 / 982102968000.0,
+    -269383.0 / 4232632320.0,
+    319.0 / 183708.0,
+)
+
+_E1_COEFFS_ARR = jnp.array(_E1_COEFFS, dtype=jnp.float32)
+_E2_COEFFS_ARR = jnp.array(_E2_COEFFS, dtype=jnp.float32)
+_E3_COEFFS_ARR = jnp.array(_E3_COEFFS, dtype=jnp.float32)
+_E4_COEFFS_ARR = jnp.array(_E4_COEFFS, dtype=jnp.float32)
+
+
 def _compute_epsilon(eta, dtype):
     """
-    Computes epsilon_1 through epsilon_4 using the Taylor expansions
-    provided in Section 5 of Temme (1992).
+    Computes epsilon_1 through epsilon_4 using Horner's method.
     """
-    # Coefficients extracted from Section 5 text
-    # Cast coefficients to the appropriate dtype
-
-    (
-        eta2,
-        eta3,
-        eta4,
-        eta5,
-        eta6,
-        eta7,
-        eta8,
-        eta9,
-        eta10,
-        eta11,
-        eta12,
-        eta13,
-        eta14,
-        eta15,
-        eta16,
-    ) = [eta**i for i in range(2, 17)]
-
-    # epsilon 1
-    e1 = (
-        -1.0 / 3.0
-        + (1.0 / 36.0) * eta
-        + (1.0 / 1620.0) * eta2
-        - (7.0 / 6480.0) * eta3
-        + (5.0 / 18144.0) * eta4
-        - (11.0 / 382725.0) * eta5
-        - (101.0 / 16329600.0) * eta6
-        + (37.0 / 9797760.0) * eta7
-        - (454973.0 / 498845952000.0) * eta8
-        + (1231.0 / 15913705500.0) * eta9
-        + (2745493.0 / 84737299046400.0) * eta10
-        - (2152217.0 / 127673385840000.0) * eta11
-        + (119937661.0 / 30505427656704000.0) * eta12
-        - (449.0 / 1595917323000.0) * eta13
-        - (756882301459.0 / 445517904822681600000.0) * eta14
-        + (12699400547.0 / 153146779782796800000.0) * eta15
-        - (3224618478943.0 / 170264214140233973760000.0) * eta16
-    )
-
-    # epsilon 2
-    e2 = (
-        -7.0 / 405.0
-        - (7.0 / 2592.0) * eta
-        + (533.0 / 204120.0) * eta2
-        - (1579.0 / 2099520.0) * eta3
-        + (109.0 / 1749600.0) * eta4
-        + (10217.0 / 251942400.0) * eta**5
-        - (9281803.0 / 436490208000.0) * eta**6
-        + (919081.0 / 185177664000.0) * eta7
-        - (100824673.0 / 571976768563200.0) * eta8
-        - (311266223.0 / 899963447040000.0) * eta9
-        + (52310527831.0 / 343186061137920000.0) * eta10
-    )
-
-    # epsilon 3
-    e3 = (
-        (449.0 / 102060.0)
-        - (63149.0 / 20995200.0) * eta
-        + (29233.0 / 36741600.0) * eta2
-        + (346793.0 / 5290790400.0) * eta3
-        - (18442139.0 / 130947062400.0) * eta4
-        + (14408797.0 / 246903552000.0) * eta5
-        - (1359578327.0 / 129994720128000.0) * eta6
-        - (69980826653.0 / 39598391669760000.0) * eta7
-        + (987512909021.0 / 514779091706880000.0) * eta8
-    )
-
-    # epsilon 4
-    e4 = (
-        (319.0 / 183708.0)
-        - (269383.0 / 4232632320.0) * eta
-        - (449882243.0 / 982102968000.0) * eta2
-        + (1981235233.0 / 6666395904000.0) * eta3
-        - (16968489929.0 / 194992080192000.0) * eta4
-        - (16004851139.0 / 26398927779840000.0) * eta5
-        + (636178018081.0 / 48260539847520000.0) * eta6
-    )
-
+    e1 = jnp.polyval(_E1_COEFFS_ARR.astype(dtype), eta)
+    e2 = jnp.polyval(_E2_COEFFS_ARR.astype(dtype), eta)
+    e3 = jnp.polyval(_E3_COEFFS_ARR.astype(dtype), eta)
+    e4 = jnp.polyval(_E4_COEFFS_ARR.astype(dtype), eta)
     return e1, e2, e3, e4
 
 

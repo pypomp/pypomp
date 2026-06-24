@@ -310,6 +310,8 @@ def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
     """
 
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
+    if u_arr.ndim == 0:
+        return _poissoninv_scalar(u_arr, lam_arr, dtype)
     flat_u = u_arr.reshape(-1)
     flat_lam = lam_arr.reshape(-1)
     flat_res = _poissoninv_vmap(flat_u, flat_lam, dtype)

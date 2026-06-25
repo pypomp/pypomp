@@ -1195,11 +1195,6 @@ class PanelEstimationMixin(Base):
         keys = jax.random.split(key, n_reps * M * U)
         keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
 
-        opt_name = optimizer.__class__.__name__
-        beta1 = getattr(optimizer, "beta1", 0.9)
-        beta2 = getattr(optimizer, "beta2", 0.999)
-        epsilon = getattr(optimizer, "epsilon", 1e-8)
-
         (
             logliks_history,
             shared_history,
@@ -1221,7 +1216,7 @@ class PanelEstimationMixin(Base):
             dmeasures,
             accumvars,
             chunk_size,
-            opt_name,
+            optimizer,
             M,
             eta_shared,
             eta_spec,
@@ -1232,9 +1227,6 @@ class PanelEstimationMixin(Base):
             process_weight_index,
             ntimes,
             decay,
-            beta1,
-            beta2,
-            epsilon,
         )
         logliks_trace = -np.array(logliks_history)
 

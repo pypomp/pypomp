@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from typing import Callable
 from .dpop import _dpop_internal
 from .helpers import _cosine_cooling
+from ..optimizer import Optimizer, SGD, Adam
 
 
 _panel_dpop_internal_vmap = jax.vmap(
@@ -164,7 +165,7 @@ def _panel_dpop_train_internal(
     dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
     chunk_size: int,
-    optimizer: str,
+    optimizer: Optimizer,
     M: int,
     eta_shared: jax.Array,  # (M, n_shared) per-iteration LR schedule
     eta_spec: jax.Array,  # (M, n_spec)   per-iteration LR schedule
@@ -175,10 +176,12 @@ def _panel_dpop_train_internal(
     process_weight_index: int | None,
     ntimes: int,
     decay: float,
-    beta1: float = 0.9,
-    beta2: float = 0.999,
-    epsilon: float = 1e-8,
 ):
+    if not isinstance(optimizer, (SGD, Adam)):
+        raise ValueError(
+            f"Optimizer '{optimizer.__class__.__name__}' not supported for panel dpop_train"
+        )
+
     times = times.astype(float)
     ylen = n_obs * U
     n_chunks = (U + chunk_size - 1) // chunk_size
@@ -193,23 +196,6 @@ def _panel_dpop_train_internal(
     unit_param_permutations_c = unit_param_permutations.reshape(
         (n_chunks, chunk_size, -1)
     )
-
-    def _adam_step(m, v, grad, step):
-        m = beta1 * m + (1 - beta1) * grad
-        v = beta2 * v + (1 - beta2) * (grad**2)
-        m_hat = m / (1 - beta1**step)
-        v_hat = v / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + epsilon), m, v
-
-    def _compute_direction(grad, m, v, step):
-        if optimizer == "SGD":
-            return -grad, m, v
-        elif optimizer == "Adam":
-            return _adam_step(m, v, grad, step)
-        else:
-            raise ValueError(
-                f"Optimizer '{optimizer}' not supported for panel dpop_train"
-            )
 
     def _chunk_obj(
         s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, curr_alpha, keys_chunk
@@ -238,7 +224,7 @@ def _panel_dpop_train_internal(
         return jnp.sum(res) / (chunk_size * n_obs)
 
     def iteration_scan_step(carry, i):
-        (shared_ests, unit_ests_c, m_s, v_s, m_u_c, v_u_c, global_step) = carry
+        (shared_ests, unit_ests_c, opt_state_s, opt_state_u_c, global_step) = carry
         iter_keys_c = keys[i].reshape((n_chunks, chunk_size) + keys.shape[2:])
 
         # Learning rate decay
@@ -249,9 +235,10 @@ def _panel_dpop_train_internal(
         curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         def chunk_scan_step(chunk_carry, chunk_idx):
-            c_s, c_m_s, c_v_s, c_step = chunk_carry
+            c_s, c_opt_state_s, c_step = chunk_carry
             c_u = unit_ests_c[chunk_idx]
-            c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
+
+            c_opt_state_u = jax.tree.map(lambda x: x[chunk_idx], opt_state_u_c)
 
             covars_chunk = None if covars_c is None else covars_c[chunk_idx]
             loglik, (g_s, g_u) = jax.value_and_grad(_chunk_obj, argnums=(0, 1))(
@@ -268,29 +255,27 @@ def _panel_dpop_train_internal(
             # Adjusts for jnp.sum(res) / (chunk_size * n_obs) in _chunk_obj()
             g_u = g_u * chunk_size
 
-            dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
-            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
+            dir_s, new_opt_state_s = optimizer.step(g_s, c_opt_state_s, c_step)
+            dir_u, new_opt_state_u = optimizer.step(g_u, c_opt_state_u, i)
 
             c_s = c_s + (eta_shared_scaled / n_chunks) * dir_s
             c_u = c_u + eta_spec_scaled * dir_u
-            return (c_s, c_m_s, c_v_s, c_step + 1), (loglik, c_u, c_m_u, c_v_u)
+            return (c_s, new_opt_state_s, c_step + 1), (loglik, c_u, new_opt_state_u)
 
         (
-            (final_s, final_m_s, final_v_s, final_step),
-            (chunk_lls, new_u_c, new_m_u_c, new_v_u_c),
+            (final_s, final_opt_state_s, final_step),
+            (chunk_lls, new_u_c, new_opt_state_u_c),
         ) = jax.lax.scan(
             chunk_scan_step,
-            (shared_ests, m_s, v_s, global_step),
+            (shared_ests, opt_state_s, global_step),
             jnp.arange(n_chunks),
         )
 
         new_carry = (
             final_s,
             new_u_c,
-            final_m_s,
-            final_v_s,
-            new_m_u_c,
-            new_v_u_c,
+            final_opt_state_s,
+            new_opt_state_u_c,
             final_step,
         )
         unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1])).T
@@ -299,10 +284,8 @@ def _panel_dpop_train_internal(
     initial_carry = (
         shared_array,
         unit_array_c,
-        jnp.zeros_like(shared_array),
-        jnp.zeros_like(shared_array),
-        jnp.zeros_like(unit_array_c),
-        jnp.zeros_like(unit_array_c),
+        optimizer.init_state(shared_array),
+        optimizer.init_state(unit_array_c),
         0,
     )
 
@@ -342,13 +325,7 @@ def _panel_dpop_train_internal(
     return logliks, shared_copies, unit_copies
 
 
-# vmap over replicates: shared_array(0), unit_array(0), then Nones, keys(0), then Nones
-# Arguments: shared_array, unit_array, unit_param_permutations, dt_array_extended,
-#   nstep_array, t0, times, ys, covars_extended, keys, J, rinitializer, rprocess_interp,
-#   dmeasure, accumvars, chunk_size, optimizer, M, eta_shared, eta_spec, alpha,
-#   alpha_cooling, n_obs, U, process_weight_index, ntimes, decay, beta1, beta2, epsilon
 _vmapped_panel_dpop_train_internal = jax.vmap(
     _panel_dpop_train_internal,
-    # indices:  0     1     2     3     4   5  6  7   8     9    10-29 (Nones except keys at 9)
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 20,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 17,
 )

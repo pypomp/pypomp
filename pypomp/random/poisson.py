@@ -323,7 +323,7 @@ def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array
     """
     Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
 
-    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve the speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
+    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve its speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
 
     Args:
         key: a PRNG key used as the random key.

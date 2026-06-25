@@ -59,16 +59,6 @@ def train(
         these arrays, use :func:`pypomp.functional.align_params`.
     """
 
-    opt_name = optimizer.__class__.__name__
-    clip_norm = optimizer.clip_norm
-    beta1 = getattr(optimizer, "beta1", 0.9)
-    beta2 = getattr(optimizer, "beta2", 0.999)
-    epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
-    c = optimizer.c
-    max_ls_itn = optimizer.max_ls_itn
-    scale = optimizer.scale
-    ls = optimizer.ls
-
     return _vmapped_train_internal(
         thetas_array,
         struct.ys,
@@ -82,22 +72,14 @@ def train(
         struct.accumvars,
         struct.covars_extended,
         J,
-        opt_name,
+        optimizer,
         M,
         eta,
-        c,
-        max_ls_itn,
         thresh,
-        scale,
-        ls,
         alpha,
         keys,
         alpha_cooling,
         n_monitors,
-        clip_norm,
-        beta1,
-        beta2,
-        epsilon,
     )
 
 
@@ -163,13 +145,6 @@ def panel_train(
         direction="to_est",
     )
 
-    opt_name = optimizer.__class__.__name__
-    clip_norm = optimizer.clip_norm
-    beta1 = getattr(optimizer, "beta1", 0.9)
-    beta2 = getattr(optimizer, "beta2", 0.999)
-    epsilon = getattr(optimizer, "epsilon", 1e-8 if opt_name == "Adam" else 1e-4)
-    scale = optimizer.scale
-
     (
         logliks_history,
         shared_history,
@@ -191,7 +166,7 @@ def panel_train(
         struct.dmeas_pf,
         struct.accumvars,
         chunk_size,
-        opt_name,
+        optimizer,
         M,
         eta_shared,
         eta_spec,
@@ -199,11 +174,6 @@ def panel_train(
         alpha_cooling,
         struct.ys_per_unit.shape[1],
         U,
-        clip_norm,
-        beta1,
-        beta2,
-        epsilon,
-        scale,
     )
 
     shared_history_natural, unit_history_natural = (

@@ -6,136 +6,21 @@ from typing import Callable
 from .pfilter import (
     _pfilter_internal,
     _vmapped_pfilter_internal,
-    _pfilter_internal_mean,
 )
-from .mop import _mop_internal_mean, _mop_internal
+from .mop import (
+    _chunked_panel_mop_internal,
+    _panel_mop_internal_vmap,
+)
 from .helpers import _cosine_cooling
-
-_grad_pfilter_internal_mean = jax.grad(_pfilter_internal_mean)
-_vg_pfilter_internal_mean = jax.value_and_grad(_pfilter_internal_mean)
-_hess_pfilter_internal_mean = jax.hessian(_pfilter_internal_mean)
-_grad_mop_internal_mean = jax.grad(_mop_internal_mean)
-_vg_mop_internal_mean = jax.value_and_grad(_mop_internal_mean)
-_hess_mop_internal_mean = jax.hessian(_mop_internal_mean)
-
-
-_panel_mop_internal_vmap = jax.vmap(
-    _mop_internal,
-    in_axes=(
-        0,  # theta
-        0,  # ys
-        None,  # dt_array_extended
-        None,  # nstep_array
-        None,  # t0
-        None,  # times
-        None,  # J
-        None,  # rinitializer
-        None,  # rprocess_interp
-        None,  # dmeasure
-        None,  # accumvars
-        0,  # covars_extended
-        None,  # alpha
-        0,  # key
-    ),
-)
-
-
-@partial(
-    jit,
-    static_argnames=(
-        "J",
-        "rinitializer",
-        "rprocess_interp",
-        "dmeasure",
-        "accumvars",
-        "chunk_size",
-    ),
-)
-def _chunked_panel_mop_internal(
-    shared_array: jax.Array,  # (n_shared,)
-    unit_array: jax.Array,  # (U, n_spec)
-    unit_param_permutations: jax.Array,  # (U, n_params)
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys: jax.Array,
-    covars_extended: jax.Array | None,
-    keys: jax.Array,
-    J: int,
-    rinitializer: Callable,
-    rprocess_interp: Callable,
-    dmeasure: Callable,
-    accumvars: tuple[int, ...] | None,
-    chunk_size: int,
-    alpha: float,
-):
-    U = unit_array.shape[0]
-    n_params = unit_param_permutations.shape[1]
-    n_chunks = U // chunk_size
-
-    ys_c = ys.reshape((n_chunks, chunk_size) + ys.shape[1:])
-    covars_c = (
-        None
-        if covars_extended is None
-        else covars_extended.reshape((n_chunks, chunk_size) + covars_extended.shape[1:])
-    )
-    keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
-
-    # unit_array: (U, n_spec) -> (n_chunks, chunk_size, n_spec)
-    unit_array_c = unit_array.reshape((n_chunks, chunk_size, -1))
-
-    # unit_param_permutations: (U, n_params) -> (n_chunks, chunk_size, n_params)
-    unit_param_permutations_c = unit_param_permutations.reshape(
-        (n_chunks, chunk_size, n_params)
-    )
-
-    shared_tiled = jnp.tile(shared_array, (chunk_size, 1))
-
-    def scan_fn(carry, chunk_idx):
-        unit_array_chunk = unit_array_c[chunk_idx]  # (chunk_size, n_spec)
-        unit_param_perm_chunk = unit_param_permutations_c[
-            chunk_idx
-        ]  # (chunk_size, n_params)
-
-        theta_chunk_unordered = jnp.concatenate(
-            [shared_tiled, unit_array_chunk], axis=1
-        )
-
-        def apply_perm(theta, perm):
-            return theta[perm]
-
-        theta_chunk = jax.vmap(apply_perm)(theta_chunk_unordered, unit_param_perm_chunk)
-
-        ys_chunk = ys_c[chunk_idx]
-        covars_chunk = None if covars_c is None else covars_c[chunk_idx]
-        key_chunk = keys_c[chunk_idx]
-
-        res = _panel_mop_internal_vmap(
-            theta_chunk,
-            ys_chunk,
-            dt_array_extended,
-            nstep_array,
-            t0,
-            times,
-            J,
-            rinitializer,
-            rprocess_interp,
-            dmeasure,
-            accumvars,
-            covars_chunk,
-            alpha,
-            key_chunk,
-        )
-        return carry + jnp.sum(res), None
-
-    total_neg_loglik, _ = jax.lax.scan(scan_fn, 0.0, jnp.arange(n_chunks))
-
-    return total_neg_loglik / (U * ys.shape[1])
-
-
-_vg_chunked_panel_mop_internal = jax.value_and_grad(
-    _chunked_panel_mop_internal, argnums=(0, 1)
+from .ad_helpers import _jvg_mop, _jgrad_mop, _jhess_mop
+from ..optimizer import (
+    Optimizer,
+    SGD,
+    Adam,
+    FullMatrixAdam,
+    Newton,
+    WeightedNewton,
+    BFGS,
 )
 
 
@@ -152,9 +37,7 @@ _vg_chunked_panel_mop_internal = jax.value_and_grad(
         "M",
         "n_obs",
         "U",
-        "clip_norm",
         "alpha_cooling",
-        "scale",
     ),
 )
 def _panel_train_internal(
@@ -174,7 +57,7 @@ def _panel_train_internal(
     dmeasure: Callable,
     accumvars: tuple[int, ...] | None,
     chunk_size: int,
-    optimizer: str,
+    optimizer: Optimizer,
     M: int,
     eta_shared: jax.Array,
     eta_spec: jax.Array,
@@ -182,12 +65,12 @@ def _panel_train_internal(
     alpha_cooling: float,
     n_obs: int,  # ys.shape[1]
     U: int,  # ys.shape[0]
-    clip_norm: float | None = None,
-    beta1: float = 0.9,
-    beta2: float = 0.999,
-    epsilon: float = 1e-8,
-    scale: bool = False,
 ):
+    if not isinstance(optimizer, (SGD, Adam, FullMatrixAdam)):
+        raise ValueError(
+            f"Optimizer '{optimizer.__class__.__name__}' not supported for panel train"
+        )
+
     times = times.astype(float)
     ylen = n_obs * U
     n_chunks = (U + chunk_size - 1) // chunk_size
@@ -202,43 +85,6 @@ def _panel_train_internal(
     unit_param_permutations_c = unit_param_permutations.reshape(
         (n_chunks, chunk_size, -1)
     )
-
-    def _adam_step(m, v, grad, step):
-        m_new = beta1 * m + (1 - beta1) * grad
-        v_new = beta2 * v + (1 - beta2) * (grad**2)
-        m_hat = m_new / (1 - beta1**step)
-        v_hat = v_new / (1 - beta2**step)
-        return -m_hat / (jnp.sqrt(v_hat) + epsilon), m_new, v_new
-
-    def _full_matrix_adam_step_single(m, v, grad, step):
-        m_new = beta1 * m + (1 - beta1) * grad
-        m_hat = m_new / (1 - beta1**step)
-
-        F_t = beta2 * v + (1 - beta2) * jnp.outer(grad, grad)
-        F_hat = F_t / (1 - beta2**step)
-
-        eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-        inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
-        F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
-
-        direction = -F_inv_sqrt @ m_hat
-
-        return direction, m_new, F_t
-
-    def _compute_direction(grad, m, v, step):
-        if optimizer == "SGD":
-            return -grad, m, v
-        elif optimizer == "Adam":
-            return _adam_step(m, v, grad, step)
-        elif optimizer == "FullMatrixAdam":
-            if grad.ndim == 1:
-                return _full_matrix_adam_step_single(m, v, grad, step)
-            else:
-                return jax.vmap(_full_matrix_adam_step_single, in_axes=(0, 0, 0, None))(
-                    m, v, grad, step
-                )
-        else:
-            raise ValueError(f"Optimizer '{optimizer}' not supported for panel train")
 
     def _chunk_obj(
         s_ests, u_ests, perm_chunk, ys_chunk, covars_chunk, keys_chunk, curr_alpha
@@ -265,13 +111,14 @@ def _panel_train_internal(
         return jnp.sum(res) / (chunk_size * n_obs)
 
     def iteration_scan_step(carry, i):
-        (shared_ests, unit_ests_c, m_s, v_s, m_u_c, v_u_c, global_step) = carry
+        (shared_ests, unit_ests_c, opt_state_s, opt_state_u_c, global_step) = carry
         iter_keys_c = keys[i].reshape((n_chunks, chunk_size) + keys.shape[2:])
 
         def chunk_scan_step(chunk_carry, chunk_idx):
-            c_s, c_m_s, c_v_s, c_step = chunk_carry
+            c_s, c_opt_state_s, c_step = chunk_carry
             c_u = unit_ests_c[chunk_idx]
-            c_m_u, c_v_u = m_u_c[chunk_idx], v_u_c[chunk_idx]
+
+            c_opt_state_u = jax.tree.map(lambda x: x[chunk_idx], opt_state_u_c)
 
             curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
@@ -290,57 +137,50 @@ def _panel_train_internal(
             # Adjusts for jnp.sum(res) / (chunk_size * n_obs) in _chunk_obj()
             g_u = g_u * chunk_size
 
-            if clip_norm is not None:
-                g_s = jnp.clip(g_s, -clip_norm, clip_norm)
-                g_u = jnp.clip(g_u, -clip_norm, clip_norm)
+            if optimizer.clip_norm is not None:
+                g_s = jnp.clip(g_s, -optimizer.clip_norm, optimizer.clip_norm)
+                g_u = jnp.clip(g_u, -optimizer.clip_norm, optimizer.clip_norm)
 
-            dir_s, c_m_s, c_v_s = _compute_direction(g_s, c_m_s, c_v_s, c_step + 1)
-            dir_u, c_m_u, c_v_u = _compute_direction(g_u, c_m_u, c_v_u, i + 1)
+            dir_s, new_opt_state_s = optimizer.step(g_s, c_opt_state_s, c_step)
+            dir_u, new_opt_state_u = optimizer.step(g_u, c_opt_state_u, i)
 
-            if scale:
-                dir_s = dir_s / jnp.maximum(jnp.linalg.norm(dir_s), epsilon)
+            if optimizer.scale:
+                dir_s = dir_s / jnp.maximum(jnp.linalg.norm(dir_s), 1e-8)
                 norm_u = jnp.linalg.norm(dir_u, axis=-1, keepdims=True)
-                dir_u = dir_u / jnp.maximum(norm_u, epsilon)
+                dir_u = dir_u / jnp.maximum(norm_u, 1e-8)
 
             c_s = c_s + (eta_shared[i] / n_chunks) * dir_s
             c_u = c_u + eta_spec[i] * dir_u
-            return (c_s, c_m_s, c_v_s, c_step + 1), (neg_loglik, c_u, c_m_u, c_v_u)
+            return (c_s, new_opt_state_s, c_step + 1), (
+                neg_loglik,
+                c_u,
+                new_opt_state_u,
+            )
 
         (
-            (final_s, final_m_s, final_v_s, final_step),
-            (chunk_neg_logliks, new_u_c, new_m_u_c, new_v_u_c),
+            (final_s, final_opt_state_s, final_step),
+            (chunk_neg_logliks, new_u_c, new_opt_state_u_c),
         ) = jax.lax.scan(
             chunk_scan_step,
-            (shared_ests, m_s, v_s, global_step),
+            (shared_ests, opt_state_s, global_step),
             jnp.arange(n_chunks),
         )
 
         new_carry = (
             final_s,
             new_u_c,
-            final_m_s,
-            final_v_s,
-            new_m_u_c,
-            new_v_u_c,
+            final_opt_state_s,
+            new_opt_state_u_c,
             final_step,
         )
         unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1]))
         return new_carry, (jnp.mean(chunk_neg_logliks), final_s, unit_flat)
 
-    if optimizer == "FullMatrixAdam":
-        init_v_s = jnp.zeros((shared_array.shape[-1], shared_array.shape[-1]))
-        init_v_u_c = jnp.zeros(unit_array_c.shape + (unit_array_c.shape[-1],))
-    else:
-        init_v_s = jnp.zeros_like(shared_array)
-        init_v_u_c = jnp.zeros_like(unit_array_c)
-
     initial_carry = (
         shared_array,
         unit_array_c,
-        jnp.zeros_like(shared_array),
-        init_v_s,
-        jnp.zeros_like(unit_array_c),
-        init_v_u_c,
+        optimizer.init_state(shared_array),
+        optimizer.init_state(unit_array_c),
         0,
     )
 
@@ -380,7 +220,7 @@ def _panel_train_internal(
 
 _vmapped_panel_train_internal = jax.vmap(
     _panel_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 19,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 14,
 )
 
 
@@ -393,15 +233,8 @@ _vmapped_panel_train_internal = jax.vmap(
         "J",
         "optimizer",
         "M",
-        "c",
-        "max_ls_itn",
         "thresh",
-        "scale",
-        "ls",
-        "alpha",
         "n_monitors",
-        "clip_norm",
-        "alpha_cooling",
     ),
 )
 def _train_internal(
@@ -417,40 +250,33 @@ def _train_internal(
     accumvars: tuple[int, ...] | None,
     covars_extended: jax.Array | None,
     J: int,  # static
-    optimizer: str,  # static
+    optimizer: Optimizer,  # static
     M: int,  # static
     eta: jax.Array,
-    c: float,  # static
-    max_ls_itn: int,  # static
     thresh: float,  # static
-    scale: bool,  # static
-    ls: bool,  # static
     alpha: float | jax.Array,
     key: jax.Array,
     alpha_cooling: float,
     n_monitors: int,  # static
-    clip_norm: float | None = None,
-    beta1: float = 0.9,
-    beta2: float = 0.999,
-    epsilon: float = 1e-8,
 ):
     """
     Internal function for conducting the MOP gradient estimate method.
     """
     times = times.astype(float)
     ylen = ys.shape[0]
-    if n_monitors < 1 and ls:
+    if n_monitors < 1 and optimizer.ls:
         raise ValueError("Line search requires at least one monitor")
+
+    if not isinstance(
+        optimizer, (SGD, Adam, FullMatrixAdam, Newton, WeightedNewton, BFGS)
+    ):
+        raise ValueError(f"Optimizer '{optimizer.__class__.__name__}' not supported")
 
     def scan_step(carry, i):
         (
             theta_ests,
             key,
-            hess,
-            prev_grad,
-            prev_hess,
-            m_adam,
-            v_adam,
+            opt_state,
         ) = carry
 
         curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
@@ -520,12 +346,13 @@ def _train_internal(
             else:
                 neg_loglik = jnp.array(jnp.nan)
 
-        if clip_norm is not None:
-            grad = jnp.clip(grad, -clip_norm, clip_norm)
+        if optimizer.clip_norm is not None:
+            grad = jnp.clip(grad, -optimizer.clip_norm, optimizer.clip_norm)
 
-        if optimizer == "Newton":
-            key, subkey = jax.random.split(key)
-            hess = _jhess_mop(
+        key, subkey_hess = jax.random.split(key)
+
+        def compute_hessian():
+            return _jhess_mop(
                 theta_ests=theta_ests,
                 ys=ys,
                 dt_array_extended=dt_array_extended,
@@ -539,109 +366,21 @@ def _train_internal(
                 accumvars=accumvars,
                 covars_extended=covars_extended,
                 alpha=curr_alpha,
-                key=subkey,
-            )
-            direction = -jnp.linalg.pinv(hess, hermitian=True) @ grad
-
-        elif optimizer == "WeightedNewton":
-            key, subkey = jax.random.split(key)
-            hess = _jhess_mop(
-                theta_ests=theta_ests,
-                ys=ys,
-                dt_array_extended=dt_array_extended,
-                nstep_array=nstep_array,
-                t0=t0,
-                times=times,
-                J=J,
-                rinitializer=rinitializer,
-                rprocess=rprocess_interp,
-                dmeasure=dmeasure,
-                accumvars=accumvars,
-                covars_extended=covars_extended,
-                alpha=curr_alpha,
-                key=subkey,
+                key=subkey_hess,
             )
 
-            def dir_weighted(_):
-                i_f = i.astype(theta_ests.dtype)
-                wt = (i_f ** jnp.log(i_f)) / ((i_f + 1) ** jnp.log(i_f + 1))
-                weighted_hess = wt * prev_hess + (1 - wt) * hess
-                return -jnp.linalg.pinv(weighted_hess, hermitian=True) @ grad
+        direction, new_opt_state = optimizer.step(
+            grad=grad,
+            state=opt_state,
+            step_num=i,
+            compute_hessian_fn=compute_hessian,
+            eta_i=eta[i],
+        )
 
-            direction = jax.lax.cond(
-                i == 0,
-                lambda _: -jnp.linalg.pinv(hess, hermitian=True) @ grad,
-                dir_weighted,
-                None,
-            )
-
-        elif optimizer == "BFGS":
-
-            def bfgs_true(_):
-                prev_direction = jax.lax.cond(
-                    i > 0,
-                    lambda __: -prev_grad,
-                    lambda __: -grad,
-                    operand=None,
-                )
-                s_k = jnp.mean(eta[i]) * prev_direction  # Use mean for BFGS
-                y_k = grad - prev_grad
-                rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
-
-                Hy = hess @ y_k
-                yHy = jnp.dot(y_k, Hy)
-                term1 = rho_k * jnp.outer(s_k, Hy)
-                term2 = rho_k * jnp.outer(Hy, s_k)
-                term3 = rho_k * (rho_k * yHy + 1.0) * jnp.outer(s_k, s_k)
-
-                new_hess = hess - term1 - term2 + term3
-                new_hess = jnp.where(jnp.isfinite(rho_k), new_hess, hess)
-                new_direction = -new_hess @ grad
-                return new_hess, new_direction
-
-            def bfgs_false(_):
-                return hess, -grad
-
-            hess, direction = jax.lax.cond(i > 1, bfgs_true, bfgs_false, operand=None)
-
-        elif optimizer == "SGD":
-            direction = -grad
-
-        elif optimizer == "Adam":
-            m_adam = beta1 * m_adam + (1 - beta1) * grad
-            v_adam = beta2 * v_adam + (1 - beta2) * (grad**2)
-            m_hat = m_adam / (1 - beta1 ** (i + 1))
-            v_hat = v_adam / (1 - beta2 ** (i + 1))
-            direction = -m_hat / (jnp.sqrt(v_hat) + epsilon)
-
-        elif optimizer == "FullMatrixAdam":
-            m_adam = beta1 * m_adam + (1 - beta1) * grad
-            m_hat = m_adam / (1 - beta1 ** (i + 1))
-
-            curr_hess = jax.lax.cond(
-                i == 0,
-                lambda _: jnp.zeros_like(hess),
-                lambda _: hess,
-                operand=None,
-            )
-
-            F_t = beta2 * curr_hess + (1 - beta2) * jnp.outer(grad, grad)
-            F_hat = F_t / (1 - beta2 ** (i + 1))
-
-            eigenvalues, eigenvectors = jnp.linalg.eigh(F_hat)
-            inv_sqrt_evals = 1.0 / jnp.sqrt(jnp.maximum(eigenvalues, 0.0) + epsilon)
-            F_inv_sqrt = eigenvectors @ jnp.diag(inv_sqrt_evals) @ eigenvectors.T
-
-            direction = -F_inv_sqrt @ m_hat
-
-            hess = F_t
-        else:
-            raise ValueError(f"Optimizer '{optimizer}' not supported")
-
-        if scale:
+        if optimizer.scale:
             direction = direction / jnp.linalg.norm(direction)
 
-        if ls:
+        if optimizer.ls:
 
             def _obj_neg_loglik(theta):
                 neg_loglik = _pfilter_internal(
@@ -677,8 +416,8 @@ def _train_internal(
                 k=i + 1,
                 eta=jnp.mean(eta[i]),
                 xi=10,
-                tau=max_ls_itn,
-                c=c,
+                tau=optimizer.max_ls_itn,
+                c=optimizer.c,
                 frac=0.5,
                 stoch=False,
             )
@@ -687,35 +426,18 @@ def _train_internal(
         else:
             theta_ests = theta_ests + eta[i] * direction
 
-        prev_grad = grad
-        prev_hess = hess
-
         new_carry = (
             theta_ests,
             key,
-            hess,
-            prev_grad,
-            prev_hess,
-            m_adam,
-            v_adam,
+            new_opt_state,
         )
 
         return new_carry, (neg_loglik, theta_ests)
 
-    hess = jnp.eye(theta_ests.shape[-1])  # default one
-    prev_grad = jnp.zeros_like(theta_ests)
-    prev_hess = hess
-    m_adam = jnp.zeros_like(theta_ests)
-    v_adam = jnp.zeros_like(theta_ests)
-
     initial_carry = (
         theta_ests,
         key,
-        hess,
-        prev_grad,
-        prev_hess,
-        m_adam,
-        v_adam,
+        optimizer.init_state(theta_ests),
     )
 
     _, (neg_logliks_history, Acopies_history) = jax.lax.scan(
@@ -733,7 +455,7 @@ def _train_internal(
 # Map over theta and key
 _vmapped_train_internal = jax.vmap(
     _train_internal,
-    in_axes=(0,) + (None,) * 20 + (0,) + (None,) * 6,
+    in_axes=(0,) + (None,) * 16 + (0,) + (None,) * 2,
 )
 
 
@@ -796,280 +518,3 @@ def _line_search(
         lambda carry: carry[2], line_search_body, (eta, 0, True)
     )
     return eta_final
-
-
-def _jgrad(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    calculates the gradient of a mean particle filter objective (function
-    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the gradient of the pfilter_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return _grad_pfilter_internal_mean(
-        theta_ests,  # for some reason this needs to be given as a positional argument
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
-    )
-
-
-def _jvg(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    Calculates the both the value and gradient of a mean particle filter
-    objective (function 'pfilter_internal_mean') w.r.t. the current estimated
-    parameter value using JAX's automatic differentiation.
-
-    Returns:
-        tuple: A tuple containing:
-        - The mean of negative log-likelihood value across the measurements
-            using pfilter_internal_mean function.
-        - The gradient of the function pfilter_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return _vg_pfilter_internal_mean(
-        theta_ests,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
-    )
-
-
-def _jgrad_mop(
-    theta_ests: jax.Array,
-    ys: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    alpha: float | jax.Array,
-    key: jax.Array,
-):
-    """
-    Calculates the gradient of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the gradient of the mop_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return _grad_mop_internal_mean(
-        theta_ests,
-        ys=ys,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess_interp=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        alpha=alpha,
-        key=key,
-    )
-
-
-def _jvg_mop(
-    theta_ests: jax.Array,
-    ys: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    covars_extended: jax.Array | None,
-    accumvars: tuple[int, ...] | None,
-    alpha: float | jax.Array,
-    key: jax.Array,
-) -> tuple:
-    """
-    Calculates the both the value and gradient of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        tuple: A tuple containing:
-        - The mean of negative log-likelihood value across the measurements
-            using mop_internal_mean function.
-        - The gradient of the function mop_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return _vg_mop_internal_mean(
-        theta_ests,
-        ys=ys,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess_interp=rprocess,
-        dmeasure=dmeasure,
-        covars_extended=covars_extended,
-        accumvars=accumvars,
-        alpha=alpha,
-        key=key,
-    )
-
-
-def _jhess(
-    theta_ests: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_extended: jax.Array,
-    ys_observed: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    key: jax.Array,
-    n_obs: int,
-):
-    """
-    calculates the Hessian matrix of a mean particle filter objective (function
-    'pfilter_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the Hessian matrix of the pfilter_internal_mean function
-            w.r.t. theta_ests.
-    """
-    return _hess_pfilter_internal_mean(
-        theta_ests,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        ys_extended=ys_extended,
-        ys_observed=ys_observed,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        thresh=thresh,
-        key=key,
-        n_obs=n_obs,
-    )
-
-
-# get the hessian matrix from mop
-def _jhess_mop(
-    theta_ests: jax.Array,
-    ys: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    J: int,  # static
-    rinitializer: Callable,  # static
-    rprocess: Callable,  # static
-    dmeasure: Callable,  # static
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    alpha: float | jax.Array,
-    key: jax.Array,
-):
-    """
-    calculates the Hessian matrix of a mean MOP objective (function
-    'mop_internal_mean') w.r.t. the current estimated parameter value using
-    JAX's automatic differentiation.
-
-    Returns:
-        array-like: the Hessian matrix of the mop_internal_mean function w.r.t.
-            theta_ests.
-    """
-    return _hess_mop_internal_mean(
-        theta_ests,
-        ys=ys,
-        dt_array_extended=dt_array_extended,
-        nstep_array=nstep_array,
-        t0=t0,
-        times=times,
-        J=J,
-        rinitializer=rinitializer,
-        rprocess_interp=rprocess,
-        dmeasure=dmeasure,
-        accumvars=accumvars,
-        covars_extended=covars_extended,
-        alpha=alpha,
-        key=key,
-    )

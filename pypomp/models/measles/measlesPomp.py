@@ -16,6 +16,31 @@ from pypomp.core.par_trans import ParTrans
 from pypomp.core.parameters import PompParameters
 
 
+def evaluate_spline_with_linear_extrapolation(spline, x, x_min, x_max):
+    """
+    Evaluates a SciPy BSpline with linear extrapolation outside [x_min, x_max],
+    matching R's predict.smooth.spline behavior.
+    """
+    x = np.atleast_1d(x)
+    y = spline(x)
+
+    deriv = spline.derivative()
+
+    left_mask = x < x_min
+    if np.any(left_mask):
+        y_min = float(spline(x_min))
+        dy_min = float(deriv(x_min))
+        y[left_mask] = y_min + dy_min * (x[left_mask] - x_min)
+
+    right_mask = x > x_max
+    if np.any(right_mask):
+        y_max = float(spline(x_max))
+        dy_max = float(deriv(x_max))
+        y[right_mask] = y_max + dy_max * (x[right_mask] - x_max)
+
+    return y
+
+
 # Not sure if this is the best way to implement this.
 class UKMeasles:
     _module_dir = os.path.dirname(os.path.abspath(__file__))
@@ -212,11 +237,17 @@ class UKMeasles:
         demog = demog.drop(columns=["unit"])
         times = np.arange(demog["year"].min(), demog["year"].max() + 1 / 12, 1 / 12)
         if interp_method == "shifted_splines":
-            # TODO fix exploding birthrate below year 1950
             pop_bspl = make_smoothing_spline(demog["year"], demog["pop"])
             births_bspl = make_smoothing_spline(demog["year"] + 0.5, demog["births"])
-            pop_interp = pop_bspl(times)
-            births_interp = births_bspl(times - 4)
+            pop_interp = evaluate_spline_with_linear_extrapolation(
+                pop_bspl, times, x_min=demog["year"].min(), x_max=demog["year"].max()
+            )
+            births_interp = evaluate_spline_with_linear_extrapolation(
+                births_bspl,
+                times - 4,
+                x_min=demog["year"].min() + 0.5,
+                x_max=demog["year"].max() + 0.5,
+            )
         elif interp_method == "linear":
             pop_interp = np.interp(times, demog["year"], demog["pop"])
             births_interp = np.interp(times - 4, demog["year"], demog["births"])

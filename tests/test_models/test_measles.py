@@ -181,3 +181,54 @@ def test_measles_invalid_interp_method():
             theta=pp.PompParameters(theta),
             interp_method="invalid_method",
         )
+
+
+def test_measles_covariates_r_alignment():
+    import os
+    import pandas as pd
+
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "..", "data", "measles", "r_covariates.csv"
+    )
+    r_covars = pd.read_csv(csv_path)
+
+    theta = BASE_THETA.copy()
+    del theta["mu"]
+    del theta["alpha"]
+
+    for unit in ["London", "Halesworth"]:
+        measles = pp.models.UKMeasles.Pomp(
+            unit=[unit],
+            theta=pp.PompParameters(theta),
+            clean=True,
+            model="001b",
+            interp_method="shifted_splines",
+        )
+        covars_df = measles.covars
+        assert covars_df is not None
+        py_covars = covars_df.reset_index()
+        r_unit = r_covars[r_covars["unit"] == unit]
+
+        # Merge on time to align evaluation points
+        merged = pd.merge(py_covars, r_unit, on="time", suffixes=("_py", "_r"))
+        assert len(merged) > 0
+
+        # Check alignment: pop is extremely close, birthrate is within ~1.5% due to
+        # small differences in spline libraries between Python/SciPy and R
+        pop_py = np.asarray(merged["pop_py"])
+        pop_r = np.asarray(merged["pop_r"])
+        np.testing.assert_allclose(pop_py, pop_r, rtol=1e-5, atol=0.0)
+
+        # Print statements for debugging
+        diffs = np.abs(pop_py - pop_r)
+        print(f"{unit} pop max difference: {diffs.max()}")
+        print(f"{unit} pop mean difference: {diffs.mean()}")
+
+        birthrate_py = np.asarray(merged["birthrate_py"])
+        birthrate_r = np.asarray(merged["birthrate_r"])
+        np.testing.assert_allclose(birthrate_py, birthrate_r, rtol=1.5e-2, atol=0.0)
+
+        # Print statements for debugging
+        diffs = np.abs(birthrate_py - birthrate_r)
+        print(f"{unit} birthrate max difference: {diffs.max()}")
+        print(f"{unit} birthrate mean difference: {diffs.mean()}")

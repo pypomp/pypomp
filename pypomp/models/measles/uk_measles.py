@@ -1,3 +1,4 @@
+from typing import Literal
 import numpy as np
 import pandas as pd
 import os
@@ -11,9 +12,9 @@ import pypomp.models.measles.model_002d as m002d
 import pypomp.models.measles.model_003 as m003
 from scipy.interpolate import make_smoothing_spline
 from pypomp.core.pomp import Pomp
-import copy
+from pypomp.panel.panel import PanelPomp
 from pypomp.core.par_trans import ParTrans
-from pypomp.core.parameters import PompParameters
+from pypomp.core.parameters import PompParameters, PanelParameters
 
 
 def evaluate_spline_with_linear_extrapolation(spline, x, x_min, x_max):
@@ -46,11 +47,27 @@ class UKMeasles:
     _module_dir = os.path.dirname(os.path.abspath(__file__))
     _data_dir = os.path.join(_module_dir, os.pardir, os.pardir, "data/uk_measles")
     _data_file = os.path.join(_data_dir, "uk_measles.pkl")
-    with open(_data_file, "rb") as _f:
-        _data = pickle.load(_f)
+    _data = None
 
-    @staticmethod
-    def subset(units=None, clean=False):
+    MODELS = {
+        "001": m001,
+        "001b": m001b,
+        "001c": m001c,
+        "001d": m001d,
+        "002": m002,
+        "002d": m002d,
+        "003": m003,
+    }
+
+    @classmethod
+    def _get_data(cls):
+        if cls._data is None:
+            with open(cls._data_file, "rb") as f:
+                cls._data = pickle.load(f)
+        return cls._data
+
+    @classmethod
+    def subset(cls, units=None, clean=False):
         """
         Return a subset of the UKMeasles data, filtered by the given units.
 
@@ -67,7 +84,8 @@ class UKMeasles:
         -------
         A dictionary with the same structure as UKMeasles.data, but with the data subsetted to only include the given units.
         """
-        data = copy.deepcopy(UKMeasles._data)
+        raw_data = cls._get_data()
+        data = {k: v.copy() for k, v in raw_data.items()}
 
         if clean:
             # London 1955-08-12   124
@@ -146,15 +164,12 @@ class UKMeasles:
                 for k, v in data.items()
             }
 
-    @staticmethod
-    def AK_mles() -> pd.DataFrame:
+    @classmethod
+    def AK_mles(cls) -> pd.DataFrame:
         """
-        MLEs from https://kingaa.github.io/sbied/measles/index.html
+        Returns a data frame of Aaron King's MLEs from https://kingaa.github.io/sbied/measles/index.html
         """
-        module_dir = os.path.dirname(os.path.abspath(__file__))
-        data_file = os.path.join(
-            module_dir, os.pardir, os.pardir, "data/uk_measles/AK_mles.csv"
-        )
+        data_file = os.path.join(cls._data_dir, "AK_mles.csv")
         df = pd.read_csv(data_file, index_col="town")
         df.drop(columns=["loglik", "loglik.sd", "mu", "delay"], inplace=True)
         return df[
@@ -175,12 +190,13 @@ class UKMeasles:
             ]
         ].T
 
-    @staticmethod
+    @classmethod
     def Pomp(
-        unit: list[str],
+        cls,
+        unit: str,
         theta: PompParameters,
-        model: str = "001b",
-        interp_method: str = "shifted_splines",
+        model: Literal["001", "001b", "001c", "001d", "002", "002d", "003"] = "001b",
+        interp_method: Literal["shifted_splines", "linear"] = "shifted_splines",
         first_year: int = 1950,
         last_year: int = 1963,
         dt: float = 1 / 365.25,
@@ -191,14 +207,14 @@ class UKMeasles:
 
         Parameters
         ----------
-        unit : list[str]
-            Which unit to use. Currently only supports one unit.
+        unit : str
+            The name of the unit to use.
         theta : PompParameters
             Parameters for the model.
-        model : str
-            The model to use. Can be "001b", "001c", "001d" or "002".
-        interp_method : str
-            The method to use to interpolate the covariates. Can be "shifted_splines" or "linear".
+        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
+            The model to use.
+        interp_method : Literal["shifted_splines", "linear"]
+            The method to use to interpolate the covariates.
         first_year : int
             The first year of the data to use.
         last_year : int
@@ -214,7 +230,7 @@ class UKMeasles:
             A Pomp object for the UK Measles data.
         """
 
-        data = UKMeasles.subset(unit, clean)
+        data = cls.subset([unit], clean)
         measles = data["measles"]
         demog = data["demog"]
 
@@ -269,19 +285,19 @@ class UKMeasles:
 
         # Placeholder for standardized log(pop_1950); must be overwritten
         # at the panel level with correct z-score across all units.
-        covar_df["std_log_pop_1950"] = 0.0
+        covar_df["std_log_pop_1950"] = covar_df["log_pop_1950"]
 
         # ----pomp-construction-----------------------------------------------
 
-        mod = {
-            "001": m001,
-            "001b": m001b,
-            "001c": m001c,
-            "001d": m001d,
-            "002": m002,
-            "002d": m002d,
-            "003": m003,
-        }[model]
+        mod = cls.MODELS[model]
+
+        missing_params = [
+            p for p in mod.param_names if p not in theta.get_param_names()
+        ]
+        if missing_params:
+            raise ValueError(
+                f"Missing required parameters for model '{model}': {missing_params}"
+            )
 
         t0 = float(2 * dat_filtered.index[0] - dat_filtered.index[1])
         return Pomp(
@@ -299,3 +315,99 @@ class UKMeasles:
             rmeas=mod.rmeas,
             par_trans=ParTrans(to_est=mod.to_est, from_est=mod.from_est),
         )
+
+    @classmethod
+    def PanelPomp(
+        cls,
+        units: list[str],
+        theta: PanelParameters,
+        model: Literal["001", "001b", "001c", "001d", "002", "002d", "003"] = "001b",
+        interp_method: Literal["shifted_splines", "linear"] = "shifted_splines",
+        first_year: int = 1950,
+        last_year: int = 1963,
+        dt: float = 1 / 365.25,
+        clean: bool = False,
+    ):
+        """
+        Returns a PanelPomp object for the UK Measles data.
+
+        Parameters
+        ----------
+        units : list of str
+            List of units to include in the panel.
+        theta : PanelParameters
+            Parameters for the panel model.
+        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
+            The model to use.
+        interp_method : Literal["shifted_splines", "linear"]
+            The method to use to interpolate the covariates.
+        first_year : int
+            The first year of the data to use.
+        last_year : int
+            The last year of the data to use.
+        dt : float
+            The time step size to use for the model.
+        clean : bool
+            If True, uses a copy of the data with suspicious values set to np.nan.
+
+        Returns
+        -------
+        PanelPomp:
+            A PanelPomp object for the UK Measles data.
+        """
+        if not isinstance(theta, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance")
+
+        mod = cls.MODELS[model]
+        param_names = mod.param_names
+
+        pomp_dict = {}
+        theta_list = theta.params()
+
+        for unit in units:
+            unit_theta_dict = {}
+            if len(theta_list) > 0:
+                theta_dict = theta_list[0]
+                if theta_dict["shared"] is not None:
+                    unit_theta_dict.update(theta_dict["shared"].iloc[:, 0].to_dict())
+                if theta_dict["unit_specific"] is not None:
+                    unit_theta_dict.update(theta_dict["unit_specific"][unit].to_dict())
+
+            missing_params = [p for p in param_names if p not in unit_theta_dict]
+            if missing_params:
+                raise ValueError(
+                    f"Missing required parameters for unit '{unit}': {missing_params}"
+                )
+
+            unit_theta = PompParameters(unit_theta_dict)
+
+            pomp_dict[unit] = cls.Pomp(
+                unit=unit,
+                theta=unit_theta,
+                model=model,
+                interp_method=interp_method,
+                first_year=first_year,
+                last_year=last_year,
+                dt=dt,
+                clean=clean,
+            )
+
+        log_pops = {
+            unit: float(pomp_obj.covars["log_pop_1950"].iloc[0])
+            for unit, pomp_obj in pomp_dict.items()
+        }
+        log_pop_values = list(log_pops.values())
+        mean_log_pop = np.mean(log_pop_values)
+        if len(log_pop_values) > 1:
+            sd_log_pop = np.std(log_pop_values, ddof=1)
+        else:
+            sd_log_pop = 1.0
+
+        if sd_log_pop == 0.0:
+            sd_log_pop = 1.0
+
+        for unit, pomp_obj in pomp_dict.items():
+            std_val = (log_pops[unit] - mean_log_pop) / sd_log_pop
+            pomp_obj.covars["std_log_pop_1950"] = std_val
+
+        return PanelPomp(Pomp_dict=pomp_dict, theta=theta)

@@ -11,7 +11,7 @@ This is the DPOP-enabled version of model_002, combining:
 The covariate "std_log_pop_1950" must be present in covars. This is the
 z-scored log(pop_1950): (log(pop_1950) - mean) / sd, where mean and sd are
 computed across all units in the panel. This standardization matches
-Wheeler et al. (2025). The raw "log_pop_1950" is added by measlesPomp.py;
+Wheeler et al. (2025). The raw "log_pop_1950" is added by uk_measles.py;
 the standardized version must be computed at the panel level.
 
 Parameters:

@@ -266,7 +266,7 @@ The package includes several example models for testing and demonstration:
 - **`models/spx.py`**: S&P 500 stochastic volatility.
 - **`models/sir.py`**: SIR with seasonal forcing.
 - **`models/ctmc_multinom.py`**: CTMC multinomial-step helper.
-- **`models/measles/`**: UK measles epidemiological models — `measlesPomp.py`
+- **`models/measles/`**: UK measles epidemiological models — `uk_measles.py`
   is the main class; `model_001.py`, `model_001b.py`, `model_001c.py`,
   `model_001d.py`, `model_002.py`, `model_003.py` are variants.
 

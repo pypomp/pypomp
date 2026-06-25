@@ -58,14 +58,11 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
     def __init__(
         self,
         Pomp_dict: dict[str, Pomp],
-        theta: PanelParameters | None = None,
+        theta: PanelParameters,
     ):
-        if theta is not None:
-            if not isinstance(theta, PanelParameters):
-                raise TypeError("theta must be a PanelParameters instance")
-            self._theta = theta
-        else:
-            self._theta = PanelParameters(theta=None)
+        if not isinstance(theta, PanelParameters):
+            raise TypeError("theta must be a PanelParameters instance")
+        self._theta = theta
 
         self.unit_objects = Pomp_dict
         self.results_history = ResultsHistory()

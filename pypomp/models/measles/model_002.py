@@ -75,12 +75,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     cohort = theta_["cohort"]
     amplitude = theta_["amplitude"]
     pop = covars["pop"]
+    std_log_pop_1950 = covars["std_log_pop_1950"]
     birthrate = covars["birthrate"]
     mu = 0.02
 
-    iota = jnp.exp(
-        iota1 + iota2 * jnp.log(pop)
-    )  # TODO: change pop to 1950 pop, maybe also standardize pop
+    iota = jnp.exp(iota1 + iota2 * std_log_pop_1950)
 
     t_mod = t - jnp.floor(t)
     is_cohort_time = jnp.abs(t_mod - 251.0 / 365.0) < 0.5 * dt

@@ -38,7 +38,7 @@ def london():
     del theta["mu"]
     del theta["alpha"]
     measles = pp.models.UKMeasles.Pomp(
-        unit=["London"],
+        unit="London",
         theta=pp.PompParameters(theta),
         clean=True,
         model="001b",
@@ -75,7 +75,7 @@ def default_rw_sd():
 def london_003():
     theta = BASE_THETA.copy()
     measles = pp.models.UKMeasles.Pomp(
-        unit=["London"],
+        unit="London",
         theta=pp.PompParameters(theta),
         model="003",
     )
@@ -112,7 +112,7 @@ def london_003():
 def test_other_models(model, theta):
     key = jax.random.key(0)
     mod_obj = pp.models.UKMeasles.Pomp(
-        unit=["London"],
+        unit="London",
         theta=pp.PompParameters(theta),
         model=model,
         clean=True,
@@ -177,9 +177,9 @@ def test_measles_invalid_interp_method():
     del theta["alpha"]
     with pytest.raises(ValueError, match="interp_method invalid_method not recognized"):
         pp.models.UKMeasles.Pomp(
-            unit=["London"],
+            unit="London",
             theta=pp.PompParameters(theta),
-            interp_method="invalid_method",
+            interp_method="invalid_method",  # type: ignore
         )
 
 
@@ -198,7 +198,7 @@ def test_measles_covariates_r_alignment():
 
     for unit in ["London", "Halesworth"]:
         measles = pp.models.UKMeasles.Pomp(
-            unit=[unit],
+            unit=unit,
             theta=pp.PompParameters(theta),
             clean=True,
             model="001b",
@@ -232,3 +232,42 @@ def test_measles_covariates_r_alignment():
         diffs = np.abs(birthrate_py - birthrate_r)
         print(f"{unit} birthrate max difference: {diffs.max()}")
         print(f"{unit} birthrate mean difference: {diffs.mean()}")
+
+
+def test_measles_panel_pomp():
+    AK_mles = pp.models.UKMeasles.AK_mles()
+    unit_specific = AK_mles[["London", "Hastings"]]
+    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
+
+    panel = pp.models.UKMeasles.PanelPomp(
+        units=["London", "Hastings"],
+        theta=theta,
+        clean=True,
+    )
+
+    assert isinstance(panel, pp.PanelPomp)
+    assert "London" in panel.unit_objects
+    assert "Hastings" in panel.unit_objects
+
+    london_covars = panel.unit_objects["London"].covars
+    hastings_covars = panel.unit_objects["Hastings"].covars
+    assert london_covars is not None
+    assert hastings_covars is not None
+
+    london_log_pop = float(london_covars["log_pop_1950"].iloc[0])
+    hastings_log_pop = float(hastings_covars["log_pop_1950"].iloc[0])
+
+    mean_val = (london_log_pop + hastings_log_pop) / 2.0
+    sd_val = np.std([london_log_pop, hastings_log_pop], ddof=1)
+
+    london_std_val = (london_log_pop - mean_val) / sd_val
+    hastings_std_val = (hastings_log_pop - mean_val) / sd_val
+
+    np.testing.assert_allclose(
+        float(london_covars["std_log_pop_1950"].iloc[0]),
+        london_std_val,
+    )
+    np.testing.assert_allclose(
+        float(hastings_covars["std_log_pop_1950"].iloc[0]),
+        hastings_std_val,
+    )

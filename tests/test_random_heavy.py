@@ -426,7 +426,14 @@ def test_nbinomial_plots() -> None:
             n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
             key_fast, key = jax.random.split(key)
-            fast_samples = ppr.fast_nbinomial(key_fast, n_arr, p=p_arr)
+            fast_samples = ppr.fast_nbinomial(
+                key_fast,
+                n_arr,
+                p=p_arr,
+                # gamma_newton_loops=6,
+                # poisson_newton_loops=10,
+                # poisson_inverse_cdf_loops=20,
+            )
 
             # Histogram comparison with theoretical Scipy PMF
             ax_hist = hist_axes[plot_idx]

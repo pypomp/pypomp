@@ -352,3 +352,60 @@ def test_nbinomial_moments(n_moments=2):
                 warnings.warn(
                     f"NB var fail for n={n},p={p}. Empirical: {var_emp}, Theoretical: {var_th}"
                 )
+
+
+def test_poisson_and_nbinomial_custom_limits():
+    key = jax.random.key(12345)
+    lam = jnp.array([1.0, 2.0, 5.0, 10.0])
+
+    # 1. Test fast_poisson with default limits
+    x_default = ppr.fast_poisson(key, lam)
+    assert x_default.shape == (4,)
+    assert x_default.min() >= 0
+
+    # 2. Test fast_poisson with custom limits (fewer/more loops)
+    x_custom = ppr.fast_poisson(key, lam, max_newton_loops=3, max_inverse_cdf_loops=10)
+    assert x_custom.shape == (4,)
+    assert x_custom.min() >= 0
+
+    # 3. Test fast_nbinomial with default limits
+    n = jnp.array([1.0, 5.0, 10.0])
+    p = jnp.array([0.5, 0.5, 0.5])
+    y_default = ppr.fast_nbinomial(key, n, p=p)
+    assert y_default.shape == (3,)
+    assert y_default.min() >= 0
+
+    # 4. Test fast_nbinomial with custom limits
+    y_custom = ppr.fast_nbinomial(
+        key,
+        n,
+        p=p,
+        gamma_newton_loops=2,
+        poisson_newton_loops=2,
+        poisson_inverse_cdf_loops=5,
+        gamma_adjustment_size=2,
+    )
+    assert y_custom.shape == (3,)
+    assert y_custom.min() >= 0
+
+
+def test_gamma_custom_newton_steps():
+    key = jax.random.key(12345)
+    alpha = jnp.array([1.0, 2.0, 5.0, 10.0])
+
+    # 1. Test fast_gamma with default limits (newton_steps=3)
+    x_default = ppr.fast_gamma(key, alpha)
+    assert x_default.shape == (4,)
+    assert x_default.min() >= 0
+
+    # 2. Test fast_gamma with custom steps (e.g. 0 steps, should be different from 3 steps)
+    x_0steps = ppr.fast_gamma(key, alpha, newton_steps=0)
+    assert x_0steps.shape == (4,)
+    assert x_0steps.min() >= 0
+    assert not jnp.allclose(x_default, x_0steps, rtol=1e-5, atol=1e-5)
+
+    # 3. Test fast_gamma with more steps (e.g. 5 steps, should be very close to 3 steps)
+    x_5steps = ppr.fast_gamma(key, alpha, newton_steps=5)
+    assert x_5steps.shape == (4,)
+    assert x_5steps.min() >= 0
+    assert jnp.allclose(x_default, x_5steps, rtol=1e-4, atol=1e-4)

@@ -18,95 +18,13 @@ from jax._src import dtypes
 from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
 
 
-def _gammainv_scalar(u: Array, alpha: Array, dtype) -> Array:
-    """
-    Scalar inverse Gamma CDF using the Temme (1992) asymptotic inversion method.
-
-    Args:
-        u: Probability in the interval [0, 1].
-        alpha: Shape parameter for the Gamma(alpha, 1) distribution, must be positive.
-        dtype: Data type for computation.
-
-    Returns:
-        Inverse CDF value.
-    """
-    u = jnp.asarray(u, dtype=dtype)
-    alpha = jnp.asarray(alpha, dtype=dtype)
-
-    zero = jnp.array(0.0, dtype=dtype)
-    one = jnp.array(1.0, dtype=dtype)
-
-    alpha_invalid = alpha <= zero
-    alpha_safe: Array = jnp.where(alpha_invalid, one, alpha)
-
-    # 1. Calculate eta_0 (The starting approximation)
-    # Eq (3.2) implies eta_0 is related to the inverse error function.
-    # In standard statistical terms, eta_0 * sqrt(alpha) is the z-score
-    # corresponding to probability u.
-    # eta_0 = Phi^-1(u) / sqrt(alpha)
-    eta_0 = ndtri(u) / jnp.sqrt(alpha_safe)
-
-    # 2. Calculate the perturbation epsilon(eta)
-    # Using the polynomial expansions from Section 5.
-    eps = _compute_epsilon(eta_0, dtype)
-
-    # 3. Calculate the refined eta
-    # Eq (3.3): eta = eta_0 + epsilon
-    # Eq (3.4): epsilon ~ e1/a + e2/a^2 + e3/a^3 + e4/a^4
-    # Note: The epsilon functions from Section 5 are technically e_i(eta).
-    # The paper notes we can approximate e_i(eta) with e_i(eta_0).
-
-    correction = (
-        (eps[0] / alpha_safe)
-        + (eps[1] / alpha_safe**2)
-        + (eps[2] / alpha_safe**3)
-        + (eps[3] / alpha_safe**4)
-    )
-
-    eta = eta_0 + correction
-
-    # 4. Convert eta back to lambda (where x = alpha * lambda)
-    # We need to invert the relation: 1/2 * eta^2 = lambda - 1 - ln(lambda)
-    # with the condition sign(eta) == sign(lambda - 1).
-    lam = _solve_lambda_from_eta(eta, dtype)
-
-    x: Array = alpha_safe * lam
-
-    nan = jnp.array(jnp.nan, dtype=dtype)
-    inf = jnp.array(jnp.inf, dtype=dtype)
-
-    x = jnp.where(u < zero, nan, x)
-    x = jnp.where(u == zero, zero, x)
-    x = jnp.where(u == one, inf, x)
-    x = jnp.where(u > one, nan, x)
-    x = jnp.where(alpha_invalid, nan, x)
-    x = jnp.where(x < zero, zero, x)
-    return x
-
-
-@partial(jax.jit, static_argnames=["dtype"])
-def gammainv(u: Array, alpha: Array, dtype=jnp.float32) -> Array:
-    """
-    Vectorized inverse Gamma CDF approximation using JAX primitives.
-
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        alpha: Corresponding Gamma shape parameter(s), must be positive.
-        dtype: Data type for computation (default float32).
-
-    Returns:
-        DeviceArray with the same broadcast shape as `u` and `alpha`.
-    """
-    u_arr, alpha_arr = jnp.broadcast_arrays(u, alpha)
-    return _gammainv_scalar(u_arr, alpha_arr, dtype)
-
-
-@partial(jax.jit, static_argnames=["adjustment_size", "dtype"])
+@partial(jax.jit, static_argnames=["adjustment_size", "dtype", "newton_steps"])
 def fast_gamma(
     key: jax.Array,
     alpha: jax.Array,
-    adjustment_size: int = 3,
     dtype: np.dtype | None = None,
+    adjustment_size: int = 3,
+    newton_steps: int = 3,
 ) -> jax.Array:
     """
     Generate a Gamma random variable using an approximate inverse CDF method in order to run fast on GPUs.
@@ -116,12 +34,14 @@ def fast_gamma(
     Args:
         key: a PRNG key used as the random key.
         alpha: shape parameters for the Gamma(alpha, 1) distribution.
-        adjustment_size: number of uniform adjustments to apply (default: 3).
+        dtype: optional, a float dtype for the returned values (default float64 if
+            jax_enable_x64 is true, otherwise float32).
+        adjustment_size: number of uniform adjustments to apply.
             The function generates Gamma(alpha + adjustment_size) and reduces
             it to Gamma(alpha) using adjustment_size uniform adjustments. The larger the value, the more accurate the approximation at low alpha values (e.g.,
             alpha < 2).
-        dtype: optional, a float dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32).
+        newton_steps: number of Newton-Raphson iterations to perform for refining
+            the CDF inverse approximation.
 
     Returns:
         A jax.Array with the same shape as alpha.
@@ -137,7 +57,6 @@ def fast_gamma(
             f"dtype argument to `fast_gamma` must be a float dtype, got {dtype}"
         )
 
-    # Get the dtype that JAX actually uses (may differ if jax_enable_x64=False)
     dtype = _get_available_dtype(dtype)
     assert dtype is not None
 
@@ -150,10 +69,8 @@ def fast_gamma(
     alpha_base = alpha_dtype + jnp.full(shape, adjustment_size, dtype=dtype)
 
     u_base = jax.random.uniform(key_base, shape, dtype=dtype)
-    # Guard against edge case numerical issues.
-    # Especially necessary for gradient calculations.
     u_base = jnp.clip(u_base, 1e-7, 1.0 - 1e-7)
-    x = gammainv(u_base, alpha_base, dtype=dtype)
+    x = gammainv(u_base, alpha_base, dtype=dtype, newton_steps=newton_steps)
 
     u_adj = jax.random.uniform(key_adj, (adjustment_size,) + shape, dtype=dtype)
     u_adj = jnp.clip(u_adj, 1e-7, 1.0 - 1e-7)
@@ -166,10 +83,114 @@ def fast_gamma(
     adjustment_powers = jnp.array(1.0, dtype=dtype) / (alpha_dtype + adjustment_indices)
     adjustments = jnp.power(u_adj, adjustment_powers)
 
-    # Multiply all adjustments together
     x = x * jnp.prod(adjustments, axis=0)
 
     return x.astype(dtype)
+
+
+@partial(jax.jit, static_argnames=["dtype", "newton_steps"])
+def gammainv(u: Array, alpha: Array, dtype=jnp.float32, newton_steps: int = 3) -> Array:
+    """
+    Vectorized inverse Gamma CDF approximation using JAX primitives.
+
+    Args:
+        u: Probabilities (scalar or array) in the interval [0, 1].
+        alpha: Corresponding Gamma shape parameter(s), must be positive.
+        dtype: Data type for computation (default float32).
+        newton_steps: Number of Newton-Raphson iterations to perform (default: 3).
+
+    Returns:
+        DeviceArray with the same broadcast shape as `u` and `alpha`.
+    """
+    u, alpha = jnp.broadcast_arrays(u, alpha)
+
+    u = jnp.asarray(u, dtype=dtype)
+    alpha = jnp.asarray(alpha, dtype=dtype)
+
+    zero = jnp.array(0.0, dtype=dtype)
+    one = jnp.array(1.0, dtype=dtype)
+
+    alpha_invalid = alpha <= zero
+    alpha_safe = jnp.where(alpha_invalid, one, alpha)
+
+    eta_0 = ndtri(u) / jnp.sqrt(alpha_safe)
+
+    eps = _compute_epsilon(eta_0, dtype)
+
+    correction = (
+        (eps[0] / alpha_safe)
+        + (eps[1] / alpha_safe**2)
+        + (eps[2] / alpha_safe**3)
+        + (eps[3] / alpha_safe**4)
+    )
+
+    eta = eta_0 + correction
+
+    lam = _solve_lambda_from_eta(eta, dtype, newton_steps=newton_steps)
+
+    x = alpha_safe * lam
+
+    nan = jnp.array(jnp.nan, dtype=dtype)
+    inf = jnp.array(jnp.inf, dtype=dtype)
+
+    x = jnp.where(u < zero, nan, x)
+    x = jnp.where(u == zero, zero, x)
+    x = jnp.where(u == one, inf, x)
+    x = jnp.where(u > one, nan, x)
+    x = jnp.where(alpha_invalid, nan, x)
+    x = jnp.where(x < zero, zero, x)
+    return x
+
+
+_LAM_GUESS_COEFFS: tuple[float, ...] = (
+    -1.0 / 270.0,
+    1.0 / 36.0,
+    1.0 / 3.0,
+    1.0,
+    1.0,
+)
+
+_LAM_GUESS_COEFFS_ARR = np.array(_LAM_GUESS_COEFFS, dtype=np.float64)
+
+
+def _solve_lambda_from_eta(eta: Array, dtype, newton_steps: int = 3) -> Array:
+    """
+    Inverts the relation 1/2 * eta^2 = lambda - 1 - ln(lambda) in log-space.
+
+    Uses a log-space Newton-Raphson solver to prevent left-tail underflow,
+    NaN gradients, and to guarantee stable convergence in fewer steps.
+    """
+    zero = jnp.array(0.0, dtype=dtype)
+    one = jnp.array(1.0, dtype=dtype)
+    half = jnp.array(0.5, dtype=dtype)
+
+    eta2 = eta**2
+
+    lam_guess = jnp.polyval(_LAM_GUESS_COEFFS_ARR.astype(dtype), eta)
+
+    z_guess = jnp.where(
+        lam_guess <= jnp.array(0.01, dtype=dtype),
+        -half * eta2,
+        jnp.log(jnp.maximum(lam_guess, jnp.array(1e-10, dtype=dtype))),
+    )
+
+    def newton_step(z_curr):
+        # Use expm1 to avoid precision loss near z=0 (lambda=1)
+        expm1_z = jnp.expm1(z_curr)
+        val = expm1_z - z_curr - half * eta2
+        grad = expm1_z
+        # Avoid division by zero at z=0 (eta=0)
+        grad_is_small = jnp.abs(grad) < jnp.array(1e-6, dtype=dtype)
+        safe_grad = jnp.where(grad_is_small, one, grad)
+        step = val / safe_grad
+        step = jnp.where(grad_is_small, zero, step)
+        return z_curr - step
+
+    z = z_guess
+    for _ in range(newton_steps):
+        z = newton_step(z)
+
+    return jnp.exp(z)
 
 
 _E1_COEFFS: tuple[float, ...] = (
@@ -228,13 +249,13 @@ _E4_COEFFS: tuple[float, ...] = (
     319.0 / 183708.0,
 )
 
-_E1_COEFFS_ARR = jnp.array(_E1_COEFFS, dtype=jnp.float32)
-_E2_COEFFS_ARR = jnp.array(_E2_COEFFS, dtype=jnp.float32)
-_E3_COEFFS_ARR = jnp.array(_E3_COEFFS, dtype=jnp.float32)
-_E4_COEFFS_ARR = jnp.array(_E4_COEFFS, dtype=jnp.float32)
+_E1_COEFFS_ARR = np.array(_E1_COEFFS, dtype=np.float64)
+_E2_COEFFS_ARR = np.array(_E2_COEFFS, dtype=np.float64)
+_E3_COEFFS_ARR = np.array(_E3_COEFFS, dtype=np.float64)
+_E4_COEFFS_ARR = np.array(_E4_COEFFS, dtype=np.float64)
 
 
-def _compute_epsilon(eta, dtype):
+def _compute_epsilon(eta: Array, dtype) -> tuple[Array, Array, Array, Array]:
     """
     Computes epsilon_1 through epsilon_4 using Horner's method.
     """
@@ -243,68 +264,3 @@ def _compute_epsilon(eta, dtype):
     e3 = jnp.polyval(_E3_COEFFS_ARR.astype(dtype), eta)
     e4 = jnp.polyval(_E4_COEFFS_ARR.astype(dtype), eta)
     return e1, e2, e3, e4
-
-
-def _solve_lambda_from_eta(eta, dtype):
-    """
-    Inverts the relation 1/2 * eta^2 = lambda - 1 - ln(lambda).
-
-    Uses the series expansion from Section 6 as an initial guess,
-    followed by Newton-Raphson iterations as suggested in the paper.
-    """
-    # Constants in the appropriate dtype
-    zero = jnp.array(0.0, dtype=dtype)
-    one = jnp.array(1.0, dtype=dtype)
-    half = jnp.array(0.5, dtype=dtype)
-
-    # Series approximation from Section 6
-    # lambda = 1 + eta + 1/3 eta^2 + 1/36 eta^3 - 1/270 eta^4 + ...
-    eta2 = eta**2
-    eta3 = eta**3
-    eta4 = eta**4
-
-    lam_guess = (
-        one
-        + eta
-        + (one / jnp.array(3.0, dtype=dtype)) * eta2
-        + (one / jnp.array(36.0, dtype=dtype)) * eta3
-        - (one / jnp.array(270.0, dtype=dtype)) * eta4
-    )
-
-    # For very large negative eta (left tail), the series might be unstable (lambda < 0).
-    # Since lambda must be > 0, we clamp the guess.
-    # For eta << -1, lambda is small, dominated by -ln(lambda) ~ eta^2/2 -> lambda ~ exp(-eta^2/2)
-    # This prevents NaN in the log step of Newton-Raphson.
-    safe_guess = jnp.where(
-        lam_guess <= jnp.array(0.01, dtype=dtype), jnp.exp(-half * eta2), lam_guess
-    )
-
-    # Newton-Raphson refinement
-    # f(lambda) = lambda - 1 - ln(lambda) - eta^2/2
-    # f'(lambda) = 1 - 1/lambda
-    # step = f(lambda) / f'(lambda)
-    #      = (lambda - 1 - ln(lambda) - eta^2/2) / ((lambda - 1) / lambda)
-    #      = lambda * (lambda - 1 - ln(lambda) - eta^2/2) / (lambda - 1)
-
-    def newton_step(lam_curr):
-        val = lam_curr - one - jnp.log(lam_curr) - half * eta2
-        grad = one - one / lam_curr
-        # Avoid division by zero at lambda=1 (eta=0)
-        # At lambda=1, the limit of val/grad is 0, so update should be 0.
-        safe_grad = jnp.where(jnp.abs(grad) < jnp.array(1e-6, dtype=dtype), one, grad)
-        step = val / safe_grad
-        # Mask the step if we are at the singularity to avoid instability
-        step = jnp.where(jnp.abs(grad) < jnp.array(1e-6, dtype=dtype), zero, step)
-        lam_new = lam_curr - step
-        # Ensure lambda stays positive to avoid NaN in log
-        # Use a small positive epsilon to prevent numerical issues
-        lam_new = jnp.maximum(lam_new, jnp.array(1e-10, dtype=dtype))
-        return lam_new
-
-    # 3 iterations is usually sufficient for double precision with this good initial guess
-    lam = safe_guess
-    lam = newton_step(lam)
-    lam = newton_step(lam)
-    lam = newton_step(lam)
-
-    return lam

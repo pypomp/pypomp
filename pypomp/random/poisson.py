@@ -69,11 +69,10 @@ _X_COEFFS: Tuple[float, ...] = (
     -1.98011178e-02,
 )
 
-# These coefficient arrays are kept at float32 for efficiency
-# They will be cast to the appropriate dtype during computation
-_RM_COEFFS_ARR = jnp.array(_RM_COEFFS, dtype=jnp.float32)
-_T_COEFFS_ARR = jnp.array(_T_COEFFS, dtype=jnp.float32)
-_X_COEFFS_ARR = jnp.array(_X_COEFFS, dtype=jnp.float32)
+# These will be cast to the appropriate dtype during computation
+_RM_COEFFS_ARR = np.array(_RM_COEFFS, dtype=np.float64)
+_T_COEFFS_ARR = np.array(_T_COEFFS, dtype=np.float64)
+_X_COEFFS_ARR = np.array(_X_COEFFS, dtype=np.float64)
 
 
 def _central_region(s: Array, lam: Array, dtype) -> Array:
@@ -92,17 +91,16 @@ def _central_region(s: Array, lam: Array, dtype) -> Array:
     return jnp.floor(total)
 
 
-def _newton_region(s: Array, lam: Array, dtype) -> Array:
-    MAX_LOOPS = 5
+def _newton_region(s: Array, lam: Array, dtype, max_newton_loops: int) -> Array:
     r = jnp.maximum(0.1, 1.0 + s)
     r_prev = r
     first = jnp.array(True, dtype=jnp.bool_)
     counter = 0
 
-    for _ in range(MAX_LOOPS):
+    for _ in range(max_newton_loops):
         diff = jnp.abs(r - r_prev)
         not_done = jnp.logical_or(first, diff > 1e-5)
-        not_max_loops = counter < MAX_LOOPS
+        not_max_loops = counter < max_newton_loops
         keep_going = jnp.logical_and(not_done, not_max_loops)
 
         t = jnp.log(r)
@@ -129,88 +127,74 @@ def _newton_region(s: Array, lam: Array, dtype) -> Array:
     return jnp.floor(x)
 
 
-def _bottom_up(u: Array, lam: Array, dtype) -> Array:
+def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array:
     lami = 1.0 / lam
 
     t0 = jnp.exp(0.5 * lam)
     del0 = jnp.where(u > 0.5, t0 * (1e-6 * t0), 0.0)
     s0 = 1.0 - t0 * (u * t0) + del0
 
-    def unrolled_computation(
+    def _find_quantile(
         x_init: Array, s0: Array, del0: Array, lami: Array
     ) -> Tuple[Array, Array, Array]:
-        MAX_LOOPS = 20
 
-        # Initialize state
-        x: Array = x_init
-        s: Array = s0
-        delta: Array = del0
+        x = x_init
+        s = s0
+        delta = del0
         t = jnp.array(0.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
         one = jnp.array(1.0, dtype=dtype)
 
-        # Track if we are still running (equivalent to cond1)
         active = jnp.array(True)
 
-        # JAX will unroll this loop during compilation
-        for _ in range(MAX_LOOPS):
+        for _ in range(max_inverse_cdf_loops):
             current_cond = s < zero
 
-            # Determine if we should update in this step
-            # We continue only if we were already active AND the condition holds
             keep_going = jnp.logical_and(active, current_cond)
 
-            # Calculate candidates for next step
-            x_next: Array = x + one
-            t_next: Array = x_next * lami
-            delta_next: Array = t_next * delta
-            s_next: Array = t_next * s + one
+            x_next = x + one
+            t_next = x_next * lami
+            delta_next = t_next * delta
+            s_next = t_next * s + one
 
-            # Apply updates only if keep_going is True
-            x = jnp.where(keep_going, x_next, x)
-            s = jnp.where(keep_going, s_next, s)
-            delta = jnp.where(keep_going, delta_next, delta)
-            t = jnp.where(keep_going, t_next, t)
+            x = jax.lax.select(keep_going, x_next, x)
+            s = jax.lax.select(keep_going, s_next, s)
+            delta = jax.lax.select(keep_going, delta_next, delta)
+            t = jax.lax.select(keep_going, t_next, t)
 
-            # Update the active flag (once it turns False, it stays False)
             active = keep_going
 
         return x, s, delta
 
     x_init = jnp.array(0.0, dtype=dtype)
-    x, s, delta = unrolled_computation(x_init, s0, del0, lami)
+    x, s, delta = _find_quantile(x_init, s0, del0, lami)
 
-    def top_down_branch(state: Tuple[Array, Array]) -> Array:
+    def _top_down_branch(state: Tuple[Array, Array]) -> Array:
         x_val, delta_val = state
         one = jnp.array(1.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
 
-        # Setup
         delta_scaled = jnp.array(1e6, dtype=dtype) * delta_val
         t_thresh = jnp.array(1e7, dtype=dtype) * delta_scaled
         delta_scaled = (one - u) * delta_scaled
 
-        # Unrolled first loop (finding x_hi, delta_hi)
-        MAX_LOOPS_2 = 20
-        x_hi: Array = x_val
-        delta_hi: Array = delta_scaled
-        for _ in range(MAX_LOOPS_2):
-            cond: Array = delta_hi < t_thresh
-            x_next: Array = x_hi + one
-            delta_next: Array = delta_hi * (x_next * lami)
+        x_hi = x_val
+        delta_hi = delta_scaled
+        for _ in range(max_inverse_cdf_loops):
+            cond = delta_hi < t_thresh
+            x_next = x_hi + one
+            delta_next = delta_hi * (x_next * lami)
             x_hi = jnp.where(cond, x_next, x_hi)
             delta_hi = jnp.where(cond, delta_next, delta_hi)
 
-        # Unrolled second loop (finding x_lo)
-        MAX_LOOPS_3 = 20
-        x_lo: Array = x_hi
-        s_lo: Array = delta_hi
-        t_lo: Array = one
-        for _ in range(MAX_LOOPS_3):
-            cond: Array = s_lo > zero
-            t_next: Array = t_lo * (x_lo * lami)
-            s_next: Array = s_lo - t_next
-            x_next: Array = x_lo - one
+        x_lo = x_hi
+        s_lo = delta_hi
+        t_lo = one
+        for _ in range(max_inverse_cdf_loops):
+            cond = s_lo > zero
+            t_next = t_lo * (x_lo * lami)
+            s_next = s_lo - t_next
+            x_next = x_lo - one
             x_lo = jnp.where(cond, x_next, x_lo)
             s_lo = jnp.where(cond, s_next, s_lo)
             t_lo = jnp.where(cond, t_next, t_lo)
@@ -219,13 +203,19 @@ def _bottom_up(u: Array, lam: Array, dtype) -> Array:
     two = jnp.array(2.0, dtype=dtype)
     return lax.cond(
         s < two * delta,
-        top_down_branch,
+        _top_down_branch,
         lambda state: state[0],
         operand=(x, delta),
     )
 
 
-def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
+def _poissoninv_scalar(
+    u: Array,
+    lam: Array,
+    dtype,
+    max_newton_loops: int = 5,
+    max_inverse_cdf_loops: int = 20,
+) -> Array:
     u = jnp.asarray(u, dtype=dtype)
     lam = jnp.asarray(lam, dtype=dtype)
 
@@ -246,7 +236,7 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
         def non_central(_: Any) -> Array:
             return lax.cond(
                 s > -sqrt2,
-                lambda __: _newton_region(s, lam_safe, dtype),
+                lambda __: _newton_region(s, lam_safe, dtype, max_newton_loops),
                 lambda __: x0,
                 operand=zero,
             )
@@ -270,7 +260,7 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
     )
 
     def bottom_up_branch(_: Any) -> Array:
-        return _bottom_up(u, lam_safe, dtype)
+        return _bottom_up(u, lam_safe, dtype, max_inverse_cdf_loops)
 
     bottom_up = x_large <= jnp.array(10.0, dtype=dtype)
     x: Array = lax.cond(
@@ -292,11 +282,19 @@ def _poissoninv_scalar(u: Array, lam: Array, dtype) -> Array:
     return x
 
 
-_poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None))
+_poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None, None, None))
 
 
-@partial(jax.jit, static_argnames=["dtype"])
-def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
+@partial(
+    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
+)
+def poissoninv(
+    u: Array,
+    lam: Array,
+    dtype=jnp.float32,
+    max_newton_loops: int = 5,
+    max_inverse_cdf_loops: int = 20,
+) -> Array:
     """
     Vectorized inverse Poisson CDF approximation using JAX primitives.
 
@@ -304,6 +302,8 @@ def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
         u: Probabilities (scalar or array) in the interval [0, 1].
         lam: Corresponding Poisson rate(s), must be positive.
         dtype: Data type for the computation (default float32).
+        max_newton_loops: Cap on iterations for the Newton-Raphson method.
+        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
 
     Returns:
         DeviceArray with the same broadcast shape as `u` and `lam`.
@@ -311,15 +311,27 @@ def poissoninv(u: Array, lam: Array, dtype=jnp.float32) -> Array:
 
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
     if u_arr.ndim == 0:
-        return _poissoninv_scalar(u_arr, lam_arr, dtype)
+        return _poissoninv_scalar(
+            u_arr, lam_arr, dtype, max_newton_loops, max_inverse_cdf_loops
+        )
     flat_u = u_arr.reshape(-1)
     flat_lam = lam_arr.reshape(-1)
-    flat_res = _poissoninv_vmap(flat_u, flat_lam, dtype)
+    flat_res = _poissoninv_vmap(
+        flat_u, flat_lam, dtype, max_newton_loops, max_inverse_cdf_loops
+    )
     return flat_res.reshape(u_arr.shape)
 
 
-@partial(jax.jit, static_argnames=["dtype"])
-def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array:
+@partial(
+    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
+)
+def fast_poisson(
+    key: Array,
+    lam: Array,
+    dtype: np.dtype | None = None,
+    max_newton_loops: int = 5,
+    max_inverse_cdf_loops: int = 20,
+) -> Array:
     """
     Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
 
@@ -330,6 +342,8 @@ def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array
         lam: rate parameters for the Poisson distribution.
         dtype: optional, an integer dtype for the returned values (default int64 if
             jax_enable_x64 is true, otherwise int32).
+        max_newton_loops: Cap on iterations for the Newton-Raphson method.
+        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
 
     Returns:
         A Poisson random variable.
@@ -356,6 +370,9 @@ def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array
     assert float_dtype is not None
 
     lam = jnp.asarray(lam)
+    lam_float = lam.astype(float_dtype)
+    invalid = lam_float < 0.0
+
     shape = lam.shape
     u = jax.random.uniform(key, shape, dtype=float_dtype)
     # Clamp u to be slightly less than 1.0 to avoid inf output
@@ -364,11 +381,17 @@ def fast_poisson(key: Array, lam: Array, dtype: np.dtype | None = None) -> Array
         jnp.array(1.0, dtype=float_dtype), jnp.array(0.0, dtype=float_dtype)
     )
     u = jnp.minimum(u, u_max)
-    lam_float = lam.astype(float_dtype)
-    x = poissoninv(u, lam_float, dtype=float_dtype)
+    x = poissoninv(
+        u,
+        lam_float,
+        dtype=float_dtype,
+        max_newton_loops=max_newton_loops,
+        max_inverse_cdf_loops=max_inverse_cdf_loops,
+    )
     # Cap the output to a reasonable maximum to prevent overflow
     max_val = lam_float + jnp.array(10.0, dtype=float_dtype) * jnp.sqrt(
         jnp.maximum(lam_float, jnp.array(1.0, dtype=float_dtype))
     )
     x = jnp.minimum(x, max_val)
-    return x.astype(dtype)
+    # For integer dtype, follow the convention of returning -1 for invalid inputs
+    return jnp.where(invalid, -1, x.astype(dtype))

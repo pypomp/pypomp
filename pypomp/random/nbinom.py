@@ -17,16 +17,29 @@ from .gamma import fast_gamma
 from .poisson import fast_poisson
 
 
-@partial(jax.jit, static_argnames=["dtype"])
+@partial(
+    jax.jit,
+    static_argnames=[
+        "dtype",
+        "gamma_newton_loops",
+        "poisson_newton_loops",
+        "poisson_inverse_cdf_loops",
+        "gamma_adjustment_size",
+    ],
+)
 def fast_nbinomial(
     key: Array,
     n: Array,
     p: Array | None = None,
     mu: Array | None = None,
     dtype: np.dtype | None = None,
+    gamma_newton_loops: int = 3,
+    poisson_newton_loops: int = 5,
+    poisson_inverse_cdf_loops: int = 20,
+    gamma_adjustment_size: int = 3,
 ) -> Array:
     """
-    Generate negative binomial random variables using approximate inverse CDF methods in order to run fast on GPUs.
+    Generate negative binomial random variables using approximate inverse CDF methods for the gamma and Poisson distributions (fast_gamma and fast_poisson) in order to run fast on GPUs.
 
     The Negative Binomial distribution NB(n, p) represents the number of failures
     before n successes, where p is the probability of success.
@@ -41,6 +54,10 @@ def fast_nbinomial(
         mu: Mean of the distribution. Exactly one of p or mu must be provided.
         dtype: optional, a float or integer dtype for the returned values (default float64 if
             jax_enable_x64 is true, otherwise float32).
+        gamma_newton_loops: Cap on iterations for the Newton-Raphson method used for the gamma sampler.
+        poisson_newton_loops: Cap on iterations for the Newton-Raphson method used for the Poisson sampler.
+        poisson_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method used for the Poisson sampler.
+        gamma_adjustment_size: Size of uniform adjustments to apply for the gamma sampler (handles small shape values).
 
     Returns:
         Negative binomial random variables with the same broadcast shape as the inputs.
@@ -69,11 +86,11 @@ def fast_nbinomial(
 
     if p is not None:
         p = jnp.asarray(p, dtype=float_dtype)
-        invalid = (n <= 0.0) | (p <= 0.0) | (p > 1.0)
+        invalid = (n <= 0.0) | (p <= 0.0) | (p > 1.0) | jnp.isnan(n) | jnp.isnan(p)
         scale = (1.0 - p) / jnp.maximum(p, jnp.finfo(float_dtype).tiny)
     else:
         mu = jnp.asarray(mu, dtype=float_dtype)
-        invalid = (n <= 0.0) | (mu < 0.0)
+        invalid = (n <= 0.0) | (mu < 0.0) | jnp.isnan(n) | jnp.isnan(mu)
         scale = mu / jnp.maximum(n, jnp.finfo(float_dtype).tiny)
 
     safe_n: Array = jnp.where(invalid, 1.0, n)
@@ -81,14 +98,28 @@ def fast_nbinomial(
 
     key_gamma, key_poisson = jax.random.split(key)
 
-    gamma_samples = fast_gamma(key_gamma, safe_n, dtype=float_dtype)
+    gamma_samples = fast_gamma(
+        key_gamma,
+        safe_n,
+        dtype=float_dtype,
+        adjustment_size=gamma_adjustment_size,
+        newton_steps=gamma_newton_loops,
+    )
     lam = gamma_samples * safe_scale
+    # Clamp to prevent float overflow to inf in fast_poisson
+    lam = jnp.minimum(lam, jnp.finfo(float_dtype).max / 10.0)
     poisson_dtype = (
         jnp.int64
         if dtypes.issubdtype(dtype, np.int64) or dtypes.issubdtype(dtype, np.float64)
         else jnp.int32
     )
-    x: Array = fast_poisson(key_poisson, lam, dtype=poisson_dtype)
+    x: Array = fast_poisson(
+        key_poisson,
+        lam,
+        dtype=poisson_dtype,
+        max_newton_loops=poisson_newton_loops,
+        max_inverse_cdf_loops=poisson_inverse_cdf_loops,
+    )
     x = jnp.where(lam == 0.0, 0, x)
 
     if dtypes.issubdtype(dtype, np.floating):

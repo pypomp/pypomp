@@ -29,6 +29,7 @@ Core Algorithms
    pfilter
    mif
    simulate
+   bif
    pmcmc
    abc
 

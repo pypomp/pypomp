@@ -23,6 +23,7 @@ In addition to accessing the stored values directly, you can access these result
    PompPFilterResult
    PompMIFResult
    PompTrainResult
+   PompBIFResult
    PompPMCMCResult
    PompABCResult
 

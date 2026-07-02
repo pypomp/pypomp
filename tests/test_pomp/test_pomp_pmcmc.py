@@ -438,6 +438,18 @@ class TestPMCMC:
         assert np.asarray(theta_trace)[0, 1, mu_idx] == 1.0
         assert np.asarray(logliks)[0, 1] > np.asarray(logliks)[0, 0]
 
+    def test_pmcmc_loglik_matches_analytic_static_normal(self):
+        pomp = _get_static_normal_pomp()
+        prop = mvn_diag_rw({"mu": 0.01})
+        pomp.pmcmc(J=3, Nmcmc=1, proposal=prop, key=jax.random.key(75))
+        res = pomp.results_history[-1]
+
+        recorded = float(
+            res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="logLik").values
+        )
+        expected = float(jax.scipy.stats.norm.logpdf(1.0, loc=0.0, scale=0.1))
+        np.testing.assert_allclose(recorded, expected, rtol=1e-6, atol=1e-6)
+
     def test_with_mvn_rw(self):
         sir = _get_sir()
         prop = mvn_rw(np.array([[1.0]]), ["beta1"])

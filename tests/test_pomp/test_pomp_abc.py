@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
@@ -18,6 +19,30 @@ from pypomp.proposals import mvn_diag_rw, mvn_rw, mvn_rw_adaptive
 def _get_sir():
     """Return a fresh SIR Pomp for testing."""
     return pp.models.sir(seed=42)
+
+
+def _get_deterministic_measurement_pomp():
+    """One-observation POMP with exact ABC distance in theta['mu']."""
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"]}
+
+    def rmeas(X_, theta_, key, covars, t):
+        return jnp.array([theta_["mu"]])
+
+    return pp.Pomp(
+        ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
+        theta=pp.PompParameters({"mu": 0.0}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        rmeas=rmeas,
+        nstep=1,
+    )
 
 
 def _default_probes():
@@ -299,6 +324,27 @@ class TestABC:
             np.asarray(res.traces_da.sel(variable="beta1")),
             np.full((1, 6), beta1_start),
         )
+
+    def test_abc_distance_matches_manual_probe_distance(self):
+        pomp = _get_deterministic_measurement_pomp()
+        probes = {"mean": lambda y: jnp.mean(y)}
+        scale = {"mean": 2.0}
+
+        pomp.abc(
+            Nabc=1,
+            probes=probes,
+            scale=scale,
+            epsilon=1e6,
+            proposal=mvn_diag_rw({"mu": 0.01}),
+            key=jax.random.key(74),
+        )
+        res = pomp.results_history[-1]
+
+        recorded = float(
+            res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="distance").values
+        )
+        expected = ((1.0 - 0.0) / 2.0) ** 2
+        np.testing.assert_allclose(recorded, expected, rtol=1e-7, atol=1e-7)
 
 
 # ---------------------------------------------------------------

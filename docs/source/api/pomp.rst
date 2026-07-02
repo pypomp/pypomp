@@ -35,6 +35,8 @@ Pomp Class
    ~Pomp.mif
    ~Pomp.train
    ~Pomp.dpop_train
+   ~Pomp.pmcmc
+   ~Pomp.abc
 
 .. rubric:: Supporting Methods
 .. autosummary::

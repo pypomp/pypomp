@@ -229,3 +229,264 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
             ],
             ["traces_da"],
         )
+
+
+@dataclass(eq=False)
+class PompPMCMCResult(PompBaseResult):
+    """Result from :meth:`pypomp.core.pomp.Pomp.pmcmc`."""
+
+    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Per-chain trace array with dims ``("theta_idx", "iteration", "variable")``."""
+    Nmcmc: int = 0
+    """Number of MCMC iterations per chain."""
+    J: int = 0
+    """Number of particles per particle-filter likelihood evaluation."""
+    accepts: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
+    """Per-chain accepted proposal counts."""
+
+    def __post_init__(self):
+        self.method = "pmcmc"
+
+    @property
+    def n_chains(self) -> int:
+        if self.traces_da.size == 0:
+            return 0
+        return int(self.traces_da.sizes.get("theta_idx", 0))
+
+    @property
+    def acceptance_rate(self) -> np.ndarray:
+        """Per-chain acceptance rate."""
+        if self.Nmcmc <= 0:
+            return np.zeros_like(self.accepts, dtype=float)
+        return np.asarray(self.accepts, dtype=float) / float(self.Nmcmc)
+
+    @property
+    def _summary_config(self) -> list[tuple[str, str]]:
+        return [
+            ("Number of parameter sets", "theta"),
+            ("Number of chains", "n_chains"),
+            ("Number of MCMC iterations (Nmcmc)", "Nmcmc"),
+            ("Number of particles (J)", "J"),
+            ("Accepted proposals (per chain)", "accepts"),
+        ]
+
+    def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        """Convert the full PMCMC trace to a tidy DataFrame."""
+        if self.traces_da.size == 0:
+            return pd.DataFrame()
+        df = self.traces_da.to_dataset(dim="variable").to_dataframe().reset_index()
+        var_order = list(self.traces_da.coords["variable"].values)
+        cols = ["theta_idx", "iteration"] + [c for c in var_order if c in df.columns]
+        df = df[cols]
+        if ignore_nan:
+            df = df.dropna()
+        return df
+
+    def traces(self) -> pd.DataFrame:
+        """Return a trace DataFrame compatible with :class:`ResultsHistory`."""
+        df = self.to_dataframe()
+        if df.empty:
+            return df
+        df.insert(2, "method", self.method)
+        df.insert(4, "se", np.nan)
+        return df
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def print_summary(self, n: int = 5):
+        """Print a summary of the PMCMC result."""
+        print(f"Method: {self.method}")
+        print(f"Number of chains: {self.n_chains}")
+        print(f"Number of particles (J): {self.J}")
+        print(f"MCMC iterations (Nmcmc): {self.Nmcmc}")
+        if np.asarray(self.accepts).size > 0:
+            rates = self.acceptance_rate
+            for chain_idx in range(int(np.asarray(self.accepts).size)):
+                print(
+                    f"  chain {chain_idx}: accepts={int(self.accepts[chain_idx])}, "
+                    f"rate={float(rates[chain_idx]):.3f}"
+                )
+        print(f"Execution time: {self.execution_time} seconds")
+        if self.traces_da.size > 0 and "logLik" in list(
+            self.traces_da.coords["variable"].values
+        ):
+            last = self.traces_da.isel(iteration=-1).sel(variable="logLik").values
+            print(f"\nFinal logLik per chain: {np.asarray(last)}")
+
+    @staticmethod
+    def merge(*results: "PompPMCMCResult") -> "PompPMCMCResult":
+        """Concatenate PMCMC chains from multiple results."""
+        if len(results) == 0:
+            raise ValueError("At least one PompPMCMCResult must be provided.")
+        first = results[0]
+        for result in results:
+            if not isinstance(result, PompPMCMCResult):
+                raise TypeError("All results must be PompPMCMCResult.")
+            if result.J != first.J:
+                raise ValueError("All results must have the same J.")
+            if result.Nmcmc != first.Nmcmc:
+                raise ValueError("All results must have the same Nmcmc.")
+            if list(result.traces_da.coords["variable"].values) != list(
+                first.traces_da.coords["variable"].values
+            ):
+                raise ValueError("All results must have the same variable ordering.")
+
+        merged_da = xr.concat(
+            [result.traces_da for result in results], dim="theta_idx"
+        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in results)))
+        theta_objs = [result.theta for result in results if result.theta is not None]
+        merged_theta = PompParameters.merge(*theta_objs) if theta_objs else None
+        merged_accepts = np.concatenate(
+            [np.asarray(result.accepts).ravel() for result in results]
+        )
+        execution_times = [
+            result.execution_time
+            for result in results
+            if result.execution_time is not None
+        ]
+
+        return PompPMCMCResult(
+            method=first.method,
+            execution_time=max(execution_times) if execution_times else None,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_da,
+            Nmcmc=first.Nmcmc,
+            J=first.J,
+            accepts=merged_accepts,
+        )
+
+
+@dataclass(eq=False)
+class PompABCResult(PompBaseResult):
+    """Result from :meth:`pypomp.core.pomp.Pomp.abc`."""
+
+    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Per-chain trace array with dims ``("theta_idx", "iteration", "variable")``."""
+    Nabc: int = 0
+    """Number of ABC-MCMC iterations per chain."""
+    epsilon: float = 0.0
+    """ABC distance threshold."""
+    accepts: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
+    """Per-chain accepted proposal counts."""
+
+    def __post_init__(self):
+        self.method = "abc"
+
+    @property
+    def n_chains(self) -> int:
+        if self.traces_da.size == 0:
+            return 0
+        return int(self.traces_da.sizes.get("theta_idx", 0))
+
+    @property
+    def acceptance_rate(self) -> np.ndarray:
+        """Per-chain acceptance rate."""
+        if self.Nabc <= 0:
+            return np.zeros_like(self.accepts, dtype=float)
+        return np.asarray(self.accepts, dtype=float) / float(self.Nabc)
+
+    @property
+    def _summary_config(self) -> list[tuple[str, str]]:
+        return [
+            ("Number of parameter sets", "theta"),
+            ("Number of chains", "n_chains"),
+            ("Number of ABC iterations (Nabc)", "Nabc"),
+            ("Tolerance (epsilon)", "epsilon"),
+            ("Accepted proposals (per chain)", "accepts"),
+        ]
+
+    def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
+        """Convert the full ABC-MCMC trace to a tidy DataFrame."""
+        if self.traces_da.size == 0:
+            return pd.DataFrame()
+        df = self.traces_da.to_dataset(dim="variable").to_dataframe().reset_index()
+        var_order = list(self.traces_da.coords["variable"].values)
+        cols = ["theta_idx", "iteration"] + [c for c in var_order if c in df.columns]
+        df = df[cols]
+        if ignore_nan:
+            df = df.dropna()
+        return df
+
+    def traces(self) -> pd.DataFrame:
+        """Return a trace DataFrame compatible with :class:`ResultsHistory`."""
+        df = self.to_dataframe()
+        if df.empty:
+            return df
+        df.insert(2, "method", self.method)
+        df.insert(3, "logLik", np.nan)
+        df.insert(4, "se", np.nan)
+        return df
+
+    def CLL(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def ESS(self, average: bool = False) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def print_summary(self, n: int = 5):
+        """Print a summary of the ABC result."""
+        print(f"Method: {self.method}")
+        print(f"Number of chains: {self.n_chains}")
+        print(f"ABC iterations (Nabc): {self.Nabc}")
+        print(f"Tolerance (epsilon): {self.epsilon}")
+        if np.asarray(self.accepts).size > 0:
+            rates = self.acceptance_rate
+            for chain_idx in range(int(np.asarray(self.accepts).size)):
+                print(
+                    f"  chain {chain_idx}: accepts={int(self.accepts[chain_idx])}, "
+                    f"rate={float(rates[chain_idx]):.3f}"
+                )
+        print(f"Execution time: {self.execution_time} seconds")
+        if self.traces_da.size > 0 and "distance" in list(
+            self.traces_da.coords["variable"].values
+        ):
+            last = self.traces_da.isel(iteration=-1).sel(variable="distance").values
+            print(f"\nFinal distance per chain: {np.asarray(last)}")
+
+    @staticmethod
+    def merge(*results: "PompABCResult") -> "PompABCResult":
+        """Concatenate ABC-MCMC chains from multiple results."""
+        if len(results) == 0:
+            raise ValueError("At least one PompABCResult must be provided.")
+        first = results[0]
+        for result in results:
+            if not isinstance(result, PompABCResult):
+                raise TypeError("All results must be PompABCResult.")
+            if result.Nabc != first.Nabc:
+                raise ValueError("All results must have the same Nabc.")
+            if result.epsilon != first.epsilon:
+                raise ValueError("All results must have the same epsilon.")
+            if list(result.traces_da.coords["variable"].values) != list(
+                first.traces_da.coords["variable"].values
+            ):
+                raise ValueError("All results must have the same variable ordering.")
+
+        merged_da = xr.concat(
+            [result.traces_da for result in results], dim="theta_idx"
+        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in results)))
+        theta_objs = [result.theta for result in results if result.theta is not None]
+        merged_theta = PompParameters.merge(*theta_objs) if theta_objs else None
+        merged_accepts = np.concatenate(
+            [np.asarray(result.accepts).ravel() for result in results]
+        )
+        execution_times = [
+            result.execution_time
+            for result in results
+            if result.execution_time is not None
+        ]
+
+        return PompABCResult(
+            method=first.method,
+            execution_time=max(execution_times) if execution_times else None,
+            key=first.key,
+            theta=merged_theta,
+            traces_da=merged_da,
+            Nabc=first.Nabc,
+            epsilon=first.epsilon,
+            accepts=merged_accepts,
+        )

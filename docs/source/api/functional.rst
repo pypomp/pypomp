@@ -29,6 +29,8 @@ Core Algorithms
    pfilter
    mif
    simulate
+   pmcmc
+   abc
 
 Differentiable Particle Filtering
 ---------------------------------

@@ -6,6 +6,8 @@ from .mop import mop
 from .dpop import dpop
 from .simulate import simulate
 from .train import train, panel_train
+from .pmcmc import pmcmc
+from .abc import abc
 
 __all__ = [
     "PompStruct",
@@ -20,4 +22,6 @@ __all__ = [
     "simulate",
     "train",
     "panel_train",
+    "pmcmc",
+    "abc",
 ]

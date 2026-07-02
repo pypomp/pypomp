@@ -18,6 +18,14 @@ from .core.optimizer import (
 from .panel.panel import PanelPomp
 
 from .mcap import mcap
+from .proposals import (
+    MVNDiagRW,
+    MVNRWFull,
+    MVNRWAdaptive,
+    mvn_diag_rw,
+    mvn_rw,
+    mvn_rw_adaptive,
+)
 
 from . import random, models, benchmarks, types, maths, functional
 
@@ -52,6 +60,12 @@ __all__ = [
     "WeightedNewton",
     # Inference / Algorithms
     "mcap",
+    "MVNDiagRW",
+    "MVNRWFull",
+    "MVNRWAdaptive",
+    "mvn_diag_rw",
+    "mvn_rw",
+    "mvn_rw_adaptive",
     # Submodules
     "benchmarks",
     "models",

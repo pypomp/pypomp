@@ -30,11 +30,19 @@ from .results import (
     PompPFilterResult,
     PompMIFResult,
     PompTrainResult,
+    PompPMCMCResult,
+    PompABCResult,
 )
 from .parameters import PompParameters
 from pypomp.maths import logmeanexp
 from pypomp import benchmarks
 from pypomp.functional.structs import PompStruct
+from pypomp.proposals import _expand_proposal
+
+
+def _flat_dprior(theta_arr: jax.Array) -> jax.Array:
+    """Default flat improper log-prior."""
+    return jnp.zeros((), dtype=theta_arr.dtype)
 
 
 class Pomp:
@@ -1019,6 +1027,252 @@ class Pomp:
         )
 
         return nll_hist, theta_hist
+
+    def pmcmc(
+        self,
+        J: int,
+        Nmcmc: int,
+        proposal,
+        dprior: Callable | None = None,
+        key: jax.Array | None = None,
+        theta: PompParameters | None = None,
+        thresh: float = 0.0,
+        track_time: bool = True,
+    ) -> None:
+        """
+        Particle Markov chain Monte Carlo (PMMH) for Bayesian parameter inference.
+
+        Runs one independent PMCMC chain for each parameter replicate in ``theta``.
+        Each chain uses a bootstrap particle filter likelihood estimate inside a
+        Metropolis-Hastings update. Results are stored in
+        :attr:`Pomp.results_history`.
+
+        Args:
+            J: Number of particles per particle-filter likelihood evaluation.
+            Nmcmc: Number of MCMC iterations per chain.
+            proposal: Proposal object from :mod:`pypomp.proposals`.
+            dprior: Pure-JAX log-prior function with signature
+                ``dprior(theta_arr) -> scalar``. If ``None``, a flat improper
+                prior is used.
+            key: JAX PRNG key. Defaults to :attr:`fresh_key`.
+            theta: Starting parameter values. Defaults to :attr:`theta`.
+            thresh: Adaptive resampling threshold passed to the particle filter.
+            track_time: Whether to record execution time.
+
+        Returns:
+            None. Updates :attr:`Pomp.results_history` with a
+            :class:`~pypomp.core.results.PompPMCMCResult`.
+        """
+        start_time = time.time()
+
+        if self.dmeas is None:
+            raise ValueError("pmcmc requires self.dmeas to be not None.")
+        if J < 1:
+            raise ValueError("J must be >= 1.")
+        if Nmcmc < 1:
+            raise ValueError("Nmcmc must be >= 1.")
+
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_obj_for_result = deepcopy(theta_obj_in)
+        n_chains = theta_obj_in.num_replicates()
+        if n_chains < 1:
+            raise ValueError("pmcmc requires at least one starting parameter set.")
+
+        new_key, old_key = self._update_fresh_key(key)
+        canonical_names = self.canonical_param_names
+        theta_array = theta_obj_in.to_jax_array(canonical_names)
+        proposal = _expand_proposal(proposal, canonical_names)
+        log_prior = dprior if dprior is not None else _flat_dprior
+        keys = jax.random.split(new_key, n_chains)
+
+        ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
+            self.to_struct(),
+            theta_array,
+            proposal,
+            log_prior,
+            Nmcmc,
+            J,
+            thresh,
+            keys,
+        )
+
+        ll_traces, lp_traces, theta_traces, accepts = jax.device_get(
+            (ll_jax, lp_jax, theta_jax, accepts_jax)
+        )
+
+        trace_vars = ["logLik", "log_prior"] + list(canonical_names)
+        trace_data = np.concatenate(
+            [ll_traces[..., np.newaxis], lp_traces[..., np.newaxis], theta_traces],
+            axis=-1,
+        )
+        traces_da = xr.DataArray(
+            trace_data,
+            dims=["theta_idx", "iteration", "variable"],
+            coords={
+                "theta_idx": np.arange(n_chains),
+                "iteration": np.arange(Nmcmc + 1),
+                "variable": trace_vars,
+            },
+        )
+
+        final_theta_da = xr.DataArray(
+            theta_traces[:, -1, :],
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_chains),
+                "parameter": canonical_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=ll_traces[:, -1])
+
+        execution_time = time.time() - start_time if track_time else None
+        result = PompPMCMCResult(
+            method="pmcmc",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_obj_for_result,
+            traces_da=traces_da,
+            Nmcmc=Nmcmc,
+            J=J,
+            accepts=np.asarray(accepts, dtype=np.int32),
+        )
+        self.results_history.add(result)
+
+    def abc(
+        self,
+        Nabc: int,
+        probes: dict[str, Callable],
+        scale: dict[str, float],
+        epsilon: float,
+        proposal,
+        dprior: Callable | None = None,
+        key: jax.Array | None = None,
+        theta: PompParameters | None = None,
+        track_time: bool = True,
+    ) -> None:
+        """
+        Approximate Bayesian Computation with a Metropolis-Hastings outer loop.
+
+        The probe functions must be pure JAX callables accepting a simulated
+        observation array with shape ``(n_obs, ydim)`` and returning a scalar.
+        One independent ABC-MCMC chain is run for each parameter replicate in
+        ``theta``. Results are stored in :attr:`Pomp.results_history`.
+
+        Args:
+            Nabc: Number of ABC-MCMC iterations per chain.
+            probes: Mapping from probe name to pure-JAX summary statistic.
+            scale: Positive scaling factor for each probe.
+            epsilon: ABC distance threshold.
+            proposal: Proposal object from :mod:`pypomp.proposals`.
+            dprior: Pure-JAX log-prior function. If ``None``, a flat improper
+                prior is used.
+            key: JAX PRNG key. Defaults to :attr:`fresh_key`.
+            theta: Starting parameter values. Defaults to :attr:`theta`.
+            track_time: Whether to record execution time.
+
+        Returns:
+            None. Updates :attr:`Pomp.results_history` with a
+            :class:`~pypomp.core.results.PompABCResult`.
+        """
+        start_time = time.time()
+
+        if self.rmeas is None:
+            raise ValueError("abc requires self.rmeas to be not None.")
+        if Nabc < 1:
+            raise ValueError("Nabc must be >= 1.")
+        if epsilon <= 0:
+            raise ValueError("epsilon must be positive.")
+        if not probes:
+            raise ValueError("probes must be a non-empty dict.")
+        if set(scale.keys()) != set(probes.keys()):
+            raise ValueError("scale keys must match probes keys.")
+        for name, value in scale.items():
+            if value <= 0:
+                raise ValueError(f"scale['{name}'] must be positive.")
+
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_obj_for_result = deepcopy(theta_obj_in)
+        n_chains = theta_obj_in.num_replicates()
+        if n_chains < 1:
+            raise ValueError("abc requires at least one starting parameter set.")
+
+        new_key, old_key = self._update_fresh_key(key)
+        canonical_names = self.canonical_param_names
+        theta_array = theta_obj_in.to_jax_array(canonical_names)
+        proposal = _expand_proposal(proposal, canonical_names)
+        log_prior = dprior if dprior is not None else _flat_dprior
+
+        probe_names = sorted(probes.keys())
+        scale_arr = jnp.asarray([float(scale[name]) for name in probe_names])
+
+        def probe_fn(y_arr: jax.Array) -> jax.Array:
+            return jnp.stack(
+                [jnp.asarray(probes[name](y_arr)).reshape(()) for name in probe_names]
+            )
+
+        obs_probes = probe_fn(jnp.asarray(self.ys.values))
+        keys = jax.random.split(new_key, n_chains)
+        ydim = int(self.ys.shape[1])
+
+        dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
+            self.to_struct(),
+            theta_array,
+            proposal,
+            log_prior,
+            probe_fn,
+            obs_probes,
+            scale_arr,
+            float(epsilon),
+            ydim,
+            Nabc,
+            keys,
+        )
+
+        dist_traces, lp_traces, theta_traces, accepts = jax.device_get(
+            (dist_jax, lp_jax, theta_jax, accepts_jax)
+        )
+
+        trace_vars = ["distance", "log_prior"] + list(canonical_names)
+        trace_data = np.concatenate(
+            [
+                dist_traces[..., np.newaxis],
+                lp_traces[..., np.newaxis],
+                theta_traces,
+            ],
+            axis=-1,
+        )
+        traces_da = xr.DataArray(
+            trace_data,
+            dims=["theta_idx", "iteration", "variable"],
+            coords={
+                "theta_idx": np.arange(n_chains),
+                "iteration": np.arange(Nabc + 1),
+                "variable": trace_vars,
+            },
+        )
+
+        final_theta_da = xr.DataArray(
+            theta_traces[:, -1, :],
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_chains),
+                "parameter": canonical_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da)
+
+        execution_time = time.time() - start_time if track_time else None
+        result = PompABCResult(
+            method="abc",
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_obj_for_result,
+            traces_da=traces_da,
+            Nabc=Nabc,
+            epsilon=float(epsilon),
+            accepts=np.asarray(accepts, dtype=np.int32),
+        )
+        self.results_history.add(result)
 
     @overload
     def simulate(

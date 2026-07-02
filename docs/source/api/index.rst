@@ -34,6 +34,7 @@ Utilities
 
    maths
    random
+   proposals
    mcap
 
 Example Models
@@ -43,4 +44,3 @@ Example Models
    :maxdepth: 2
 
    examples
-

@@ -8,6 +8,8 @@ from .pomp import (
     PompPFilterResult,
     PompMIFResult,
     PompTrainResult,
+    PompPMCMCResult,
+    PompABCResult,
 )
 from .panel import (
     PanelPompBaseResult,
@@ -26,6 +28,8 @@ __all__ = [
     "PompPFilterResult",
     "PompMIFResult",
     "PompTrainResult",
+    "PompPMCMCResult",
+    "PompABCResult",
     "PanelPompBaseResult",
     "PanelPompPFilterResult",
     "PanelPompMIFResult",

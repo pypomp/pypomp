@@ -852,7 +852,7 @@ class Pomp:
         trace_data = np.zeros((n_reps, M + 1, len(trace_vars)), dtype=float)
         for i in range(n_reps):
             logliks_with_nan = np.concatenate([np.array([np.nan]), -nLLs[i]])
-            param_traces = self.par_trans.transform_array(
+            param_traces = self.par_trans._transform_array(
                 theta_traces[i],
                 param_names,
                 direction="from_est",
@@ -871,7 +871,7 @@ class Pomp:
         )
 
         flat_cloud_est = final_thetas_est.reshape(n_reps * J, n_params)
-        flat_cloud_nat = self.par_trans.transform_array(
+        flat_cloud_nat = self.par_trans._transform_array(
             flat_cloud_est,
             param_names,
             direction="from_est",

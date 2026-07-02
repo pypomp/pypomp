@@ -227,6 +227,79 @@ class TestABC:
         # Very tight epsilon -> typically few accepts
         assert int(res.accepts[0]) <= 10
 
+    def test_theta_updated_to_final_trace(self):
+        sir = _get_sir()
+        prop = mvn_diag_rw({"beta1": 1.0})
+        sir.abc(
+            Nabc=5,
+            probes=_default_probes(),
+            scale=_default_scale(),
+            epsilon=1e6,
+            proposal=prop,
+            key=jax.random.key(71),
+        )
+        res = sir.results_history[-1]
+
+        final_row = res.traces_da.isel(theta_idx=0, iteration=-1)
+        for name in sir.canonical_param_names:
+            assert sir.theta[0][name] == float(final_row.sel(variable=name).values)
+
+    def test_input_theta_is_deepcopied_and_unchanged(self):
+        sir = _get_sir()
+        theta_input = pp.PompParameters(sir.theta)
+        theta_before = pp.PompParameters(theta_input)
+        prop = mvn_diag_rw({"beta1": 1.0})
+
+        sir.abc(
+            Nabc=3,
+            probes=_default_probes(),
+            scale=_default_scale(),
+            epsilon=1e6,
+            proposal=prop,
+            theta=theta_input,
+            key=jax.random.key(72),
+        )
+        res = sir.results_history[-1]
+
+        assert theta_input == theta_before
+        assert res.theta == theta_before
+        assert res.theta is not theta_input
+
+        mutated = theta_input.params()[0]
+        mutated["beta1"] = 123.0
+        theta_input.set_params(mutated)
+        assert res.theta == theta_before
+
+    def test_impossible_prior_rejects_all_proposals(self):
+        sir = _get_sir()
+        beta1_idx = sir.canonical_param_names.index("beta1")
+        beta1_start = float(sir.theta[0]["beta1"])
+
+        def point_mass_prior(theta_arr):
+            return jnp.where(
+                jnp.abs(theta_arr[beta1_idx] - beta1_start) < 1e-12,
+                0.0,
+                -jnp.inf,
+            )
+
+        prop = mvn_diag_rw({"beta1": 1.0})
+        sir.abc(
+            Nabc=5,
+            probes=_default_probes(),
+            scale=_default_scale(),
+            epsilon=1e12,
+            proposal=prop,
+            dprior=point_mass_prior,
+            key=jax.random.key(73),
+        )
+        res = sir.results_history[-1]
+
+        assert int(res.accepts[0]) == 0
+        np.testing.assert_array_equal(
+            np.asarray(res.traces_da.sel(variable="beta1")),
+            np.full((1, 6), beta1_start),
+        )
+
 
 # ---------------------------------------------------------------
 # Multi-chain tests

@@ -23,6 +23,8 @@ In addition to accessing the stored values directly, you can access these result
    PompPFilterResult
    PompMIFResult
    PompTrainResult
+   PompPMCMCResult
+   PompABCResult
 
 .. rubric:: PanelPomp Results
 .. autosummary::

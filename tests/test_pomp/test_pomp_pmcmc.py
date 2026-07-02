@@ -1,10 +1,11 @@
 """Tests for Pomp.pmcmc() -- JIT-compiled Particle MCMC (PMMH)."""
 
-from copy import deepcopy
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
@@ -20,6 +21,34 @@ from pypomp.proposals import (
 )
 
 
+@dataclass(frozen=True)
+class _FixedShiftProposal:
+    """Deterministic proposal used for non-random PMCMC acceptance tests."""
+
+    shift: jax.Array
+    param_names: tuple[str, ...]
+
+    def init_state(self, theta_arr: jax.Array) -> tuple:
+        return ()
+
+    def step(
+        self,
+        state: tuple,
+        theta_arr: jax.Array,
+        key: jax.Array,
+        n: jax.Array,
+        accepts: jax.Array,
+    ) -> tuple[jax.Array, tuple]:
+        return theta_arr + self.shift, state
+
+
+jax.tree_util.register_pytree_node(
+    _FixedShiftProposal,
+    lambda p: ((p.shift,), p.param_names),
+    lambda aux, children: _FixedShiftProposal(shift=children[0], param_names=aux),
+)
+
+
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------
@@ -28,6 +57,36 @@ from pypomp.proposals import (
 def _get_sir():
     """Return a fresh SIR Pomp for testing."""
     return pp.models.sir(seed=42)
+
+
+def _get_static_normal_pomp():
+    """One-observation POMP with deterministic likelihood in theta['mu']."""
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"]}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        return jax.scipy.stats.norm.logpdf(
+            Y_["Y"], loc=theta_["mu"], scale=theta_["sigma"]
+        )
+
+    def rmeas(X_, theta_, key, covars, t):
+        return jnp.array([theta_["mu"] + theta_["sigma"] * jax.random.normal(key, ())])
+
+    return pp.Pomp(
+        ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
+        theta=pp.PompParameters({"mu": 0.0, "sigma": 0.1}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        rmeas=rmeas,
+        nstep=1,
+    )
 
 
 def _flat_dprior(theta_arr):
@@ -256,15 +315,128 @@ class TestPMCMC:
 
     def test_theta_updated(self):
         sir = _get_sir()
-        starting = deepcopy(sir.theta[0])
         prop = mvn_diag_rw({"beta1": 50.0})  # large jumps -> some acceptance
         sir.pmcmc(J=20, Nmcmc=8, proposal=prop, key=jax.random.key(7))
-        # self.theta should be updated to last accepted sample of chain 0.
-        final = sir.theta[0]
-        # If at least one accepted, beta1 should differ; otherwise equal.
         res = sir.results_history[-1]
-        if int(res.accepts[0]) > 0:
-            assert final["beta1"] != starting["beta1"]
+
+        # self.theta should exactly match the final trace row, regardless of
+        # whether the last chain happened to accept any proposals.
+        final_row = res.traces_da.isel(theta_idx=0, iteration=-1)
+        for name in sir.canonical_param_names:
+            assert sir.theta[0][name] == float(final_row.sel(variable=name).values)
+        np.testing.assert_allclose(
+            sir.theta.logLik,
+            np.asarray(res.traces_da.isel(iteration=-1).sel(variable="logLik")),
+            rtol=0,
+            atol=0,
+        )
+
+    def test_input_theta_is_deepcopied_and_unchanged(self):
+        sir = _get_sir()
+        theta_input = pp.PompParameters(sir.theta)
+        theta_before = pp.PompParameters(theta_input)
+        prop = mvn_diag_rw({"beta1": 1.0})
+
+        sir.pmcmc(
+            J=20,
+            Nmcmc=3,
+            proposal=prop,
+            theta=theta_input,
+            key=jax.random.key(71),
+        )
+        res = sir.results_history[-1]
+
+        assert theta_input == theta_before
+        assert res.theta == theta_before
+        assert res.theta is not theta_input
+
+        mutated = theta_input.params()[0]
+        mutated["beta1"] = 123.0
+        theta_input.set_params(mutated)
+        assert res.theta == theta_before
+
+    def test_initial_loglik_matches_independent_pfilter(self):
+        sir = _get_sir()
+        run_key = jax.random.key(72)
+        prop = mvn_diag_rw({"beta1": 1.0})
+        J = 20
+
+        sir.pmcmc(J=J, Nmcmc=2, proposal=prop, key=run_key)
+        res = sir.results_history[-1]
+        recorded = np.asarray(
+            res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="logLik")
+        )
+
+        # Reconstruct the exact initial particle-filter key used internally by
+        # Pomp.pmcmc -> F.pmcmc -> _pmcmc_internal.
+        _, method_key = jax.random.split(run_key)
+        chain_key = jax.random.split(method_key, 1)[0]
+        _, init_pf_key = jax.random.split(chain_key)
+        keys = jnp.asarray([[init_pf_key]])
+
+        recomputed = pp.functional.pfilter(
+            sir.to_struct(),
+            res.theta.to_jax_array(sir.canonical_param_names),
+            J,
+            0.0,
+            keys,
+        )["logLik"]
+        np.testing.assert_allclose(
+            recorded, np.asarray(recomputed)[0, 0], rtol=0, atol=0
+        )
+
+    def test_impossible_prior_rejects_all_proposals(self):
+        sir = _get_sir()
+        beta1_idx = sir.canonical_param_names.index("beta1")
+        beta1_start = float(sir.theta[0]["beta1"])
+
+        def point_mass_prior(theta_arr):
+            return jnp.where(
+                jnp.abs(theta_arr[beta1_idx] - beta1_start) < 1e-12,
+                0.0,
+                -jnp.inf,
+            )
+
+        prop = mvn_diag_rw({"beta1": 1.0})
+        sir.pmcmc(
+            J=20,
+            Nmcmc=5,
+            proposal=prop,
+            dprior=point_mass_prior,
+            key=jax.random.key(73),
+        )
+        res = sir.results_history[-1]
+        assert int(res.accepts[0]) == 0
+        np.testing.assert_array_equal(
+            np.asarray(res.traces_da.sel(variable="beta1")),
+            np.full((1, 6), beta1_start),
+        )
+
+    def test_functional_pmcmc_accepts_higher_likelihood_proposal(self):
+        pomp = _get_static_normal_pomp()
+        theta_array = pomp.theta.to_jax_array(pomp.canonical_param_names)
+        proposal = _FixedShiftProposal(
+            shift=jnp.asarray([1.0, 0.0]),
+            param_names=tuple(pomp.canonical_param_names),
+        )
+        keys = jax.random.split(jax.random.key(74), 1)
+
+        logliks, _, theta_trace, accepts = pp.functional.pmcmc(
+            pomp.to_struct(),
+            theta_array,
+            proposal,
+            _flat_dprior,
+            Nmcmc=1,
+            J=2,
+            thresh=0.0,
+            keys=keys,
+        )
+
+        mu_idx = pomp.canonical_param_names.index("mu")
+        assert int(np.asarray(accepts)[0]) == 1
+        assert np.asarray(theta_trace)[0, 0, mu_idx] == 0.0
+        assert np.asarray(theta_trace)[0, 1, mu_idx] == 1.0
+        assert np.asarray(logliks)[0, 1] > np.asarray(logliks)[0, 0]
 
     def test_with_mvn_rw(self):
         sir = _get_sir()

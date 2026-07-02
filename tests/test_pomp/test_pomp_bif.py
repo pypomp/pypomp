@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import pypomp as pp
-from pypomp.core.algorithms.bif import _bif_perfilter_internal
+from pypomp.core.algorithms.bif import _bif_deconvolution_diag, _bif_perfilter_internal
 from pypomp.core.results import PompBIFResult
 
 
@@ -159,3 +159,32 @@ class TestBIF:
         # obs1: y=2, t=3, nstep->t_idx=3, covar=20 => 5032
         # obs2: y=3, t=6, nstep->t_idx=6, covar=30 => 9063
         assert float(neg_loglik) == -16106.0
+
+    def test_deconvolution_weights_match_manual_gaussian_calculation(self):
+        cloud = np.asarray([[0.0], [1.0], [3.0]], dtype=float)
+        sd = np.asarray([1.5], dtype=float)
+
+        log_Hf_jax, weights_jax, ess_jax = _bif_deconvolution_diag(
+            jnp.asarray(cloud), jnp.asarray(sd)
+        )
+
+        diffs = cloud[:, None, :] - cloud[None, :, :]
+        quad = np.sum(diffs * diffs / (sd * sd), axis=-1)
+        log_norm = -0.5 * np.log(2.0 * np.pi) - np.log(sd[0])
+        log_k = log_norm - 0.5 * quad
+        np.fill_diagonal(log_k, -np.inf)
+
+        max_log_k = np.max(log_k, axis=1, keepdims=True)
+        manual_log_Hf = (
+            max_log_k[:, 0]
+            + np.log(np.sum(np.exp(log_k - max_log_k), axis=1))
+            - np.log(cloud.shape[0] - 1)
+        )
+        manual_log_w = -manual_log_Hf
+        manual_log_w -= np.log(np.sum(np.exp(manual_log_w)))
+        manual_weights = np.exp(manual_log_w)
+        manual_ess = 1.0 / np.sum(manual_weights * manual_weights)
+
+        np.testing.assert_allclose(np.asarray(log_Hf_jax), manual_log_Hf, rtol=1e-6)
+        np.testing.assert_allclose(np.asarray(weights_jax), manual_weights, rtol=1e-6)
+        np.testing.assert_allclose(np.asarray(ess_jax), manual_ess, rtol=1e-6)

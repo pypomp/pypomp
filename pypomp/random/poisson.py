@@ -23,56 +23,147 @@ from jax._src import dtypes
 from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
 
 
-_RM_COEFFS: Tuple[float, ...] = (
-    2.82298751e-07,
-    -2.58136133e-06,
-    1.02118025e-05,
-    -2.37996199e-05,
-    4.05347462e-05,
-    -6.63730967e-05,
-    1.24762566e-04,
-    -2.56970731e-04,
-    5.58953132e-04,
-    -1.33129194e-03,
-    3.70367937e-03,
-    -1.38888706e-02,
-    1.66666667e-01,
+@partial(
+    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
 )
+def fast_poisson(
+    key: Array,
+    lam: Array,
+    dtype: np.dtype | None = None,
+    max_newton_loops: int = 5,
+    max_inverse_cdf_loops: int = 20,
+) -> Array:
+    """
+    Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
 
-_T_COEFFS: Tuple[float, ...] = (
-    1.86386867e-05,
-    -2.07319499e-04,
-    9.68945100e-04,
-    -2.47340054e-03,
-    3.79952985e-03,
-    -3.86717047e-03,
-    3.46960934e-03,
-    -4.14125511e-03,
-    5.86752093e-03,
-    -8.38583787e-03,
-    1.32793933e-02,
-    -2.77755360e-02,
-    3.33333333e-01,
+    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve its speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
+
+    Args:
+        key: a PRNG key used as the random key.
+        lam: rate parameters for the Poisson distribution.
+        dtype: optional, an integer dtype for the returned values (default int64 if
+            jax_enable_x64 is true, otherwise int32).
+        max_newton_loops: Cap on iterations for the Newton-Raphson method.
+        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
+
+    Returns:
+        A Poisson random variable.
+
+    References:
+        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
+    """
+    dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
+    assert dtype is not None
+    if not dtypes.issubdtype(dtype, np.integer):
+        raise ValueError(
+            f"dtype argument to `fast_poisson` must be an integer dtype, got {dtype}"
+        )
+
+    dtype = _get_available_dtype(dtype)
+    assert dtype is not None
+
+    if dtypes.issubdtype(dtype, np.int64):
+        float_dtype = jnp.float64
+    else:
+        float_dtype = jnp.float32
+
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
+
+    lam = jnp.asarray(lam)
+    lam_float = lam.astype(float_dtype)
+    invalid = lam_float < 0.0
+
+    shape = lam.shape
+    u = jax.random.uniform(key, shape, dtype=float_dtype)
+    # Clamp u to be slightly less than 1.0 to avoid inf output
+    # Use nextafter to get the largest float < 1.0
+    u_max = jnp.nextafter(
+        jnp.array(1.0, dtype=float_dtype), jnp.array(0.0, dtype=float_dtype)
+    )
+    u = jnp.minimum(u, u_max)
+    x = poissoninv(
+        u,
+        lam_float,
+        dtype=float_dtype,
+        max_newton_loops=max_newton_loops,
+        max_inverse_cdf_loops=max_inverse_cdf_loops,
+    )
+    # Cap the output to a reasonable maximum to prevent overflow
+    max_val = lam_float + jnp.array(10.0, dtype=float_dtype) * jnp.sqrt(
+        jnp.maximum(lam_float, jnp.array(1.0, dtype=float_dtype))
+    )
+    x = jnp.minimum(x, max_val)
+    # For integer dtype, follow the convention of returning -1 for invalid inputs
+    return jnp.where(invalid, -1, x.astype(dtype))
+
+
+@partial(
+    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
 )
+def poissoninv(
+    u: Array,
+    lam: Array,
+    dtype: np.dtype | None = None,
+    max_newton_loops: int = 5,
+    max_inverse_cdf_loops: int = 20,
+) -> Array:
+    """
+    Vectorized inverse Poisson CDF approximation using JAX primitives.
 
-_X_COEFFS: Tuple[float, ...] = (
-    -1.45852240e-04,
-    1.46121529e-03,
-    -6.10328845e-03,
-    1.38117964e-02,
-    -1.86988746e-02,
-    1.68155118e-02,
-    -1.33947970e-02,
-    1.35698573e-02,
-    -1.55377333e-02,
-    1.74065334e-02,
-    -1.98011178e-02,
-)
+    Args:
+        u: Probabilities (scalar or array) in the interval [0, 1].
+        lam: Corresponding Poisson rate(s), must be positive.
+        dtype: Data type for the computation and return value.
+        max_newton_loops: Cap on iterations for the Newton-Raphson method.
+        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
 
-# These will be cast to the appropriate dtype during computation
-_RM_COEFFS_ARR = np.array(_RM_COEFFS, dtype=np.float64)
-_T_COEFFS_ARR = np.array(_T_COEFFS, dtype=np.float64)
-_X_COEFFS_ARR = np.array(_X_COEFFS, dtype=np.float64)
+    Returns:
+        DeviceArray with the same broadcast shape as `u` and `lam`.
+    """
+
+    u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
+    if dtype is None:
+        dtype = jnp.result_type(u_arr, lam_arr)
+        if not dtypes.issubdtype(dtype, np.floating):
+            dtype = jnp.float32
+
+    dtype = check_and_canonicalize_user_dtype(dtype)
+    assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `poissoninv` must be a float or integer dtype, got {dtype}"
+        )
+
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
+
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
+
+    if u_arr.ndim == 0:
+        res = _poissoninv_scalar(
+            u_arr, lam_arr, float_dtype, max_newton_loops, max_inverse_cdf_loops
+        )
+    else:
+        flat_u = u_arr.reshape(-1)
+        flat_lam = lam_arr.reshape(-1)
+        flat_res = _poissoninv_vmap(
+            flat_u, flat_lam, float_dtype, max_newton_loops, max_inverse_cdf_loops
+        )
+        res = flat_res.reshape(u_arr.shape)
+
+    if dtypes.issubdtype(dtype, np.integer):
+        res = jnp.where(jnp.isnan(res) | jnp.isinf(res), -1.0, res)
+        return res.astype(dtype)
+    return res.astype(dtype)
 
 
 def _central_region(s: Array, lam: Array, dtype) -> Array:
@@ -285,144 +376,53 @@ def _poissoninv_scalar(
 _poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None, None, None))
 
 
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
+_RM_COEFFS: Tuple[float, ...] = (
+    2.82298751e-07,
+    -2.58136133e-06,
+    1.02118025e-05,
+    -2.37996199e-05,
+    4.05347462e-05,
+    -6.63730967e-05,
+    1.24762566e-04,
+    -2.56970731e-04,
+    5.58953132e-04,
+    -1.33129194e-03,
+    3.70367937e-03,
+    -1.38888706e-02,
+    1.66666667e-01,
 )
-def poissoninv(
-    u: Array,
-    lam: Array,
-    dtype: np.dtype | None = None,
-    max_newton_loops: int = 5,
-    max_inverse_cdf_loops: int = 20,
-) -> Array:
-    """
-    Vectorized inverse Poisson CDF approximation using JAX primitives.
 
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        lam: Corresponding Poisson rate(s), must be positive.
-        dtype: Data type for the computation and return value.
-        max_newton_loops: Cap on iterations for the Newton-Raphson method.
-        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
-
-    Returns:
-        DeviceArray with the same broadcast shape as `u` and `lam`.
-    """
-
-    u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
-    if dtype is None:
-        dtype = jnp.result_type(u_arr, lam_arr)
-        if not dtypes.issubdtype(dtype, np.floating):
-            dtype = jnp.float32
-
-    dtype = check_and_canonicalize_user_dtype(dtype)
-    assert dtype is not None
-    if not (
-        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
-    ):
-        raise ValueError(
-            f"dtype argument to `poissoninv` must be a float or integer dtype, got {dtype}"
-        )
-
-    if dtypes.issubdtype(dtype, np.integer):
-        if dtypes.issubdtype(dtype, np.int64):
-            float_dtype = jnp.float64
-        else:
-            float_dtype = jnp.float32
-    else:
-        float_dtype = dtype
-
-    float_dtype = _get_available_dtype(float_dtype)
-    assert float_dtype is not None
-
-    if u_arr.ndim == 0:
-        res = _poissoninv_scalar(
-            u_arr, lam_arr, float_dtype, max_newton_loops, max_inverse_cdf_loops
-        )
-    else:
-        flat_u = u_arr.reshape(-1)
-        flat_lam = lam_arr.reshape(-1)
-        flat_res = _poissoninv_vmap(
-            flat_u, flat_lam, float_dtype, max_newton_loops, max_inverse_cdf_loops
-        )
-        res = flat_res.reshape(u_arr.shape)
-
-    if dtypes.issubdtype(dtype, np.integer):
-        res = jnp.where(jnp.isnan(res) | jnp.isinf(res), -1.0, res)
-        return res.astype(dtype)
-    return res.astype(dtype)
-
-
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
+_T_COEFFS: Tuple[float, ...] = (
+    1.86386867e-05,
+    -2.07319499e-04,
+    9.68945100e-04,
+    -2.47340054e-03,
+    3.79952985e-03,
+    -3.86717047e-03,
+    3.46960934e-03,
+    -4.14125511e-03,
+    5.86752093e-03,
+    -8.38583787e-03,
+    1.32793933e-02,
+    -2.77755360e-02,
+    3.33333333e-01,
 )
-def fast_poisson(
-    key: Array,
-    lam: Array,
-    dtype: np.dtype | None = None,
-    max_newton_loops: int = 5,
-    max_inverse_cdf_loops: int = 20,
-) -> Array:
-    """
-    Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
 
-    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve its speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
+_X_COEFFS: Tuple[float, ...] = (
+    -1.45852240e-04,
+    1.46121529e-03,
+    -6.10328845e-03,
+    1.38117964e-02,
+    -1.86988746e-02,
+    1.68155118e-02,
+    -1.33947970e-02,
+    1.35698573e-02,
+    -1.55377333e-02,
+    1.74065334e-02,
+    -1.98011178e-02,
+)
 
-    Args:
-        key: a PRNG key used as the random key.
-        lam: rate parameters for the Poisson distribution.
-        dtype: optional, an integer dtype for the returned values (default int64 if
-            jax_enable_x64 is true, otherwise int32).
-        max_newton_loops: Cap on iterations for the Newton-Raphson method.
-        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
-
-    Returns:
-        A Poisson random variable.
-
-    References:
-        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
-    """
-    dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
-    assert dtype is not None
-    if not dtypes.issubdtype(dtype, np.integer):
-        raise ValueError(
-            f"dtype argument to `fast_poisson` must be an integer dtype, got {dtype}"
-        )
-
-    dtype = _get_available_dtype(dtype)
-    assert dtype is not None
-
-    if dtypes.issubdtype(dtype, np.int64):
-        float_dtype = jnp.float64
-    else:
-        float_dtype = jnp.float32
-
-    float_dtype = _get_available_dtype(float_dtype)
-    assert float_dtype is not None
-
-    lam = jnp.asarray(lam)
-    lam_float = lam.astype(float_dtype)
-    invalid = lam_float < 0.0
-
-    shape = lam.shape
-    u = jax.random.uniform(key, shape, dtype=float_dtype)
-    # Clamp u to be slightly less than 1.0 to avoid inf output
-    # Use nextafter to get the largest float < 1.0
-    u_max = jnp.nextafter(
-        jnp.array(1.0, dtype=float_dtype), jnp.array(0.0, dtype=float_dtype)
-    )
-    u = jnp.minimum(u, u_max)
-    x = poissoninv(
-        u,
-        lam_float,
-        dtype=float_dtype,
-        max_newton_loops=max_newton_loops,
-        max_inverse_cdf_loops=max_inverse_cdf_loops,
-    )
-    # Cap the output to a reasonable maximum to prevent overflow
-    max_val = lam_float + jnp.array(10.0, dtype=float_dtype) * jnp.sqrt(
-        jnp.maximum(lam_float, jnp.array(1.0, dtype=float_dtype))
-    )
-    x = jnp.minimum(x, max_val)
-    # For integer dtype, follow the convention of returning -1 for invalid inputs
-    return jnp.where(invalid, -1, x.astype(dtype))
+# These will be cast to the appropriate dtype during computation
+_RM_COEFFS_ARR = np.array(_RM_COEFFS, dtype=np.float64)
+_T_COEFFS_ARR = np.array(_T_COEFFS, dtype=np.float64)
+_X_COEFFS_ARR = np.array(_X_COEFFS, dtype=np.float64)

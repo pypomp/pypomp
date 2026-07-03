@@ -291,7 +291,7 @@ _poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None, None, None)
 def poissoninv(
     u: Array,
     lam: Array,
-    dtype=jnp.float32,
+    dtype: np.dtype | None = None,
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
 ) -> Array:
@@ -301,7 +301,7 @@ def poissoninv(
     Args:
         u: Probabilities (scalar or array) in the interval [0, 1].
         lam: Corresponding Poisson rate(s), must be positive.
-        dtype: Data type for the computation (default float32).
+        dtype: Data type for the computation and return value.
         max_newton_loops: Cap on iterations for the Newton-Raphson method.
         max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
 
@@ -310,16 +310,47 @@ def poissoninv(
     """
 
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
-    if u_arr.ndim == 0:
-        return _poissoninv_scalar(
-            u_arr, lam_arr, dtype, max_newton_loops, max_inverse_cdf_loops
+    if dtype is None:
+        dtype = jnp.result_type(u_arr, lam_arr)
+        if not dtypes.issubdtype(dtype, np.floating):
+            dtype = jnp.float32
+
+    dtype = check_and_canonicalize_user_dtype(dtype)
+    assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `poissoninv` must be a float or integer dtype, got {dtype}"
         )
-    flat_u = u_arr.reshape(-1)
-    flat_lam = lam_arr.reshape(-1)
-    flat_res = _poissoninv_vmap(
-        flat_u, flat_lam, dtype, max_newton_loops, max_inverse_cdf_loops
-    )
-    return flat_res.reshape(u_arr.shape)
+
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
+
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
+
+    if u_arr.ndim == 0:
+        res = _poissoninv_scalar(
+            u_arr, lam_arr, float_dtype, max_newton_loops, max_inverse_cdf_loops
+        )
+    else:
+        flat_u = u_arr.reshape(-1)
+        flat_lam = lam_arr.reshape(-1)
+        flat_res = _poissoninv_vmap(
+            flat_u, flat_lam, float_dtype, max_newton_loops, max_inverse_cdf_loops
+        )
+        res = flat_res.reshape(u_arr.shape)
+
+    if dtypes.issubdtype(dtype, np.integer):
+        res = jnp.where(jnp.isnan(res) | jnp.isinf(res), -1.0, res)
+        return res.astype(dtype)
+    return res.astype(dtype)
 
 
 @partial(

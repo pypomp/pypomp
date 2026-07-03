@@ -290,8 +290,14 @@ tests/
 ├── test_ParTrans_traces.py
 ├── test_RWSigma.py
 ├── test_model_struct.py
-├── test_random.py             # JAX random distributions
-├── test_random_extra.py
+├── test_random/               # Modular JAX random distribution tests
+│   ├── helpers.py             # Shared test utilities
+│   ├── test_binomial.py
+│   ├── test_gamma.py
+│   ├── test_inverse.py        # Public inverse CDF checks
+│   ├── test_multinomial.py
+│   ├── test_nbinomial.py
+│   └── test_poisson.py
 ├── test_ctmc_multinom.py
 ├── test_functional.py
 ├── test_benchmarks.py

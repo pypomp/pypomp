@@ -25,9 +25,14 @@ from ._dtype_helpers import (
 )
 
 
-@partial(jax.jit, static_argnames=["dtype"])
+@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def fast_multinomial(
-    key: Array, n: Array, p: Array, dtype: np.dtype | None = None
+    key: Array,
+    n: Array,
+    p: Array,
+    order: int = 2,
+    exact_max: int = 5,
+    dtype: np.dtype | None = None,
 ) -> Array:
     """
     Generate multinomial random variables using the inverse CDF method with fast_binomial in order to run fast on GPUs.
@@ -39,6 +44,8 @@ def fast_multinomial(
         n: Number of trials for the multinomial distribution. Shape: (...,)
         p: Probabilities for each category. Shape: (..., k), where k = num categories.
            Probabilities along the last axis must sum to 1.
+        order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
+        exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
         dtype: optional, a float dtype for the returned values (default float64 if
             jax_enable_x64 is true, otherwise float32). If integer, returns -1 for invalid inputs instead of nan.
     Returns:
@@ -75,7 +82,14 @@ def fast_multinomial(
         p_remain_safe = jnp.where(p_remain > 0.0, p_remain, 1.0)
         p_cur = p[..., j] / p_remain_safe
         p_cur = jnp.clip(p_cur, 0.0, 1.0)
-        x = fast_binomial(keys[j], n_remaining, p_cur, dtype=dtype)
+        x = fast_binomial(
+            keys[j],
+            n_remaining,
+            p_cur,
+            order=order,
+            exact_max=exact_max,
+            dtype=dtype,
+        )
         out.append(x)
         n_remaining = n_remaining - x
         p_remain = p_remain - p[..., j]
@@ -162,7 +176,7 @@ def binominv(
     u: Array,
     n: Array,
     p: Array,
-    exact_max: int,
+    exact_max: int = 5,
     order: int = 2,
     dtype: np.dtype | None = None,
 ) -> Array:
@@ -199,40 +213,53 @@ def binominv(
         if not dtypes.issubdtype(dtype, np.floating):
             dtype = jnp.float32
 
-    dtype = _get_available_dtype(dtype)
+    dtype = check_and_canonicalize_user_dtype(dtype)
     assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `binominv` must be a float or integer dtype, got {dtype}"
+        )
 
-    u = jnp.asarray(u, dtype=dtype)
-    n = jnp.asarray(n, dtype=dtype)
-    p = jnp.asarray(p, dtype=dtype)
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
 
-    nan = jnp.array(jnp.nan, dtype=dtype)
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
 
-    invalid_n = n < 0.0
-    invalid_p = (p < 0.0) | (p > 1.0)
-    invalid_u = (u < 0.0) | (u > 1.0)
+    u_float = jnp.asarray(u, dtype=float_dtype)
+    n_float = jnp.asarray(n, dtype=float_dtype)
+    p_float = jnp.asarray(p, dtype=float_dtype)
+
+    nan = jnp.array(jnp.nan, dtype=float_dtype)
+
+    invalid_n = n_float < 0.0
+    invalid_p = (p_float < 0.0) | (p_float > 1.0)
+    invalid_u = (u_float < 0.0) | (u_float > 1.0)
     invalid = invalid_n | invalid_p | invalid_u
 
-    n_is_zero = n == 0.0
-    u_is_zero = u == 0.0
-    u_is_one = u == 1.0
-    p_is_zero = p == 0.0
-    p_is_one = p == 1.0
+    n_is_zero = n_float == 0.0
+    u_is_zero = u_float == 0.0
+    u_is_one = u_float == 1.0
+    p_is_zero = p_float == 0.0
+    p_is_one = p_float == 1.0
 
-    p_val = jnp.asarray(p, dtype=dtype)
+    p_val = jnp.asarray(p_float, dtype=float_dtype)
     flip = p_val > 0.5
     p_safe = jnp.where(flip, 1.0 - p_val, p_val)
-    u_flipped = jnp.where(flip, 1.0 - u, u)
+    u_flipped = jnp.where(flip, 1.0 - u_float, u_float)
 
-    n_safe = jnp.where(invalid_n, 1.0, n)
+    n_safe = jnp.where(invalid_n, 1.0, n_float)
     p_safe = jnp.clip(p_safe, 0.0, 1.0)
 
     # Clip u_safe to avoid norm.ppf underflow/overflow
-    u_clip_min = (
-        jnp.array(1e-16, dtype=dtype)
-        if dtypes.issubdtype(dtype, np.float64)
-        else jnp.array(1e-9, dtype=dtype)
-    )
+    u_clip_min = jnp.finfo(float_dtype).eps
     u_safe = jnp.clip(u_flipped, u_clip_min, 1.0 - u_clip_min)
 
     q = 1.0 - p_safe
@@ -240,7 +267,7 @@ def binominv(
     w2 = w * w
     np_ = n_safe * p_safe
     npq_ = np_ * q
-    sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(dtype).tiny))
+    sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(float_dtype).tiny))
     pq = p_safe * q
 
     args = (u_safe, n_safe, p_safe, q, w, w2, np_, sqrt_npq, pq)
@@ -260,7 +287,7 @@ def binominv(
 
     u_exact = jnp.clip(u_flipped, 0.0, 1.0)
     k_bottom_up = _binom_bottom_up(
-        u_exact, n_safe, p_safe, k_approx, dtype, max_k=exact_max
+        u_exact, n_safe, p_safe, k_approx, float_dtype, max_k=exact_max
     )
 
     x_cutoff = 10
@@ -281,7 +308,9 @@ def binominv(
     k_result = jnp.clip(k_result, 0.0, n_safe)
     k_result = jnp.where(invalid, nan, k_result)
 
-    return k_result
+    if dtypes.issubdtype(dtype, np.integer):
+        return jnp.nan_to_num(k_result, nan=-1.0).astype(dtype)
+    return k_result.astype(dtype)
 
 
 def _binom_bottom_up(

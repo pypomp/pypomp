@@ -89,33 +89,67 @@ def fast_gamma(
 
 
 @partial(jax.jit, static_argnames=["dtype", "newton_steps"])
-def gammainv(u: Array, alpha: Array, dtype=jnp.float32, newton_steps: int = 3) -> Array:
+def gammainv(
+    u: Array,
+    alpha: Array,
+    dtype: np.dtype | None = None,
+    newton_steps: int = 3,
+) -> Array:
     """
     Vectorized inverse Gamma CDF approximation using JAX primitives.
+
+    The implementation follows the methodology from Temme (1992). The method does not perfectly match the inverse CDF, but it is very close. The approximation is best for large values of `alpha`, giving an accuracy of at least four significant digits for `alpha` >= 2.
 
     Args:
         u: Probabilities (scalar or array) in the interval [0, 1].
         alpha: Corresponding Gamma shape parameter(s), must be positive.
-        dtype: Data type for computation (default float32).
+        dtype: Data type for computation and return values.
         newton_steps: Number of Newton-Raphson iterations to perform (default: 3).
 
     Returns:
         DeviceArray with the same broadcast shape as `u` and `alpha`.
+
+    References:
+        * Temme, N. M. "Asymptotic Inversion of Incomplete Gamma Functions." Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
     """
     u, alpha = jnp.broadcast_arrays(u, alpha)
+    if dtype is None:
+        dtype = jnp.result_type(u, alpha)
+        if not dtypes.issubdtype(dtype, np.floating):
+            dtype = jnp.float32
 
-    u = jnp.asarray(u, dtype=dtype)
-    alpha = jnp.asarray(alpha, dtype=dtype)
+    dtype = check_and_canonicalize_user_dtype(dtype)
+    assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `gammainv` must be a float or integer dtype, got {dtype}"
+        )
 
-    zero = jnp.array(0.0, dtype=dtype)
-    one = jnp.array(1.0, dtype=dtype)
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
 
-    alpha_invalid = alpha <= zero
-    alpha_safe = jnp.where(alpha_invalid, one, alpha)
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
 
-    eta_0 = ndtri(u) / jnp.sqrt(alpha_safe)
+    u_float = jnp.asarray(u, dtype=float_dtype)
+    alpha_float = jnp.asarray(alpha, dtype=float_dtype)
 
-    eps = _compute_epsilon(eta_0, dtype)
+    zero = jnp.array(0.0, dtype=float_dtype)
+    one = jnp.array(1.0, dtype=float_dtype)
+
+    alpha_invalid = alpha_float <= zero
+    alpha_safe = jnp.where(alpha_invalid, one, alpha_float)
+
+    eta_0 = ndtri(u_float) / jnp.sqrt(alpha_safe)
+
+    eps = _compute_epsilon(eta_0, float_dtype)
 
     correction = (
         (eps[0] / alpha_safe)
@@ -126,20 +160,24 @@ def gammainv(u: Array, alpha: Array, dtype=jnp.float32, newton_steps: int = 3) -
 
     eta = eta_0 + correction
 
-    lam = _solve_lambda_from_eta(eta, dtype, newton_steps=newton_steps)
+    lam = _solve_lambda_from_eta(eta, float_dtype, newton_steps=newton_steps)
 
     x = alpha_safe * lam
 
-    nan = jnp.array(jnp.nan, dtype=dtype)
-    inf = jnp.array(jnp.inf, dtype=dtype)
+    nan = jnp.array(jnp.nan, dtype=float_dtype)
+    inf = jnp.array(jnp.inf, dtype=float_dtype)
 
-    x = jnp.where(u < zero, nan, x)
-    x = jnp.where(u == zero, zero, x)
-    x = jnp.where(u == one, inf, x)
-    x = jnp.where(u > one, nan, x)
+    x = jnp.where(u_float < zero, nan, x)
+    x = jnp.where(u_float == zero, zero, x)
+    x = jnp.where(u_float == one, inf, x)
+    x = jnp.where(u_float > one, nan, x)
     x = jnp.where(alpha_invalid, nan, x)
     x = jnp.where(x < zero, zero, x)
-    return x
+
+    if dtypes.issubdtype(dtype, np.integer):
+        x = jnp.where(jnp.isnan(x) | jnp.isinf(x), -1.0, x)
+        return x.astype(dtype)
+    return x.astype(dtype)
 
 
 _LAM_GUESS_COEFFS: tuple[float, ...] = (

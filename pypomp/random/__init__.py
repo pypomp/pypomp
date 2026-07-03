@@ -10,12 +10,19 @@ fast_multinomial = binom.fast_multinomial
 fast_gamma = gamma.fast_gamma
 fast_nbinomial = nbinom.fast_nbinomial
 
+poissoninv = poisson.poissoninv
+binominv = binom.binominv
+gammainv = gamma.gammainv
+
 __all__ = [
     "fast_poisson",
     "fast_binomial",
     "fast_multinomial",
     "fast_gamma",
     "fast_nbinomial",
+    "poissoninv",
+    "binominv",
+    "gammainv",
 ]
 
 del poisson, binom, gamma, nbinom, _dtype_helpers

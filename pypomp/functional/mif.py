@@ -16,9 +16,9 @@ def mif(
     M: int,
     cooling_fn: Callable | float,
     J: int,
-    thresh: float,
     keys: jax.Array,
-    n_monitors: int,
+    thresh: float = 0.0,
+    n_monitors: int = 0,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     This is a pure functional implementation of the Iterated Filtering algorithm,
@@ -40,8 +40,8 @@ def mif(
         M (int): Number of iterations.
         cooling_fn (Callable | float): Cooling function taking (nt, m, ntimes) or float cooling factor.
         J (int): Number of particles.
-        thresh (float): Resampling threshold.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
+        thresh (float): Resampling threshold.
         n_monitors (int): Number of monitors for likelihood averaging.
 
     Returns:
@@ -55,6 +55,7 @@ def mif(
         these arrays, use :func:`pypomp.functional.align_params`.
     """
 
+    thresh = float(max(0.0, thresh))
     thetas_est = struct.par_trans._transform_array_jax(
         thetas_array,
         struct.param_names,
@@ -109,8 +110,8 @@ def panel_mif(
     M: int,
     cooling_fn: Callable | float,
     J: int,
-    thresh: float,
     keys: jax.Array,
+    thresh: float = 0.0,
     n_monitors: int = 0,
     block: bool = True,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -135,10 +136,10 @@ def panel_mif(
         M (int): Number of iterated filtering iterations.
         cooling_fn (Callable | float): Cooling schedule function or constant decay factor.
         J (int): Number of particles.
-        thresh (float): Resampling threshold.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
-        n_monitors (int, optional): Number of monitor runs to perform at each iteration. Defaults to 0.
-        block (bool, optional): Whether to use MPIF. Defaults to True.
+        thresh (float): Resampling threshold.
+        n_monitors (int): Number of monitor runs to perform at each iteration.
+        block (bool): Whether to use MPIF.
 
     Returns:
         tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -152,6 +153,7 @@ def panel_mif(
         these arrays, you can use :func:`pypomp.functional.align_params`.
     """
 
+    thresh = float(max(0.0, thresh))
     U = len(struct.unit_names)
 
     shared_est, unit_est = struct.par_trans._transform_panel_array_jax(

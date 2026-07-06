@@ -432,7 +432,7 @@ class Pomp:
         J: int,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-        thresh: float = 0,
+        thresh: float = 0.0,
         reps: int = 1,
         CLL: bool = False,
         ESS: bool = False,
@@ -477,6 +477,7 @@ class Pomp:
             filtered means, and prediction means if requested.
         """
         start_time = time.time()
+        thresh = float(max(0.0, thresh))
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_for_results = deepcopy(theta_obj_in)
@@ -497,13 +498,13 @@ class Pomp:
 
         results_jax = run_jax_batch_sharded(
             F.pfilter,
-            {1: 0, 4: 0},
+            {1: 0, 3: 0},
             {"logLik": 0, "CLL": 0, "ESS": 0, "filter_mean": 0, "prediction_mean": 0},
             self.to_struct(),
             thetas_array,
             J,
-            thresh,
             rep_keys,
+            thresh,
             CLL,
             ESS,
             filter_mean,
@@ -585,7 +586,7 @@ class Pomp:
         rw_sd: RWSigma,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-        thresh: float = 0,
+        thresh: float = 0.0,
         n_monitors: int = 0,
         track_time: bool = True,
     ) -> None:
@@ -621,6 +622,7 @@ class Pomp:
             parameter traces, and diagnostic information from the Iterated Filtering (IF2) run.
         """
         start_time = time.time()
+        thresh = float(max(0.0, thresh))
 
         rw_param_names = list(rw_sd.all_names)
         if set(rw_param_names) != set(self.canonical_param_names):
@@ -650,7 +652,7 @@ class Pomp:
 
         nLLs_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
-            {1: 0, 8: 0},
+            {1: 0, 7: 0},
             [0, 0, 0],
             self.to_struct(),
             theta_array_3d,
@@ -659,8 +661,8 @@ class Pomp:
             M,
             rw_sd.cooling_fn,
             J,
-            thresh,
             keys,
+            thresh,
             n_monitors,
         )
 
@@ -731,7 +733,7 @@ class Pomp:
         theta: PompParameters | None = None,
         optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
-        thresh: int = 0,
+        thresh: float = 0.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
         track_time: bool = True,
@@ -775,6 +777,7 @@ class Pomp:
             parameter traces, and optimizer details from the training run.
         """
         start_time = time.time()
+        thresh = float(max(0.0, thresh))
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
@@ -800,7 +803,7 @@ class Pomp:
 
         nLLs, theta_ests = run_jax_batch_sharded(
             F.train,
-            {1: 0, 8: 0},
+            {1: 0, 7: 0},
             [0, 0],
             self.to_struct(),
             theta_array,
@@ -808,10 +811,10 @@ class Pomp:
             optimizer,
             M,
             eta_array,
-            thresh,
             alpha,
             keys,
             alpha_cooling,
+            thresh,
             n_monitors,
         )
 

@@ -14,11 +14,11 @@ def train(
     optimizer: Optimizer,
     M: int,
     eta: jax.Array,
-    thresh: float,
     alpha: float | jax.Array,
     keys: jax.Array,
-    alpha_cooling: float,
-    n_monitors: int,
+    alpha_cooling: float = 1.0,
+    thresh: float = 0.0,
+    n_monitors: int = 1,
 ) -> tuple[jax.Array, jax.Array]:
     """
     This is a pure functional implementation of the optimization algorithm, intended
@@ -43,10 +43,10 @@ def train(
         M (int): Number of iterations.
         eta (jax.Array): Learning rates array. Shape (M, n_params).
             Must be aligned with the canonical order of `struct.param_names` along the last axis.
-        thresh (float): Resampling threshold.
         alpha (float | jax.Array): Alpha parameter.
         keys (jax.Array): Random keys. Shape (n_reps, ...).
         alpha_cooling (float): Alpha cooling factor.
+        thresh (float): Resampling threshold.
         n_monitors (int): Number of monitors.
 
     Returns:
@@ -59,6 +59,7 @@ def train(
         these arrays, use :func:`pypomp.functional.align_params`.
     """
 
+    thresh = float(max(0.0, thresh))
     return _vmapped_train_internal(
         thetas_array,
         struct.ys,

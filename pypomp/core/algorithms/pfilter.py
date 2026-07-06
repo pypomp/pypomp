@@ -486,10 +486,10 @@ def _pfilter_helper(
         prediction_mean_t = particlesP.mean(axis=0)
         prediction_mean_arr = prediction_mean_arr.at[i].set(prediction_mean_t)
 
-    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(thresh)
     key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights = jax.lax.cond(
-        oddr > thresh,
+        resample,
         _resampler,
         _no_resampler,
         *(counts, particlesP, norm_weights, subkey),

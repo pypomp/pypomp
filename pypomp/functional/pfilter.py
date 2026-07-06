@@ -10,8 +10,8 @@ def pfilter(
     struct: PompStruct,
     thetas_array: jax.Array,
     J: int,
-    thresh: float,
     keys: jax.Array,
+    thresh: float = 0.0,
     CLL: bool = False,
     ESS: bool = False,
     filter_mean: bool = False,
@@ -31,8 +31,8 @@ def pfilter(
         thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
             Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
         J (int): Number of particles.
-        thresh (float): Resampling threshold.
         keys (jax.Array): Random keys. Shape (n_reps, reps, ...).
+        thresh (float): Resampling threshold.
         CLL (bool): Compute conditional log-likelihoods.
         ESS (bool): Compute effective sample size.
         filter_mean (bool): Compute filtered mean.
@@ -53,6 +53,7 @@ def pfilter(
         these arrays, you can use :func:`pypomp.functional.align_params`.
     """
 
+    thresh = float(max(0.0, thresh))
     results = _vmapped_pfilter_internal2(
         thetas_array,
         struct.dt_array_extended,
@@ -82,8 +83,8 @@ def panel_pfilter(
     struct: PanelPompStruct,
     thetas_array: jax.Array,
     J: int,
-    thresh: float,
     keys: jax.Array,
+    thresh: float = 0.0,
     chunk_size: int = 1,
     CLL: bool = False,
     ESS: bool = False,
@@ -122,6 +123,7 @@ def panel_pfilter(
         To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
         these arrays, you can use :func:`pypomp.functional.align_params`.
     """
+    thresh = float(max(0.0, thresh))
     results = _chunked_panel_pfilter_internal(
         thetas_array,
         struct.dt_array_extended,

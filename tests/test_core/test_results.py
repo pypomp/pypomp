@@ -666,7 +666,7 @@ def test_pomp_train_result():
         M=1,
         eta=lr,
         alpha=0.95,
-        thresh=0,
+        thresh=0.0,
         alpha_cooling=0.99,
     )
 
@@ -685,7 +685,7 @@ def test_pomp_train_result():
         M=1,
         eta=lr,
         alpha=0.95,
-        thresh=0,
+        thresh=0.0,
         alpha_cooling=0.99,
     )
     res_merged = PompTrainResult.merge(res, res2)

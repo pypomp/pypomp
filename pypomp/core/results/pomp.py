@@ -190,7 +190,7 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """The learning rate object."""
     alpha: float = 0.97
     """The discount factor for the gradient moving average."""
-    thresh: int = 0
+    thresh: float = 0.0
     """The resampling threshold used."""
     alpha_cooling: float = 1.0
     """The cooling factor for the discount factor."""

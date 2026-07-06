@@ -328,9 +328,9 @@ def _perfilter_helper(
     norm_weights, loglik_t = _normalize_weights(weights)
     loglik = loglik + loglik_t
 
-    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
+    resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(thresh)
     counts, particlesF_Jx, norm_weights, thetas_Jd = jax.lax.cond(
-        oddr > thresh,
+        resample,
         _resampler_thetas,
         _no_resampler_thetas,
         *(counts, particlesP_Jx, norm_weights, thetas_Jd, key_resample),
@@ -338,7 +338,7 @@ def _perfilter_helper(
 
     if return_ancestry:
         step_indices = jax.lax.cond(
-            oddr > thresh,
+            resample,
             lambda: counts,
             lambda: jnp.arange(J),
         )

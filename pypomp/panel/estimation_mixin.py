@@ -402,6 +402,7 @@ class PanelEstimationMixin(Base):
             None. Updates :attr:`self.theta.logLik_unit` and adds a :class:`~pypomp.core.results.PanelPompPFilterResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
+        thresh = float(max(0.0, thresh))
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_for_result = deepcopy(theta_obj_in)
         new_key, old_key = self._update_fresh_key(key)
@@ -584,7 +585,7 @@ class PanelEstimationMixin(Base):
         rw_sd: RWSigma,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
-        thresh: float = 0,
+        thresh: float = 0.0,
         n_monitors: int = 0,
         block: bool = True,
     ) -> None:
@@ -608,6 +609,7 @@ class PanelEstimationMixin(Base):
             None. Updates :attr:`self.theta` with final estimates and adds a :class:`~pypomp.core.results.PanelPompMIFResult` to :attr:`self.results_history`.
         """
         start_time = time.time()
+        thresh = float(max(0.0, thresh))
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_for_result = deepcopy(theta_obj_in)
 
@@ -652,7 +654,7 @@ class PanelEstimationMixin(Base):
             final_unit_swarm_jax,
         ) = run_jax_batch_sharded(
             F.panel_mif,
-            {1: 0, 2: 0, 9: 0},
+            {1: 0, 2: 0, 8: 0},
             [0, 0, 0, 0],
             struct,
             shared_array,
@@ -662,8 +664,8 @@ class PanelEstimationMixin(Base):
             M,
             rw_sd.cooling_fn,
             J,
-            thresh,
             keys,
+            thresh,
             n_monitors,
             block,
         )

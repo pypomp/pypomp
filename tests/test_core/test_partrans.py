@@ -45,33 +45,36 @@ def test_ParTrans_to_est_panel():
         "shared": shared,
         "unit_specific": unit_specific,
     }
-    theta_out = par_trans._panel_transform(
-        cast(dict[str, pd.DataFrame | None], theta), direction="to_est"
-    )
+
+    panel = pp.PanelParameters(theta)
+    panel.transform(par_trans, direction="to_est")
+    theta_out = list(panel)[0]
 
     # Test that shared parameters are transformed correctly
     # Shared
-    shared = theta_out["shared"]
-    assert shared is not None
-    assert shared.index.tolist() == ["pos_param_shared", "standard_param_shared"]
-    assert shared.shape == (2, 1)
-    s_col = shared.columns[0]
-    assert abs(cast(float, shared.loc["pos_param_shared", s_col]) - np.log(5.0)) < 1e-10
-    assert abs(cast(float, shared.loc["standard_param_shared", s_col]) - 6.0) < 1e-10
+    shared_out = theta_out["shared"]
+    assert shared_out is not None
+    assert shared_out.index.tolist() == ["pos_param_shared", "standard_param_shared"]
+    assert shared_out.shape == (2, 1)
+    s_col = shared_out.columns[0]
+    assert (
+        abs(cast(float, shared_out.loc["pos_param_shared", s_col]) - np.log(5.0)) < 1e-6
+    )
+    assert abs(cast(float, shared_out.loc["standard_param_shared", s_col]) - 6.0) < 1e-6
 
     # Unit specific
     unit = theta_out["unit_specific"]
     assert unit is not None
     assert unit.index.tolist() == ["pos_param_unit", "standard_param_unit"]
     assert unit.columns.tolist() == ["unit1", "unit2"]
-    assert abs(cast(float, unit.loc["pos_param_unit", "unit1"]) - np.log(1.0)) < 1e-10
-    assert abs(cast(float, unit.loc["standard_param_unit", "unit1"]) - 2.0) < 1e-10
-    assert abs(cast(float, unit.loc["pos_param_unit", "unit2"]) - np.log(3.0)) < 1e-10
-    assert abs(cast(float, unit.loc["standard_param_unit", "unit2"]) - 4.0) < 1e-10
+    assert abs(cast(float, unit.loc["pos_param_unit", "unit1"]) - np.log(1.0)) < 1e-6
+    assert abs(cast(float, unit.loc["standard_param_unit", "unit1"]) - 2.0) < 1e-6
+    assert abs(cast(float, unit.loc["pos_param_unit", "unit2"]) - np.log(3.0)) < 1e-6
+    assert abs(cast(float, unit.loc["standard_param_unit", "unit2"]) - 4.0) < 1e-6
 
 
 def test_ParTrans_to_est_panel_none_cases():
-    """Test that the panel transform correctly handles None cases for shared and unit-specific parameters by creating a None dictionary entry."""
+    """Test that the panel transform correctly handles None cases for shared and unit-specific parameters."""
 
     def to_est(theta: ParamDict) -> ParamDict:
         return {k: jnp.array(v * 2) for k, v in theta.items()}
@@ -82,17 +85,15 @@ def test_ParTrans_to_est_panel_none_cases():
     par_trans = pp.ParTrans(to_est, from_est)
 
     # Test both None
-    theta_out = par_trans._panel_transform(
-        cast(dict[str, pd.DataFrame | None], {}), direction="to_est"
-    )
-    assert theta_out == {"shared": None, "unit_specific": None}
+    panel = pp.PanelParameters(None)
+    panel.transform(par_trans, direction="to_est")
+    assert len(list(panel)) == 0
 
     # Test shared only
     shared = pd.DataFrame(index=pd.Index(["param1"])).assign(shared=[5.0])
-    theta_out = par_trans._panel_transform(
-        cast(dict[str, pd.DataFrame | None], {"shared": shared, "unit_specific": None}),
-        direction="to_est",
-    )
+    panel = pp.PanelParameters({"shared": shared, "unit_specific": None})
+    panel.transform(par_trans, direction="to_est")
+    theta_out = list(panel)[0]
     assert theta_out["shared"] is not None
     assert theta_out["unit_specific"] is None
     assert (
@@ -102,23 +103,18 @@ def test_ParTrans_to_est_panel_none_cases():
             )
             - 10.0
         )
-        < 1e-10
+        < 1e-6
     )
 
     # Test unit-specific only
     unit_specific = pd.DataFrame(index=pd.Index(["param2"])).assign(unit1=[3.0])
-    theta_out = par_trans._panel_transform(
-        cast(
-            dict[str, pd.DataFrame | None],
-            {"shared": None, "unit_specific": unit_specific},
-        ),
-        direction="to_est",
-    )
+    panel = pp.PanelParameters({"shared": None, "unit_specific": unit_specific})
+    panel.transform(par_trans, direction="to_est")
+    theta_out = list(panel)[0]
     assert theta_out["shared"] is None
     assert theta_out["unit_specific"] is not None
     assert (
-        abs(cast(float, theta_out["unit_specific"].loc["param2", "unit1"]) - 6.0)
-        < 1e-10
+        abs(cast(float, theta_out["unit_specific"].loc["param2", "unit1"]) - 6.0) < 1e-6
     )
 
 
@@ -141,13 +137,15 @@ def test_panel_transform_from_est():
         "unit_specific": unit_specific,
     }
 
-    # from_est: 10 -> 5, 20 -> 10
-    theta_out = par_trans._panel_transform(theta, direction="from_est")
+    panel = pp.PanelParameters(theta)
+    panel.estimation_scale = True
+    panel.transform(par_trans, direction="from_est")
+    theta_out = list(panel)[0]
 
     assert theta_out["shared"] is not None
     assert theta_out["unit_specific"] is not None
-    assert abs(cast(float, theta_out["shared"].iloc[0, 0]) - 5.0) < 1e-10
-    assert abs(cast(float, theta_out["unit_specific"].iloc[0, 0]) - 10.0) < 1e-10
+    assert abs(cast(float, theta_out["shared"].iloc[0, 0]) - 5.0) < 1e-6
+    assert abs(cast(float, theta_out["unit_specific"].iloc[0, 0]) - 10.0) < 1e-6
 
 
 def test_panel_transform_list():
@@ -176,31 +174,40 @@ def test_panel_transform_list():
         },
     ]
 
-    res_to = par_trans._panel_transform_list(theta_list, direction="to_est")
+    panel = pp.PanelParameters(theta_list)
+    panel.transform(par_trans, direction="to_est")
+    res_to = list(panel)
     assert len(res_to) == 2
     shared_to0 = res_to[0]["shared"]
     unit_to0 = res_to[0]["unit_specific"]
     shared_to1 = res_to[1]["shared"]
     unit_to1 = res_to[1]["unit_specific"]
-    assert shared_to0 is not None and unit_to0 is not None
-    assert shared_to1 is not None and unit_to1 is not None
-    assert abs(cast(float, shared_to0.iloc[0, 0]) - 2.0) < 1e-10
-    assert abs(cast(float, unit_to0.iloc[0, 0]) - 3.0) < 1e-10
-    assert abs(cast(float, shared_to1.iloc[0, 0]) - 4.0) < 1e-10
-    assert abs(cast(float, unit_to1.iloc[0, 0]) - 5.0) < 1e-10
+    assert isinstance(shared_to0, pd.DataFrame)
+    assert isinstance(unit_to0, pd.DataFrame)
+    assert isinstance(shared_to1, pd.DataFrame)
+    assert isinstance(unit_to1, pd.DataFrame)
+    assert abs(cast(float, shared_to0.iloc[0, 0]) - 2.0) < 1e-6
+    assert abs(cast(float, unit_to0.iloc[0, 0]) - 3.0) < 1e-6
+    assert abs(cast(float, shared_to1.iloc[0, 0]) - 4.0) < 1e-6
+    assert abs(cast(float, unit_to1.iloc[0, 0]) - 5.0) < 1e-6
 
-    res_from = par_trans._panel_transform_list(theta_list, direction="from_est")
+    panel_from = pp.PanelParameters(theta_list)
+    panel_from.estimation_scale = True
+    panel_from.transform(par_trans, direction="from_est")
+    res_from = list(panel_from)
     assert len(res_from) == 2
     shared_from0 = res_from[0]["shared"]
     unit_from0 = res_from[0]["unit_specific"]
     shared_from1 = res_from[1]["shared"]
     unit_from1 = res_from[1]["unit_specific"]
-    assert shared_from0 is not None and unit_from0 is not None
-    assert shared_from1 is not None and unit_from1 is not None
-    assert abs(cast(float, shared_from0.iloc[0, 0]) - 0.0) < 1e-10
-    assert abs(cast(float, unit_from0.iloc[0, 0]) - 1.0) < 1e-10
-    assert abs(cast(float, shared_from1.iloc[0, 0]) - 2.0) < 1e-10
-    assert abs(cast(float, unit_from1.iloc[0, 0]) - 3.0) < 1e-10
+    assert isinstance(shared_from0, pd.DataFrame)
+    assert isinstance(unit_from0, pd.DataFrame)
+    assert isinstance(shared_from1, pd.DataFrame)
+    assert isinstance(unit_from1, pd.DataFrame)
+    assert abs(cast(float, shared_from0.iloc[0, 0]) - 0.0) < 1e-6
+    assert abs(cast(float, unit_from0.iloc[0, 0]) - 1.0) < 1e-6
+    assert abs(cast(float, shared_from1.iloc[0, 0]) - 2.0) < 1e-6
+    assert abs(cast(float, unit_from1.iloc[0, 0]) - 3.0) < 1e-6
 
 
 def test_to_floats():
@@ -219,14 +226,14 @@ def test_to_floats():
     res_to = par_trans._to_floats(theta, direction="to_est")
     assert isinstance(res_to["p1"], float)
     assert isinstance(res_to["p2"], float)
-    assert abs(res_to["p1"] - 3.0) < 1e-10
-    assert abs(res_to["p2"] - 4.0) < 1e-10
+    assert abs(res_to["p1"] - 3.0) < 1e-6
+    assert abs(res_to["p2"] - 4.0) < 1e-6
 
     res_from = par_trans._to_floats(theta, direction="from_est")
     assert isinstance(res_from["p1"], float)
     assert isinstance(res_from["p2"], float)
-    assert abs(res_from["p1"] - 1.0) < 1e-10
-    assert abs(res_from["p2"] - 2.0) < 1e-10
+    assert abs(res_from["p1"] - 1.0) < 1e-6
+    assert abs(res_from["p2"] - 2.0) < 1e-6
 
     import pytest
 

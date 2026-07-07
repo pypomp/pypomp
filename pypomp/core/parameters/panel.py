@@ -9,6 +9,8 @@ from typing import (
     Literal,
     Any,
     overload,
+    Mapping,
+    Sequence,
 )
 
 from .base import ParameterSet
@@ -17,12 +19,12 @@ from ..par_trans import ParTrans
 
 def _standardize_panel_theta(
     theta: Union[
-        dict[str, pd.DataFrame | None],
-        list[dict[str, pd.DataFrame | None]],
+        Mapping[str, pd.DataFrame | None],
+        Sequence[Mapping[str, pd.DataFrame | None]],
         None,
     ],
 ) -> tuple[xr.Dataset, list[str], list[str]]:
-    if theta is None:
+    if theta is None or (isinstance(theta, Sequence) and len(theta) == 0):
         shared_da = xr.DataArray(
             np.empty((0, 0)),
             dims=["theta_idx", "parameter"],
@@ -41,7 +43,7 @@ def _standardize_panel_theta(
         )
         return ds, [], []
 
-    if isinstance(theta, dict):
+    if isinstance(theta, Mapping):
         theta_list = [theta]
     else:
         theta_list = list(theta)
@@ -210,8 +212,8 @@ class PanelParameters(ParameterSet[xr.Dataset]):
     def __init__(
         self,
         theta: Union[
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
+            Mapping[str, pd.DataFrame | None],
+            Sequence[Mapping[str, pd.DataFrame | None]],
             "PanelParameters",
             xr.Dataset,
             None,
@@ -631,10 +633,31 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         param_list: list[Any],
         direction: Literal["to_est", "from_est"],
     ) -> None:
-        transformed_list = par_trans._panel_transform_list(
-            param_list, direction=direction
+        ds, s_names, u_names = _standardize_panel_theta(param_list)
+
+        shared_arr = (
+            ds["shared"].sel(parameter=s_names).values if len(s_names) > 0 else None
         )
-        ds, s_names, u_names = _standardize_panel_theta(transformed_list)
+        unit_arr = (
+            ds["unit_specific"].sel(parameter=u_names).values
+            if len(u_names) > 0
+            else None
+        )
+
+        transformed_shared, transformed_unit = par_trans._transform_panel_array(
+            shared_array=shared_arr,
+            unit_array=unit_arr,
+            shared_names=s_names,
+            unit_specific_names=u_names,
+            direction=direction,
+        )
+
+        if transformed_shared is not None:
+            ds["shared"].loc[{"parameter": s_names}] = transformed_shared
+
+        if transformed_unit is not None:
+            ds["unit_specific"].loc[{"parameter": u_names}] = transformed_unit
+
         self._data = ds
         self._canonical_shared_param_names = [str(x) for x in s_names]
         self._canonical_unit_param_names = [str(x) for x in u_names]

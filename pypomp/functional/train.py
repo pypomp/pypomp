@@ -138,7 +138,7 @@ def panel_train(
 
     U = len(struct.unit_names)
 
-    shared_est, unit_est = struct.par_trans._transform_panel_array_jax(
+    shared_est, unit_est = struct.par_trans._transform_panel_array(
         shared_array,
         unit_array,
         struct.shared_param_names,
@@ -178,7 +178,7 @@ def panel_train(
     )
 
     shared_history_natural, unit_history_natural = (
-        struct.par_trans._transform_panel_array_jax(
+        struct.par_trans._transform_panel_array(
             shared_history,
             unit_history,
             struct.shared_param_names,

@@ -1232,42 +1232,37 @@ class PanelEstimationMixin(Base):
         )
         logliks_trace = -np.array(logliks_history)
 
-        shared_traces_in = None
-        unit_traces_in = None
+        shared_history_arr = np.array(shared_history) if len(shared_index) > 0 else None
+        unit_history_arr = (
+            np.transpose(np.array(unit_history), (0, 1, 3, 2))
+            if len(spec_index) > 0
+            else None
+        )
 
-        if len(shared_index) > 0:
-            shared_ll_expanded = np.expand_dims(logliks_trace, axis=-1)
-            shared_traces_in = np.concatenate(
-                [shared_ll_expanded, np.array(shared_history)], axis=-1
+        if shared_history_arr is None and unit_history_arr is None:
+            raise ValueError(
+                "Both shared_traces and unit_traces are None; cannot build traces."
             )
 
-        if len(spec_index) > 0:
-            unit_history_trans = np.transpose(np.array(unit_history), (0, 1, 3, 2))
-            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
-            unit_traces_in = np.concatenate([nan_ll, unit_history_trans], axis=-1)
-
-        shared_traces, unit_traces = rep_unit.par_trans._transform_panel_traces(
-            shared_traces=shared_traces_in,
-            unit_traces=unit_traces_in,
-            shared_param_names=shared_index,
-            unit_param_names=spec_index,
+        shared_trans, unit_trans = rep_unit.par_trans._transform_panel_array(
+            shared_array=shared_history_arr,
+            unit_array=unit_history_arr,
+            shared_names=shared_index,
+            unit_specific_names=spec_index,
             direction="from_est",
         )
 
-        if shared_traces is None:
-            if unit_traces is None:
-                raise ValueError(
-                    "Both shared_traces and unit_traces are None; cannot build traces."
-                )
-            n_reps = unit_traces.shape[0]
-            shared_ll = np.expand_dims(logliks_trace, axis=-1)
-            shared_traces = shared_ll
-            shared_index = []
+        shared_ll_expanded = np.expand_dims(logliks_trace, axis=-1)
+        if shared_trans is not None:
+            shared_traces = np.concatenate([shared_ll_expanded, shared_trans], axis=-1)
+        else:
+            shared_traces = shared_ll_expanded
 
-        if unit_traces is None:
-            n_reps = shared_traces.shape[0]
-            unit_ll = np.zeros((n_reps, M + 1, U, 1), dtype=float)
-            unit_traces = unit_ll
+        if len(spec_index) > 0 and unit_trans is not None:
+            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
+            unit_traces = np.concatenate([nan_ll, unit_trans], axis=-1)
+        else:
+            unit_traces = np.zeros((n_reps, M + 1, U, 1), dtype=float)
 
         shared_vars = ["logLik"] + shared_index
         unit_vars = ["unitLogLik"] + spec_index

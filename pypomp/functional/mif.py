@@ -56,7 +56,7 @@ def mif(
     """
 
     thresh = float(max(0.0, thresh))
-    thetas_est = struct.par_trans._transform_array_jax(
+    thetas_est = struct.par_trans._transform_array(
         thetas_array,
         struct.param_names,
         direction="to_est",
@@ -88,12 +88,12 @@ def mif(
         n_monitors,
         False,
     )
-    traces_natural = struct.par_trans._transform_array_jax(
+    traces_natural = struct.par_trans._transform_array(
         res[1],
         struct.param_names,
         direction="from_est",
     )
-    final_thetas_natural = struct.par_trans._transform_array_jax(
+    final_thetas_natural = struct.par_trans._transform_array(
         res[2],
         struct.param_names,
         direction="from_est",
@@ -156,7 +156,7 @@ def panel_mif(
     thresh = float(max(0.0, thresh))
     U = len(struct.unit_names)
 
-    shared_est, unit_est = struct.par_trans._transform_panel_array_jax(
+    shared_est, unit_est = struct.par_trans._transform_panel_array(
         shared_array,
         unit_array,
         struct.shared_param_names,
@@ -213,14 +213,12 @@ def panel_mif(
             else jnp.zeros((unit_traces.shape[0], unit_traces.shape[1], U, 0))
         )
 
-        shared_transformed, unit_transformed = (
-            struct.par_trans._transform_panel_array_jax(
-                shared_params,
-                unit_params,
-                struct.shared_param_names,
-                struct.unit_param_names,
-                direction="from_est",
-            )
+        shared_transformed, unit_transformed = struct.par_trans._transform_panel_array(
+            shared_params,
+            unit_params,
+            struct.shared_param_names,
+            struct.unit_param_names,
+            direction="from_est",
         )
 
         if n_shared > 0:
@@ -233,7 +231,7 @@ def panel_mif(
             )
 
     final_shared_swarm_natural, final_unit_swarm_natural = (
-        struct.par_trans._transform_panel_array_jax(
+        struct.par_trans._transform_panel_array(
             shared_array_f,
             unit_array_f,
             struct.shared_param_names,

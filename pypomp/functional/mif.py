@@ -78,7 +78,6 @@ def mif(
         struct.covars_extended,
         M,
         cooling_fn,
-        0,
         J,
         thresh,
         keys,

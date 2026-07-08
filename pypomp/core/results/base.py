@@ -13,8 +13,8 @@ T = TypeVar("T", bound="BaseResult")
 def _merge_results(
     cls: Type[T],
     results: Sequence[T],
-    scalar_fields: list[str],
-    array_fields: list[str],
+    scalar_fields: list[str] | None = None,
+    array_fields: list[str] | None = None,
 ) -> T:
     """Helper to merge multiple result objects into one."""
     if not results:
@@ -24,7 +24,34 @@ def _merge_results(
     for result in results:
         if not isinstance(result, cls):
             raise TypeError(f"All merged objects must be of type {cls.__name__}.")
-        for field_name in scalar_fields:
+
+    special_fields = {"theta", "execution_time", "timestamp", "key"}
+
+    if array_fields is None:
+        array_fields_set = set()
+        for f in fields(cls):
+            if f.name in special_fields:
+                continue
+            for r in results:
+                val = getattr(r, f.name, None)
+                if isinstance(val, xr.DataArray):
+                    array_fields_set.add(f.name)
+                    break
+        array_fields_list = list(array_fields_set)
+    else:
+        array_fields_list = list(array_fields)
+
+    if scalar_fields is None:
+        scalar_fields_list = [
+            f.name
+            for f in fields(cls)
+            if f.name not in special_fields and f.name not in array_fields_list
+        ]
+    else:
+        scalar_fields_list = list(scalar_fields)
+
+    for result in results:
+        for field_name in scalar_fields_list:
             if getattr(result, field_name) != getattr(first, field_name):
                 raise ValueError(
                     f"All {cls.__name__} objects must have the same {field_name}."
@@ -52,13 +79,21 @@ def _merge_results(
 
     # Merge DataArrays
     merged_arrays = {}
-    for name in array_fields:
-        arrays = [
-            getattr(r, name)
-            for r in results
-            if getattr(r, name) is not None and getattr(r, name).size > 0
-        ]
-        merged_arrays[name] = xr.concat(arrays, dim="theta_idx") if arrays else None
+    for name in array_fields_list:
+        arrays = []
+        for r in results:
+            arr = getattr(r, name, None)
+            if arr is not None and arr.size > 0:
+                arrays.append(arr)
+        if arrays:
+            merged_arr = xr.concat(arrays, dim="theta_idx")
+            if "theta_idx" in merged_arr.dims:
+                merged_arr = merged_arr.assign_coords(
+                    theta_idx=np.arange(merged_arr.sizes["theta_idx"])
+                )
+            merged_arrays[name] = merged_arr
+        else:
+            merged_arrays[name] = None
 
     # Max execution time
     times = [r.execution_time for r in results if r.execution_time is not None]
@@ -68,9 +103,13 @@ def _merge_results(
         f.name: getattr(first, f.name)
         for f in fields(cls)
         if f.name
-        not in (scalar_fields + array_fields + ["theta", "execution_time", "timestamp"])
+        not in (
+            scalar_fields_list
+            + array_fields_list
+            + ["theta", "execution_time", "timestamp"]
+        )
     }
-    kwargs.update({f: getattr(first, f) for f in scalar_fields})
+    kwargs.update({f: getattr(first, f) for f in scalar_fields_list})
     kwargs.update(merged_arrays)
     kwargs["execution_time"] = max_time
     if "theta" in [f.name for f in fields(cls)]:
@@ -142,19 +181,40 @@ class BaseResult(ABC):
         """Convert result to DataFrame."""
         pass
 
-    @staticmethod
-    @abstractmethod
-    def merge(*results: Any) -> "BaseResult":
+    @classmethod
+    def merge(cls: Type[T], *results: T) -> T:
         """Merge multiple result objects of the same type."""
-        pass
+        return _merge_results(cls, results)
 
     def CLL(self, average: bool = False) -> pd.DataFrame:
         """Return conditional log-likelihoods as a DataFrame."""
-        return pd.DataFrame()
+        cll_da = getattr(self, "CLL_da", None)
+        if cll_da is None or cll_da.size == 0:
+            return pd.DataFrame()
+        if not average:
+            return cll_da.to_dataframe(name="CLL").reset_index()
+        try:
+            axis = cll_da.dims.index("rep")
+        except ValueError:
+            axis = 1
+        from ...maths import logmeanexp
+
+        avg = logmeanexp(np.asarray(cll_da.values), axis=axis)
+        dims = [d for d in cll_da.dims if d != "rep"]
+        coords = {d: cll_da.coords[d].values for d in dims}
+        return (
+            xr.DataArray(avg, dims=dims, coords=coords)
+            .to_dataframe(name="CLL")
+            .reset_index()
+        )
 
     def ESS(self, average: bool = False) -> pd.DataFrame:
         """Return Effective Sample Size as a DataFrame."""
-        return pd.DataFrame()
+        ess_da = getattr(self, "ESS_da", None)
+        if ess_da is None or ess_da.size == 0:
+            return pd.DataFrame()
+        ess = ess_da.mean(dim="rep") if average else ess_da
+        return ess.to_dataframe(name="ESS").reset_index()
 
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this result."""
@@ -259,7 +319,9 @@ class PanelPompEstimationTracesMixin:
         )
         if "iteration" in s_df.columns:
             s_df = s_df.drop(columns=["iteration"])
+
         u_df = u_df.join(s_df, on="theta_idx").reset_index()
+
         u_df["shared logLik se"] = np.nan
         u_df["unit logLik se"] = np.nan
         cols = [
@@ -291,6 +353,7 @@ class PanelPompEstimationTracesMixin:
             .reset_index()
             .rename(columns={"unitLogLik": "logLik"})
         )
+
         shared_params = [
             c
             for c in df_s.columns

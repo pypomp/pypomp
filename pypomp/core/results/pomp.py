@@ -3,7 +3,7 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 
-from .base import BaseResult, PompEstimationTracesMixin, _merge_results
+from .base import BaseResult, PompEstimationTracesMixin
 from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
@@ -24,7 +24,9 @@ class PompPFilterResult(PompBaseResult):
     """Result from Pomp.pfilter() method."""
 
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
-    """Log-likelihoods for each parameter set and replicate."""
+    """Log-likelihoods for each parameter set and replicate.
+    Dimensions: ("theta_idx", "rep")
+    """
     J: int = 0
     """The number of particles used for filtering."""
     reps: int = 1
@@ -32,13 +34,21 @@ class PompPFilterResult(PompBaseResult):
     thresh: float = 0.0
     """The resampling threshold used by the filter."""
     CLL_da: xr.DataArray | None = None
-    """Conditional log-likelihoods for each unit and time point."""
+    """Conditional log-likelihoods for each unit and time point.
+    Dimensions: ("theta_idx", "rep", "time")
+    """
     ESS_da: xr.DataArray | None = None
-    """Effective Sample Size for each unit and time point."""
+    """Effective Sample Size for each unit and time point.
+    Dimensions: ("theta_idx", "rep", "time")
+    """
     filter_mean: xr.DataArray | None = None
-    """The mean of the filtering distribution for each state variable."""
+    """The mean of the filtering distribution for each state variable.
+    Dimensions: ("theta_idx", "rep", "state", "time")
+    """
     prediction_mean: xr.DataArray | None = None
-    """The mean of the predictive distribution for each state variable."""
+    """The mean of the predictive distribution for each state variable.
+    Dimensions: ("theta_idx", "rep", "state", "time")
+    """
 
     def __post_init__(self):
         self.method = "pfilter"
@@ -70,68 +80,16 @@ class PompPFilterResult(PompBaseResult):
         )
         return pd.concat([df, theta_df], axis=1)
 
-    def CLL(self, average: bool = False) -> pd.DataFrame:
-        """Return conditional log-likelihoods as a DataFrame."""
-        if self.CLL_da is None or self.CLL_da.size == 0:
-            return pd.DataFrame()
-        if not average:
-            return self.CLL_da.to_dataframe(name="CLL").reset_index()
-        avg = logmeanexp(np.asarray(self.CLL_da.values), axis=1)
-        return (
-            xr.DataArray(
-                avg,
-                dims=["theta_idx", "time"],
-                coords={
-                    "theta_idx": self.CLL_da.coords.get(
-                        "theta_idx", np.arange(avg.shape[0])
-                    ),
-                    "time": self.CLL_da.coords.get("time", np.arange(avg.shape[1])),
-                },
-            )
-            .to_dataframe(name="CLL")
-            .reset_index()
-        )
-
-    def ESS(self, average: bool = False) -> pd.DataFrame:
-        """Return Effective Sample Size as a DataFrame."""
-        if self.ESS_da is None or self.ESS_da.size == 0:
-            return pd.DataFrame()
-        ess = self.ESS_da.mean(dim="rep") if average else self.ESS_da
-        return ess.to_dataframe(name="ESS").reset_index()
-
     def traces(self) -> pd.DataFrame:
         """Return traces DataFrame for this pfilter result."""
-        if not self.theta or not len(self.logLiks):
-            return pd.DataFrame()
-        arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
-        logliks = np.atleast_1d(logmeanexp(arr, axis=-1))
-        se = (
-            logmeanexp_se(arr, axis=-1)
-            if arr.shape[-1] > 1
-            else np.full_like(logliks, np.nan)
-        )
-        se = np.atleast_1d(se)
-        base_df = pd.DataFrame(
-            {
-                "theta_idx": np.arange(len(self.theta)),
-                "iteration": 0,
-                "method": self.method,
-                "logLik": logliks,
-                "se": se,
-            }
-        )
-        if not self.theta:
-            return base_df
-        return pd.concat([base_df, pd.DataFrame(self.theta.params())], axis=1)
-
-    @staticmethod
-    def merge(*results: "PompPFilterResult") -> "PompPFilterResult":
-        return _merge_results(
-            PompPFilterResult,
-            results,
-            ["J", "reps", "thresh", "method"],
-            ["logLiks", "CLL_da", "ESS_da", "filter_mean", "prediction_mean"],
-        )
+        df = self.to_dataframe()
+        if df.empty:
+            return df
+        df.insert(1, "iteration", 0)
+        df.insert(2, "method", self.method)
+        cols = ["theta_idx", "iteration", "method", "logLik", "se"]
+        other_cols = [c for c in df.columns if c not in cols]
+        return df[cols + other_cols]
 
 
 @dataclass(eq=False)
@@ -139,7 +97,9 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
     """Result from Pomp.mif() method."""
 
     traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
-    """Parameter traces and log-likelihoods across iterations."""
+    """Log-likelihood and parameter traces across iterations.
+    Dimensions: ("theta_idx", "iteration", "variable")
+    """
     J: int = 0
     """The number of particles used for filtering."""
     M: int = 0
@@ -164,22 +124,15 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
             ("Number of monitors", "n_monitors"),
         ]
 
-    @staticmethod
-    def merge(*results: "PompMIFResult") -> "PompMIFResult":
-        return _merge_results(
-            PompMIFResult,
-            results,
-            ["J", "M", "thresh", "n_monitors", "rw_sd", "method"],
-            ["traces_da"],
-        )
-
 
 @dataclass(eq=False)
 class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """Result from Pomp.train() method."""
 
-    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))  # type: ignore[assignment]
-    """Parameter traces and log-likelihoods across iterations."""
+    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihood and parameter traces across iterations.
+    Dimensions: ("theta_idx", "iteration", "variable")
+    """
     optimizer: Optimizer = field(default_factory=Adam)
     """The optimizer used for training."""
     J: int = 0
@@ -211,21 +164,3 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
             ("Cooling factor for alpha", "alpha_cooling"),
         ]
         return config
-
-    @staticmethod
-    def merge(*results: "PompTrainResult") -> "PompTrainResult":
-        return _merge_results(
-            PompTrainResult,
-            results,
-            [
-                "optimizer",
-                "J",
-                "M",
-                "eta",
-                "alpha",
-                "thresh",
-                "alpha_cooling",
-                "method",
-            ],
-            ["traces_da"],
-        )

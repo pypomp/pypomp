@@ -147,13 +147,8 @@ class ResultsHistory:
 
             all_traces.append(t)
 
-        all_traces = [df for df in all_traces if not df.empty]
         if not all_traces:
             return pd.DataFrame()
-
-        all_cols = all_traces[0].columns
-        for df in all_traces[1:]:
-            all_cols = all_cols.union(df.columns)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning)

@@ -41,6 +41,7 @@ Pomp Class
    :toctree: generated/
 
    ~Pomp.sample_params
+   ~Pomp.to_struct
    ~Pomp.prune
    ~Pomp.results
    ~Pomp.traces

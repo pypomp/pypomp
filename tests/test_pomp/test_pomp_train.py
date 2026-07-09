@@ -51,7 +51,7 @@ def test_train_basic(opt_instance, simple):
     assert traces.sel(theta_idx=0).shape == (M + 1, len(LG.theta[0]) + 1)
     # Check that "logLik" and all parameter names are in variable coordinate
     assert "logLik" in list(traces.coords["variable"].values)
-    for param in LG.theta.params()[0].keys():
+    for param in LG.theta.params(as_list=True)[0].keys():
         assert param in list(traces.coords["variable"].values)
     assert all(isinstance(v, float) for v in LG.theta[0].values())
     from pypomp.core.optimizer import Optimizer
@@ -122,9 +122,9 @@ def test_train_param_order_invariance(simple):
     out1 = LG.results_history[-1].traces_da.values
 
     # Permute theta parameter order
-    param_keys = list(theta.params()[0].keys())
+    param_keys = list(theta.params(as_list=True)[0].keys())
     rev_keys = list(reversed(param_keys))
-    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params()]
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params(as_list=True)]
 
     LG.train(
         J=J,

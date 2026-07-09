@@ -155,7 +155,7 @@ def test_base_parameter_set_transform():
     pomp = pp.PompParameters({"a": 2.0, "b": 5.0})
     assert pomp.estimation_scale is False
 
-    # params method variations
+    assert isinstance(pomp.params(), xr.DataArray)
     assert isinstance(pomp.params(as_list=False), xr.DataArray)
     assert isinstance(pomp.params(as_list=True), list)
 
@@ -595,6 +595,7 @@ def test_panel_parameters_utility_and_magic():
 
     # list call / iteration / params extraction
     assert isinstance(list(panel), list)
+    assert isinstance(panel.params(), xr.Dataset)
     assert isinstance(panel.params(as_list=True), list)
     assert isinstance(panel.params(as_list=False), xr.Dataset)
 

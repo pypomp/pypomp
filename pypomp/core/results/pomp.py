@@ -63,7 +63,18 @@ class PompPFilterResult(PompBaseResult):
         ]
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
-        """Convert pfilter result to DataFrame."""
+        """Convert results to a pandas DataFrame.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether to ignore rows containing NaN when computing log-likelihoods and standard errors.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame representation of the results.
+        """
         if not self.theta or self.logLiks.size == 0:
             return pd.DataFrame()
         arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
@@ -74,14 +85,20 @@ class PompPFilterResult(PompBaseResult):
             else np.full_like(logLik, np.nan)
         )
         se = np.atleast_1d(se)
-        theta_df = pd.DataFrame(self.theta.params())
+        theta_df = pd.DataFrame(self.theta.params(as_list=True))
         df = pd.DataFrame(
             {"theta_idx": np.arange(len(theta_df)), "logLik": logLik, "se": se}
         )
         return pd.concat([df, theta_df], axis=1)
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this pfilter result."""
+        """Return parameter and likelihood trace history.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of the traces.
+        """
         df = self.to_dataframe()
         if df.empty:
             return df

@@ -161,7 +161,7 @@ def test_panel_pomp_eq_canonical_unit_param_mismatch(
 def test_panel_pomp_eq_theta_mismatch(lg_panel_setup_some_shared):
     panel1, _, _ = lg_panel_setup_some_shared
     panel2 = deepcopy(panel1)
-    theta_params = panel2.theta.params()
+    theta_params = panel2.theta.params(as_list=True)
     theta_params[0]["shared"].iloc[0, 0] += 1.0
     panel2.theta.set_params(theta_params)
     assert panel1 != panel2

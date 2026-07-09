@@ -1,5 +1,10 @@
 """
-This module implements the OOP structure for POMP models.
+Object-oriented interface for defining and fitting POMP models.
+
+The :class:`Pomp` class is the primary entry point for single-unit POMP
+modelling in ``pypomp``.  It wraps user-supplied simulator and density
+functions, validates their signatures, and exposes a high-level API for
+particle filtering, iterated filtering, and gradient-based training.
 """
 
 import importlib
@@ -39,72 +44,106 @@ from pypomp.functional.structs import PompStruct
 
 class Pomp:
     """
-    A class representing a Partially Observed Markov Process (POMP) model.
+    Define and fit a partially observed Markov process (POMP) model.
 
-    This class provides a structured way to define and work with POMP models, which are
-    used for modeling time series data where the underlying state process is only
-    partially observed. The class encapsulates the model components including the
-    initial state distribution, process model, and measurement model.
+    A POMP model describes a time series whose latent state evolves according
+    to a Markov process that is only partially observable through noisy
+    measurements.  This class encapsulates the four model components — initial
+    state distribution (``rinit``), state transition (``rproc``), measurement
+    density (``dmeas``), and measurement simulator (``rmeas``) — and exposes
+    methods for simulation, particle filtering, iterated filtering, and
+    gradient-based training.
 
-    In particular, the class provides methods for:
+    .. important::
 
-    - Simulation of the model
+        The ``rinit``, ``rproc``, ``dmeas``, and ``rmeas`` arguments expect
+        user-defined functions with **specific argument names and type hints**.
+        The ``Pomp`` object raises an error at construction time if these
+        functions do not conform to the specification.
 
-    - Particle filtering
-
-    - Iterated filtering
-
-    - Model training using a differentiable particle filter
-
-
-    **⚠️ IMPORTANT: Defining Model Components**
-
-    The `rinit`, `rproc`, `dmeas`, and `rmeas` arguments expect user-defined
-    functions. **You MUST read the documentation for each argument to understand the required argument names, type hints, and return types.** The `Pomp` object will fail to initialize if these functions do not strictly
-    adhere to the specifications.
-
-    - **State initialization simulator (rinit):** See :ref:`rinit-tutorial`.
-    - **State transition simulator (rproc):** See :ref:`rproc-tutorial`.
-    - **Measurement density (dmeas):** See :ref:`dmeas-tutorial`.
-    - **Measurement simulator (rmeas):** See :ref:`rmeas-tutorial`.
+        - **rinit**: See :ref:`rinit-tutorial`.
+        - **rproc**: See :ref:`rproc-tutorial`.
+        - **dmeas**: See :ref:`dmeas-tutorial`.
+        - **rmeas**: See :ref:`rmeas-tutorial`.
 
     Parameters
     ----------
     ys : pd.DataFrame
-        The measurement data frame. The row index must contain the observation times.
+        Measurement data frame.  The index must contain the observation times
+        as numeric values.
     theta : PompParameters
-        Initial parameter(s) for the model. Accepts:
-        - An existing :class:`~pypomp.core.parameters.PompParameters` object
-        Vectorized methods (like pfilter) will run in parallel over multiple parameter sets stored inside the `PompParameters` object.
-    statenames : list[str]
-        List of all latent state variable names.
+        Initial parameter set(s).  Pass a :class:`~pypomp.PompParameters`
+        object with multiple parameter sets to run estimation methods in parallel over
+        multiple starting points.
+    statenames : list of str
+        Names of all latent state variables in the process model.
     t0 : float
-        The initial time for the model (typically before the first observation).
-    rinit : Callable
-        Initial state simulator function.
-    rproc : Callable
-        Process simulator function (defining a single time step).
-    dmeas : Callable, optional
-        Measurement density function (log-likelihood).
-    rmeas : Callable, optional
-        Measurement simulator function.
-    par_trans : :class:`~pypomp.core.par_trans.ParTrans`, optional
-        Parameter transformation object used to move parameters
-        between the natural space and the estimation space. Defaults to the identity transformation.
-    covars : pd.DataFrame, optional
-        Time-varying covariates. The row index must contain the covariate times.
-    nstep : int, optional
-        The number of integration steps to take between observations.
-        Passed automatically to the `RProc` component. Must be None if `dt` is provided.
-    dt : float, optional
-        Fixed time step size for the process model.
-        Passed automatically to the `RProc` component. Must be None if `nstep` is provided.
-    accumvars : tuple[str, ...], optional
-        Names of accumulator state variables (e.g., incidence tracking). These are reset to 0 at the start of each observation interval.
+        Initial time for the model, typically just before the first
+        observation.
+    rinit : callable
+        Initial state simulator.  See :ref:`rinit-tutorial` for the required
+        signature.
+    rproc : callable
+        State transition simulator for a single time step.  See
+        :ref:`rproc-tutorial` for the required signature.
+    dmeas : callable or None, optional
+        Measurement log-density function.  Required for particle filtering
+        and iterated filtering.  See :ref:`dmeas-tutorial`.
+    rmeas : callable or None, optional
+        Measurement simulator.  Required for :meth:`simulate`.  See
+        :ref:`rmeas-tutorial`.
+    par_trans : ParTrans or None, optional
+        Parameter transformation object mapping between the natural
+        parameter space and the estimation space.  Defaults to the
+        identity transformation.
+    covars : pd.DataFrame or None, optional
+        Time-varying covariate data frame.  The index must contain numeric
+        covariate times.  Interpolated to the integration grid at runtime.
+    nstep : int or None, optional
+        Number of Euler integration steps between consecutive observations.
+        Mutually exclusive with ``dt``.
+    dt : float or None, optional
+        Fixed integration step size.  Mutually exclusive with ``nstep``.
+    accumvars : list of str or None, optional
+        Names of accumulator state variables (e.g. incidence counters) that
+        are reset to zero at the start of each observation interval.
     validate_logic : bool, optional
-        Whether to validate the logic of the model components.
+        Whether to validate model component function signatures and logic
+        at construction time.  Defaults to ``True``.
     order : str, optional
-        The interpolation order for time-varying covariates ("linear" or "constant").
+        Covariate interpolation method: ``"linear"`` (default) or
+        ``"constant"`` (left-step).
+
+    Examples
+    --------
+    Build a minimal SIR-like POMP model:
+
+    >>> import pandas as pd
+    >>> import jax
+    >>> import pypomp as pp
+    >>> from pypomp.types import StateDict, ParamDict, TimeFloat, StepSizeFloat, RNGKey, ObservationDict
+    >>>
+    >>> def my_rinit(theta_: ParamDict, t0: TimeFloat, key: RNGKey) -> StateDict:
+    ...     return {"S": 990.0, "I": 10.0, "R": 0.0}
+    >>>
+    >>> def my_rproc(X_: StateDict, theta_: ParamDict, t: TimeFloat, dt: StepSizeFloat, key: RNGKey) -> StateDict:
+    ...     return X_  # identity placeholder
+    >>>
+    >>> def my_dmeas(Y_: ObservationDict, X_: StateDict, theta_: ParamDict, t: TimeFloat) -> float:
+    ...     import jax.numpy as jnp
+    ...     return jnp.array(0.0)
+    >>>
+    >>> ys = pd.DataFrame({"cases": [10, 12, 15]}, index=[1.0, 2.0, 3.0])
+    >>> theta = pp.PompParameters({"beta": 0.5, "gamma": 0.1})
+    >>> model = pp.Pomp(
+    ...     ys=ys, theta=theta, statenames=["S", "I", "R"], t0=0.0,
+    ...     rinit=my_rinit, rproc=my_rproc, dmeas=my_dmeas, dt=0.1,
+    ... )
+
+    See Also
+    --------
+    pypomp.panel.PanelPomp : Multi-unit panel extension of this class.
+    pypomp.core.parameters.PompParameters : Parameter container for single-unit models.
     """
 
     ys: pd.DataFrame
@@ -303,7 +342,18 @@ class Pomp:
 
     @property
     def theta(self) -> PompParameters:
-        """The parameter object for the model."""
+        """The current parameter set for the model.
+
+        Returns
+        -------
+        PompParameters
+            The active :class:`~pypomp.PompParameters` object.
+
+        Raises
+        ------
+        ValueError
+            If ``theta`` has not been set.
+        """
         if self._theta is None:
             raise ValueError("Model parameters have not been set (theta is None).")
         return self._theta
@@ -351,12 +401,21 @@ class Pomp:
         return new_key, old_key
 
     def to_struct(self) -> PompStruct:
-        """
-        Exports the static data and compiled simulator functions into a lightweight
-        JAX PyTree (PompStruct) for use with the functional API (pypomp.functional).
+        """Export the model to a lightweight JAX-compatible struct.
 
-        Returns:
-            PompStruct: The compiled structural representation of the model.
+        Packs the static data arrays and compiled simulator callables into a
+        :class:`~pypomp.functional.PompStruct` NamedTuple suitable for use
+        with the functional API (``pypomp.functional``).
+
+        Returns
+        -------
+        PompStruct
+            The compiled structural representation of the model.
+
+        See Also
+        --------
+        pypomp.functional.pfilter : Functional particle filter.
+        pypomp.functional.mif : Functional iterated filter.
         """
         return PompStruct(
             ys=jnp.array(self.ys),
@@ -383,20 +442,36 @@ class Pomp:
     def sample_params(
         param_bounds: dict[str, tuple[float, float]], n: int, key: jax.Array
     ) -> PompParameters:
-        """
-        Samples multiple sets of parameters from independent uniform distributions.
+        """Sample ``n`` parameter sets uniformly within specified bounds.
 
-        This utility method generates random parameter vectors within specified lower and
-        upper bounds. It is commonly used to create initial parameter guesses or 'starting
-        points' for global optimization.
+        Generates random parameter vectors from independent uniform
+        distributions.  Commonly used to create diverse starting points for
+        global optimization (e.g. before running :meth:`mif` in parallel).
 
-        Args:
-            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds
-            n (int): Number of parameter sets to sample
-            key (jax.Array): JAX random key for reproducibility
+        Parameters
+        ----------
+        param_bounds : dict
+            Dictionary mapping parameter names to ``(lower, upper)`` bound
+            tuples.
+        n : int
+            Number of parameter sets to sample.
+        key : jax.Array
+            JAX random key for reproducibility.
 
-        Returns:
-            PompParameters: A PompParameters object containing the sampled parameters
+        Returns
+        -------
+        PompParameters
+            A :class:`~pypomp.PompParameters` object with ``n`` parameter
+            rows drawn uniformly from ``param_bounds``.
+
+        Examples
+        --------
+        >>> import jax
+        >>> import pypomp as pp
+        >>> bounds = {"beta": (0.1, 1.0), "gamma": (0.05, 0.5)}
+        >>> theta = pp.Pomp.sample_params(bounds, n=20, key=jax.random.key(0))
+        >>> theta.num_replicates()
+        20
         """
         param_names = list(param_bounds.keys())
         low = jnp.array([param_bounds[p][0] for p in param_names])
@@ -418,12 +493,11 @@ class Pomp:
         return PompParameters(da)
 
     def print_metadata(self) -> None:
-        """
-        Displays technical metadata regarding the creation and runtime environment of this `Pomp` instance.
+        """Display environment and version metadata for this model instance.
 
-        This includes information such as the timestamp of creation, the versions of key
-        dependencies, and other environment-specific details useful
-        for reproducibility and debugging.
+        Prints the creation timestamp and the versions of key dependencies
+        (pypomp, JAX, etc.) captured when this :class:`Pomp` object
+        was constructed.  Useful for reproducibility and debugging.
         """
         self.metadata.print_metadata()
 
@@ -440,41 +514,59 @@ class Pomp:
         prediction_mean: bool = False,
         track_time: bool = True,
     ) -> None:
-        """
-        Evaluates the likelihood of the model via the particle filter (bootstrap filter).
+        """Evaluate the log-likelihood via the bootstrap particle filter.
 
-        The particle filter (also known as Sequential Monte Carlo) estimates the log-likelihood
-        of the data given a specific set of parameters by propagating a swarm of particles
-        through the latent state space. It can also be used to estimate the latent states
-        over time (via filtering or prediction means).
+        Propagates a swarm of ``J`` particles through the latent state space
+        using Sequential Monte Carlo (bootstrap filter) to estimate the
+        marginal log-likelihood of the observed data.  Optionally computes
+        conditional log-likelihoods, effective sample size, filtered means,
+        and prediction means.
 
-        This implementation leverages JAX to efficiently vectorize the algorithm across
-        multiple parameter sets simultaneously. Results are automatically stored in the
-        model's history and can be accessed using :meth:`Pomp.results()`.
+        JAX vectorises the computation across all parameter sets in ``theta``
+        simultaneously.
 
-        Args:
-            J (int): The number of particles
-            key (jax.Array, optional): The random key. Defaults to self.fresh_key.
-            theta (PompParameters, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
-                execution across all parameter sets.
-            thresh (float, optional): Threshold value to determine whether to
-                resample particles. Defaults to 0.
-            reps (int, optional): Number of replicates to run. Defaults to 1.
-            CLL (bool, optional): Boolean flag controlling whether to compute and store
-                the conditional log-likelihoods at each time point.
-            ESS (bool, optional): Boolean flag controlling whether to compute and store
-                the effective sample size at each time point.
-            filter_mean (bool, optional): Boolean flag controlling whether to compute
-                and store the filtered mean at each time point.
-            prediction_mean (bool, optional): Boolean flag controlling whether to
-                compute and store the prediction mean at each time point.
-            track_time (bool, optional): Boolean flag controlling whether to track the
-                execution time.
-        Returns:
-            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompPFilterResult` containing the log-likelihoods,
-            and optionally the conditional log-likelihoods (CLL), effective sample size (ESS),
-            filtered means, and prediction means if requested.
+        Parameters
+        ----------
+        J : int
+            Number of particles.
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
+        theta : PompParameters or None, optional
+            Parameter set(s) to evaluate.  Defaults to :attr:`theta`.
+        thresh : float, optional
+            ESS-based resampling threshold in the interval :math:`[0, 1]`.
+            Defaults to ``0.0`` (resample at every step).
+        reps : int, optional
+            Number of independent filter replicates per parameter set.
+            Defaults to ``1``.
+        CLL : bool, optional
+            Whether to compute and store conditional log-likelihoods at
+            each observation time.  Defaults to ``False``.
+        ESS : bool, optional
+            Whether to compute and store the effective sample size at each
+            observation time.  Defaults to ``False``.
+        filter_mean : bool, optional
+            Whether to compute and store the filtered state mean at each
+            observation time.  Defaults to ``False``.
+        prediction_mean : bool, optional
+            Whether to compute and store the predicted state mean at each
+            observation time.  Defaults to ``False``.
+        track_time : bool, optional
+            Whether to record wall-clock execution time.  Defaults to
+            ``True``.
+
+        Returns
+        -------
+        None
+            A :class:`~pypomp.core.results.PompPFilterResult` is appended
+            to :attr:`results_history`.  Retrieve a dataframe summary with
+            :meth:`results` or the log-likelihoods directly via ``model.theta.logLik``.
+
+        Examples
+        --------
+        >>> model.fresh_key = jax.random.key(0)
+        >>> model.pfilter(J=1000)
+        >>> model.results()  # DataFrame with logLik and parameter columns
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -590,36 +682,55 @@ class Pomp:
         n_monitors: int = 0,
         track_time: bool = True,
     ) -> None:
-        """
-        Estimates model parameters by maximizing the marginal likelihood via the Iterated Filtering (IF2) algorithm.
+        """Estimate parameters via the Iterated Filtering 2 (IF2) algorithm.
 
-        The Iterated Filtering algorithm estimates maximum likelihood parameters by
-        introducing random perturbations to the parameters and sequentially filtering them
-        alongside the state variables. Over successive iterations (cooling cycles), the
-        perturbation variance is decayed, allowing the parameters to converge to their MLEs.
+        Maximizes the marginal log-likelihood by perturbing parameters with
+        random walks that shrink (cool) over ``M`` iterations.  Each
+        iteration runs a bootstrap particle filter with the perturbed
+        parameter swarm, then records the mean parameter values as the
+        estimate for that iteration.
 
-        This implementation leverages JAX to efficiently vectorize the algorithm across
-        multiple initial parameter sets simultaneously. Results are automatically stored in
-        the model's history and can be accessed using :meth:`Pomp.results()`.
+        JAX vectorises the computation across all starting parameter sets
+        in ``theta`` simultaneously.
 
-        Args:
-            J (int): The number of particles.
-            M (int): Number of algorithm iterations.
-            rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk sigma object.
-            key (jax.Array, optional): The random key for reproducibility.
-                Defaults to self.fresh_key.
-            theta (PompParameters, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
-                execution across all parameter sets.
-            thresh (float): Resampling threshold. Defaults to 0.
-            n_monitors (int): Number of particle filter runs to average for
-                log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
-                filter).
-            track_time (bool): Boolean flag controlling whether to track the
-                execution time.
-        Returns:
-            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompMIFResult` containing the log-likelihoods,
-            parameter traces, and diagnostic information from the Iterated Filtering (IF2) run.
+        Parameters
+        ----------
+        J : int
+            Number of particles.
+        M : int
+            Number of IF2 iterations.
+        rw_sd : RWSigma
+            Random walk standard deviation configuration, including per-
+            parameter sigmas and a cooling schedule.  See
+            :class:`~pypomp.RWSigma`.
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
+        theta : PompParameters or None, optional
+            Starting parameter set(s).  Defaults to :attr:`theta`.
+        thresh : float, optional
+            ESS-based resampling threshold in the interval :math:`[0, 1]`.
+            Defaults to ``0.0``.
+        n_monitors : int, optional
+            Number of unperturbed particle filter runs to average for the
+            log-likelihood monitor at each iteration.  Defaults to ``0``
+            (uses the log-likelihood from the perturbed filter directly).
+        track_time : bool, optional
+            Whether to record wall-clock execution time.  Defaults to
+            ``True``.
+
+        Returns
+        -------
+        None
+            A :class:`~pypomp.core.results.PompMIFResult` is appended to
+            :attr:`results_history`, containing the log-likelihood monitor,
+            parameter traces over iterations, and algorithm settings.
+
+        Examples
+        --------
+        >>> rw = pp.RWSigma({"beta": 0.02, "gamma": 0.01}).geometric_cooling(0.5)
+        >>> model.fresh_key = jax.random.key(0)
+        >>> model.mif(J=1000, M=50, rw_sd=rw)
+        >>> model.traces()  # DataFrame with logLik and parameter traces
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -738,43 +849,72 @@ class Pomp:
         n_monitors: int = 1,
         track_time: bool = True,
     ) -> None:
-        """
-        Optimizes parameters for a continuous-state model using a differentiable particle filter and gradient-based methods.
+        """Optimize parameters via a differentiable particle filter (MOP).
 
-        This method performs Maximum Likelihood Estimation (MLE) using MOP, a differentiable particle filter for continuous-state POMPs. It computes gradients of the log-likelihood with respect to the parameters via reverse-mode automatic differentiation (using JAX), and updates the parameters using optimizers (e.g., Adam, SGD).
+        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter, treating the particle filter
+        as a differentiable computation graph and applies gradient-based
+        optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
+        automatic differentiation.
 
-        It bears repeating that this optimizer is only valid for continuous-state POMPs! For discrete-state models, use :meth:`Pomp.mif()` or :meth:`Pomp.dpop_train()`.
+        .. warning::
 
-        This implementation leverages JAX to efficiently vectorize the algorithm across
-        multiple initial parameter sets simultaneously.
-        Results are automatically stored in the model's history and can be accessed using :meth:`Pomp.results()`.
+            MOP gradients are only well-defined for **continuous-state**
+            models.  For discrete-state models, use :meth:`mif` or
+            :meth:`dpop_train` instead.
 
-        Args:
-            J (int): The number of particles in the MOP objective for obtaining the gradient and/or Hessian.
-            M (int): Maximum iteration for the gradient descent optimization.
-            eta (:class:`~pypomp.core.learning_rate.LearningRate`): Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
-            key (jax.Array, optional): The random key for reproducibility.
-                Defaults to self.fresh_key.
-            theta (PompParameters, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
-                execution across all parameter sets.
-            optimizer (:class:`~pypomp.core.optimizer.Optimizer`, optional): The optimizer configuration object to use
-                (e.g., `pypomp.Adam()`, `pypomp.SGD()`, `pypomp.Newton()`, `pypomp.FullMatrixAdam()`, etc.).
-                Defaults to `pypomp.Adam()`. Hyperparameters like learning rate scaling, line search
-                (`scale`, `ls`, `c`, `max_ls_itn`), gradient clipping (`clip_norm`), or Adam beta values
-                are configured directly inside the optimizer instance.
-            alpha (float, optional): Discount factor for MOP.
-            thresh (int, optional): Threshold value to determine whether to resample
-                particles.
-            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
-            n_monitors (int, optional): Number of particle filter runs to average for
-                log-likelihood estimation.
-            track_time (bool, optional): Boolean flag controlling whether to track the
-                execution time.
+        JAX vectorises the computation across all starting parameter sets
+        in ``theta`` simultaneously.  Results are appended to
+        :attr:`results_history`.
 
-        Returns:
-            None. Updates :attr:`Pomp.results_history` with a :class:`~pypomp.core.results.PompTrainResult` containing the log-likelihoods,
-            parameter traces, and optimizer details from the training run.
+        Parameters
+        ----------
+        J : int
+            Number of particles used to estimate the MOP objective and
+            its gradient.
+        M : int
+            Number of gradient steps to perform.
+        eta : LearningRate
+            Per-parameter learning rate schedules.  See
+            :class:`~pypomp.LearningRate`.
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
+        theta : PompParameters or None, optional
+            Starting parameter set(s).  Defaults to :attr:`theta`.
+        optimizer : Optimizer, optional
+            Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
+            :class:`~pypomp.SGD`, :class:`~pypomp.Newton`).  Defaults to
+            :class:`~pypomp.Adam`.
+        alpha : float, optional
+            MOP discount factor controlling the bias-variance trade-off.
+            Defaults to ``0.97``.
+        thresh : float, optional
+            ESS-based resampling threshold.  Defaults to ``0.0``.
+        alpha_cooling : float, optional
+            Cosine cooling multiplier for ``alpha``.  At the end of
+            training, ``alpha`` is moved ``alpha_cooling`` of the way from
+            its initial value toward ``1.0``.  Defaults to ``1.0`` (no
+            cooling).
+        n_monitors : int, optional
+            Number of unperturbed particle filter runs to average for the
+            log-likelihood monitor.  Defaults to ``1``. Using more than 1 monitor
+            increases computation time but can lead to more stable estimates.
+        track_time : bool, optional
+            Whether to record wall-clock execution time.  Defaults to
+            ``True``.
+
+        Returns
+        -------
+        None
+            A :class:`~pypomp.core.results.PompTrainResult` is appended
+            to :attr:`results_history`, containing log-likelihood and
+            parameter traces over iterations.
+
+        Examples
+        --------
+        >>> eta = pp.LearningRate({"beta": 0.01, "gamma": 0.005})
+        >>> model.fresh_key = jax.random.key(0)
+        >>> model.train(J=100, M=200, eta=eta)
+        >>> model.results()
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -945,7 +1085,7 @@ class Pomp:
 
         new_key, _ = self._update_fresh_key(key)
         theta_obj = self._prepare_theta_input(theta)
-        theta_nat = theta_obj.params()[0]
+        theta_nat = theta_obj.params(as_list=True)[0]
         param_names = self.canonical_param_names
         theta_est_dict = self.par_trans.to_est(cast(ParamDict, theta_nat))
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
@@ -1052,38 +1192,47 @@ class Pomp:
         nsim: int = 1,
         as_pomp: bool = False,
     ) -> Union[tuple[pd.DataFrame, pd.DataFrame], "Pomp"]:
-        """
-        Simulates the latent state and measurement processes of the POMP model.
+        """Simulate latent states and observations from the POMP model.
 
-        This method propagates the system's latent state through time according to the
-        process model (`rproc`) and generates corresponding simulated observations from
-        the measurement model (`rmeas`).
+        Propagates the latent state through time via ``rproc`` and draws
+        synthetic observations from ``rmeas``.  JAX vectorises the
+        computation across parameter sets and simulation replicates
+        simultaneously.
 
-        This implementation leverages JAX to efficiently vectorize the simulations across
-        multiple parameter sets and simulation replicates simultaneously.
+        Parameters
+        ----------
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
+        theta : PompParameters or None, optional
+            Parameter set(s) to simulate from.  Defaults to :attr:`theta`.
+        times : jax.Array or None, optional
+            Observation times at which to simulate.  Defaults to the
+            original ``ys`` index.
+        nsim : int, optional
+            Number of independent simulation replicates per parameter set.
+            Defaults to ``1``.
+        as_pomp : bool, optional
+            If ``True``, return a deep copy of this model with its ``ys``
+            replaced by one simulation from the first parameter set.
+            Overrides ``nsim`` to ``1``.  Defaults to ``False``.
 
-        Args:
-            key (jax.Array, optional): The random key for random number generation.
-                Defaults to self.fresh_key.
-            theta (PompParameters, optional): Parameters involved in the POMP model.
-                Defaults to self.theta. Providing a :class:`~pypomp.core.parameters.PompParameters` object with multiple parameter sets enables faster, vectorized
-                execution across all parameter sets.
-            times (jax.Array, optional): Times at which to generate observations.
-                Defaults to self.ys.index.
-            nsim (int): The number of simulations to perform. Defaults to 1.
-            as_pomp (bool): If True, returns a new Pomp object containing the simulated
-                observations for the first parameter replicate and simulation, instead of DataFrames.
+        Returns
+        -------
+        tuple of (pd.DataFrame, pd.DataFrame) or Pomp
+            If ``as_pomp=False`` (default): a ``(states_df, obs_df)`` tuple
+            of long-format DataFrames.  Each has columns ``theta_idx``,
+            ``sim``, ``time``, plus one column per state/observation
+            variable.
 
-        Returns:
-            If as_pomp is False:
-                tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the simulated unobserved state values and the simulated observed values.
-                The columns are as follows:
-                - theta_idx: The index of the parameter set.
-                - sim: The index of the simulation.
-                - time: The time points at which the observations were made.
-                - Remaining columns contain the features of the state and observation processes.
-            If as_pomp is True:
-                Pomp: A deep copy of the original model, where the `ys` attribute contains one dataset of simulated observations.
+            If ``as_pomp=True``: a new :class:`Pomp` instance whose ``ys``
+            contains the simulated observations for the first parameter
+            replicate.
+
+        Examples
+        --------
+        >>> model.fresh_key = jax.random.key(1)
+        >>> states, obs = model.simulate(nsim=50)
+        >>> obs.head()
         """
         if as_pomp:
             if nsim > 1:
@@ -1161,28 +1310,32 @@ class Pomp:
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
     ) -> pd.DataFrame:
-        """
-        Evaluates model diagnostics by comparing 'probes' (summary statistics) of real data against simulated data.
+        """Assess goodness-of-fit by comparing data probes to simulated probes.
 
-        This method is useful for assessing model goodness-of-fit by checking if specific
-        features of the observed data (e.g., mean, autocorrelation, peak height) are
-        well-captured by simulations generated from the model's parameters. It calculates
-        the specified probe statistics for the original dataset and for multiple simulation
-        replicates, providing a basis for visual or formal comparison.
+        Computes user-supplied summary statistics ("probes") on both the
+        original observed data and ``nsim`` simulated data sets.  The
+        resulting DataFrame can be used to visually or formally test
+        whether the model reproduces salient features of the data.
 
-        Args:
-            probes (dict[str, Callable[[pd.DataFrame], float]]): A dictionary of probe functions.
-                Each function should receive a DataFrame of observations (with time as the index,
-                or a single dataframe component) and return a numeric scalar.
-                Example: `{"mean": lambda df: df["obs"].mean()}`
-            nsim (int, optional): Number of simulations to run per parameter set. Defaults to 100.
-            key (jax.Array, optional): JAX random key for the simulations.
-            theta (PompParameters, optional): Parameters to simulate from.
+        Parameters
+        ----------
+        probes : dict of str to callable
+            Dictionary mapping probe names to functions.  Each function
+            receives a :class:`~pandas.DataFrame` of observations (with
+            time as the index) and returns a scalar, e.g.
+            ``{"mean": lambda df: df["cases"].mean()}``.
+        nsim : int, optional
+            Number of simulation replicates.  Defaults to ``100``.
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
+        theta : PompParameters or None, optional
+            Parameter set to simulate from.  Defaults to :attr:`theta`.
 
-
-        Returns:
-            pd.DataFrame: A long-format DataFrame with columns:
-                `probe`, `value`, `is_real_data`, `theta_idx`, `sim`
+        Returns
+        -------
+        pd.DataFrame
+            Long-format DataFrame with columns ``probe``, ``value``,
+            ``is_real_data``, ``theta_idx``, and ``sim``.
         """
         sim_result = self.simulate(nsim=nsim, key=key, theta=theta, as_pomp=False)
         assert isinstance(sim_result, tuple)
@@ -1222,98 +1375,142 @@ class Pomp:
         return pd.DataFrame(results)
 
     def traces(self) -> pd.DataFrame:
-        """
-        Returns a DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
-        Columns are
+        """Return the full trace of log-likelihoods and parameters over all runs.
 
-            - theta_idx: The index of the parameter set (for all methods)
-            - iteration: The global iteration number for that parameter set (increments over all mif/train calls for that set; for pfilter, the last iteration for that set)
-            - method: 'pfilter', 'mif', or 'train'
-            - logLik: The log-likelihood estimate (averaged over reps for pfilter)
-            - <param>: One column for each parameter
+        Concatenates the parameter and log-likelihood histories from every
+        :meth:`pfilter`, :meth:`mif`, and :meth:`train` call stored in
+        :attr:`results_history`.
+
+        Returns
+        -------
+        pd.DataFrame
+            Long-format DataFrame with columns:
+
+            - ``theta_idx``: index of the parameter set.
+            - ``iteration``: global iteration counter for that parameter set
+              (increments across successive :meth:`mif` / :meth:`train`
+              calls; for :meth:`pfilter` this is the last iteration for
+              that set).
+            - ``method``: ``'pfilter'``, ``'mif'``, or ``'train'``.
+            - ``logLik``: log-likelihood estimate (logmeanexp over reps
+              for :meth:`pfilter`).
+            - One additional column per parameter.
         """
         return self.results_history.traces()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
-        """
-        Returns a DataFrame with the results of the method run at the given index in the model's history.
+        """Return a summary DataFrame for one run from the results history.
 
-        This method provides a convenient way to access the outcome of previous runs
-        (e.g., `pfilter`, `mif`, or `train`). It returns a tidy DataFrame containing
-        the final log-likelihoods and parameter values for all replicates associated
-        with that specific run.
+        Retrieves the final log-likelihoods and parameter values for all
+        replicates associated with the run at position ``index`` in
+        :attr:`results_history`.
 
-        Args:
-            index (int): The index of the result to return. Defaults to -1 (the last result).
-            ignore_nan (bool): If True, ignore NaNs when computing the log-likelihood.
+        Parameters
+        ----------
+        index : int, optional
+            Position in :attr:`results_history` to retrieve.  Defaults to
+            ``-1`` (the most recent run).
+        ignore_nan : bool, optional
+            If ``True``, NaN log-likelihoods are excluded when computing
+            the summary.  Defaults to ``False``.
 
-        Returns:
-            pd.DataFrame: A DataFrame with the results of the method run at the given index.
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame with columns ``logLik`` and one column per
+            parameter, indexed by ``theta_idx``.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
     def CLL(self, index: int = -1, average: bool = False) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the conditional log-likelihoods of the method run at the given index.
+        """Return conditional log-likelihoods from a particle filter run.
 
-        Args:
-            index (int, optional): The index of the result to retrieve. Defaults to -1.
-            average (bool, optional): Boolean flag controlling whether to average
-                the conditional log-likelihoods over replicates using logmeanexp.
-                Defaults to False.
-        Returns:
-            pd.DataFrame: A DataFrame with the conditional log-likelihoods.
+        Parameters
+        ----------
+        index : int, optional
+            Position in :attr:`results_history` to retrieve.  Defaults to
+            ``-1`` (the most recent run).  The indexed result must be a
+            :meth:`pfilter` result with ``CLL=True``.
+        average : bool, optional
+            If ``True``, average the CLLs over replicates using logmeanexp.
+            Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame with one row per observation time and one column
+            per replicate (or a single averaged column if ``average=True``).
         """
         return self.results_history.CLL(index=index, average=average)
 
     def ESS(self, index: int = -1, average: bool = False) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the effective sample size of the method run at the given index.
+        """Return effective sample sizes from a particle filter run.
 
-        Args:
-            index (int, optional): The index of the result to retrieve. Defaults to -1.
-            average (bool, optional): Boolean flag controlling whether to average
-                the effective sample size over replicates using arithmetic mean.
-                Defaults to False.
-        Returns:
-            pd.DataFrame: A DataFrame with the effective sample size.
+        Parameters
+        ----------
+        index : int, optional
+            Position in :attr:`results_history` to retrieve.  Defaults to
+            ``-1`` (the most recent run).  The indexed result must be a
+            :meth:`pfilter` result with ``ESS=True``.
+        average : bool, optional
+            If ``True``, average the ESS over replicates using arithmetic
+            mean.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame with one row per observation time and one column
+            per replicate (or a single averaged column if ``average=True``).
         """
         return self.results_history.ESS(index=index, average=average)
 
     def time(self):
-        """
-        Return a DataFrame summarizing the execution times of methods run.
+        """Return a summary of wall-clock execution times for all runs.
 
-        Returns:
-            pd.DataFrame: A DataFrame where each row contains:
-                - 'method': The name of the method run.
-                - 'time': The execution time in seconds.
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns ``method`` (e.g. ``'pfilter'``,
+            ``'mif'``) and ``time`` (execution time in seconds).
         """
         return self.results_history.time()
 
     def prune(self, n: int = 1, refill: bool = True):
-        """
-        Filters the current set of parameter replicates to keep only the top `n` performers based on their most recent log-likelihood estimates.
+        """Keep the top ``n`` parameter sets by log-likelihood.
 
-        This method is commonly used after an estimation run (like `pfilter` or `mif`) to
-        discard poorly performing parameter sets and focus subsequent computational effort
-        on the most promising candidates. If `refill` is enabled, the kept parameters are
-        duplicated to maintain the original number of replicates.
+        Discards poorly performing starting points after an estimation run,
+        focusing subsequent work on the most promising candidates.  If
+        ``refill`` is ``True``, the surviving sets are duplicated to restore
+        the original number of replicates.
 
-        Args:
-            n (int): Number of top thetas to keep.
-            refill (bool): If True, repeat the top n thetas to match the previous number of theta sets.
+        Parameters
+        ----------
+        n : int, optional
+            Number of top parameter sets to retain.  Defaults to ``1``.
+        refill : bool, optional
+            If ``True``, repeat the top ``n`` sets to match the previous
+            number of replicates.  Defaults to ``True``.
         """
         self.theta.prune(n=n, refill=refill)
 
     def plot_traces(self, show: bool = True) -> Any:
-        """
-        Plot the parameter and log-likelihood traces from the entire result history.
-        Each facet shows a parameter or logLik. The x-axis is iteration, y-axis is value.
-        Lines connect mif/train points for the same replication; pfilter points are dots. Color by replication.
+        """Plot parameter and log-likelihood traces from the results history.
 
-        Args:
-            show (bool): Whether to display the plot. Defaults to True.
+        Produces an interactive Plotly figure with one facet per parameter
+        and one for ``logLik``.  Lines connect :meth:`mif` / :meth:`train`
+        points for each replicate; :meth:`pfilter` runs appear as dots.
+        Replicates are distinguished by colour.
+
+        Parameters
+        ----------
+        show : bool, optional
+            Whether to call ``fig.show()`` before returning.  Defaults to
+            ``True``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or None
+            The Plotly figure object, or ``None`` if no results are stored.
         """
         traces = self.traces()
         fig = plot_traces_internal(traces, title="Pomp Traces")
@@ -1330,21 +1527,33 @@ class Pomp:
         theta: PompParameters | None = None,
         show: bool = True,
     ) -> Any:
-        """
-        Generates an interactive plot comparing simulated trajectories from the model against the actual observed data.
+        """Plot simulated trajectories alongside the observed data.
 
-        This visualization helps assess whether the model (with its current parameters)
-        produces behavior that is qualitatively similar to the observed system. It can
-        display individual simulated paths ('lines') or confidence intervals ('quantiles')
-        to represent the distribution of possible outcomes.
+        Generates an interactive Plotly figure overlaying ``nsim`` simulated
+        observation trajectories on the actual ``ys`` data, helping to
+        assess qualitative goodness-of-fit.
 
-        Args:
-            key (jax.Array): JAX random key for simulation.
-            nsim (int): Number of simulations to perform. Defaults to 20.
-            mode (str): Plotting mode, either "lines" (individual sims) or "quantiles" (shaded region).
-                Defaults to "lines".
-            theta (PompParameters, optional): Parameters to use for simulation. Defaults to the first replicate in self.theta.
-            show (bool): Whether to display the plot. Defaults to True.
+        Parameters
+        ----------
+        key : jax.Array
+            JAX random key for simulation.
+        nsim : int, optional
+            Number of simulation replicates.  Defaults to ``20``.
+        mode : str, optional
+            Plot mode: ``"lines"`` shows individual trajectories;
+            ``"quantiles"`` shows a shaded quantile band.  Defaults to
+            ``"lines"``.
+        theta : PompParameters or None, optional
+            Parameter set to simulate from.  Defaults to the first
+            replicate of :attr:`theta`.
+        show : bool, optional
+            Whether to call ``fig.show()`` before returning.  Defaults to
+            ``True``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or None
+            The Plotly figure object.
         """
         if theta is None:
             theta = (
@@ -1363,13 +1572,18 @@ class Pomp:
         return fig
 
     def print_summary(self, n: int = 5):
-        """
-        Prints a high-level summary of the POMP model instance and its estimation history.
+        """Print a high-level summary of the model and its estimation history.
 
-        The summary includes:
-        - Basic model statistics such as the number of observations, time steps, and parameters.
-        - The current number of parameter replicates stored in the object.
-        - A summary of the results history, listing the execution of estimation methods (e.g., pfilter, mif, train) and their corresponding performance metrics.
+        Displays basic model statistics (number of observations, time steps,
+        parameters, and parameter replicates) followed by a tabular summary
+        of :attr:`results_history` listing each run's method and
+        performance metrics.
+
+        Parameters
+        ----------
+        n : int, optional
+            Maximum number of history entries to display.  Defaults to
+            ``5``.
         """
         print("Basics:")
         print("-------")
@@ -1381,17 +1595,12 @@ class Pomp:
         self.results_history.print_summary(n=n)
 
     def __eq__(self, other):
-        """
-        Check structural equality with another Pomp object.
+        """Check structural equality with another :class:`Pomp` object.
 
-        Two Pomp instances are considered equal if they:
-        - Are of the same type
-        - Have identical canonical parameter names
-        - Have equal parameter sets (self.theta)
-        - Have identical data (ys) and covariates (covars)
-        - Have the same state names and initial time t0
-        - Have equivalent model components (rinit, rproc, dmeas, rmeas)
-        - Have equal fresh_key values (or both None)
+        Two instances are considered equal if they have identical parameter
+        names, parameter values, data (``ys``, ``covars``), state names,
+        initial time, model components (``rinit``, ``rproc``, ``dmeas``,
+        ``rmeas``), ``par_trans``, ``results_history``, and ``fresh_key``.
         """
         if not isinstance(other, type(self)):
             return False
@@ -1469,13 +1678,25 @@ class Pomp:
 
     @staticmethod
     def merge(*pomp_objs: "Pomp") -> "Pomp":
-        """
-        Merges multiple `Pomp` objects into a single instance by combining their parameter replicates and results histories.
+        """Merge multiple :class:`Pomp` objects into a single instance.
 
-        All provided `Pomp` objects must share the same structural components (e.g., state
-        names, parameter names, and model logic). The resulting object will contain the
-        union of all parameter sets and their corresponding estimation results, which is
-        particularly useful for consolidating parallelized simulation or estimation runs.
+        Combines their parameter replicates and results histories.  All
+        objects must share identical structural components (data, state
+        names, model functions, and parameter names).  Useful for
+        consolidating results from parallel estimation runs.
+
+        Parameters
+        ----------
+        *pomp_objs : Pomp
+            Two or more :class:`Pomp` objects to merge.  Must be
+            structurally identical (same ``ys``, ``statenames``, ``rinit``,
+            ``rproc``, ``dmeas``, ``rmeas``, and ``par_trans``).
+
+        Returns
+        -------
+        Pomp
+            A new :class:`Pomp` instance whose ``theta`` and
+            ``results_history`` are the concatenation of all inputs.
         """
         if len(pomp_objs) == 0:
             raise ValueError("At least one Pomp object must be provided.")
@@ -1724,20 +1945,27 @@ class Pomp:
         log_ys: bool = False,
         suppress_warnings: bool = True,
     ) -> float:
-        """
-        Fits an independent ARIMA model to the observation data and returns the estimated
-        log-likelihood.
+        """Fit an ARIMA benchmark model and return its log-likelihood.
 
-        This is a wrapper around `pypomp.benchmarks.arma`.
+        Fits an independent ARIMA(p, d, q) model to the observation data
+        as a statistical baseline.  Wraps :func:`pypomp.benchmarks.arma`.
 
-        Args:
-            order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
-            log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
-                and issues a summary warning instead. Defaults to True.
+        Parameters
+        ----------
+        order : tuple of int, optional
+            ``(p, d, q)`` order for the ARIMA model.  Defaults to
+            ``(1, 0, 1)``.
+        log_ys : bool, optional
+            If ``True``, fit the model to ``log(y + 1)`` rather than the
+            raw observations.  Defaults to ``False``.
+        suppress_warnings : bool, optional
+            If ``True``, suppress per-unit warnings from statsmodels and
+            issue a single summary warning instead.  Defaults to ``True``.
 
-        Returns:
-            float: The sum of the log-likelihoods.
+        Returns
+        -------
+        float
+            Sum of the per-unit ARIMA log-likelihoods.
         """
         return benchmarks.arma(
             self.ys, order=order, log_ys=log_ys, suppress_warnings=suppress_warnings
@@ -1746,20 +1974,25 @@ class Pomp:
     def negbin(
         self, autoregressive: bool = False, suppress_warnings: bool = True
     ) -> float:
-        """
-        Fits a Negative Binomial model to the observation data and returns
-        the log-likelihood.
+        """Fit a Negative Binomial benchmark model and return its log-likelihood.
 
-        This is a wrapper around `pypomp.benchmarks.negbin`.
+        Fits an independent (or AR(1)) Negative Binomial model to the
+        observation data as a statistical baseline.  Wraps
+        :func:`pypomp.benchmarks.negbin`.
 
-        Args:
-            autoregressive (bool, optional): If True, fits an AR(1) model.
-                Defaults to False (iid).
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
-                and issues a summary warning instead. Defaults to True.
+        Parameters
+        ----------
+        autoregressive : bool, optional
+            If ``True``, fit an AR(1) Negative Binomial model instead of
+            the i.i.d. version.  Defaults to ``False``.
+        suppress_warnings : bool, optional
+            If ``True``, suppress per-unit warnings and issue a single
+            summary warning instead.  Defaults to ``True``.
 
-        Returns:
-            float: The sum of the log-likelihoods.
+        Returns
+        -------
+        float
+            Sum of the per-unit Negative Binomial log-likelihoods.
         """
         return benchmarks.negbin(
             self.ys,

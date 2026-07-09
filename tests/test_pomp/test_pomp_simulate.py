@@ -31,9 +31,9 @@ def test_simulate_param_order_invariance(simple):
     nsim = 1
     X_sims, Y_sims = LG.simulate(nsim=nsim, key=key, theta=theta)
 
-    param_keys = list(theta.params()[0].keys())
+    param_keys = list(theta.params(as_list=True)[0].keys())
     rev_keys = list(reversed(param_keys))
-    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params()]
+    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params(as_list=True)]
 
     X2, Y2 = LG.simulate(nsim=nsim, key=key, theta=pp.PompParameters(permuted_theta))
     pd.testing.assert_frame_equal(X_sims, X2)

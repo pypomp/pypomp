@@ -95,25 +95,25 @@ def _standardize_pomp_theta(
 
 
 class PompParameters(ParameterSet[xr.DataArray]):
-    """
-    Manages parameters for a standard Pomp model.
+    """Parameter set for standard POMP models.
 
-    Internal storage is a 3D ``xarray.DataArray`` with dimensions
-    ``("theta_idx", "unit", "parameter")``, where ``"unit"`` is always ``"shared"``.
+    Wraps a 3D ``xarray.DataArray`` with dimensions ``("theta_idx", "unit",
+    "parameter")``, where the ``"unit"`` dimension is always ``"shared"``.
 
     Parameters
     ----------
-    theta : Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | PompParameters | xr.DataArray | None
-        Parameters for the model. Accepts:
+    theta : mapping or sequence of mapping or PompParameters or xr.DataArray or None
+        Parameters for the model.  Accepts:
 
-        - A single dictionary: ``dict[str, Numeric]``
-        - A list of dictionaries: ``list[dict[str, Numeric]]``
-        - An existing :class:`~pypomp.core.parameters.PompParameters` object
+        - A single dictionary: ``dict[str, float]``
+        - A sequence of dictionaries: ``list[dict[str, float]]``
+        - An existing :class:`PompParameters` object
         - An ``xarray.DataArray`` with dimensions ``("theta_idx", "unit", "parameter")``
     logLik : np.ndarray, optional
-        A numpy array of log-likelihoods associated with each parameter set.
+        Log-likelihood values associated with each parameter set.
     estimation_scale : bool, optional
-        Whether the parameters are on the estimation scale. Defaults to False.
+        Whether the parameters are on the estimation scale.  Defaults to
+        ``False``.
     """
 
     _data: xr.DataArray
@@ -206,19 +206,20 @@ class PompParameters(ParameterSet[xr.DataArray]):
         return ll
 
     def to_jax_array(self, param_names: list[str] | None = None, **kwargs) -> jax.Array:
-        """
-        Convert to a JAX array matching the order of param_names.
+        """Convert parameter values to a JAX array matching ``param_names``.
 
         Parameters
         ----------
-        param_names : list[str], optional
-            A list of parameter names in the desired order. If None (default),
-            returns the array matching the canonical order of parameters.
+        param_names : list of str, optional
+            Parameter names in the desired order.  If ``None`` (default),
+            returns the array in the canonical parameter order.
+        **kwargs : dict
+            Unused in standard pomp parameters.
 
         Returns
         -------
         jax.Array
-            A JAX array of shape (num_theta_idx, n_params).
+            JAX array of shape ``(n_reps, n_params)``.
         """
         if param_names is None:
             param_names = self.get_param_names()
@@ -243,8 +244,17 @@ class PompParameters(ParameterSet[xr.DataArray]):
         self._logLik = self._format_logLik(value, self.num_replicates())
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PompParameters":
-        """
-        Return a new PompParameters object with the specified parameter set (theta_idx) indices.
+        """Return a new PompParameters object with subset replicates.
+
+        Parameters
+        ----------
+        indices : int or list of int or slice
+            Replicate indices to keep.
+
+        Returns
+        -------
+        PompParameters
+            A new parameter set containing only the selected replicates.
         """
         if isinstance(indices, int):
             indices = [indices]
@@ -258,28 +268,31 @@ class PompParameters(ParameterSet[xr.DataArray]):
         )
 
     @overload
-    def params(self, as_list: Literal[True] = True) -> list[dict[str, float]]: ...
+    def params(self, as_list: Literal[True]) -> list[dict[str, float]]: ...
 
     @overload
-    def params(self, as_list: Literal[False]) -> xr.DataArray: ...
+    def params(self, as_list: Literal[False] = False) -> xr.DataArray: ...
 
     @overload
-    def params(self, as_list: bool = True) -> list[dict[str, float]] | xr.DataArray: ...
+    def params(
+        self, as_list: bool = False
+    ) -> list[dict[str, float]] | xr.DataArray: ...
 
-    def params(self, as_list: bool = True) -> list[dict[str, float]] | xr.DataArray:
-        """
-        Get the parameters in this set.
+    def params(self, as_list: bool = False) -> list[dict[str, float]] | xr.DataArray:
+        """Get the parameter values in this set.
 
         Parameters
         ----------
-        as_list : bool, default True
-            If True, returns the parameters as a list of dictionaries mapping parameter names to floats.
-            If False, returns the internal 3D xarray DataArray.
+        as_list : bool, optional
+            If ``True``, returns the parameters as a list of Python
+            dictionaries.  If ``False`` (default), returns the internal 3D
+            ``xarray.DataArray``.
 
         Returns
         -------
-        list[dict[str, float]] | xr.DataArray
-            The parameters either as a list of dictionaries or as a DataArray.
+        list of dict or xr.DataArray
+            The parameters either as a list of dictionaries mapping parameter
+            names to floats, or as a DataArray.
         """
         return super().params(as_list)
 
@@ -287,8 +300,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
         self,
         value: Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | xr.DataArray,
     ) -> None:
-        """
-        Set or overwrite the parameter values.
+        """Overwrite parameter values.
 
         Parameters
         ----------
@@ -337,8 +349,17 @@ class PompParameters(ParameterSet[xr.DataArray]):
 
     @staticmethod
     def merge(*param_objs: "PompParameters") -> "PompParameters":
-        """
-        Merge replications from an arbitrary number of PompParameters objects.
+        """Merge replicates from multiple PompParameters objects.
+
+        Parameters
+        ----------
+        *param_objs : PompParameters
+            One or more parameter sets to merge.
+
+        Returns
+        -------
+        PompParameters
+            A new parameter set containing the concatenated replicates.
         """
         if len(param_objs) == 0:
             raise ValueError("At least one PompParameters object must be provided.")

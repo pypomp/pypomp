@@ -20,39 +20,61 @@ def mif(
     thresh: float = 0.0,
     n_monitors: int = 0,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """
-    This is a pure functional implementation of the Iterated Filtering algorithm,
-    intended for users who need to compose it within custom JAX loops or
-    higher-order functions. For a more user-friendly (but impurely-functional) interface, see
-    :meth:`pypomp.core.pomp.Pomp.mif`.
+    """Run the Iterated Filtering 2 (IF2) algorithm on a POMP model struct.
 
-    This implementation leverages JAX to efficiently vectorize the algorithm across
-    multiple initial parameter sets simultaneously.
+    Pure-functional implementation intended for users who need to compose
+    the algorithm within custom JAX loops or higher-order functions.
+    For the standard interface, see :meth:`pypomp.Pomp.mif`.
 
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, J, n_params) on the natural scale.
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names`.
-        sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names`.
-        M (int): Number of iterations.
-        cooling_fn (Callable | float): Cooling function taking (nt, m, ntimes) or float cooling factor.
-        J (int): Number of particles.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-        thresh (float): Resampling threshold.
-        n_monitors (int): Number of monitors for likelihood averaging.
+    JAX vectorises the computation across all starting parameter sets
+    simultaneously.
 
-    Returns:
-        tuple[jax.Array, jax.Array, jax.Array]:
-            Negative log-likelihood history: Shape (n_reps, M).
-            Parameter trace history: Shape (n_reps, M+1, n_params) on the natural scale.
-            Final particle swarm: Shape (n_reps, J, n_params) on the natural scale.
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.  Obtain via
+        :meth:`~pypomp.Pomp.to_struct`.
+    thetas_array : jax.Array
+        Initial parameter array of shape ``(n_reps, J, n_params)`` on the
+        natural scale.  Must be aligned with ``struct.param_names``.
+    sigmas_array : jax.Array
+        Per-parameter random walk standard deviations.  Shape
+        ``(n_params,)``.
+    sigmas_init_array : jax.Array
+        Initial random walk standard deviations.  Shape ``(n_params,)``.
+    M : int
+        Number of IF2 iterations.
+    cooling_fn : callable or float
+        Cooling schedule.  Pass a callable ``(nt, m, ntimes) -> float``
+        for custom schedules, or a single float for geometric cooling.
+    J : int
+        Number of particles.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+    thresh : float, optional
+        ESS-based resampling threshold.  Defaults to ``0.0``.
+    n_monitors : int, optional
+        Number of unperturbed filter runs for log-likelihood monitoring.
+        Defaults to ``0``.
 
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, use :func:`pypomp.functional.align_params`.
+    Returns
+    -------
+    tuple of (jax.Array, jax.Array, jax.Array)
+        - Negative log-likelihood history of shape ``(n_reps, M)``.
+        - Parameter trace history of shape ``(n_reps, M+1, n_params)``
+          on the natural scale.
+        - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
+          natural scale.
+
+    Notes
+    -----
+    To align and stack input parameter dictionaries into the correct
+    canonical ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.Pomp.mif : Object-oriented interface.
+    align_params : Parameter alignment utility.
     """
 
     thresh = float(max(0.0, thresh))
@@ -114,42 +136,63 @@ def panel_mif(
     n_monitors: int = 0,
     block: bool = True,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """
-    Pure functional implementation of the (Marginal) Panel Iterated Filtering (PIF/MPIF) algorithm,
-    intended for users who need to compose it within custom JAX loops.
+    """Estimate panel POMP parameters using Panel Iterated Filtering.
 
-    This function estimates parameters for a Panel POMP model by introducing random perturbations
-    to the parameters and sequentially filtering them across all units. The perturbation variance
-    is decayed according to a cooling schedule.
+    A pure functional implementation of the (Marginal) Panel Iterated
+    Filtering (PIF/MPIF) algorithm, intended for composition within custom JAX
+    loops.
 
-    Args:
-        struct (PanelPompStruct): The compiled structural representation of the Panel POMP model.
-        shared_array (jax.Array): Swarm of initial shared parameters on natural scale.
-            Shape (n_reps, J, n_shared). Must be aligned with the canonical order of `struct.shared_param_names` (e.g. prepared via `align_params`).
-        unit_array (jax.Array): Swarm of initial unit-specific parameters on natural scale.
-            Shape (n_reps, J, U, n_spec). Must be aligned with the canonical order of `struct.unit_param_names` (e.g. prepared via `align_params`).
-        sigmas_array (jax.Array): Random walk standard deviations. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        sigmas_init_array (jax.Array): Initial random walk standard deviations. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        M (int): Number of iterated filtering iterations.
-        cooling_fn (Callable | float): Cooling schedule function or constant decay factor.
-        J (int): Number of particles.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-        thresh (float): Resampling threshold.
-        n_monitors (int): Number of monitor runs to perform at each iteration.
-        block (bool): Whether to use MPIF.
+    This function estimates parameters for a Panel POMP model by introducing
+    random perturbations to the parameters and sequentially filtering them
+    across all units.  The perturbation variance is decayed according to a
+    given cooling schedule.
 
-    Returns:
-        tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-            shared_traces: Shared parameter history trace. Shape (n_reps, M + 1, n_shared + 1).
-            unit_traces: Unit-specific parameter history trace. Shape (n_reps, M + 1, U, n_spec + 1).
-            final_shared_swarm: Final swarm of shared parameters. Shape (n_reps, J, n_shared).
-            final_unit_swarm: Final swarm of unit-specific parameters. Shape (n_reps, J, U, n_spec).
+    Parameters
+    ----------
+    struct : PanelPompStruct
+        Compiled structural representation of the Panel POMP model.
+    shared_array : jax.Array
+        Swarm of initial shared parameters of shape ``(n_reps, J, n_shared)``
+        on the natural scale.
+    unit_array : jax.Array
+        Swarm of initial unit-specific parameters of shape
+        ``(n_reps, J, U, n_spec)`` on the natural scale.
+    sigmas_array : jax.Array
+        Random walk standard deviations of shape ``(n_params,)``.
+    sigmas_init_array : jax.Array
+        Initial random walk standard deviations of shape ``(n_params,)``.
+    M : int
+        Number of iterated filtering iterations.
+    cooling_fn : callable or float
+        Cooling schedule function or constant decay factor.
+    J : int
+        Number of particles.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+    thresh : float, optional
+        Resampling threshold.  Defaults to ``0.0``.
+    n_monitors : int, optional
+        Number of monitor runs to perform at each iteration.  Defaults to
+        ``0``.
+    block : bool, optional
+        Whether to use block updates (MPIF).  Defaults to ``True``.
 
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
+    Returns
+    -------
+    shared_traces : jax.Array
+        Shared parameter history trace of shape ``(n_reps, M + 1, n_shared + 1)``.
+    unit_traces : jax.Array
+        Unit-specific parameter history trace of shape
+        ``(n_reps, M + 1, U, n_spec + 1)``.
+    final_shared_swarm : jax.Array
+        Final swarm of shared parameters of shape ``(n_reps, J, n_shared)``.
+    final_unit_swarm : jax.Array
+        Final swarm of unit-specific parameters of shape ``(n_reps, J, U, n_spec)``.
+
+    Notes
+    -----
+    To align and stack input parameter arrays into the correct canonical
+    ordering, use :func:`pypomp.functional.align_params`.
     """
 
     thresh = float(max(0.0, thresh))

@@ -11,35 +11,47 @@ def simulate(
     keys: jax.Array,
     times: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
-    """
-    This is a pure functional implementation of the simulation algorithm, intended
-    for users who need to compose it within custom JAX loops or higher-order
-    functions. For a more user-friendly (but impurely-functional) interface, see
-    :meth:`pypomp.core.pomp.Pomp.simulate`.
+    """Simulate latent states and observations from a POMP model struct.
 
-    This function propagates the system's latent state through time according to the
-    process model (`rproc`) and generates corresponding simulated observations from
-    the measurement model (`rmeas`).
+    Pure-functional implementation intended for users who need to compose
+    the simulation within custom JAX loops or higher-order functions.
+    For the standard interface, see :meth:`pypomp.Pomp.simulate`.
 
-    This implementation leverages JAX to efficiently vectorize the simulations across
-    multiple parameter sets and simulation replicates simultaneously.
+    JAX vectorises the computation across parameter sets and simulation
+    replicates simultaneously.
 
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        nsim (int): Number of simulations.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-        times (jax.Array | None): Custom observation times. Defaults to struct.times.
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.  Obtain via
+        :meth:`~pypomp.Pomp.to_struct`.
+    thetas_array : jax.Array
+        Parameter array of shape ``(n_reps, n_params)`` on the natural
+        scale.  Must be aligned with ``struct.param_names``.
+    nsim : int
+        Number of independent simulation replicates.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+    times : jax.Array or None, optional
+        Custom observation times.  Defaults to ``struct.times``.
 
-    Returns:
-        tuple[jax.Array, jax.Array]:
-            X_sims: simulated states. Shape (n_reps, nsim, len(times), n_states)
-            Y_sims: simulated observations. Shape (n_reps, nsim, len(times), n_obs)
+    Returns
+    -------
+    tuple of (jax.Array, jax.Array)
+        - ``X_sims``: simulated states of shape
+          ``(n_reps, nsim, len(times), n_states)``.
+        - ``Y_sims``: simulated observations of shape
+          ``(n_reps, nsim, len(times), n_obs)``.
 
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
+    Notes
+    -----
+    To align and stack input parameter arrays into the correct
+    canonical ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.Pomp.simulate : Object-oriented interface.
+    align_params : Parameter alignment utility.
     """
 
     _times = struct.times if times is None else times

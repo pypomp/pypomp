@@ -10,35 +10,39 @@ def mop(
     alpha: float,
     keys: jax.Array,
 ) -> jax.Array:
-    """
-    This is a pure functional implementation of the MOP differentiable particle
-    filter, intended for users who need to compose it within custom JAX
-    loops or higher-order functions. For a more user-friendly (but impurely-functional) interface
-    to train models using the MOP objective, see :meth:`pypomp.core.pomp.Pomp.train`.
+    """MOP differentiable particle filter log-likelihood objective.
 
-    Unlike the standard particle filter (:func:`pypomp.functional.pfilter`), the MOP objective is specifically
-    designed to be fully differentiable with respect to the model parameters. This allows
-    for the computation of gradients and Hessians of the log-likelihood using
-    JAX's automatic differentiation capabilities.
+    A pure functional implementation of the Measurement Off-Parameter (MOP)
+    differentiable particle filter, intended for composition within custom JAX
+    loops or higher-order functions.
 
-    This function evaluates the log-likelihood for the given parameter sets, but it is
-    primarily intended to be used as an objective function within gradient-based
-    optimization routines (e.g., :func:`pypomp.functional.train`).
+    Unlike the standard particle filter (:func:`~pypomp.functional.pfilter`), the MOP
+    objective is designed to be fully differentiable with respect to the model
+    parameters using automatic differentiation.
 
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        J (int): Number of particles.
-        alpha (float): Alpha parameter for MOP.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.
+    thetas_array : jax.Array
+        Array of initial parameters of shape ``(n_reps, n_params)``, aligned
+        with the canonical order of ``struct.param_names``.
+    J : int
+        Number of particles.
+    alpha : float
+        Alpha parameter for MOP.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
 
-    Returns:
-        jax.Array: Negative MOP log-likelihood estimates.
+    Returns
+    -------
+    jax.Array
+        Negative MOP log-likelihood estimates.
 
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
+    See Also
+    --------
+    pypomp.Pomp.train : High-level OOP training interface.
+    pypomp.functional.align_params : Prepare parameter arrays.
     """
 
     return _vmapped_mop_internal(

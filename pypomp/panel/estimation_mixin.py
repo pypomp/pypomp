@@ -105,24 +105,28 @@ class PanelEstimationMixin(Base):
         unit: str,
         theta: PanelParameters | None = None,
     ) -> list[dict[str, float]]:
-        """
-        Get the parameter values for a specific unit across all replicates.
+        """Get parameter values for a specific unit across all replicates.
 
-        Args
-        ----
-        unit (str): The name of the unit to get the parameter values for.
-        theta (PanelParameters | None): The parameter values to get the parameter values for. If None, the parameter values of the panel will be used.
+        Parameters
+        ----------
+        unit : str
+            Name of the unit.
+        theta : PanelParameters or None, optional
+            Parameter values.  If ``None`` (default), the parameter values of the
+            panel model are used.
 
         Returns
         -------
-        list[dict[str, float]]: A list of dictionaries containing the parameter values for the specified unit across all replicates.
+        list of dict
+            List of dictionaries containing the parameter values for the
+            specified unit across replicates.
         """
         theta = self._prepare_theta_input(theta)
 
         tll = theta.num_replicates()
         params: list[dict[str, float]] = [{} for _ in range(tll)]
 
-        theta_list = theta.params()
+        theta_list = theta.params(as_list=True)
         for i in range(tll):
             theta_dict = theta_list[i]
             if theta_dict["shared"] is not None:
@@ -144,18 +148,26 @@ class PanelEstimationMixin(Base):
         key: jax.Array,
         shared_names: list[str] | None = None,
     ) -> PanelParameters:
-        """
-        Sample parameters for PanelPomp models.
+        """Sample parameters uniformly within bounds for a panel model.
 
-        Args:
-            param_bounds (dict): Dictionary mapping parameter names to (lower, upper) bounds.
-            units (list[str]): List of unit names.
-            n (int): Number of parameter sets to sample.
-            key (jax.Array): JAX random key for reproducibility.
-            shared_names (list[str], optional): List of shared parameter names. If None, all parameters are considered unit-specific.
+        Parameters
+        ----------
+        param_bounds : dict of str to tuple of float
+            Mapping from parameter names to ``(lower, upper)`` bounds.
+        units : list of str
+            Unit names.
+        n : int
+            Number of replicates to sample.
+        key : jax.Array
+            JAX random key.
+        shared_names : list of str, optional
+            List of shared parameter names.  If ``None`` (default), all
+            parameters are considered unit-specific.
 
-        Returns:
-            PanelParameters: A PanelParameters object containing the sampled parameters.
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing the sampled values.
         """
         shared = list(shared_names or [])
         specific = [k for k in param_bounds if k not in shared]
@@ -240,23 +252,30 @@ class PanelEstimationMixin(Base):
         nsim: int = 1,
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Base:
-        """
-        Simulate the :class:`~pypomp.panel.panel.PanelPomp` model.
+        """Simulate latent states and observations from the panel model.
 
-        Args:
-            key (jax.Array): JAX random key.
-            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Parameter sets to use.
-                If None, uses `self.theta`.
-            times (jax.Array, optional): Times at which to simulate the model.
-                If None, uses `self.times`.
-            nsim (int, optional): Number of simulations to run.
-            as_pomp (bool, optional): If True, returns a new :class:`~pypomp.panel.panel.PanelPomp` object containing the simulated
-                observations for the first parameter replicate and simulation, instead of DataFrames.
+        Parameters
+        ----------
+        key : jax.Array
+            JAX random key.
+        theta : PanelParameters or None, optional
+            Parameters to simulate from.  If ``None``, defaults to ``self.theta``.
+        times : jax.Array or None, optional
+            Times at which to simulate the model.  If ``None``, defaults to
+            the times coordinate of the data.
+        nsim : int, optional
+            Number of simulations to run per replicate.  Defaults to ``1``.
+        as_pomp : bool, optional
+            If ``True``, return a new ``PanelPomp`` object containing the
+            simulated observations for the first parameter replicate and
+            simulation index.  Defaults to ``False``.
 
-        Returns:
-            Union[pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame], :class:`~pypomp.panel.panel.PanelPomp`]:
-                If as_pomp is False, returns a tuple of (X_sims, Y_sims) DataFrames.
-                If as_pomp is True, returns a deep copy of the original model with simulated observations.
+        Returns
+        -------
+        tuple of (pd.DataFrame, pd.DataFrame) or PanelPomp
+            If ``as_pomp=False``, returns a tuple ``(X_sims, Y_sims)`` of dataframes
+            in long format.  If ``as_pomp=True``, returns a deep copy of the
+            original panel model with simulated observations.
         """
         if as_pomp:
             if nsim > 1:
@@ -315,19 +334,25 @@ class PanelEstimationMixin(Base):
         nsim: int = 100,
         theta: PanelParameters | None = None,
     ) -> pd.DataFrame:
-        """
-        Evaluate probe statistics on the model's true data and simulated data for each unit.
+        """Evaluate probe statistics on real and simulated data for each unit.
 
-        Args:
-            probes (dict[str, Callable[[pd.DataFrame], float]]): A dictionary of probe functions.
-                Each function should receive a DataFrame of observations for a single unit and return a numeric scalar.
-                Example: `{"mean": lambda df: df["obs"].mean()}`
-            key (jax.Array): JAX random key for the simulations.
-            nsim (int, optional): Number of simulations to run per parameter set. Defaults to 100.
-            theta: Parameters to simulate from.
+        Parameters
+        ----------
+        probes : dict of str to callable
+            Dictionary mapping probe names to functions.  Each function must
+            take a dataframe of observations for a single unit and return a
+            scalar float.
+        key : jax.Array
+            JAX random key.
+        nsim : int, optional
+            Number of simulations to run per replicate.  Defaults to ``100``.
+        theta : PanelParameters or None, optional
+            Parameters to simulate from.  If ``None``, defaults to ``self.theta``.
 
-        Returns:
-            pd.DataFrame: A long-format DataFrame with columns:
+        Returns
+        -------
+        pd.DataFrame
+            Long-format DataFrame with columns:
                 `probe`, `value`, `is_real_data`, `theta_idx`, `sim`, `unit`
         """
         sim_result = self.simulate(nsim=nsim, key=key, theta=theta)
@@ -382,24 +407,40 @@ class PanelEstimationMixin(Base):
         filter_mean: bool = False,
         prediction_mean: bool = False,
     ) -> None:
-        """
-        Run the particle filter (SMC) algorithm on the :class:`~pypomp.panel.panel.PanelPomp` model.
+        """Run the bootstrap particle filter (SMC) algorithm.
 
-        Args:
-            J (int): Number of particles per unit.
-            key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Parameter sets to use.
-                If None, uses `self.theta`.
-            thresh (float, optional): Resampling threshold. If 0.0, always resample.
-            reps (int, optional): Number of replicates per parameter set.
-            chunk_size (int, optional): Number of units to process per batch.
-            CLL (bool, optional): Whether to compute conditional log-likelihoods.
-            ESS (bool, optional): Whether to compute effective sample sizes.
-            filter_mean (bool, optional): Whether to compute filtering means.
-            prediction_mean (bool, optional): Whether to compute prediction means.
+        Evaluates the likelihood of the panel data at the specified parameter values.
 
-        Returns:
-            None. Updates :attr:`self.theta.logLik_unit` and adds a :class:`~pypomp.core.results.PanelPompPFilterResult` to :attr:`self.results_history`.
+        Parameters
+        ----------
+        J : int
+            Number of particles per unit.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        theta : PanelParameters or None, optional
+            Parameter sets to use.  If ``None``, defaults to ``self.theta``.
+        thresh : float, optional
+            Resampling threshold.  If ``0.0`` (default), always resample at
+            each observation time.
+        reps : int, optional
+            Number of replicates per parameter set.  Defaults to ``1``.
+        chunk_size : int, optional
+            Number of units to process per batch.  Defaults to ``1``.
+        CLL : bool, optional
+            Whether to compute conditional log-likelihoods.  Defaults to
+            ``False``.
+        ESS : bool, optional
+            Whether to compute effective sample sizes.  Defaults to ``False``.
+        filter_mean : bool, optional
+            Whether to compute filtering state means.  Defaults to ``False``.
+        prediction_mean : bool, optional
+            Whether to compute predicted state means.  Defaults to ``False``.
+
+        Returns
+        -------
+        None
+            Updates the unit-specific log-likelihoods ``self.theta.logLik_unit``
+            and appends a :class:`PanelPompPFilterResult` to the history.
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -589,24 +630,34 @@ class PanelEstimationMixin(Base):
         n_monitors: int = 0,
         block: bool = True,
     ) -> None:
-        """
-        Estimate parameters using the Panel Iterated Filtering (PIF) algorithm for :class:`~pypomp.panel.panel.PanelPomp`.
+        """Estimate parameters using the (Marginalized) Panel Iterated Filtering (MPIF/PIF) algorithm.
 
-        Args:
-            J (int): Number of particles per unit.
-            M (int): Number of iterations (cooling cycles).
-            rw_sd (:class:`~pypomp.core.rw_sigma.RWSigma`): Random walk standard deviations for parameter perturbations.
-            key (jax.Array, optional): JAX random key. If None, uses `self.fresh_key`.
-            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Initial parameter estimates.
-                If None, uses `self.theta`.
-            thresh (float): Resampling threshold for the particle filter.
-            n_monitors (int): Number of particle filter runs to average for
-                log-likelihood estimation. Defaults to 0 (uses estimate from perturbed
-                filter).
-            block (bool): Whether to use block updates, i.e., Marginalized Panel Iterated Filtering (MPIF). Uses Panel Iterated Filtering (PIF) if False.
+        Parameters
+        ----------
+        J : int
+            Number of particles per unit.
+        M : int
+            Number of iterations (cooling cycles).
+        rw_sd : RWSigma
+            Random walk standard deviations and cooling schedule.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        theta : PanelParameters or None, optional
+            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
+        thresh : float, optional
+            Resampling threshold for the particle filter.  Defaults to ``0.0``.
+        n_monitors : int, optional
+            Number of unperturbed particle filter runs to estimate log-likelihood
+            at each iteration.  Defaults to ``0`` (use perturbed filter).
+        block : bool, optional
+            Whether to use block updates (MPIF).  If ``False``, uses standard PIF.
+            Defaults to ``True``.
 
-        Returns:
-            None. Updates :attr:`self.theta` with final estimates and adds a :class:`~pypomp.core.results.PanelPompMIFResult` to :attr:`self.results_history`.
+        Returns
+        -------
+        None
+            Updates ``self.theta`` with final estimates and appends a
+            :class:`PanelPompMIFResult` to the history.
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -773,33 +824,51 @@ class PanelEstimationMixin(Base):
         theta: PanelParameters | None = None,
         alpha_cooling: float = 1.0,
     ):
-        """
-        Estimate parameters using chunked gradient-descent optimization (SGD/Adam).
+        """Estimate parameters using MOP-based gradient-descent optimization.
 
-        This method performs stochastic gradient descent (or Adam) iterations over
-        the likelihood of the panel POMP. It operates by drawing particles for a
-        subset of units (defined by `chunk_size`), calculating gradients for both
-        shared and unit-specific parameters, and updating estimates.
+        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter, treating the particle filter
+        as a differentiable computation graph and applies gradient-based
+        optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
+        automatic differentiation.
 
-        Args:
-            J (int): Number of particles per unit.
-            M (int): Number of training iterations.
-            eta (:class:`~pypomp.core.learning_rate.LearningRate`): Learning rates per parameter as a :class:`~pypomp.core.learning_rate.LearningRate` object.
-            chunk_size (int, optional): Number of units to process per
-                gradient calculation step.
-            optimizer (:class:`~pypomp.core.optimizer.Optimizer`, optional): The optimizer configuration object to use
-                (e.g., `pp.Adam()`, `pp.SGD()`, `pp.FullMatrixAdam()`, etc.). Defaults to `pp.Adam()`.
-                Hyperparameters like gradient clipping (`clip_norm`) or Adam beta values are
-                configured directly inside the optimizer instance.
-            alpha (float, optional): Learning rate decay factor per iteration.
-            key (jax.Array, optional): JAX PRNG key. If None, uses the
-                `fresh_key` attribute.
-            theta (:class:`~pypomp.core.parameters.PanelParameters`, optional): Initial parameter estimates.
-                If None, uses the current `theta` attribute.
-            alpha_cooling (float, optional): Cooling factor for the MOP discount factor (alpha) using cosine decay. This factor represents the multiplier for the distance of alpha from 1.0 by the end of training (i.e., alpha approaches 1.0). Defaults to 1.0 (no cooling).
+        .. warning::
 
-        Returns:
-            None. Updates :attr:`self.theta` and adds a :class:`~pypomp.core.results.PanelPompTrainResult` to :attr:`self.results_history`.
+            MOP gradients are only well-defined for **continuous-state**
+            models.  For discrete-state models, use :meth:`mif` or
+            :meth:`dpop_train` instead.
+
+        JAX vectorises the computation across all starting parameter sets
+        in ``theta`` simultaneously.  Results are appended to
+        :attr:`results_history`.
+
+        Parameters
+        ----------
+        J : int
+            Number of particles per unit.
+        M : int
+            Number of training iterations (gradient steps).
+        eta : LearningRate
+            Learning rates per parameter.
+        chunk_size : int, optional
+            Number of units to process in parallel per gradient step.  Defaults
+            to ``1``.
+        optimizer : Optimizer, optional
+            Optimizer configuration object.  Defaults to ``Adam()``.
+        alpha : float, optional
+            MOP discount factor.  Defaults to ``0.97``.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        theta : PanelParameters or None, optional
+            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
+        alpha_cooling : float, optional
+            Cooling factor for the MOP discount factor ``alpha`` using cosine decay.
+            Defaults to ``1.0``.
+
+        Returns
+        -------
+        None
+            Updates ``self.theta`` with final estimates and appends a
+            :class:`PanelPompTrainResult` to the history.
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
@@ -989,45 +1058,37 @@ class PanelEstimationMixin(Base):
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
     ):
-        """
-        Estimate parameters using DPOP gradient-descent optimization (SGD/Adam).
+        """Estimate parameters using DPOP-based gradient-descent optimization.
 
         .. warning::
-            This method is experimental. Its API and behavior are subject to change in future releases.
+           This method is experimental.  Its API and behavior are subject to change
+           in future releases.
 
-        This method performs stochastic gradient descent (or Adam) iterations over
-        the DPOP likelihood of the panel POMP. It operates by drawing particles for a
-        subset of units (defined by `chunk_size`), calculating gradients for both
-        shared and unit-specific parameters, and updating estimates.
-
-        Args:
-            J (int): Number of particles per unit.
-            M (int): Number of training iterations.
-            eta (LearningRate | dict[str, float] | float): Learning rate(s). A
-                LearningRate gives a full per-iteration schedule, e.g.
-                ``LearningRate(rates).cosine_decay(0.05, M)``; a dict maps param
-                names to constant rates; a float is one global constant rate. For
-                the dict/float forms the scalar ``decay`` still applies reciprocal
-                LR decay; for a LearningRate the schedule is used as-is.
-            chunk_size (Union[int, str], optional): Number of units to process
-                per gradient calculation step.
-            optimizer (Optimizer, optional): Optimizer configuration object,
-                e.g. ``Adam()`` or ``SGD()``. Adam hyperparameters (beta1, beta2,
-                epsilon) are read from the object; pass ``Adam(beta1=0.0)`` to
-                disable momentum (e.g. for the high-variance alpha=0 arm,
-                matching the dmop/IFAD convention).
-            alpha (float, optional): DPOP discount / cooling factor.
-            alpha_cooling (float, optional): Cosine cooling factor for alpha.
-                This factor represents the multiplier for the distance of alpha
-                from 1.0 by the end of training. The default keeps alpha fixed.
-            decay (float, optional): Learning-rate decay coefficient. At iteration m,
-                the effective learning rate is ``eta / (1 + decay * m)``.
-            process_weight_state (str or None): Name of the state component that
-                stores the accumulated process log-weight (e.g. ``"logw"``).
-            key (jax.Array, optional): JAX PRNG key. If None, uses the
-                `fresh_key` attribute.
-            theta (PanelParameters, optional): Initial parameter estimates.
-                If None, uses the current `theta` attribute.
+        Parameters
+        ----------
+        J : int
+            Number of particles per unit.
+        M : int
+            Number of training iterations.
+        eta : LearningRate or dict or float
+            Learning rate(s).
+        chunk_size : int or str, optional
+            Number of units to process per gradient step.  Defaults to ``1``.
+        optimizer : Optimizer, optional
+            Optimizer configuration object.  Defaults to ``Adam()``.
+        alpha : float, optional
+            DPOP discount / cooling factor.  Defaults to ``0.97``.
+        alpha_cooling : float, optional
+            Cosine cooling factor for alpha.  Defaults to ``1.0``.
+        decay : float, optional
+            Learning-rate decay coefficient.  Defaults to ``0.0``.
+        process_weight_state : str or None, optional
+            Name of the state component that stores the accumulated process
+            log-weight (e.g. ``"logw"``).
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        theta : PanelParameters or None, optional
+            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
         """
         warnings.warn(
             "dpop_train is experimental and its API and behavior are subject to change.",
@@ -1354,21 +1415,27 @@ class PanelEstimationMixin(Base):
         log_ys: bool = False,
         suppress_warnings: bool = True,
     ) -> pd.DataFrame:
-        """
-        Fits an independent ARIMA model to the observation data for each unit and returns
-        a DataFrame with the estimated log-likelihoods for each unit and the total.
+        """Fit an independent ARIMA model to the observation data of each unit.
 
-        This is a wrapper around `pypomp.benchmarks.arma`.
+        This is a wrapper around :func:`pypomp.benchmarks.arma`.
 
-        Args:
-            order (tuple, optional): The (p, d, q) order for the ARIMA model. Defaults to (1, 0, 1).
-            log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
-                and issues a summary warning instead. Defaults to True.
+        Parameters
+        ----------
+        order : tuple of (int, int, int), optional
+            The ``(p, d, q)`` order for the ARIMA model.  Defaults to
+            ``(1, 0, 1)``.
+        log_ys : bool, optional
+            If ``True``, fit the model to ``log(y + 1)``.  Defaults to ``False``.
+        suppress_warnings : bool, optional
+            If ``True``, suppress statsmodels warning messages during fitting.
+            Defaults to ``True``.
 
-        Returns:
-            pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
-                and their sum (labeled as '[[TOTAL]]' in the first row).
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns ``'unit'`` and ``'logLik'`` containing
+            the individual unit log-likelihoods and their sum (labeled as
+            ``'[[TOTAL]]'``).
         """
         import warnings
 
@@ -1407,19 +1474,23 @@ class PanelEstimationMixin(Base):
     def negbin(
         self, autoregressive: bool = False, suppress_warnings: bool = True
     ) -> pd.DataFrame:
-        """
-        Fits a Negative Binomial model to the observation data for each unit and
-        returns a DataFrame with the estimated log-likelihoods for each unit and the total.
+        """Fit a Negative Binomial model to the observation data of each unit.
 
-        Args:
-            autoregressive (bool, optional): If True, fits an AR(1) model.
-                Defaults to False (iid).
-            suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
-                and issues a summary warning instead. Defaults to True.
+        Parameters
+        ----------
+        autoregressive : bool, optional
+            If ``True``, fit an autoregressive AR(1) model.  Defaults to
+            ``False`` (iid).
+        suppress_warnings : bool, optional
+            If ``True``, suppress statsmodels warning messages during fitting.
+            Defaults to ``True``.
 
-        Returns:
-            pd.DataFrame: A DataFrame with columns 'unit' and 'logLik' containing results for each unit
-                and their sum (labeled as '[[TOTAL]]' in the first row).
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns ``'unit'`` and ``'logLik'`` containing
+            the individual unit log-likelihoods and their sum (labeled as
+            ``'[[TOTAL]]'``).
         """
         import warnings
 

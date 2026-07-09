@@ -161,7 +161,7 @@ def test_pickle_by_value():
     unpickled = pickle.loads(pickle.dumps(pomp))
     assert unpickled.statenames == pomp.statenames
     assert float(unpickled.t0) == float(pomp.t0)
-    assert unpickled.theta.params() == pomp.theta.params()
+    assert unpickled.theta.params(as_list=True) == pomp.theta.params(as_list=True)
     assert jnp.array_equal(
         jax.random.key_data(unpickled.fresh_key), jax.random.key_data(pomp.fresh_key)
     )
@@ -188,7 +188,7 @@ def test_prune(model):
     with pytest.raises(ValueError):
         LG.__class__(
             ys=LG.ys.copy(),
-            theta=pp.PompParameters(LG.theta.params()[0].copy()),
+            theta=pp.PompParameters(LG.theta.params(as_list=True)[0].copy()),
             rinit=LG.rinit.original_func,
             rproc=LG.rproc.original_func,
             dmeas=LG.dmeas.original_func,

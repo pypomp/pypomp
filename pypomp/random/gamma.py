@@ -26,28 +26,48 @@ def fast_gamma(
     adjustment_size: int = 3,
     newton_steps: int = 3,
 ) -> jax.Array:
-    """
-    Generate a Gamma random variable using an approximate inverse CDF method in order to run fast on GPUs.
+    """Sample Gamma random variates using a GPU-optimized inverse CDF algorithm.
 
-    The implementation follows the methodology from Temme (1992). To extend the method to small alpha values, we apply a multi-step trick. The method does not produce exact Gamma random variables, but it is very close to exact.
+    Generates Gamma(alpha, 1)-distributed samples using an approximate
+    inverse CDF method based on Temme (1992).  A multi-step adjustment
+    trick extends accuracy to ``alpha`` values less than 2.
+    Results are very close to exact but not guaranteed to be identical
+    to a reference sampler.
 
-    Args:
-        key: a PRNG key used as the random key.
-        alpha: shape parameters for the Gamma(alpha, 1) distribution.
-        dtype: optional, a float dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32).
-        adjustment_size: number of uniform adjustments to apply.
-            The function generates Gamma(alpha + adjustment_size) and reduces
-            it to Gamma(alpha) using adjustment_size uniform adjustments. The larger the value, the more accurate the approximation at low alpha values (e.g.,
-            alpha < 2).
-        newton_steps: number of Newton-Raphson iterations to perform for refining
-            the CDF inverse approximation.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    alpha : jax.Array
+        Shape parameter(s) for the Gamma(alpha, 1) distribution.  Must
+        be positive.
+    dtype : np.dtype or None, optional
+        Floating-point output dtype.  Defaults to ``float64`` if
+        ``jax_enable_x64=True``, otherwise ``float32``.
+    adjustment_size : int, optional
+        Number of uniform adjustments to apply for small-``alpha``
+        accuracy.  Defaults to ``3``.
+    newton_steps : int, optional
+        Number of Newton-Raphson refinement steps.  Defaults to ``3``.
 
-    Returns:
-        A jax.Array with the same shape as alpha.
+    Returns
+    -------
+    jax.Array
+        Gamma samples with the same shape as ``alpha``.
 
-    References:
-        * Temme, N. M. "Asymptotic Inversion of Incomplete Gamma Functions." Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from pypomp.random import fast_gamma
+    >>> fast_gamma(jax.random.key(0), alpha=jnp.array(2.0))
+    Array(1.8..., dtype=float32)
+
+    References
+    ----------
+    Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
+    Functions." *Mathematics of Computation* 58, no. 198 (1992):
+    755–64. https://doi.org/10.2307/2153214.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -95,22 +115,41 @@ def gammainv(
     dtype: np.dtype | None = None,
     newton_steps: int = 3,
 ) -> Array:
-    """
-    Vectorized inverse Gamma CDF approximation using JAX primitives.
+    """Compute the approximate inverse Gamma CDF using JAX primitives.
 
-    The implementation follows the methodology from Temme (1992). The method does not perfectly match the inverse CDF, but it is very close. The approximation is best for large values of `alpha`, giving an accuracy of at least four significant digits for `alpha` >= 2.
+    Vectorised implementation following the asymptotic inversion method
+    from Temme (1992).  The approximation is most accurate for large
+    ``alpha`` (at least four significant digits for ``alpha >= 2``).
 
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        alpha: Corresponding Gamma shape parameter(s), must be positive.
-        dtype: Data type for computation and return values.
-        newton_steps: Number of Newton-Raphson iterations to perform (default: 3).
+    Parameters
+    ----------
+    u : jax.Array
+        Uniform probabilities in ``[0, 1]``.  Scalar or array.
+    alpha : jax.Array
+        Gamma shape parameter(s).  Must be positive.  Broadcast-
+        compatible with ``u``.
+    dtype : np.dtype or None, optional
+        Floating-point dtype for computation.  Inferred from inputs if
+        ``None``.
+    newton_steps : int, optional
+        Number of Newton-Raphson refinement iterations.  Defaults to
+        ``3``.
 
-    Returns:
-        DeviceArray with the same broadcast shape as `u` and `alpha`.
+    Returns
+    -------
+    jax.Array
+        Array of Gamma quantiles with the broadcast shape of ``u`` and
+        ``alpha``.
 
-    References:
-        * Temme, N. M. "Asymptotic Inversion of Incomplete Gamma Functions." Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
+    References
+    ----------
+    .. [1] Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
+       Functions." *Mathematics of Computation* 58, no. 198 (1992):
+       755–64. https://doi.org/10.2307/2153214.
+
+    See Also
+    --------
+    fast_gamma : High-level sampler that wraps this function.
     """
     u, alpha = jnp.broadcast_arrays(u, alpha)
     if dtype is None:

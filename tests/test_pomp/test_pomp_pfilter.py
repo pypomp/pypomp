@@ -34,7 +34,7 @@ def test_class_basic_default(simple):
 
 def test_reps_default(simple):
     LG, key, J = simple
-    theta = LG.theta.params()
+    theta = LG.theta.params(as_list=True)
     theta_list = [theta[0], {k: v * 2 for k, v in theta[0].items()}]
     LG.pfilter(J=J, key=key, theta=pp.PompParameters(theta_list), reps=2)
     val1 = LG.results_history[-1].logLiks
@@ -45,7 +45,7 @@ def test_reps_default(simple):
 def test_order_of_parameters_consistency(simple):
     # check that the order of parameters in the theta dict does not affect the results
     LG, key, J = simple
-    theta_orig = LG.theta.params()[0]
+    theta_orig = LG.theta.params(as_list=True)[0]
 
     keys = list(theta_orig.keys())
     reversed_keys = list(reversed(keys))
@@ -83,7 +83,7 @@ def test_diagnostics(
     simple, theta_spec, reps, expected_shape, CLL, ESS, filter_mean, prediction_mean
 ):
     LG, key, J = simple
-    theta_params = LG.theta.params()
+    theta_params = LG.theta.params(as_list=True)
     if theta_spec == "single":
         theta = pp.PompParameters(theta_params[0])
     else:

@@ -8,20 +8,35 @@ def align_params(
     names: list[str],
     axis: int = -1,
 ) -> jax.Array:
-    """
-    Stateless utility to align and stack parameter arrays or scalars into a single
-    JAX array matching the specified canonical names.
+    """Align and stack parameter arrays into the canonical ordering for a model struct.
 
-    This is useful for preparing the parameter arrays required by functions under
-    `pypomp.functional` (e.g. `mif`, `pfilter`, `train`) from dictionaries.
+    Builds a single JAX array from a dictionary of named parameter values,
+    reordering them to match the canonical ``param_names`` order expected
+    by :func:`pypomp.functional.pfilter`, :func:`mif`, and
+    :func:`train`.
 
-    Args:
-        params: Dictionary mapping parameter names to JAX arrays or float scalars.
-        names: List of parameter names in target canonical order (e.g. struct.param_names).
-        axis: The axis along which to stack the parameters (defaults to the last axis).
+    Parameters
+    ----------
+    params : mapping of str to jax.Array or float
+        Dictionary mapping parameter names to JAX arrays or float scalars.
+    names : list of str
+        Canonical parameter name ordering (e.g. ``struct.param_names``).
+    axis : int, optional
+        Axis along which to stack.  Defaults to ``-1`` (last axis).
 
-    Returns:
-        jax.Array: Stacked array aligned with the canonical names.
+    Returns
+    -------
+    jax.Array
+        Array whose last axis (by default) corresponds to ``names`` in
+        order.
+
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> import pypomp.functional as F
+    >>> params = {"beta": jnp.array(0.5), "gamma": jnp.array(0.1)}
+    >>> F.align_params(params, names=["gamma", "beta"])
+    Array([0.1, 0.5], dtype=float32)
     """
     try:
         return jnp.stack([jnp.asarray(params[name]) for name in names], axis=axis)

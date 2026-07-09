@@ -211,9 +211,9 @@ class UKMeasles:
             The name of the unit to use.
         theta : PompParameters
             Parameters for the model.
-        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
+        model : {"001", "001b", "001c", "001d", "002", "002d", "003"}
             The model to use.
-        interp_method : Literal["shifted_splines", "linear"]
+        interp_method : {"shifted_splines", "linear"}
             The method to use to interpolate the covariates.
         first_year : int
             The first year of the data to use.
@@ -337,9 +337,9 @@ class UKMeasles:
             List of units to include in the panel.
         theta : PanelParameters
             Parameters for the panel model.
-        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
+        model : {"001", "001b", "001c", "001d", "002", "002d", "003"}
             The model to use.
-        interp_method : Literal["shifted_splines", "linear"]
+        interp_method : {"shifted_splines", "linear"}
             The method to use to interpolate the covariates.
         first_year : int
             The first year of the data to use.
@@ -362,7 +362,7 @@ class UKMeasles:
         param_names = mod.param_names
 
         pomp_dict = {}
-        theta_list = theta.params()
+        theta_list = theta.params(as_list=True)
 
         for unit in units:
             unit_theta_dict = {}

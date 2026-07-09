@@ -12,41 +12,51 @@ def dpop(
     process_weight_index: int,
     keys: jax.Array,
 ) -> jax.Array:
-    """
-    This is a pure functional implementation of the DPOP differentiable particle
-    filter, intended for users who need to compose it within custom JAX
-    loops or higher-order functions. For a more user-friendly (but impurely-functional) interface, see
-    :meth:`pypomp.core.pomp.Pomp.dpop_train`.
+    """DPOP differentiable particle filter log-likelihood objective.
+
+    A pure functional implementation of the DPOP differentiable particle
+    filter, intended for composition within custom JAX loops or
+    higher-order functions.
 
     .. warning::
-        This function is experimental. Its API and behavior are subject to change in future releases.
+       This function is experimental.  Its API and behavior are subject to change
+       in future releases.
 
-    This function is analogous to :func:`pypomp.functional.mop` as a fully differentiable objective function
-    for parameter estimation. However, it additionally
-    incorporates a per-interval transition log-weight that is
+    This function is analogous to :func:`pypomp.functional.mop` as a fully
+    differentiable objective function for parameter estimation.  However, it
+    additionally incorporates a per-interval transition log-weight that is
     assumed to be stored in one of the state components.
 
-    The process log-weight is expected to be accumulated over a
-    single observation interval by the user-specified process
-    model. At the beginning of each interval, the corresponding
-    state component should be reset to zero (this is naturally
-    handled by ``accumvars``).
+    The process log-weight is expected to be accumulated over a single
+    observation interval by the user-specified process model.  At the
+    beginning of each interval, the corresponding state component should be
+    reset to zero (this is naturally handled by ``accumvars``).
 
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        J (int): Number of particles.
-        alpha (float): Alpha parameter for DPOP.
-        process_weight_index (int): Index of the process weight state.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.
+    thetas_array : jax.Array
+        Array of initial parameters of shape ``(n_reps, n_params)``, aligned
+        with the canonical order of ``struct.param_names``.
+    J : int
+        Number of particles.
+    alpha : float
+        Alpha parameter for DPOP.
+    process_weight_index : int
+        Index of the process weight state component.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
 
-    Returns:
-        jax.Array: Negative DPOP log-likelihood estimates.
+    Returns
+    -------
+    jax.Array
+        Negative DPOP log-likelihood estimates.
 
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
+    See Also
+    --------
+    pypomp.Pomp.dpop_train : High-level OOP training interface.
+    pypomp.functional.align_params : Prepare parameter arrays.
     """
     warnings.warn(
         "dpop is experimental and its API and behavior are subject to change.",

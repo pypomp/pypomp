@@ -28,6 +28,7 @@ PanelPomp Class
    ~PanelPomp.pfilter
    ~PanelPomp.mif
    ~PanelPomp.train
+   ~PanelPomp.dpop_train
 
 .. rubric:: Supporting Methods
 .. autosummary::
@@ -36,6 +37,7 @@ PanelPomp Class
    ~PanelPomp.get_unit_names
    ~PanelPomp.get_unit_parameters
    ~PanelPomp.sample_params
+   ~PanelPomp.to_struct
    ~PanelPomp.prune
    ~PanelPomp.mix_and_match
    ~PanelPomp.results

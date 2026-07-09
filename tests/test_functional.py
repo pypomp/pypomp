@@ -140,7 +140,7 @@ def panel_setup():
     LG1.par_trans = pp.ParTrans()
     LG2.par_trans = pp.ParTrans()
 
-    theta_base = LG1.theta.params()[0]
+    theta_base = LG1.theta.params(as_list=True)[0]
 
     shared_params = pd.DataFrame(
         index=pd.Index(shared_param_names),

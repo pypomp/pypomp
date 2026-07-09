@@ -1,4 +1,4 @@
-﻿pypomp.models.UKMeasles.Pomp
+pypomp.models.UKMeasles.Pomp
 ============================
 
 .. currentmodule:: pypomp.models

@@ -41,18 +41,22 @@ class ParameterSet(ABC, Generic[T_data]):
 
     @abstractmethod
     def to_jax_array(self, param_names: list[str] | None = None, **kwargs) -> jax.Array:
-        """
-        Converts the parameters to a JAX array suitable for model functions.
+        """Convert the parameters to a JAX array suitable for model functions.
 
-        Args:
-            param_names: A list of canonical parameter names expected by the model.
-                If None, defaults to the canonical order of parameters in the set.
-            **kwargs: Additional context required for conversion (e.g. unit names).
+        Parameters
+        ----------
+        param_names : list of str or None, optional
+            Canonical parameter names expected by the model.  If ``None``,
+            defaults to the canonical order of parameters in the set.
+        **kwargs : dict
+            Additional context required for conversion (e.g. unit names).
 
-        Returns:
-            A JAX array representing the parameters.
-            - For Pomp: Shape (num_theta_idx, n_params)
-            - For PanelPomp: Shape (num_theta_idx, n_units, n_params)
+        Returns
+        -------
+        jax.Array
+            JAX array representing the parameters.  For ``Pomp`` models,
+            shape is ``(n_reps, n_params)``.  For ``PanelPomp`` models, shape
+            is ``(n_reps, n_units, n_params)``.
         """
         pass
 
@@ -134,12 +138,15 @@ class ParameterSet(ABC, Generic[T_data]):
         return f"{self.__class__.__name__}(\n{self._data.__str__()}\n)"
 
     def prune(self, n: int = 1, refill: bool = True) -> None:
-        """
-        Replace internal parameter sets with the top `n` based on stored log-likelihoods.
+        """Replace internal parameter sets with the top `n` by log-likelihood.
 
-        Args:
-            n: Number of top-performing parameter sets to keep.
-            refill: If True, duplicate the top `n` sets to restore the original length.
+        Parameters
+        ----------
+        n : int, optional
+            Number of top-performing parameter sets to keep.  Defaults to ``1``.
+        refill : bool, optional
+            If ``True``, duplicate the top ``n`` sets to restore the original
+            number of replicates.  Defaults to ``True``.
         """
         n_reps = self.num_replicates()
         if n_reps == 0:
@@ -189,8 +196,15 @@ class ParameterSet(ABC, Generic[T_data]):
         par_trans: ParTrans,
         direction: Literal["to_est", "from_est"] | None = None,
     ) -> None:
-        """
-        Transform the parameters to or from the estimation parameter space.
+        """Transform parameters between natural and estimation scales.
+
+        Parameters
+        ----------
+        par_trans : ParTrans
+            Parameter transformation mapping.
+        direction : {"to_est", "from_est"} or None, optional
+            Direction of the transformation.  If ``None`` (default), toggle the
+            scale relative to the current ``estimation_scale`` attribute.
         """
         auto = direction is None
         if auto:
@@ -204,28 +218,29 @@ class ParameterSet(ABC, Generic[T_data]):
             self.estimation_scale = not self.estimation_scale
 
     @overload
-    def params(self, as_list: Literal[True] = True) -> list[Any]: ...
+    def params(self, as_list: Literal[True]) -> list[Any]: ...
 
     @overload
-    def params(self, as_list: Literal[False]) -> T_data: ...
+    def params(self, as_list: Literal[False] = False) -> T_data: ...
 
     @overload
-    def params(self, as_list: bool = True) -> list[Any] | T_data: ...
+    def params(self, as_list: bool = False) -> list[Any] | T_data: ...
 
-    def params(self, as_list: bool = True) -> list[Any] | T_data:
-        """
-        Get the parameter values in this parameter set.
+    def params(self, as_list: bool = False) -> list[Any] | T_data:
+        """Get the parameter values in this parameter set.
 
         Parameters
         ----------
-        as_list : bool, default True
-            If True, returns the parameters as a list of Python dictionaries.
-            If False, returns the internal xarray representation (DataArray or Dataset).
+        as_list : bool, optional
+            If ``True``, returns the parameters as a list of Python
+            dictionaries.  If ``False`` (default), returns the internal xarray
+            representation (DataArray or Dataset).
 
         Returns
         -------
-        list[Any] | xr.DataArray | xr.Dataset
-            The parameters either as a list of dictionaries or as an xarray object.
+        list of dict or xr.DataArray or xr.Dataset
+            The parameters either as a list of dictionaries or as an xarray
+            object.
         """
         if as_list:
             return self._to_list()

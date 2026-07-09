@@ -225,7 +225,7 @@ def test_panel_dpop_train_multi_replicate():
     panel = _get_sir_panel()
 
     # Build 2-replicate theta
-    base_theta = panel.theta.params()[0]
+    base_theta = panel.theta.params(as_list=True)[0]
     theta = pp.PanelParameters(theta=[deepcopy(base_theta), deepcopy(base_theta)])
 
     J, M = 2, 2

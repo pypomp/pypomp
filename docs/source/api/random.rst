@@ -1,12 +1,12 @@
 Fast Random Number Generation on GPUs
 ======================================
 
-The simulators included in the JAX package often suffer from warp divergence due to using rejection sampling. For the user's convenience, we have included a few replacement functions that use Inverse Transform Sampling to generate random variables. These functions use JAX under the hood, so they can be used in a JIT-compiled context. While the following functions include some branching in order to handle edge cases, the performance loss from warp divergence is minimal. 
+The simulators included in the JAX package often suffer from warp divergence due to using rejection sampling. For the user's convenience, we have included a few replacement functions that use Inverse Transform Sampling to generate random variables. These functions use JAX under the hood, so they can be used in a JIT-compiled context. While the following functions include some branching in order to handle edge cases, the performance loss from warp divergence is minimal.
 
 What is warp divergence?
 -------------------------
 
-Warp divergence is a performance-degrading phenomenon on GPUs that occurs when threads within the same warp (typically a group of 32 threads) encounter a conditional branch, such as an if/else statement, and follow different execution paths. Because GPU hardware uses a Single Instruction, Multiple Thread (SIMT) model, all threads in a warp share a single program counter; if they diverge, the GPU must serialize the paths, executing each one sequentially while masking out the inactive threads, which can lead to significant drops in throughput. 
+Warp divergence is a performance-degrading phenomenon on GPUs that occurs when threads within the same warp (typically a group of 32 threads) encounter a conditional branch, such as an if/else statement, and follow different execution paths. Because GPU hardware uses a Single Instruction, Multiple Thread (SIMT) model, all threads in a warp share a single program counter; if they diverge, the GPU must serialize the paths, executing each one sequentially while masking out the inactive threads, which can lead to significant drops in throughput.
 
 Why is warp divergence relevant here?
 --------------------------------------
@@ -29,4 +29,12 @@ Random Variate Generators
    fast_gamma
    fast_nbinomial
 
+Inverse Cumulative Distribution Functions (CDFs)
+-----------------------------------------------
 
+.. autosummary::
+   :toctree: generated/
+
+   poissoninv
+   binominv
+   gammainv

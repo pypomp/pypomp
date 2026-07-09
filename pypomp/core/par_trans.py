@@ -11,8 +11,22 @@ TUnit = TypeVar("TUnit", bound=np.ndarray | jax.Array | None)
 
 
 class ParTrans:
-    """
-    Handles parameter transformations between natural and estimation parameter spaces.
+    """Parameter transformations between natural and estimation scales.
+
+    Enables numerical algorithms to switch between operating in an unconstrained
+    estimation parameter space (e.g. log-transformed positive parameters,
+    logit-transformed probabilities) and running the model in the natural parameter
+    space.
+
+    Parameters
+    ----------
+    to_est : callable or None, optional
+        A function mapping a parameter dictionary to the estimation scale.
+        If ``None``, defaults to the identity transformation.
+    from_est : callable or None, optional
+        A function mapping a parameter dictionary from the estimation scale
+        back to the natural scale.  If ``None``, defaults to the identity
+        transformation.
     """
 
     to_est: Callable[[ParamDict], ParamDict]
@@ -120,9 +134,6 @@ class ParTrans:
         Returns:
             A tuple (transformed_shared, transformed_unit) of the same types and shapes
             as the inputs. If an input array is None, the corresponding output is also None.
-
-        Raises:
-            ValueError: If direction is not "to_est" or "from_est".
         """
         if direction not in ("to_est", "from_est"):
             raise ValueError(f"Invalid direction: {direction}")

@@ -178,7 +178,18 @@ class BaseResult(ABC):
 
     @abstractmethod
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
-        """Convert result to DataFrame."""
+        """Convert results to a pandas DataFrame.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether to ignore NaNs when computing log-likelihoods and standard errors.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame representation of the results.
+        """
         pass
 
     @classmethod
@@ -187,7 +198,19 @@ class BaseResult(ABC):
         return _merge_results(cls, results)
 
     def CLL(self, average: bool = False) -> pd.DataFrame:
-        """Return conditional log-likelihoods as a DataFrame."""
+        """Return conditional log-likelihoods as a DataFrame.
+
+        Parameters
+        ----------
+        average : bool, optional
+            If ``True``, average the conditional log-likelihoods over the
+            replicates scaled in likelihood space.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of conditional log-likelihoods.
+        """
         cll_da = getattr(self, "CLL_da", None)
         if cll_da is None or cll_da.size == 0:
             return pd.DataFrame()
@@ -209,7 +232,19 @@ class BaseResult(ABC):
         )
 
     def ESS(self, average: bool = False) -> pd.DataFrame:
-        """Return Effective Sample Size as a DataFrame."""
+        """Return Effective Sample Size as a DataFrame.
+
+        Parameters
+        ----------
+        average : bool, optional
+            If ``True``, average the ESS values over replicates.  Defaults to
+            ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of ESS values.
+        """
         ess_da = getattr(self, "ESS_da", None)
         if ess_da is None or ess_da.size == 0:
             return pd.DataFrame()
@@ -217,7 +252,13 @@ class BaseResult(ABC):
         return ess.to_dataframe(name="ESS").reset_index()
 
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this result."""
+        """Return parameter and likelihood trace history.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of the traces.
+        """
         return pd.DataFrame()
 
     def print_summary(self, n: int = 5):

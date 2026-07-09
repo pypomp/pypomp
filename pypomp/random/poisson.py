@@ -33,24 +33,50 @@ def fast_poisson(
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
 ) -> Array:
-    """
-    Generate a Poisson random variable with given rate parameter using an approximate inverse CDF method in order to run fast on GPUs.
+    """Sample Poisson random variates using a GPU-optimized inverse CDF algorithm.
 
-    Follows the methodology from Giles (2016). We made some ad-hoc modifications to the algorithm to improve its speed. In particular, we put a cap on how many iterations the Newton-Raphson method and the exact inverse CDF method can take, and we adjusted the thresholds for applying the exact inverse CDF method. Our implementation of the method does not produce exact Poisson random variables, but it is very close to exact.
+    Generates Poisson-distributed integers with rate ``lam`` using an
+    approximate inverse CDF method from Giles (2016).  The implementation is
+    designed to run efficiently on GPUs.
 
-    Args:
-        key: a PRNG key used as the random key.
-        lam: rate parameters for the Poisson distribution.
-        dtype: optional, an integer dtype for the returned values (default int64 if
-            jax_enable_x64 is true, otherwise int32).
-        max_newton_loops: Cap on iterations for the Newton-Raphson method.
-        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
+    Iterations of both the Newton-Raphson and exact inverse CDF stages are
+    capped to bound runtime.  The output is very close to exact Poisson but
+    not guaranteed to be identical to a reference sampler.
 
-    Returns:
-        A Poisson random variable.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    lam : jax.Array
+        Rate parameter(s).  Broadcast with ``key`` shape.  Negative values
+        produce ``-1``.
+    dtype : np.dtype or None, optional
+        Integer output dtype.  Defaults to ``int64`` if
+        ``jax_enable_x64=True``, otherwise ``int32``.
+    max_newton_loops : int, optional
+        Maximum Newton-Raphson iterations.  Defaults to ``5``.
+    max_inverse_cdf_loops : int, optional
+        Maximum exact inverse CDF iterations.  Defaults to ``20``.
 
-    References:
-        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
+    Returns
+    -------
+    jax.Array
+        Integer array of Poisson samples with the broadcast shape of
+        ``lam``.  Returns ``-1`` for invalid (negative) rate inputs.
+
+    Examples
+    --------
+    >>> import jax
+    >>> from pypomp.random import fast_poisson
+    >>> fast_poisson(jax.random.key(0), lam=5.0)
+    Array(5, dtype=int32)
+
+    References
+    ----------
+    Giles, Michael B. "Algorithm 955: Approximation of the Inverse
+    Poisson Cumulative Distribution Function." *ACM Transactions on
+    Mathematical Software* 42, no. 1 (2016): 1–22.
+    https://doi.org/10.1145/2699466.
     """
     dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
     assert dtype is not None
@@ -108,18 +134,42 @@ def poissoninv(
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
 ) -> Array:
-    """
-    Vectorized inverse Poisson CDF approximation using JAX primitives.
+    """Compute the approximate inverse Poisson CDF using JAX primitives.
 
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        lam: Corresponding Poisson rate(s), must be positive.
-        dtype: Data type for the computation and return value.
-        max_newton_loops: Cap on iterations for the Newton-Raphson method.
-        max_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method.
+    Vectorised implementation of the inverse CDF for the Poisson
+    distribution from Giles (2016).
 
-    Returns:
-        DeviceArray with the same broadcast shape as `u` and `lam`.
+    Parameters
+    ----------
+    u : jax.Array
+        Uniform probabilities in ``[0, 1]``.  Scalar or array.
+    lam : jax.Array
+        Poisson rate parameter(s).  Must be positive.  Broadcast-
+        compatible with ``u``.
+    dtype : np.dtype or None, optional
+        Floating-point dtype for intermediate computations and the
+        return value.  Inferred from inputs if ``None``.
+    max_newton_loops : int, optional
+        Maximum Newton-Raphson iterations.  Defaults to ``5``.
+    max_inverse_cdf_loops : int, optional
+        Maximum exact inverse CDF iterations.  Defaults to ``20``.
+
+    Returns
+    -------
+    jax.Array
+        Array of Poisson quantiles with the broadcast shape of ``u`` and
+        ``lam``.
+
+    See Also
+    --------
+    fast_poisson : High-level sampler that wraps this function.
+
+    References
+    ----------
+    Giles, Michael B. "Algorithm 955: Approximation of the Inverse
+    Poisson Cumulative Distribution Function." *ACM Transactions on
+    Mathematical Software* 42, no. 1 (2016): 1–22.
+    https://doi.org/10.1145/2699466.
     """
 
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)
@@ -188,6 +238,7 @@ def _newton_region(s: Array, lam: Array, dtype, max_newton_loops: int) -> Array:
     first = jnp.array(True, dtype=jnp.bool_)
     counter = 0
 
+    # vanilla for loops are used because they are more efficient than jax.lax.fori_loop by a long shot in this case
     for _ in range(max_newton_loops):
         diff = jnp.abs(r - r_prev)
         not_done = jnp.logical_or(first, diff > 1e-5)
@@ -238,6 +289,7 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
 
         active = jnp.array(True)
 
+        # vanilla for loops are used because they are more efficient than jax.lax.fori_loop by a long shot in this case
         for _ in range(max_inverse_cdf_loops):
             current_cond = s < zero
 

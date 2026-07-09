@@ -93,7 +93,18 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         ]
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
-        """Convert panel pfilter result to DataFrame."""
+        """Convert results to a pandas DataFrame.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether to ignore rows containing NaN when computing log-likelihoods and standard errors.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame representation of the results.
+        """
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
         unit_names = self.logLiks.coords["unit"].values
         se_unit = (
@@ -142,7 +153,13 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         return df
 
     def traces(self) -> pd.DataFrame:
-        """Return pfilter results formatted as traces (long format)."""
+        """Return parameter and likelihood trace history.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of the traces.
+        """
         ll = logmeanexp(self.logLiks.values, axis=-1)
         se_unit = (
             logmeanexp_se(self.logLiks.values, axis=-1)

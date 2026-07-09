@@ -9,6 +9,9 @@ Example Models
    :toctree: generated/
 
    ~dhaka
-   ~spx
-   UKMeasles.Pomp
    ~LG
+   ~sir
+   ~spx
+   ~UKMeasles
+   UKMeasles.Pomp
+   UKMeasles.PanelPomp

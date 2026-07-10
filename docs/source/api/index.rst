@@ -14,8 +14,16 @@ Core Classes
    parameters
    results
 
-Model Components
-----------------
+Functional API
+--------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   functional
+
+Configuration & Tuning
+----------------------
 
 .. toctree::
    :maxdepth: 2
@@ -24,7 +32,6 @@ Model Components
    rw_sigma
    learning_rate
    optimizers
-   functional
 
 Utilities
 ---------
@@ -43,4 +50,3 @@ Example Models
    :maxdepth: 2
 
    examples
-

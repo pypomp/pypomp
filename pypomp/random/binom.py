@@ -38,7 +38,7 @@ def fast_multinomial(
 
     Generates multinomial counts by sequentially sampling binomial
     components via :func:`fast_binomial`.  Follows the methodology from
-    Giles and Beentjes (2024).  Results are very close to exact but not
+    Giles and Beentjes (2024) [1]_.  Results are very close to exact but not
     guaranteed to be identical to a reference sampler.
 
     Parameters
@@ -68,12 +68,17 @@ def fast_multinomial(
         Multinomial count array with the same shape as ``p`` and the
         specified ``dtype``.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     References
     ----------
-    Giles, Michael B., and Casper Beentjes. "Approximation of an
-    Inverse of the Incomplete Beta Function." In *Mathematical Software
-    – ICMS 2024*, vol. 14749. Springer, 2024.
-    https://doi.org/10.1007/978-3-031-64529-7_22.
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     if not (
@@ -135,7 +140,7 @@ def fast_binomial(
 
     Generates binomial counts with parameters ``(n, p)`` using an
     approximate inverse incomplete beta function method.  The
-    implementation follows Giles and Beentjes (2024), with an optional
+    implementation follows Giles and Beentjes (2024) [1]_, with an optional
     exact inverse CDF correction for small or extreme quantiles.
     Results are very close to exact but not guaranteed to be identical
     to a reference sampler.
@@ -165,6 +170,11 @@ def fast_binomial(
         Binomial samples with the broadcast shape of ``n`` and ``p`` and
         the specified ``dtype``.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     Examples
     --------
     >>> import jax
@@ -175,10 +185,10 @@ def fast_binomial(
 
     References
     ----------
-    Giles, Michael B., and Casper Beentjes. "Approximation of an
-    Inverse of the Incomplete Beta Function." In *Mathematical Software
-    – ICMS 2024*, vol. 14749. Springer, 2024.
-    https://doi.org/10.1007/978-3-031-64529-7_22.
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -235,7 +245,7 @@ def binominv(
     """Compute the approximate inverse binomial CDF using JAX primitives.
 
     Vectorised implementation using the normal asymptotic expansion
-    formulas from Giles and Beentjes (2024).  A bottom-up exact
+    formulas from Giles and Beentjes (2024) [1]_.  A bottom-up exact
     inverse CDF calculation is performed for small values.
 
     Parameters
@@ -261,16 +271,21 @@ def binominv(
         Array of binomial quantiles with the broadcast shape of the
         inputs.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    See Also
+    --------
+    fast_binomial : High-level sampler that wraps this function.
+
     References
     ----------
     .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
        Inverse of the Incomplete Beta Function." In *Mathematical Software
        – ICMS 2024*, vol. 14749. Springer, 2024.
        https://doi.org/10.1007/978-3-031-64529-7_22.
-
-    See Also
-    --------
-    fast_binomial : High-level sampler that wraps this function.
     """
     u, n, p = jnp.broadcast_arrays(u, n, p)
     if dtype is None:

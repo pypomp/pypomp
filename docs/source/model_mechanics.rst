@@ -1,7 +1,7 @@
-Model Structure Components
-==========================
+Model Mechanics
+===============
 
-The following components define the core behavior of a POMP model. 
+The following components define the core behavior of a POMP model.
 Instead of interacting with internal wrapper classes, users provide functions to a :class:`~pypomp.core.pomp.Pomp` object following the specifications below.
 The :class:`~pypomp.core.pomp.Pomp` object will fail to initialize if these functions do not strictly
 adhere to the specifications.
@@ -12,8 +12,8 @@ This ensures that the arguments are internally mapped to the correct names in th
 State Initialization (rinit)
 ----------------------------
 
-The ``rinit`` function defines the initialization process for the state variables at time :math:`t_0`. 
-It receives parameters, a PRNG key, covariates, and the initial time, and must return 
+The ``rinit`` function defines the initialization process for the state variables at time :math:`t_0`.
+It receives parameters, a PRNG key, covariates, and the initial time, and must return
 a dictionary mapping state names to their initial values.
 
 **Argument Binding:**
@@ -48,9 +48,8 @@ You can define the function arguments in two ways:
 State Transition (rproc)
 ------------------------
 
-The ``rproc`` function defines the process model (state transitions). It performs a 
-**single Euler step**, receiving the current state, parameters, PRNG key, covariates, 
-current time, and step size.
+The ``rproc`` function defines the process model (state transitions).
+It performs a single Euler step, receiving the current state, parameters, PRNG key, covariates, current time, and step size.
 
 **Argument Binding:**
 You can define the function arguments in two ways:
@@ -89,7 +88,7 @@ You can define the function arguments in two ways:
 Measurement Density (dmeas)
 ---------------------------
 
-The ``dmeas`` function calculates the log-likelihood of the data given the state. 
+The ``dmeas`` function calculates the log-likelihood of the data given the state.
 It must return a **scalar** (float or 0-d JAX array).
 
 **Argument Binding:**
@@ -128,7 +127,7 @@ You can define the function arguments in two ways:
 Measurement Simulator (rmeas)
 -----------------------------
 
-The ``rmeas`` function simulates a single observation vector from the current state. 
+The ``rmeas`` function simulates a single observation vector from the current state.
 It must return a 1D **JAX Array** (not a dictionary).
 
 **Argument Binding:**

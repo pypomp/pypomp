@@ -78,6 +78,11 @@ def fast_nbinomial(
         Negative Binomial samples with the broadcast shape of the
         inputs.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     Examples
     --------
     >>> import jax

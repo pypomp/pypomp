@@ -160,7 +160,21 @@ class ResultsHistory:
         Returns
         -------
         pd.DataFrame
-            DataFrame of conditional log-likelihoods.
+            Tidy DataFrame of conditional log-likelihoods. The columns appear
+            in the following order:
+
+            For single-unit models:
+                - ``theta_idx``: Index of the parameter set.
+                - ``rep``: Replicate index (only if ``average=False``).
+                - ``time``: Observation time point.
+                - ``CLL``: Conditional log-likelihood value.
+
+            For panel models:
+                - ``theta_idx``: Index of the parameter set.
+                - ``unit``: Unit name/identifier.
+                - ``rep``: Replicate index (only if ``average=False``).
+                - ``time``: Observation time point.
+                - ``CLL``: Conditional log-likelihood value.
         """
         if not self._entries:
             return pd.DataFrame()
@@ -180,7 +194,20 @@ class ResultsHistory:
         Returns
         -------
         pd.DataFrame
-            DataFrame of ESS values.
+            Tidy DataFrame of ESS values. The columns appear in the following order:
+
+            For single-unit models:
+                - ``theta_idx``: Index of the parameter set.
+                - ``rep``: Replicate index (only if ``average=False``).
+                - ``time``: Observation time point.
+                - ``ESS``: Effective Sample Size value.
+
+            For panel models:
+                - ``theta_idx``: Index of the parameter set.
+                - ``unit``: Unit name/identifier.
+                - ``rep``: Replicate index (only if ``average=False``).
+                - ``time``: Observation time point.
+                - ``ESS``: Effective Sample Size value.
         """
         if not self._entries:
             return pd.DataFrame()
@@ -193,8 +220,24 @@ class ResultsHistory:
         Returns
         -------
         pd.DataFrame
-            DataFrame containing concatenated and iteration-aligned trace data
-            from the history of results.
+            DataFrame containing concatenated and iteration-aligned trace data.
+
+            For single-unit history:
+                - ``theta_idx``: Index of the parameter set.
+                - ``iteration``: Counter indicating the global iteration.
+                - ``method``: Estimation/filtering method.
+                - ``logLik``: Estimated log-likelihood.
+                - ``se``: Standard error of the log-likelihood estimate.
+                - Parameter columns: One column per model parameter in defined order.
+
+            For panel history:
+                - ``theta_idx``: Index of the parameter set.
+                - ``unit``: Unit identifier (or ``'shared'`` for shared parameter rows).
+                - ``iteration``: Counter indicating the global iteration.
+                - ``method``: Estimation/filtering method.
+                - ``logLik``: Estimated log-likelihood.
+                - ``se``: Standard error of the log-likelihood.
+                - Parameter columns: Shared and unit-specific parameters sharded by unit.
         """
         if not self._entries:
             return pd.DataFrame()

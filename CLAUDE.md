@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**pypomp** is a Python package for modeling and inference using Partially Observed Markov Process (POMP) models (also known as state-space models or hidden Markov models). It implements particle filtering, iterated filtering, gradient-based optimization, and other inference algorithms for highly nonlinear, non-Gaussian dynamical systems. The package leverages JAX for GPU support and just-in-time compilation, achieving significant performance improvements over the R **pomp** package.
+Pypomp is a Python package for modeling and inference using Partially Observed Markov Process (POMP) models (also known as state-space models or hidden Markov models). It implements particle filtering, iterated filtering, gradient-based optimization, and other inference algorithms for highly nonlinear, non-Gaussian dynamical systems. The package leverages JAX for GPU support and just-in-time compilation, achieving significant performance improvements over the R Pomp package.
 
 ## Development Commands
 

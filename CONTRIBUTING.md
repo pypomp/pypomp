@@ -1,6 +1,6 @@
 # Contributing to pypomp
 
-Thank you for your interest in contributing to **pypomp**! We welcome all contributions, including bug reports, feature requests, documentation improvements, and code submissions.
+Thank you for your interest in contributing to Pypomp! We welcome all contributions, including bug reports, feature requests, documentation improvements, and code submissions.
 
 To ensure a smooth collaboration process, please read and follow these guidelines.
 

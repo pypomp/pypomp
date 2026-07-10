@@ -101,7 +101,14 @@ class PanelAnalysisMixin(Base):
         Returns
         -------
         pd.DataFrame
-            DataFrame of conditional log-likelihoods.
+            Tidy DataFrame of conditional log-likelihoods. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier.
+            3. ``rep``: The replicate index (only if ``average=False``).
+            4. ``time``: The observation time point.
+            5. ``CLL``: The conditional log-likelihood value.
         """
         return self.results_history.CLL(index=index, average=average)
 
@@ -119,7 +126,13 @@ class PanelAnalysisMixin(Base):
         Returns
         -------
         pd.DataFrame
-            DataFrame of ESS values.
+            Tidy DataFrame of ESS values. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier.
+            3. ``rep``: The replicate index (only if ``average=False``).
+            4. ``time``: The observation time point.
+            5. ``ESS``: The Effective Sample Size value.
         """
         return self.results_history.ESS(index=index, average=average)
 
@@ -139,7 +152,15 @@ class PanelAnalysisMixin(Base):
         Returns
         -------
         pd.DataFrame
-            DataFrame containing concatenated and aligned trace history.
+            Tidy DataFrame of the traces. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier (or ``'shared'`` for shared parameter rows).
+            3. ``iteration``: The iteration counter.
+            4. ``method``: The name of the method.
+            5. ``logLik``: The estimated log-likelihood.
+            6. ``se``: The standard error of the log-likelihood.
+            7. Parameter columns: Shared and unit-specific parameters sharded by unit.
         """
         return self.results_history.traces()
 

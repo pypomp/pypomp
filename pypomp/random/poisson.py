@@ -36,7 +36,7 @@ def fast_poisson(
     """Sample Poisson random variates using a GPU-optimized inverse CDF algorithm.
 
     Generates Poisson-distributed integers with rate ``lam`` using an
-    approximate inverse CDF method from Giles (2016).  The implementation is
+    approximate inverse CDF method from Giles (2016) [1]_.  The implementation is
     designed to run efficiently on GPUs.
 
     Iterations of both the Newton-Raphson and exact inverse CDF stages are
@@ -64,6 +64,11 @@ def fast_poisson(
         Integer array of Poisson samples with the broadcast shape of
         ``lam``.  Returns ``-1`` for invalid (negative) rate inputs.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     Examples
     --------
     >>> import jax
@@ -73,10 +78,10 @@ def fast_poisson(
 
     References
     ----------
-    Giles, Michael B. "Algorithm 955: Approximation of the Inverse
-    Poisson Cumulative Distribution Function." *ACM Transactions on
-    Mathematical Software* 42, no. 1 (2016): 1–22.
-    https://doi.org/10.1145/2699466.
+    .. [1] Giles, Michael B. "Algorithm 955: Approximation of the Inverse
+       Poisson Cumulative Distribution Function." *ACM Transactions on
+       Mathematical Software* 42, no. 1 (2016): 1–22.
+       https://doi.org/10.1145/2699466.
     """
     dtype = check_and_canonicalize_user_dtype(int if dtype is None else dtype)
     assert dtype is not None
@@ -137,7 +142,7 @@ def poissoninv(
     """Compute the approximate inverse Poisson CDF using JAX primitives.
 
     Vectorised implementation of the inverse CDF for the Poisson
-    distribution from Giles (2016).
+    distribution from Giles (2016) [1]_.
 
     Parameters
     ----------
@@ -160,16 +165,21 @@ def poissoninv(
         Array of Poisson quantiles with the broadcast shape of ``u`` and
         ``lam``.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     See Also
     --------
     fast_poisson : High-level sampler that wraps this function.
 
     References
     ----------
-    Giles, Michael B. "Algorithm 955: Approximation of the Inverse
-    Poisson Cumulative Distribution Function." *ACM Transactions on
-    Mathematical Software* 42, no. 1 (2016): 1–22.
-    https://doi.org/10.1145/2699466.
+    .. [1] Giles, Michael B. "Algorithm 955: Approximation of the Inverse
+       Poisson Cumulative Distribution Function." *ACM Transactions on
+       Mathematical Software* 42, no. 1 (2016): 1–22.
+       https://doi.org/10.1145/2699466.
     """
 
     u_arr, lam_arr = jnp.broadcast_arrays(u, lam)

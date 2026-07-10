@@ -103,7 +103,16 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         Returns
         -------
         pd.DataFrame
-            DataFrame representation of the results.
+            Tidy DataFrame representation of the results. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``shared logLik``: The sharded/aggregated shared log-likelihood across all units.
+            3. ``shared logLik se``: The standard error of the shared log-likelihood.
+            4. ``unit``: The unit name/identifier.
+            5. ``unit logLik``: The unit-specific log-likelihood.
+            6. ``unit logLik se``: The standard error of the unit-specific log-likelihood.
+            7. Parameter columns: Shared and unit-specific parameters sharded by unit.
         """
         ll = logmeanexp(self.logLiks.values, axis=-1, ignore_nan=ignore_nan)
         unit_names = self.logLiks.coords["unit"].values
@@ -158,7 +167,15 @@ class PanelPompPFilterResult(PanelPompBaseResult):
         Returns
         -------
         pd.DataFrame
-            DataFrame of the traces.
+            Tidy DataFrame of the traces. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier (or ``'shared'`` for shared parameter rows).
+            3. ``iteration``: The iteration counter (fixed at 0 for ``pfilter``).
+            4. ``method``: The name of the method (``'pfilter'``).
+            5. ``logLik``: The estimated log-likelihood (shared log-likelihood for shared rows, unit-specific log-likelihood for unit rows).
+            6. ``se``: The standard error of the log-likelihood.
+            7. Parameter columns: Shared and unit-specific parameters sharded by unit.
         """
         ll = logmeanexp(self.logLiks.values, axis=-1)
         se_unit = (

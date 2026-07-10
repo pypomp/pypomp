@@ -73,7 +73,13 @@ class PompPFilterResult(PompBaseResult):
         Returns
         -------
         pd.DataFrame
-            DataFrame representation of the results.
+            Tidy DataFrame representation of the results. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``logLik``: The estimated log-likelihood.
+            3. ``se``: The standard error of the log-likelihood estimate.
+            4. Parameter columns: One column per model parameter in their defined order.
         """
         if not self.theta or self.logLiks.size == 0:
             return pd.DataFrame()
@@ -97,7 +103,14 @@ class PompPFilterResult(PompBaseResult):
         Returns
         -------
         pd.DataFrame
-            DataFrame of the traces.
+            Tidy DataFrame of the traces. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``iteration``: The iteration index (fixed at 0 for ``pfilter``).
+            3. ``method``: The name of the method (``'pfilter'``).
+            4. ``logLik``: The estimated log-likelihood.
+            5. ``se``: The standard error of the log-likelihood estimate.
+            6. Parameter columns: One column per model parameter in their defined order.
         """
         df = self.to_dataframe()
         if df.empty:

@@ -36,23 +36,33 @@ Pomp Class
    ~Pomp.train
    ~Pomp.dpop_train
 
-.. rubric:: Supporting Methods
+.. rubric:: Results
+.. autosummary::
+   :toctree: generated/
+
+   ~Pomp.results
+   ~Pomp.traces
+   ~Pomp.CLL
+   ~Pomp.ESS
+
+.. rubric:: Other Supporting Methods
 .. autosummary::
    :toctree: generated/
 
    ~Pomp.sample_params
    ~Pomp.to_struct
    ~Pomp.prune
-   ~Pomp.results
-   ~Pomp.traces
-   ~Pomp.CLL
-   ~Pomp.ESS
    ~Pomp.time
    ~Pomp.arma
    ~Pomp.negbin
    ~Pomp.probe
    ~Pomp.print_summary
    ~Pomp.print_metadata
+   ~Pomp.merge
+
+.. rubric:: Visualization
+.. autosummary::
+   :toctree: generated/
+
    ~Pomp.plot_traces
    ~Pomp.plot_simulations
-   ~Pomp.merge

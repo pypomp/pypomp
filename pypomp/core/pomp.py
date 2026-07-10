@@ -2,7 +2,7 @@
 Object-oriented interface for defining and fitting POMP models.
 
 The :class:`Pomp` class is the primary entry point for single-unit POMP
-modelling in ``pypomp``.  It wraps user-supplied simulator and density
+modelling in Pypomp.  It wraps user-supplied simulator and density
 functions, validates their signatures, and exposes a high-level API for
 particle filtering, iterated filtering, and gradient-based training.
 """
@@ -1043,14 +1043,9 @@ class Pomp:
         M : int
             Number of gradient steps.
         eta : LearningRate
-            Per-parameter learning rates as a LearningRate object. A full
-            per-iteration schedule is applied (row m used at iteration m), so
-            ``LearningRate(rates).cosine_decay(0.05, M)`` works as expected.
+            Per-parameter learning rates as a LearningRate object.
         optimizer : Optimizer, default Adam()
-            Optimizer configuration object, e.g. ``Adam()`` or ``SGD()``. Adam
-            hyperparameters (``beta1``, ``beta2``, ``epsilon``) are read from the
-            object; pass ``Adam(beta1=0.0)`` to disable momentum (e.g. for the
-            high-variance alpha=0 arm, matching the dmop/IFAD convention).
+            Optimizer configuration object, e.g. ``Adam()`` or ``SGD()``.
         alpha : float, default 0.8
             DPOP discount / cooling factor.
         alpha_cooling : float, default 1.0
@@ -1384,17 +1379,15 @@ class Pomp:
         Returns
         -------
         pd.DataFrame
-            Long-format DataFrame with columns:
+            Long-format DataFrame containing concatenated trace data. The columns appear
+            in the following order:
 
-            - ``theta_idx``: index of the parameter set.
-            - ``iteration``: global iteration counter for that parameter set
-              (increments across successive :meth:`mif` / :meth:`train`
-              calls; for :meth:`pfilter` this is the last iteration for
-              that set).
-            - ``method``: ``'pfilter'``, ``'mif'``, or ``'train'``.
-            - ``logLik``: log-likelihood estimate (logmeanexp over reps
-              for :meth:`pfilter`).
-            - One additional column per parameter.
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``iteration``: Counter indicating the global iteration.
+            3. ``method``: The name of the method (e.g. ``'pfilter'``, ``'mif'``, ``'train'``).
+            4. ``logLik``: The estimated log-likelihood.
+            5. ``se``: The standard error of the log-likelihood estimate.
+            6. Parameter columns: One column per model parameter in their defined order.
         """
         return self.results_history.traces()
 
@@ -1419,6 +1412,12 @@ class Pomp:
         pd.DataFrame
             Tidy DataFrame with columns ``logLik`` and one column per
             parameter, indexed by ``theta_idx``.
+
+        See Also
+        --------
+        pypomp.core.results.PompPFilterResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompPFilterResult` class.
+        pypomp.core.results.PompMIFResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompMIFResult` class.
+        pypomp.core.results.PompTrainResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompTrainResult` class.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
@@ -1438,8 +1437,13 @@ class Pomp:
         Returns
         -------
         pd.DataFrame
-            Tidy DataFrame with one row per observation time and one column
-            per replicate (or a single averaged column if ``average=True``).
+            Tidy DataFrame of conditional log-likelihoods. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``rep``: The replicate index (only if ``average=False``).
+            3. ``time``: The observation time point.
+            4. ``CLL``: The conditional log-likelihood value.
         """
         return self.results_history.CLL(index=index, average=average)
 
@@ -1459,8 +1463,12 @@ class Pomp:
         Returns
         -------
         pd.DataFrame
-            Tidy DataFrame with one row per observation time and one column
-            per replicate (or a single averaged column if ``average=True``).
+            Tidy DataFrame of ESS values. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``rep``: The replicate index (only if ``average=False``).
+            3. ``time``: The observation time point.
+            4. ``ESS``: The Effective Sample Size value.
         """
         return self.results_history.ESS(index=index, average=average)
 

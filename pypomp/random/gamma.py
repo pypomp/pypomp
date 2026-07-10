@@ -29,7 +29,7 @@ def fast_gamma(
     """Sample Gamma random variates using a GPU-optimized inverse CDF algorithm.
 
     Generates Gamma(alpha, 1)-distributed samples using an approximate
-    inverse CDF method based on Temme (1992).  A multi-step adjustment
+    inverse CDF method based on Temme (1992) [1]_.  A multi-step adjustment
     trick extends accuracy to ``alpha`` values less than 2.
     Results are very close to exact but not guaranteed to be identical
     to a reference sampler.
@@ -55,6 +55,11 @@ def fast_gamma(
     jax.Array
         Gamma samples with the same shape as ``alpha``.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
     Examples
     --------
     >>> import jax
@@ -65,9 +70,9 @@ def fast_gamma(
 
     References
     ----------
-    Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
-    Functions." *Mathematics of Computation* 58, no. 198 (1992):
-    755–64. https://doi.org/10.2307/2153214.
+    .. [1] Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
+       Functions." *Mathematics of Computation* 58, no. 198 (1992):
+       755–64. https://doi.org/10.2307/2153214.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -118,7 +123,7 @@ def gammainv(
     """Compute the approximate inverse Gamma CDF using JAX primitives.
 
     Vectorised implementation following the asymptotic inversion method
-    from Temme (1992).  The approximation is most accurate for large
+    from Temme (1992) [1]_.  The approximation is most accurate for large
     ``alpha`` (at least four significant digits for ``alpha >= 2``).
 
     Parameters
@@ -141,15 +146,20 @@ def gammainv(
         Array of Gamma quantiles with the broadcast shape of ``u`` and
         ``alpha``.
 
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    See Also
+    --------
+    fast_gamma : High-level sampler that wraps this function.
+
     References
     ----------
     .. [1] Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
        Functions." *Mathematics of Computation* 58, no. 198 (1992):
        755–64. https://doi.org/10.2307/2153214.
-
-    See Also
-    --------
-    fast_gamma : High-level sampler that wraps this function.
     """
     u, alpha = jnp.broadcast_arrays(u, alpha)
     if dtype is None:

@@ -20,7 +20,7 @@ a dictionary mapping state names to their initial values.
 You can define the function arguments in two ways:
 
 1. **By Name:** Use the exact names ``theta_``, ``key``, ``covars``, and ``t0``, in that order.
-2. **By Type:** Label arguments with the types ``ParamDict``, ``RNGKey``, ``CovarDict``, ``InitialTimeFloat``, in any order.
+2. **By Type:** Label arguments with the types :data:`~pypomp.types.ParamDict`, :data:`~pypomp.types.RNGKey`, :data:`~pypomp.types.CovarDict`, and :data:`~pypomp.types.InitialTimeFloat`, in any order.
 
 **Template:**
 
@@ -55,7 +55,7 @@ It performs a single Euler step, receiving the current state, parameters, PRNG k
 You can define the function arguments in two ways:
 
 1. **By Name:** Use the exact parameter names ``X_``, ``theta_``, ``key``, ``covars``, ``t``, ``dt``, in that order.
-2. **By Type:** Label arguments with the types ``StateDict``, ``ParamDict``, ``RNGKey``, ``CovarDict``, ``TimeFloat``, ``StepSizeFloat``, in any order.
+2. **By Type:** Label arguments with the types :data:`~pypomp.types.StateDict`, :data:`~pypomp.types.ParamDict`, :data:`~pypomp.types.RNGKey`, :data:`~pypomp.types.CovarDict`, :data:`~pypomp.types.TimeFloat`, and :data:`~pypomp.types.StepSizeFloat`, in any order.
 
 **Template:**
 
@@ -95,7 +95,7 @@ It must return a **scalar** (float or 0-d JAX array).
 You can define the function arguments in two ways:
 
 1. **By Name:** Use the exact parameter names ``Y_``, ``X_``, ``theta_``, ``covars``, ``t``, in that order.
-2. **By Type:** Label arguments with the types ``ObservationDict``, ``StateDict``, ``ParamDict``, ``CovarDict``, ``TimeFloat``, in any order.
+2. **By Type:** Label arguments with the types :data:`~pypomp.types.ObservationDict`, :data:`~pypomp.types.StateDict`, :data:`~pypomp.types.ParamDict`, :data:`~pypomp.types.CovarDict`, and :data:`~pypomp.types.TimeFloat`, in any order.
 
 **Template:**
 
@@ -134,7 +134,7 @@ It must return a 1D **JAX Array** (not a dictionary).
 You can define the function arguments in two ways:
 
 1. **By Name:** Use the exact parameter names ``X_``, ``theta_``, ``key``, ``covars``, ``t``, in that order.
-2. **By Type:** Label arguments with the types ``StateDict``, ``ParamDict``, ``RNGKey``, ``CovarDict``, ``TimeFloat``, in any order.
+2. **By Type:** Label arguments with the types :data:`~pypomp.types.StateDict`, :data:`~pypomp.types.ParamDict`, :data:`~pypomp.types.RNGKey`, :data:`~pypomp.types.CovarDict`, and :data:`~pypomp.types.TimeFloat`, in any order.
 
 **Template:**
 

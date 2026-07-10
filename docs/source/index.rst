@@ -6,7 +6,7 @@ pypomp documentation
 Pypomp is a Python package for modeling and inference using partially observed Markov process (POMP) models, also called state-space models (SSM) or hidden Markov models (HMM). Key features include:
 
 * Estimation, filtering, and inference for nonlinear, non-Gaussian POMP models via the particle filter
-* GPU support and just-in-time compilation via JAX, enabling significant speedups
+* GPU support and just-in-time compilation via `JAX <https://jax.readthedocs.io/en/latest/>`_, enabling significant speedups
 * New algorithms for model-fitting with gradient descent using improved gradient estimates
 * Support for both standard POMP models and panel POMP models
 
@@ -28,7 +28,7 @@ To install the latest development branch:
 
     pip install git+https://github.com/pypomp/pypomp.git
 
-Pypomp depends on **JAX**.
+Pypomp depends on JAX.
 To take full advantage of GPU acceleration, we highly recommend installing the GPU-enabled version of JAX.
 Please refer to the `JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_ for detailed instructions specific to your system.
 

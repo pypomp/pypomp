@@ -22,8 +22,9 @@ def mif(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Run the Iterated Filtering 2 (IF2) algorithm on a POMP model struct.
 
-    Pure-functional implementation intended for users who need to compose
-    the algorithm within custom JAX loops or higher-order functions.
+    Pure-functional implementation of the Iterated Filtering 2 (IF2) algorithm
+    (Ionides et al. 2015 [1]_), intended for users who need to compose the algorithm
+    within custom JAX loops or higher-order functions.
     For the standard interface, see :meth:`pypomp.Pomp.mif`.
 
     JAX vectorises the computation across all starting parameter sets
@@ -75,6 +76,13 @@ def mif(
     --------
     pypomp.Pomp.mif : Object-oriented interface.
     align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Ionides, Edward L., Dao Nguyen, Yves Atchadé, Stilian Stoev, and Aaron A. King.
+       "Inference for dynamic and latent variable models via iterated, perturbed Bayes maps."
+       *Proceedings of the National Academy of Sciences* 112, no. 3 (2015): 719–724.
+       https://doi.org/10.1073/pnas.1410597112.
     """
 
     thresh = float(max(0.0, thresh))
@@ -139,7 +147,7 @@ def panel_mif(
     """Estimate panel POMP parameters using Panel Iterated Filtering.
 
     A pure functional implementation of the (Marginal) Panel Iterated
-    Filtering (PIF/MPIF) algorithm, intended for composition within custom JAX
+    Filtering (PIF/MPIF) algorithm (Bretó et al. 2020 [1]_; Wheeler et al. 2025 [2]_), intended for composition within custom JAX
     loops.
 
     This function estimates parameters for a Panel POMP model by introducing
@@ -193,6 +201,20 @@ def panel_mif(
     -----
     To align and stack input parameter arrays into the correct canonical
     ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.PanelPomp.mif : Object-oriented interface.
+    align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Bretó, Carles, Edward L. Ionides, and Aaron A. King. "Panel Data Analysis
+       via Mechanistic Models." *Journal of the American Statistical Association*
+       115, no. 531 (2020): 1178–1188. https://doi.org/10.1080/01621459.2019.1604367.
+    .. [2] Wheeler, Jesse, Aaron J. Abkemeier, and Edward L. Ionides. "Iterating
+       marginalized Bayes maps for likelihood maximization with application to nonlinear
+       panel models." *arXiv preprint arXiv:2511.17438* (2025). https://arxiv.org/abs/2511.17438.
     """
 
     thresh = float(max(0.0, thresh))

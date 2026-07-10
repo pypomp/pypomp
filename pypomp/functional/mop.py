@@ -13,8 +13,8 @@ def mop(
     """MOP differentiable particle filter log-likelihood objective.
 
     A pure functional implementation of the Measurement Off-Parameter (MOP)
-    differentiable particle filter, intended for composition within custom JAX
-    loops or higher-order functions.
+    differentiable particle filter (Tan et al. 2024 [1]_), intended for composition
+    within custom JAX loops or higher-order functions.
 
     Unlike the standard particle filter (:func:`~pypomp.functional.pfilter`), the MOP
     objective is designed to be fully differentiable with respect to the model
@@ -43,6 +43,12 @@ def mop(
     --------
     pypomp.Pomp.train : High-level OOP training interface.
     pypomp.functional.align_params : Prepare parameter arrays.
+
+    References
+    ----------
+    .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+       for Partially Observed Markov Processes using Automatic Differentiation."
+       *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
     return _vmapped_mop_internal(

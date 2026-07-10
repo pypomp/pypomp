@@ -1,7 +1,7 @@
 Parameters
 ==========
 
-.. currentmodule:: pypomp.core.parameters
+.. currentmodule:: pypomp
 
 .. autoclass:: PompParameters
    :no-members:

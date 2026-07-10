@@ -1,7 +1,7 @@
 Pomp Class
 ==========
 
-.. currentmodule:: pypomp.core.pomp
+.. currentmodule:: pypomp
 
 .. autoclass:: Pomp
    :no-members:

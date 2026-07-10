@@ -562,6 +562,10 @@ class Pomp:
             to :attr:`results_history`.  Retrieve a dataframe summary with
             :meth:`results` or the log-likelihoods directly via ``model.theta.logLik``.
 
+        See Also
+        --------
+        pypomp.functional.pfilter : Pure-functional JAX particle filter.
+
         Examples
         --------
         >>> model.fresh_key = jax.random.key(0)
@@ -684,7 +688,8 @@ class Pomp:
     ) -> None:
         """Estimate parameters via the Iterated Filtering 2 (IF2) algorithm.
 
-        Maximizes the marginal log-likelihood by perturbing parameters with
+        Maximizes the marginal log-likelihood via the Iterated Filtering 2 (IF2)
+        algorithm (Ionides et al. 2015 [1]_) by perturbing parameters with
         random walks that shrink (cool) over ``M`` iterations.  Each
         iteration runs a bootstrap particle filter with the perturbed
         parameter swarm, then records the mean parameter values as the
@@ -724,6 +729,17 @@ class Pomp:
             A :class:`~pypomp.core.results.PompMIFResult` is appended to
             :attr:`results_history`, containing the log-likelihood monitor,
             parameter traces over iterations, and algorithm settings.
+
+        See Also
+        --------
+        pypomp.functional.mif : Pure-functional JAX IF2.
+
+        References
+        ----------
+        .. [1] Ionides, Edward L., Dao Nguyen, Yves Atchadé, Stilian Stoev, and Aaron A. King.
+           "Inference for dynamic and latent variable models via iterated, perturbed Bayes maps."
+           *Proceedings of the National Academy of Sciences* 112, no. 3 (2015): 719–724.
+           https://doi.org/10.1073/pnas.1410597112.
 
         Examples
         --------
@@ -851,7 +867,7 @@ class Pomp:
     ) -> None:
         """Optimize parameters via a differentiable particle filter (MOP).
 
-        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter, treating the particle filter
+        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter (Tan et al. 2024 [1]_), treating the particle filter
         as a differentiable computation graph and applies gradient-based
         optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
         automatic differentiation.
@@ -908,6 +924,16 @@ class Pomp:
             A :class:`~pypomp.core.results.PompTrainResult` is appended
             to :attr:`results_history`, containing log-likelihood and
             parameter traces over iterations.
+
+        See Also
+        --------
+        pypomp.functional.train : Pure-functional JAX gradient training.
+
+        References
+        ----------
+        .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+           for Partially Observed Markov Processes using Automatic Differentiation."
+           *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
 
         Examples
         --------
@@ -1222,6 +1248,10 @@ class Pomp:
             If ``as_pomp=True``: a new :class:`Pomp` instance whose ``ys``
             contains the simulated observations for the first parameter
             replicate.
+
+        See Also
+        --------
+        pypomp.functional.simulate : Pure-functional JAX simulation.
 
         Examples
         --------

@@ -16,12 +16,11 @@ from typing import (
 
 from .base import ParameterSet
 from ..par_trans import ParTrans
-from pypomp.types import Numeric
 
 
 def _standardize_pomp_theta(
-    theta: Mapping[str, Numeric]
-    | Sequence[Mapping[str, Numeric]]
+    theta: Mapping[str, float]
+    | Sequence[Mapping[str, float]]
     | PompParameters
     | xr.DataArray
     | None,
@@ -32,7 +31,7 @@ def _standardize_pomp_theta(
     if theta is None:
         raise ValueError("theta cannot be None")
 
-    theta_dicts: list[dict[str, Numeric]] = []
+    theta_dicts: list[dict[str, float]] = []
     if isinstance(theta, Mapping):
         theta_dicts = [dict(theta)]
     elif isinstance(theta, (list, tuple)):
@@ -122,8 +121,8 @@ class PompParameters(ParameterSet[xr.DataArray]):
 
     def __init__(
         self,
-        theta: Mapping[str, Numeric]
-        | Sequence[Mapping[str, Numeric]]
+        theta: Mapping[str, float]
+        | Sequence[Mapping[str, float]]
         | PompParameters
         | xr.DataArray
         | None,
@@ -298,16 +297,16 @@ class PompParameters(ParameterSet[xr.DataArray]):
 
     def set_params(
         self,
-        value: Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | xr.DataArray,
+        value: Mapping[str, float] | Sequence[Mapping[str, float]] | xr.DataArray,
     ) -> None:
         """Overwrite parameter values.
 
         Parameters
         ----------
-        value : Mapping[str, Numeric] | Sequence[Mapping[str, Numeric]] | xr.DataArray
+        value : Mapping[str, float] | Sequence[Mapping[str, float]] | xr.DataArray
             The new parameter values. Accepts:
-            - A single dictionary: ``dict[str, Numeric]``
-            - A list of dictionaries: ``list[dict[str, Numeric]]`` (must have identical keys)
+            - A single dictionary: ``dict[str, float]``
+            - A list of dictionaries: ``list[dict[str, float]]`` (must have identical keys)
             - An ``xarray.DataArray`` of shape ``(theta_idx, unit, parameter)``
         """
         if value is None:

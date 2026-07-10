@@ -1,7 +1,7 @@
 Parameter Transformations
 ==========================
 
-.. currentmodule:: pypomp.core.par_trans
+.. currentmodule:: pypomp
 
 .. autoclass:: ParTrans
    :no-members:
@@ -10,4 +10,3 @@ Parameter Transformations
 
 .. autoattribute:: ParTrans.to_est
 .. autoattribute:: ParTrans.from_est
-

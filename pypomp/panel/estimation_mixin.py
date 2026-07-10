@@ -632,6 +632,9 @@ class PanelEstimationMixin(Base):
     ) -> None:
         """Estimate parameters using the (Marginalized) Panel Iterated Filtering (MPIF/PIF) algorithm.
 
+        Performs parameter estimation using the (Marginalized) Panel Iterated
+        Filtering (MPIF/PIF) algorithm (Bretó et al. 2020 [1]_; Wheeler et al. 2025 [2]_).
+
         Parameters
         ----------
         J : int
@@ -658,6 +661,15 @@ class PanelEstimationMixin(Base):
         None
             Updates ``self.theta`` with final estimates and appends a
             :class:`PanelPompMIFResult` to the history.
+
+        References
+        ----------
+        .. [1] Bretó, Carles, Edward L. Ionides, and Aaron A. King. "Panel Data Analysis
+           via Mechanistic Models." *Journal of the American Statistical Association*
+           115, no. 531 (2020): 1178–1188. https://doi.org/10.1080/01621459.2019.1604367.
+        .. [2] Wheeler, Jesse, Aaron J. Abkemeier, and Edward L. Ionides. "Iterating
+           marginalized Bayes maps for likelihood maximization with application to nonlinear
+           panel models." *arXiv preprint arXiv:2511.17438* (2025). https://arxiv.org/abs/2511.17438.
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -826,7 +838,7 @@ class PanelEstimationMixin(Base):
     ):
         """Estimate parameters using MOP-based gradient-descent optimization.
 
-        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter, treating the particle filter
+        Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter (Tan et al. 2024 [1]_), treating the particle filter
         as a differentiable computation graph and applies gradient-based
         optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
         automatic differentiation.
@@ -869,6 +881,12 @@ class PanelEstimationMixin(Base):
         None
             Updates ``self.theta`` with final estimates and appends a
             :class:`PanelPompTrainResult` to the history.
+
+        References
+        ----------
+        .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+           for Partially Observed Markov Processes using Automatic Differentiation."
+           *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
         """
         start_time = time.time()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))

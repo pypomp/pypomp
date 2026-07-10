@@ -1,7 +1,7 @@
 PanelPomp Class
 ===============
 
-.. currentmodule:: pypomp.panel.panel
+.. currentmodule:: pypomp
 
 .. autoclass:: PanelPomp
    :no-members:

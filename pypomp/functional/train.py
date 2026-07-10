@@ -20,7 +20,12 @@ def train(
     thresh: float = 0.0,
     n_monitors: int = 1,
 ) -> tuple[jax.Array, jax.Array]:
-    """Optimize parameters via a differentiable particle filter.
+    """Optimize parameters via a differentiable particle filter (MOP).
+
+    Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter (Tan et al. 2024 [1]_), treating the particle filter
+    as a differentiable computation graph and applies gradient-based
+    optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
+    automatic differentiation.
 
     Pure-functional implementation intended for users who need to compose
     the algorithm within custom JAX loops or higher-order functions.
@@ -74,6 +79,12 @@ def train(
     --------
     pypomp.Pomp.train : Object-oriented interface.
     align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+       for Partially Observed Markov Processes using Automatic Differentiation."
+       *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
     thresh = float(max(0.0, thresh))
@@ -115,16 +126,15 @@ def panel_train(
     alpha_cooling: float,
     chunk_size: int = 1,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Optimize panel POMP parameters via a differentiable particle filter.
-
-    A pure functional implementation of the optimization (gradient-descent)
-    algorithm, intended for composition within custom JAX code.
+    """Optimize panel POMP parameters via a differentiable particle filter (MOP).
 
     This function performs Maximum Likelihood Estimation (MLE) for Panel POMP
     models by treating the particle filter as a differentiable computational
-    graph.  It computes gradients of the log-likelihood with respect to
-    parameters across units, and updates them using an optimizer (e.g. Adam,
-    SGD).
+    graph (Tan et al. 2024 [1]_).  It computes gradients of the log-likelihood
+    with respect to parameters across units, and updates them using an optimizer (e.g. Adam, SGD).
+
+    A pure functional implementation of the optimization (gradient-descent)
+    algorithm, intended for composition within custom JAX code.
 
     Parameters
     ----------
@@ -176,6 +186,17 @@ def panel_train(
     -----
     To align and stack input parameter arrays into the correct canonical
     ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.PanelPomp.train : Object-oriented interface.
+    align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+       for Partially Observed Markov Processes using Automatic Differentiation."
+       *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
     U = len(struct.unit_names)

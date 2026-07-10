@@ -13,5 +13,3 @@ Pypomp includes several example models:
    ~sir
    ~spx
    ~UKMeasles
-   UKMeasles.Pomp
-   UKMeasles.PanelPomp

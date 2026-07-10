@@ -288,9 +288,9 @@ def _rproc_gamma(
     """
     # old code: perturb = sd_beta * dw / dt, where dw is a standard normal
         rproc does the above
-    # this function draws from a gamma white noise process 
+    # this function draws from a gamma white noise process
             Gamma(shape=dt/sigma**2, scale=sigma**2)
-    # with gamma noise, want the mean to be dt, 
+    # with gamma noise, want the mean to be dt,
             and the variance to be sd_beta**2 * dt,
             before dividing by dt to yield multiplicative noise by 1
     """
@@ -425,9 +425,10 @@ def dhaka(
     """
     Creates a POMP model for the Dhaka cholera data.
 
-    This function constructs a Partially Observed Markov Process (POMP) model
-    for the Dhaka cholera dataset. The model includes a stochastic process for
-    the underlying disease dynamics and a measurement model for observed deaths.
+    This function constructs a Partially Observed Markov Process (POMP) model for
+    the Dhaka cholera dataset (King et al. 2008 [1]_). The model includes a
+    stochastic process for the underlying disease dynamics and a measurement
+    model for observed deaths.
 
     Arguments
     ---------
@@ -473,6 +474,12 @@ def dhaka(
     -------
     Pomp
         A POMP model object representing the Dhaka cholera model.
+
+    References
+    ----------
+    .. [1] King, Aaron A., Edward L. Ionides, Mercedes Pascual, and Menno J. Bouma.
+       "Inapparent infections and cholera dynamics." *Nature* 454, no. 7206
+       (2008): 877–880. https://doi.org/10.1038/nature07084.
     """
 
     rproc_func = _rproc_gamma if gamma else _rproc

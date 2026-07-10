@@ -1,7 +1,7 @@
 Random Walk Standard Deviation
 ==============================
 
-.. currentmodule:: pypomp.core.rw_sigma
+.. currentmodule:: pypomp
 
 .. autoclass:: RWSigma
    :no-members:

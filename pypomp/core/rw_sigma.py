@@ -40,7 +40,9 @@ class RWSigma:
 
     See Also
     --------
-    pypomp.core.pomp.mif : Uses RWSigma to run IF2.
+    :meth:`Pomp.mif <pypomp.Pomp.mif>` : Uses RWSigma to run IF2.
+
+    :meth:`PanelPomp.mif <pypomp.PanelPomp.mif>` : Uses RWSigma to run PIF/MPIF.
     """
 
     sigmas: dict[str, float]

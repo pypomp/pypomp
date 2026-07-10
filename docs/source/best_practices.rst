@@ -2,7 +2,7 @@ Best Practices and Performance Guidelines
 =========================================
 
 To ensure that Pypomp operates at optimal speed and efficiency, it is important to follow a few key best practices.
-Pypomp's primary advantage over R Pomp is its performance, particularly on GPUs, and deviating from these guidelines may significantly degrade execution speed and thus negate the benefits of using Pypomp.
+Pypomp's primary advantage over the original R :code:`pomp` package (see the `R pomp website <https://kingaa.github.io/pomp/>`_ and `GitHub repository <https://github.com/kingaa/pomp>`_) is its performance, particularly on GPUs, and deviating from these guidelines may significantly degrade execution speed and thus negate the benefits of using Pypomp.
 
 Essential Guidelines
 --------------------
@@ -10,7 +10,7 @@ Essential Guidelines
 Using Pypomp Random Variate Samplers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When defining your model's random processes, always use the random variate samplers provided in ``pypomp.random`` instead of their equivalents in ``jax.random`` whenever possible.
+When defining a model's random processes, always use the random variate samplers provided in ``pypomp.random`` instead of their equivalents in the `jax.random <https://jax.readthedocs.io/en/latest/jax.random.html>`_ module whenever possible.
 
 The list of optimized samplers includes:
 
@@ -25,7 +25,7 @@ The list of optimized samplers includes:
 
 Many ``jax.random`` functions utilize extensive branching logic, which ends up being executed sequentially on GPUs, severely impacting performance.
 In contrast, the samplers in ``pypomp.random`` utilize approximate inverse cumulative distribution functions (CDFs) that avoid most of this branching logic.
-Using the standard JAX samplers can result in execution speeds up to 25 times slower, potentially making the code slower than its R ``pomp`` counterpart.
+Using the standard JAX samplers can make the code significantly slower than its R :code:`pomp` counterpart.
 
 .. note::
    The functions ``jax.random.normal`` and ``jax.random.uniform`` are among the exceptions that are highly optimized; they are perfectly fine to use.

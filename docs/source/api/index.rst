@@ -18,7 +18,7 @@ Functional API
 --------------------------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
 
    functional
 
@@ -42,6 +42,7 @@ Utilities
    maths
    random
    mcap
+   types
 
 Example Models
 --------------

@@ -148,6 +148,11 @@ def panel_pfilter(
     -----
     To align and stack input parameter arrays into the correct
     canonical ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.PanelPomp.pfilter : Object-oriented interface.
+    align_params : Parameter alignment utility.
     """
     thresh = float(max(0.0, thresh))
     results = _chunked_panel_pfilter_internal(

@@ -194,7 +194,7 @@ def mcap(
 
     Constructs a profile likelihood confidence interval accommodating both
     Monte Carlo noise in the profile and statistical uncertainty in the
-    likelihood function.
+    likelihood function (Ionides et al. 2017 [1]_).
 
     Parameters
     ----------
@@ -216,6 +216,13 @@ def mcap(
     -------
     MCAPResult
         Object containing the computed confidence interval and SE decomposition.
+
+    References
+    ----------
+    .. [1] Ionides, Edward L., Carles Bretó, Joonha Park, R. A. Smith, and Aaron A. King.
+       "Monte Carlo profile confidence intervals for dynamic systems."
+       *Journal of The Royal Society Interface* 14, no. 132 (2017): 20170126.
+       https://doi.org/10.1098/rsif.2017.0126.
     """
     x: FloatArray = np.asarray(parameter, dtype=float)
     y: FloatArray = np.asarray(loglik, dtype=float)

@@ -4,17 +4,11 @@ Type aliases for user-defined model component function arguments.
 These aliases use :data:`typing.Annotated` so the library can identify
 argument roles by tag (regardless of argument order) when wrapping
 user-supplied ``rinit``, ``rproc``, ``dmeas``, and ``rmeas`` functions.
-Users see the underlying base type (e.g. ``dict[str, float]``); the tag
-string is consumed internally during function introspection.
 """
 
-from typing import Annotated, TypeAlias
+from typing import Annotated
 
 import jax
-import numpy as np
-
-Numeric: TypeAlias = int | float | np.number | jax.Array
-"""A scalar numeric value: Python int/float, NumPy scalar, or JAX array."""
 
 # Annotated[base_type, tag] — tag matches the type name; used for mapping
 # Maps to 'X_'

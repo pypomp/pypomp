@@ -523,19 +523,113 @@ def test_panel_pfilter_accuracy():
     assert np.abs(est_unit2_ll - exact_unit2_ll) < 0.225
 
 
-def test_panel_mif_accuracy():
+@pytest.mark.parametrize(
+    "shared_params, unit_spec_params, pert_shared, pert_spec, shared_names, expected_targets, plot_filename, plot_true_values",
+    [
+        # Case 1: Mixed
+        (
+            {"a": 0.8},
+            {
+                "unit1": {"sigma_x": 0.5, "sigma_y": 0.3},
+                "unit2": {"sigma_x": 0.4, "sigma_y": 0.2},
+            },
+            {"a": 0.5},
+            {
+                "unit1": {"sigma_x": 0.8, "sigma_y": 0.6},
+                "unit2": {"sigma_x": 0.7, "sigma_y": 0.5},
+            },
+            ["a"],
+            {
+                ("a", None): (0.8, 0.18),
+                ("sigma_x", "unit1"): (0.5, 0.12),
+                ("sigma_y", "unit1"): (0.3, 0.09),
+                ("sigma_x", "unit2"): (0.4, 0.09),
+                ("sigma_y", "unit2"): (0.2, 0.105),
+            },
+            "tests/plots/panel_mif_traces.png",
+            {
+                "a": 0.8,
+                ("sigma_x", "unit1"): 0.5,
+                ("sigma_y", "unit1"): 0.3,
+                ("sigma_x", "unit2"): 0.4,
+                ("sigma_y", "unit2"): 0.2,
+            },
+        ),
+        # Case 2: Shared-only
+        (
+            {"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+            {
+                "unit1": {},
+                "unit2": {},
+            },
+            {"a": 0.5, "sigma_x": 0.8, "sigma_y": 0.6},
+            {
+                "unit1": {},
+                "unit2": {},
+            },
+            ["a", "sigma_x", "sigma_y"],
+            {
+                ("a", None): (0.8, 0.18),
+                ("sigma_x", None): (0.5, 0.15),
+                ("sigma_y", None): (0.3, 0.225),
+            },
+            "tests/plots/panel_mif_shared_only_traces.png",
+            {
+                "a": 0.8,
+                "sigma_x": 0.5,
+                "sigma_y": 0.3,
+            },
+        ),
+        # Case 3: Unit-specific-only
+        (
+            {},
+            {
+                "unit1": {"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+                "unit2": {"a": 0.8, "sigma_x": 0.4, "sigma_y": 0.2},
+            },
+            {},
+            {
+                "unit1": {"a": 0.5, "sigma_x": 0.8, "sigma_y": 0.6},
+                "unit2": {"a": 0.5, "sigma_x": 0.7, "sigma_y": 0.5},
+            },
+            [],
+            {
+                ("a", "unit1"): (0.8, 0.18),
+                ("sigma_x", "unit1"): (0.5, 0.12),
+                ("sigma_y", "unit1"): (0.3, 0.09),
+                ("a", "unit2"): (0.8, 0.18),
+                ("sigma_x", "unit2"): (0.4, 0.09),
+                ("sigma_y", "unit2"): (0.2, 0.105),
+            },
+            "tests/plots/panel_mif_unit_specific_only_traces.png",
+            {
+                ("a", "unit1"): 0.8,
+                ("sigma_x", "unit1"): 0.5,
+                ("sigma_y", "unit1"): 0.3,
+                ("a", "unit2"): 0.8,
+                ("sigma_x", "unit2"): 0.4,
+                ("sigma_y", "unit2"): 0.2,
+            },
+        ),
+    ],
+    ids=["mixed", "shared_only", "unit_specific_only"],
+)
+def test_panel_mif_accuracy(
+    shared_params,
+    unit_spec_params,
+    pert_shared,
+    pert_spec,
+    shared_names,
+    expected_targets,
+    plot_filename,
+    plot_true_values,
+):
     """
-    Verify Panel POMP MIF convergence for shared and unit-specific parameters.
+    Verify Panel POMP MIF convergence for different parameter configurations.
     """
     T = 100
     key = jax.random.key(1234)
     ys_dummy = pd.DataFrame(0.0, index=np.arange(1, T + 1, dtype=float), columns=["Y"])
-
-    shared_params = {"a": 0.8}
-    unit_spec_params = {
-        "unit1": {"sigma_x": 0.5, "sigma_y": 0.3},
-        "unit2": {"sigma_x": 0.4, "sigma_y": 0.2},
-    }
 
     ys_dict = {}
     for unit, spec in unit_spec_params.items():
@@ -545,12 +639,6 @@ def test_panel_mif_accuracy():
         )
         ys_dict[unit] = p_sim.ys
 
-    # Fit panel starting from perturbed values
-    pert_shared = {"a": 0.5}
-    pert_spec = {
-        "unit1": {"sigma_x": 0.8, "sigma_y": 0.6},
-        "unit2": {"sigma_x": 0.7, "sigma_y": 0.5},
-    }
     panel = make_lgm_panel_pomp(ys_dict, pert_shared, pert_spec)
 
     # Sample 5 sets of parameters
@@ -561,7 +649,7 @@ def test_panel_mif_accuracy():
         units=unit_names,
         n=5,
         key=key,
-        shared_names=["a"],
+        shared_names=shared_names,
     )
 
     rw_sd = pp.RWSigma(
@@ -574,51 +662,133 @@ def test_panel_mif_accuracy():
     mean_shared = final_theta["shared"].mean(dim="theta_idx")
     mean_spec = final_theta["unit_specific"].mean(dim="theta_idx")
 
-    est_a = mean_shared.sel(parameter="a").item()
-    est_u1_sx = mean_spec.sel(unit="unit1", parameter="sigma_x").item()
-    est_u1_sy = mean_spec.sel(unit="unit1", parameter="sigma_y").item()
-    est_u2_sx = mean_spec.sel(unit="unit2", parameter="sigma_x").item()
-    est_u2_sy = mean_spec.sel(unit="unit2", parameter="sigma_y").item()
-
-    err_a = np.abs(est_a - 0.8)
-    err_u1_sx = np.abs(est_u1_sx - 0.5)
-    err_u1_sy = np.abs(est_u1_sy - 0.3)
-    err_u2_sx = np.abs(est_u2_sx - 0.4)
-    err_u2_sy = np.abs(est_u2_sy - 0.2)
-
-    assert err_a < 0.18
-    assert err_u1_sx < 0.12
-    assert err_u1_sy < 0.09
-    assert err_u2_sx < 0.09
-    assert err_u2_sy < 0.105
+    for (param, unit), (true_val, tolerance) in expected_targets.items():
+        if unit is None:
+            est_val = mean_shared.sel(parameter=param).item()
+        else:
+            est_val = mean_spec.sel(unit=unit, parameter=param).item()
+        err = np.abs(est_val - true_val)
+        assert err < tolerance, (
+            f"MIF error for parameter={param}, unit={unit}: est={est_val}, true={true_val}"
+        )
 
     save_traces_plotnine(
         panel,
-        "tests/plots/panel_mif_traces.png",
-        true_values={
-            "a": 0.8,
-            ("sigma_x", "unit1"): 0.5,
-            ("sigma_y", "unit1"): 0.3,
-            ("sigma_x", "unit2"): 0.4,
-            ("sigma_y", "unit2"): 0.2,
-        },
-        expected_values={"a": 0.8 - (1 + 3 * 0.8) / 100},  # Hurwicz bias for T=100
+        plot_filename,
+        true_values=plot_true_values,
+        expected_values={"a": 0.8 - (1 + 3 * 0.8) / 100}
+        if "a" in panel.canonical_param_names
+        else None,
     )
 
 
-def test_panel_train_accuracy():
+@pytest.mark.parametrize(
+    "shared_params, unit_spec_params, pert_shared, pert_spec, shared_names, expected_targets, plot_filename, plot_true_values",
+    [
+        # Case 1: Mixed
+        (
+            {"a": 0.8},
+            {
+                "unit1": {"sigma_x": 0.5, "sigma_y": 0.3},
+                "unit2": {"sigma_x": 0.4, "sigma_y": 0.2},
+            },
+            {"a": 0.5},
+            {
+                "unit1": {"sigma_x": 0.8, "sigma_y": 0.6},
+                "unit2": {"sigma_x": 0.7, "sigma_y": 0.5},
+            },
+            ["a"],
+            {
+                ("a", None): (0.8, 0.18),
+                ("sigma_x", "unit1"): (0.5, 0.105),
+                ("sigma_y", "unit1"): (0.3, 0.18),
+                ("sigma_x", "unit2"): (0.4, 0.075),
+                ("sigma_y", "unit2"): (0.2, 0.09),
+            },
+            "tests/plots/panel_train_traces.png",
+            {
+                "a": 0.8,
+                ("sigma_x", "unit1"): 0.5,
+                ("sigma_y", "unit1"): 0.3,
+                ("sigma_x", "unit2"): 0.4,
+                ("sigma_y", "unit2"): 0.2,
+            },
+        ),
+        # Case 2: Shared-only
+        (
+            {"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+            {
+                "unit1": {},
+                "unit2": {},
+            },
+            {"a": 0.5, "sigma_x": 0.8, "sigma_y": 0.6},
+            {
+                "unit1": {},
+                "unit2": {},
+            },
+            ["a", "sigma_x", "sigma_y"],
+            {
+                ("a", None): (0.8, 0.18),
+                ("sigma_x", None): (0.5, 0.105),
+                ("sigma_y", None): (0.3, 0.18),
+            },
+            "tests/plots/panel_train_shared_only_traces.png",
+            {
+                "a": 0.8,
+                "sigma_x": 0.5,
+                "sigma_y": 0.3,
+            },
+        ),
+        # Case 3: Unit-specific-only
+        (
+            {},
+            {
+                "unit1": {"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+                "unit2": {"a": 0.8, "sigma_x": 0.4, "sigma_y": 0.2},
+            },
+            {},
+            {
+                "unit1": {"a": 0.5, "sigma_x": 0.8, "sigma_y": 0.6},
+                "unit2": {"a": 0.5, "sigma_x": 0.7, "sigma_y": 0.5},
+            },
+            [],
+            {
+                ("a", "unit1"): (0.8, 0.18),
+                ("sigma_x", "unit1"): (0.5, 0.105),
+                ("sigma_y", "unit1"): (0.3, 0.18),
+                ("a", "unit2"): (0.8, 0.18),
+                ("sigma_x", "unit2"): (0.4, 0.075),
+                ("sigma_y", "unit2"): (0.2, 0.09),
+            },
+            "tests/plots/panel_train_unit_specific_only_traces.png",
+            {
+                ("a", "unit1"): 0.8,
+                ("sigma_x", "unit1"): 0.5,
+                ("sigma_y", "unit1"): 0.3,
+                ("a", "unit2"): 0.8,
+                ("sigma_x", "unit2"): 0.4,
+                ("sigma_y", "unit2"): 0.2,
+            },
+        ),
+    ],
+    ids=["mixed", "shared_only", "unit_specific_only"],
+)
+def test_panel_train_accuracy(
+    shared_params,
+    unit_spec_params,
+    pert_shared,
+    pert_spec,
+    shared_names,
+    expected_targets,
+    plot_filename,
+    plot_true_values,
+):
     """
-    Verify Panel POMP train optimization convergence for shared and unit-specific parameters.
+    Verify Panel POMP train optimization convergence for different parameter configurations.
     """
     T = 100
     key = jax.random.key(1234)
     ys_dummy = pd.DataFrame(0.0, index=np.arange(1, T + 1, dtype=float), columns=["Y"])
-
-    shared_params = {"a": 0.8}
-    unit_spec_params = {
-        "unit1": {"sigma_x": 0.5, "sigma_y": 0.3},
-        "unit2": {"sigma_x": 0.4, "sigma_y": 0.2},
-    }
 
     ys_dict = {}
     for unit, spec in unit_spec_params.items():
@@ -628,11 +798,6 @@ def test_panel_train_accuracy():
         )
         ys_dict[unit] = p_sim.ys
 
-    pert_shared = {"a": 0.5}
-    pert_spec = {
-        "unit1": {"sigma_x": 0.8, "sigma_y": 0.6},
-        "unit2": {"sigma_x": 0.7, "sigma_y": 0.5},
-    }
     panel = make_lgm_panel_pomp(ys_dict, pert_shared, pert_spec)
 
     # Sample 5 sets of parameters
@@ -643,7 +808,7 @@ def test_panel_train_accuracy():
         units=unit_names,
         n=5,
         key=key,
-        shared_names=["a"],
+        shared_names=shared_names,
     )
 
     eta = pp.LearningRate({"a": 0.05, "sigma_x": 0.05, "sigma_y": 0.05}).cosine_decay(
@@ -663,33 +828,21 @@ def test_panel_train_accuracy():
     mean_shared = final_theta["shared"].mean(dim="theta_idx")
     mean_spec = final_theta["unit_specific"].mean(dim="theta_idx")
 
-    est_a = mean_shared.sel(parameter="a").item()
-    est_u1_sx = mean_spec.sel(unit="unit1", parameter="sigma_x").item()
-    est_u1_sy = mean_spec.sel(unit="unit1", parameter="sigma_y").item()
-    est_u2_sx = mean_spec.sel(unit="unit2", parameter="sigma_x").item()
-    est_u2_sy = mean_spec.sel(unit="unit2", parameter="sigma_y").item()
-
-    err_a = np.abs(est_a - 0.8)
-    err_u1_sx = np.abs(est_u1_sx - 0.5)
-    err_u1_sy = np.abs(est_u1_sy - 0.3)
-    err_u2_sx = np.abs(est_u2_sx - 0.4)
-    err_u2_sy = np.abs(est_u2_sy - 0.2)
-
-    assert err_a < 0.18
-    assert err_u1_sx < 0.105
-    assert err_u1_sy < 0.18
-    assert err_u2_sx < 0.075
-    assert err_u2_sy < 0.09
+    for (param, unit), (true_val, tolerance) in expected_targets.items():
+        if unit is None:
+            est_val = mean_shared.sel(parameter=param).item()
+        else:
+            est_val = mean_spec.sel(unit=unit, parameter=param).item()
+        err = np.abs(est_val - true_val)
+        assert err < tolerance, (
+            f"Train error for parameter={param}, unit={unit}: est={est_val}, true={true_val}"
+        )
 
     save_traces_plotnine(
         panel,
-        "tests/plots/panel_train_traces.png",
-        true_values={
-            "a": 0.8,
-            ("sigma_x", "unit1"): 0.5,
-            ("sigma_y", "unit1"): 0.3,
-            ("sigma_x", "unit2"): 0.4,
-            ("sigma_y", "unit2"): 0.2,
-        },
-        expected_values={"a": 0.8 - (1 + 3 * 0.8) / 100},  # Hurwicz bias for T=100
+        plot_filename,
+        true_values=plot_true_values,
+        expected_values={"a": 0.8 - (1 + 3 * 0.8) / 100}
+        if "a" in panel.canonical_param_names
+        else None,
     )

@@ -173,7 +173,7 @@ def _panel_train_internal(
             new_opt_state_u_c,
             final_step,
         )
-        unit_flat = new_u_c.reshape((-1, new_u_c.shape[-1]))
+        unit_flat = new_u_c.reshape((new_u_c.shape[0] * new_u_c.shape[1], -1))
         return new_carry, (jnp.mean(chunk_neg_logliks), final_s, unit_flat)
 
     initial_carry = (

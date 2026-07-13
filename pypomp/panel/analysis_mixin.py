@@ -45,7 +45,7 @@ class PanelAnalysisMixin(Base):
             If ``True`` (default), duplicate the top ``n`` sets to restore the
             original number of replicates.
         """
-        self.theta.prune(n=n, refill=refill)
+        self.theta = self.theta.pruned(n=n, refill=refill)
 
     def mix_and_match(self) -> None:
         """Sort parameters independently and cross-combine them.
@@ -68,7 +68,7 @@ class PanelAnalysisMixin(Base):
         maximum log-likelihoods obtained for each unit individually across all
         original replicates.
         """
-        self.theta.mix_and_match()
+        self.theta = self.theta.mixed_and_matched()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
         """Get the results DataFrame for the specified history index.

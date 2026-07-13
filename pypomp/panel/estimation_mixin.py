@@ -1224,7 +1224,7 @@ class PanelEstimationMixin(Base):
 
         n_reps = theta_obj_in.num_replicates()
 
-        theta_obj_in.transform(rep_unit.par_trans, direction="to_est")
+        theta_obj_in = theta_obj_in.transformed(rep_unit.par_trans, direction="to_est")
 
         shared_index = self.canonical_shared_param_names
         n_shared = len(shared_index)

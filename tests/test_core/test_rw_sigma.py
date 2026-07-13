@@ -247,9 +247,9 @@ def test_setitem_invalid(param_name, value, error):
         rw_sigma[param_name] = value
 
 
-def test_cool():
+def test_cooled():
     rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
-    new_rw_sigma = rw_sigma.cool(0.5)
+    new_rw_sigma = rw_sigma.cooled(0.5)
     assert rw_sigma.sigmas == {"param1": 0.1, "param2": 0.2}
     assert new_rw_sigma.sigmas == {"param1": 0.05, "param2": 0.1}
 
@@ -264,10 +264,10 @@ def test_copy():
     assert rw_copy.init_names == rw.init_names
 
 
-def test_cool_invalid_factor():
+def test_cooled_invalid_factor():
     rw_sigma = pp.RWSigma({"param1": 0.1}, [])
     with pytest.raises(ValueError, match="factor must be >= 0"):
-        rw_sigma.cool(-0.1)
+        rw_sigma.cooled(-0.1)
 
 
 def test_cooling_schedules():

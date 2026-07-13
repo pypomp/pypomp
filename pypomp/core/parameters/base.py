@@ -137,8 +137,8 @@ class ParameterSet(ABC, Generic[T_data]):
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(\n{self._data.__str__()}\n)"
 
-    def prune(self, n: int = 1, refill: bool = True) -> None:
-        """Replace internal parameter sets with the top `n` by log-likelihood.
+    def pruned(self, n: int = 1, refill: bool = True) -> Self:
+        """Return a new parameter set with the top `n` replicates by log-likelihood.
 
         Parameters
         ----------
@@ -147,6 +147,11 @@ class ParameterSet(ABC, Generic[T_data]):
         refill : bool, optional
             If ``True``, duplicate the top ``n`` sets to restore the original
             number of replicates.  Defaults to ``True``.
+
+        Returns
+        -------
+        Self
+            A new parameter set containing the pruned replicates.
         """
         n_reps = self.num_replicates()
         if n_reps == 0:
@@ -171,9 +176,11 @@ class ParameterSet(ABC, Generic[T_data]):
         else:
             new_indices = top_indices
 
-        self._data = self._data.isel(theta_idx=new_indices)
-        self._data.coords["theta_idx"] = np.arange(len(new_indices))
-        self._slice_logLik(new_indices)
+        new_obj = copy.deepcopy(self)
+        new_obj._data = new_obj._data.isel(theta_idx=new_indices)
+        new_obj._data.coords["theta_idx"] = np.arange(len(new_indices))
+        new_obj._slice_logLik(new_indices)
+        return new_obj
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, type(self)):
@@ -191,11 +198,11 @@ class ParameterSet(ABC, Generic[T_data]):
             return self.subset(index)
         return self._getitem_int(int(index))
 
-    def transform(
+    def transformed(
         self,
         par_trans: ParTrans,
         direction: Literal["to_est", "from_est"] | None = None,
-    ) -> None:
+    ) -> Self:
         """Transform parameters between natural and estimation scales.
 
         Parameters
@@ -205,6 +212,11 @@ class ParameterSet(ABC, Generic[T_data]):
         direction : {"to_est", "from_est"} or None, optional
             Direction of the transformation.  If ``None`` (default), toggle the
             scale relative to the current ``estimation_scale`` attribute.
+
+        Returns
+        -------
+        Self
+            A new parameter set with the transformed parameters.
         """
         auto = direction is None
         if auto:
@@ -213,9 +225,13 @@ class ParameterSet(ABC, Generic[T_data]):
         if (direction == "to_est" and not self.estimation_scale) or (
             direction == "from_est" and self.estimation_scale
         ):
-            param_list = self._to_list()
-            self._transform_and_load(par_trans, param_list, direction)
-            self.estimation_scale = not self.estimation_scale
+            new_obj = copy.deepcopy(self)
+            param_list = new_obj._to_list()
+            new_obj._transform_and_load(par_trans, param_list, direction)
+            new_obj.estimation_scale = not new_obj.estimation_scale
+            return new_obj
+
+        return copy.deepcopy(self)
 
     @overload
     def params(self, as_list: Literal[True]) -> list[Any]: ...

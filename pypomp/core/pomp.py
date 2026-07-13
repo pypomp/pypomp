@@ -950,7 +950,7 @@ class Pomp:
 
         n_reps = theta_obj_in.num_replicates()
 
-        theta_obj_in.transform(self.par_trans, direction="to_est")
+        theta_obj_in = theta_obj_in.transformed(self.par_trans, direction="to_est")
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -1529,7 +1529,7 @@ class Pomp:
             If ``True``, repeat the top ``n`` sets to match the previous
             number of replicates.  Defaults to ``True``.
         """
-        self.theta.prune(n=n, refill=refill)
+        self.theta = self.theta.pruned(n=n, refill=refill)
 
     def plot_traces(self, show: bool = True) -> Any:
         """Plot parameter and log-likelihood traces from the results history.

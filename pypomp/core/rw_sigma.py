@@ -1,3 +1,4 @@
+from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -156,7 +157,7 @@ class RWSigma:
             self.M = None
             self.cooling_fn = default_cooling
 
-    def geometric_cooling(self, a: float) -> "RWSigma":
+    def geometric_cooling(self, a: float) -> RWSigma:
         """Return a copy of this instance using geometric cooling.
 
         The cooling factor at iteration ``m``, time step ``nt``, with
@@ -193,7 +194,7 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("geometric", a))
         return obj
 
-    def cosine_cooling(self, c: float, M: int) -> "RWSigma":
+    def cosine_cooling(self, c: float, M: int) -> RWSigma:
         """Return a copy of this instance using cosine annealing cooling.
 
         The cooling factor at progress ``p = (nt / ntimes + m) / M`` is:
@@ -235,7 +236,7 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("cosine", c, M))
         return obj
 
-    def hyperbolic_cooling(self, s: float) -> "RWSigma":
+    def hyperbolic_cooling(self, s: float) -> RWSigma:
         """Return a copy of this instance using hyperbolic cooling.
 
         The cooling factor at iteration ``m``, time step ``nt``, with
@@ -271,7 +272,7 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("hyperbolic", s))
         return obj
 
-    def custom_cooling(self, cooling_fn: Callable) -> "RWSigma":
+    def custom_cooling(self, cooling_fn: Callable) -> RWSigma:
         """Return a copy of this instance using a custom cooling function.
 
         Parameters
@@ -375,7 +376,7 @@ class RWSigma:
         sigmas_init_array = all_sigmas_array * init_mask
         return sigmas_array, sigmas_init_array
 
-    def copy(self) -> "RWSigma":
+    def copy(self) -> RWSigma:
         """Return a copy of the RWSigma instance."""
         obj = RWSigma(
             self.sigmas.copy(),
@@ -389,7 +390,7 @@ class RWSigma:
         obj._cooling_info = self._cooling_info
         return obj
 
-    def cool(self, factor: float) -> "RWSigma":
+    def cooled(self, factor: float) -> RWSigma:
         """Scale all standard deviations by ``factor`` and return a new instance.
 
         Parameters

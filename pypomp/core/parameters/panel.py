@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import pandas as pd
 import jax.numpy as jnp
 import numpy as np
@@ -451,7 +452,7 @@ class PanelParameters(ParameterSet[xr.Dataset]):
 
         return jnp.array(out_array)
 
-    def mix_and_match(self) -> None:
+    def mixed_and_matched(self) -> PanelParameters:
         """Sort parameters independently and cross-combine them.
 
         Ranks the shared parameters of all replicates based on their overall
@@ -471,10 +472,15 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         is guaranteed to have a panel log-likelihood equal to the sum of the
         maximum log-likelihoods obtained for each unit individually across all
         original replicates.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing the mixed-and-matched replicates.
         """
         unit_names = self.get_unit_names()
         if self.num_replicates() == 0:
-            return
+            return copy.deepcopy(self)
 
         shared_ranks = self._logLik.argsort()[::-1]
 
@@ -517,15 +523,17 @@ class PanelParameters(ParameterSet[xr.Dataset]):
                 "parameter": specific_keys,
             },
         )
-        self._data = xr.Dataset(
+        new_obj = copy.deepcopy(self)
+        new_obj._data = xr.Dataset(
             data_vars={
                 "shared": new_shared_da,
                 "unit_specific": unit_specific_da,
             }
         )
 
-        self._logLik_unit = new_ll_unit
-        self._logLik = new_ll_unit.sum(axis=1)
+        new_obj._logLik_unit = new_ll_unit
+        new_obj._logLik = new_ll_unit.sum(axis=1)
+        return new_obj
 
     @overload
     def params(

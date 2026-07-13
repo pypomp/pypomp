@@ -47,7 +47,7 @@ def test_ParTrans_to_est_panel():
     }
 
     panel = pp.PanelParameters(theta)
-    panel.transform(par_trans, direction="to_est")
+    panel = panel.transformed(par_trans, direction="to_est")
     theta_out = list(panel)[0]
 
     # Test that shared parameters are transformed correctly
@@ -86,13 +86,13 @@ def test_ParTrans_to_est_panel_none_cases():
 
     # Test both None
     panel = pp.PanelParameters(None)
-    panel.transform(par_trans, direction="to_est")
+    panel = panel.transformed(par_trans, direction="to_est")
     assert len(list(panel)) == 0
 
     # Test shared only
     shared = pd.DataFrame(index=pd.Index(["param1"])).assign(shared=[5.0])
     panel = pp.PanelParameters({"shared": shared, "unit_specific": None})
-    panel.transform(par_trans, direction="to_est")
+    panel = panel.transformed(par_trans, direction="to_est")
     theta_out = list(panel)[0]
     assert theta_out["shared"] is not None
     assert theta_out["unit_specific"] is None
@@ -109,7 +109,7 @@ def test_ParTrans_to_est_panel_none_cases():
     # Test unit-specific only
     unit_specific = pd.DataFrame(index=pd.Index(["param2"])).assign(unit1=[3.0])
     panel = pp.PanelParameters({"shared": None, "unit_specific": unit_specific})
-    panel.transform(par_trans, direction="to_est")
+    panel = panel.transformed(par_trans, direction="to_est")
     theta_out = list(panel)[0]
     assert theta_out["shared"] is None
     assert theta_out["unit_specific"] is not None
@@ -139,7 +139,7 @@ def test_panel_transform_from_est():
 
     panel = pp.PanelParameters(theta)
     panel.estimation_scale = True
-    panel.transform(par_trans, direction="from_est")
+    panel = panel.transformed(par_trans, direction="from_est")
     theta_out = list(panel)[0]
 
     assert theta_out["shared"] is not None
@@ -175,7 +175,7 @@ def test_panel_transform_list():
     ]
 
     panel = pp.PanelParameters(theta_list)
-    panel.transform(par_trans, direction="to_est")
+    panel = panel.transformed(par_trans, direction="to_est")
     res_to = list(panel)
     assert len(res_to) == 2
     shared_to0 = res_to[0]["shared"]
@@ -193,7 +193,7 @@ def test_panel_transform_list():
 
     panel_from = pp.PanelParameters(theta_list)
     panel_from.estimation_scale = True
-    panel_from.transform(par_trans, direction="from_est")
+    panel_from = panel_from.transformed(par_trans, direction="from_est")
     res_from = list(panel_from)
     assert len(res_from) == 2
     shared_from0 = res_from[0]["shared"]

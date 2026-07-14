@@ -3,6 +3,10 @@ from .structs import PompStruct, PanelPompStruct
 from ..core.algorithms.train import (
     _vmapped_train_internal,
     _vmapped_panel_train_internal,
+    PanelTrainConfig,
+    PanelTrainInputs,
+    TrainConfig,
+    TrainInputs,
 )
 from ..core.optimizer import Optimizer
 
@@ -87,28 +91,36 @@ def train(
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
-    thresh = float(max(0.0, thresh))
+    assert struct.dmeas_pf is not None, "dmeasure is required for train"
+    config = TrainConfig(
+        J=J,
+        rinitializer=struct.rinit_pf,
+        rprocess_interp=struct.rproc_pf,
+        dmeasure=struct.dmeas_pf,
+        accumvars=struct.accumvars,
+        M=M,
+        alpha_cooling=alpha_cooling,
+        thresh=thresh,
+        n_monitors=n_monitors,
+    )
+
+    inputs = TrainInputs(
+        ys=struct.ys,
+        dt_array_extended=struct.dt_array_extended,
+        nstep_array=struct.nstep_array,
+        t0=struct.t0,
+        times=struct.times.astype(float),
+        covars_extended=struct.covars_extended,
+        eta=eta,
+        alpha=alpha,
+    )
+
     return _vmapped_train_internal(
         thetas_array,
-        struct.ys,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        struct.covars_extended,
-        J,
-        optimizer,
-        M,
-        eta,
-        thresh,
-        alpha,
         keys,
-        alpha_cooling,
-        n_monitors,
+        config,
+        inputs,
+        optimizer,
     )
 
 
@@ -209,6 +221,34 @@ def panel_train(
         direction="to_est",
     )
 
+    assert struct.dmeas_pf is not None, "dmeasure is required for panel_train"
+    config = PanelTrainConfig(
+        J=J,
+        rinitializer=struct.rinit_pf,
+        rprocess_interp=struct.rproc_pf,
+        dmeasure=struct.dmeas_pf,
+        accumvars=struct.accumvars,
+        chunk_size=chunk_size,
+        M=M,
+        alpha_cooling=alpha_cooling,
+        n_obs=struct.ys_per_unit.shape[1],
+        U=U,
+    )
+
+    inputs = PanelTrainInputs(
+        unit_param_permutations=struct.unit_param_permutations,
+        dt_array_extended=struct.dt_array_extended,
+        nstep_array=struct.nstep_array,
+        t0=struct.t0,
+        times=struct.times.astype(float),
+        ys=struct.ys_per_unit,
+        covars_extended=struct.covars_per_unit,
+        keys=keys,
+        eta_shared=eta_shared,
+        eta_spec=eta_spec,
+        alpha=alpha,
+    )
+
     (
         logliks_history,
         shared_history,
@@ -216,28 +256,9 @@ def panel_train(
     ) = _vmapped_panel_train_internal(
         shared_est,
         unit_est,
-        struct.unit_param_permutations,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys_per_unit,
-        struct.covars_per_unit,
-        keys,
-        J,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        chunk_size,
+        config,
+        inputs,
         optimizer,
-        M,
-        eta_shared,
-        eta_spec,
-        alpha,
-        alpha_cooling,
-        struct.ys_per_unit.shape[1],
-        U,
     )
 
     shared_history_natural, unit_history_natural = (

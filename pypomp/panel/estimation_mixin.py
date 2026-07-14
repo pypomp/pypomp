@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
 import warnings
 
 from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
+from ..core.algorithms.types import PfilterConfig, PfilterInputs
 from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
 from ..core.algorithms.helpers import run_jax_batch_sharded
 from ..core.rw_sigma import RWSigma
@@ -498,9 +499,31 @@ class PanelEstimationMixin(Base):
                     covars_per_unit, ((0, padding), (0, 0), (0, 0))
                 )
 
+        config = PfilterConfig(
+            J=J,
+            rinitializer=rep_unit.rinit.struct_pf,
+            rprocess_interp=rep_unit.rproc.struct_pf_interp,
+            dmeasure=rep_unit.dmeas.struct_pf,
+            accumvars=rep_unit.rproc.accumvars,
+            thresh=thresh,
+            CLL=CLL,
+            ESS=ESS,
+            filter_mean=filter_mean,
+            prediction_mean=prediction_mean,
+            should_trans=False,
+        )
+        inputs = PfilterInputs(
+            ys=ys_per_unit,
+            dt_array_extended=jnp.array(rep_unit._dt_array_extended),
+            nstep_array=jnp.array(rep_unit._nstep_array),
+            t0=rep_unit.t0,
+            times=jnp.array(rep_unit.ys.index),
+            covars_extended=covars_per_unit,
+        )
+
         results_jax = run_jax_batch_sharded(
             _chunked_panel_pfilter_internal,
-            {0: 0, 7: 0},
+            {0: 0, 1: 0},
             {
                 "neg_loglik": 0,
                 "CLL": 0,
@@ -509,24 +532,10 @@ class PanelEstimationMixin(Base):
                 "prediction_mean": 0,
             },
             thetas_panel_repl,
-            rep_unit._dt_array_extended,
-            rep_unit._nstep_array,
-            rep_unit.t0,
-            jnp.array(rep_unit.ys.index),
-            ys_per_unit,
-            covars_per_unit,
             rep_unit_keys,
-            J,
-            rep_unit.rinit.struct_pf,
-            rep_unit.rproc.struct_pf_interp,
-            rep_unit.dmeas.struct_pf,
-            rep_unit.rproc.accumvars,
-            thresh,
+            config,
+            inputs,
             chunk_size,
-            CLL,
-            ESS,
-            filter_mean,
-            prediction_mean,
         )
 
         results = jax.device_get(results_jax)

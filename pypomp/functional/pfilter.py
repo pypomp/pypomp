@@ -4,6 +4,7 @@ from ..core.algorithms.pfilter import (
     _vmapped_pfilter_internal2,
     _chunked_panel_pfilter_internal,
 )
+from ..core.algorithms.types import PfilterConfig, PfilterInputs
 
 
 def pfilter(
@@ -69,26 +70,23 @@ def pfilter(
     """
 
     thresh = float(max(0.0, thresh))
+    config = PfilterConfig.from_pfilter_struct(
+        struct,
+        J=J,
+        thresh=thresh,
+        CLL=CLL,
+        ESS=ESS,
+        filter_mean=filter_mean,
+        prediction_mean=prediction_mean,
+        should_trans=False,
+    )
+    inputs = PfilterInputs.from_pfilter_struct(struct)
+
     results = _vmapped_pfilter_internal2(
         thetas_array,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys,
-        J,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        struct.covars_extended,
-        thresh,
         keys,
-        CLL,
-        ESS,
-        filter_mean,
-        prediction_mean,
-        False,
+        config,
+        inputs,
     )
     results["logLik"] = -results.pop("neg_loglik")
     return results
@@ -155,27 +153,24 @@ def panel_pfilter(
     align_params : Parameter alignment utility.
     """
     thresh = float(max(0.0, thresh))
+    config = PfilterConfig.from_panel_pfilter_struct(
+        struct,
+        J=J,
+        thresh=thresh,
+        CLL=CLL,
+        ESS=ESS,
+        filter_mean=filter_mean,
+        prediction_mean=prediction_mean,
+        should_trans=False,
+    )
+    inputs = PfilterInputs.from_panel_pfilter_struct(struct)
+
     results = _chunked_panel_pfilter_internal(
         thetas_array,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys_per_unit,
-        struct.covars_per_unit,
         keys,
-        J,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        thresh,
+        config,
+        inputs,
         chunk_size,
-        CLL,
-        ESS,
-        filter_mean,
-        prediction_mean,
-        False,
     )
     results["logLik"] = -results.pop("neg_loglik")
     return results

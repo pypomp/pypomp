@@ -1,15 +1,27 @@
 from functools import partial
+from dataclasses import replace
 import jax
 from jax import jit
 import jax.numpy as jnp
-from typing import Callable, NamedTuple, Any
+from typing import Callable, cast
 from .pfilter import (
     _pfilter_internal,
     _vmapped_pfilter_internal,
 )
 from .mop import (
-    _chunked_panel_mop_internal,
     _panel_mop_internal_vmap,
+)
+from .types import (
+    PanelTrainConfig,
+    PanelTrainInputs,
+    PanelTrainState,
+    ChunkState,
+    ChunkMetrics,
+    IterationMetrics,
+    TrainConfig,
+    TrainInputs,
+    TrainState,
+    TrainMetrics,
 )
 from .helpers import _cosine_cooling
 from .ad_helpers import _jvg_mop, _jgrad_mop, _jhess_mop
@@ -22,94 +34,6 @@ from ..optimizer import (
     WeightedNewton,
     BFGS,
 )
-from typing import cast
-
-
-class PanelTrainConfig(NamedTuple):
-    J: int
-    rinitializer: Callable
-    rprocess_interp: Callable
-    dmeasure: Callable
-    accumvars: tuple[int, ...] | None
-    chunk_size: int
-    M: int
-    alpha_cooling: float
-    n_obs: int
-    U: int
-
-
-class PanelTrainInputs(NamedTuple):
-    unit_param_permutations: jax.Array
-    dt_array_extended: jax.Array
-    nstep_array: jax.Array
-    t0: float
-    times: jax.Array
-    ys: jax.Array
-    covars_extended: jax.Array | None
-    keys: jax.Array
-    eta_shared: jax.Array
-    eta_spec: jax.Array
-    alpha: float
-
-
-class PanelTrainState(NamedTuple):
-    shared_ests: jax.Array
-    unit_ests_chunked: jax.Array
-    opt_state_shared: Any  # Optimizer state (polymorphic)
-    opt_state_unit_chunked: Any  # Optimizer state (polymorphic)
-    global_step: int
-
-
-class ChunkState(NamedTuple):
-    shared_ests: jax.Array
-    opt_state_shared: Any  # Optimizer state (polymorphic)
-    global_step: int
-
-
-class ChunkMetrics(NamedTuple):
-    neg_loglik: jax.Array
-    unit_ests_chunk: jax.Array
-    opt_state_unit_chunk: Any  # Optimizer state (polymorphic)
-
-
-class IterationMetrics(NamedTuple):
-    neg_loglik: jax.Array
-    shared_ests: jax.Array
-    unit_ests: jax.Array
-
-
-class TrainConfig(NamedTuple):
-    J: int
-    rinitializer: Callable
-    rprocess_interp: Callable
-    dmeasure: Callable
-    accumvars: tuple[int, ...] | None
-    M: int
-    alpha_cooling: float
-    thresh: float
-    n_monitors: int
-
-
-class TrainInputs(NamedTuple):
-    ys: jax.Array
-    dt_array_extended: jax.Array
-    nstep_array: jax.Array
-    t0: float
-    times: jax.Array
-    covars_extended: jax.Array | None
-    eta: jax.Array
-    alpha: float | jax.Array
-
-
-class TrainState(NamedTuple):
-    theta_ests: jax.Array
-    key: jax.Array
-    opt_state: Any  # Optimizer state (polymorphic)
-
-
-class TrainMetrics(NamedTuple):
-    neg_loglik: jax.Array
-    theta_ests: jax.Array
 
 
 @partial(
@@ -139,7 +63,6 @@ def _train_internal(
         key=key,
         opt_state=optimizer.init_state(theta_ests),
     )
-
     step_fn = jax.tree_util.Partial(
         _train_scan_step,
         config,
@@ -173,68 +96,34 @@ def _train_scan_step(
     alpha_m = 1.0 - (1.0 - inputs.alpha) * _cosine_cooling(
         m, config.M, config.alpha_cooling
     )
+    inputs_m = replace(inputs, alpha=alpha_m)
 
     if config.n_monitors == 1:
         key, subkey = jax.random.split(key)
         neg_loglik, grad = _jvg_mop(
-            theta_ests=theta_ests,
-            ys=inputs.ys,
-            dt_array_extended=inputs.dt_array_extended,
-            nstep_array=inputs.nstep_array,
-            t0=inputs.t0,
-            times=inputs.times,
-            J=config.J,
-            rinitializer=config.rinitializer,
-            rprocess=config.rprocess_interp,
-            dmeasure=config.dmeasure,
-            accumvars=config.accumvars,
-            covars_extended=inputs.covars_extended,
-            alpha=alpha_m,
-            key=subkey,
+            theta_ests,
+            subkey,
+            config,
+            inputs_m,
         )
         ylen = inputs.ys.shape[0]
         neg_loglik *= ylen
     else:
         key, subkey = jax.random.split(key)
         grad = _jgrad_mop(
-            theta_ests=theta_ests,
-            ys=inputs.ys,
-            dt_array_extended=inputs.dt_array_extended,
-            nstep_array=inputs.nstep_array,
-            t0=inputs.t0,
-            times=inputs.times,
-            J=config.J,
-            rinitializer=config.rinitializer,
-            rprocess=config.rprocess_interp,
-            dmeasure=config.dmeasure,
-            accumvars=config.accumvars,
-            covars_extended=inputs.covars_extended,
-            alpha=alpha_m,
-            key=subkey,
+            theta_ests,
+            subkey,
+            config,
+            inputs_m,
         )
         if config.n_monitors > 0:
             key, *subkeys = jax.random.split(key, config.n_monitors + 1)
             neg_loglik = jnp.mean(
                 _vmapped_pfilter_internal(
                     theta_ests,
-                    inputs.dt_array_extended,
-                    inputs.nstep_array,
-                    inputs.t0,
-                    inputs.times,
-                    inputs.ys,
-                    config.J,
-                    config.rinitializer,
-                    config.rprocess_interp,
-                    config.dmeasure,
-                    config.accumvars,
-                    inputs.covars_extended,
-                    0,
                     jnp.array(subkeys),
-                    False,
-                    False,
-                    False,
-                    False,
-                    True,
+                    config.to_pfilter_config(should_trans=True),
+                    inputs.to_pfilter_inputs(),
                 )["neg_loglik"]
             )
         else:
@@ -248,20 +137,10 @@ def _train_scan_step(
     # this is only run if the optimizer.step code uses it
     def compute_hessian():
         return _jhess_mop(
-            theta_ests=theta_ests,
-            ys=inputs.ys,
-            dt_array_extended=inputs.dt_array_extended,
-            nstep_array=inputs.nstep_array,
-            t0=inputs.t0,
-            times=inputs.times,
-            J=config.J,
-            rinitializer=config.rinitializer,
-            rprocess=config.rprocess_interp,
-            dmeasure=config.dmeasure,
-            accumvars=config.accumvars,
-            covars_extended=inputs.covars_extended,
-            alpha=alpha_m,
-            key=subkey_hess,
+            theta_ests,
+            subkey_hess,
+            config,
+            inputs_m,
         )
 
     direction, new_opt_state = optimizer.step(
@@ -280,24 +159,9 @@ def _train_scan_step(
         def _obj_neg_loglik(theta):
             neg_loglik_val = _pfilter_internal(
                 theta,
-                dt_array_extended=inputs.dt_array_extended,
-                nstep_array=inputs.nstep_array,
-                t0=inputs.t0,
-                times=inputs.times,
-                ys=inputs.ys,
-                J=config.J,
-                rinitializer=config.rinitializer,
-                rprocess_interp=config.rprocess_interp,
-                dmeasure=config.dmeasure,
-                accumvars=config.accumvars,
-                covars_extended=inputs.covars_extended,
-                thresh=config.thresh,
-                key=subkey,
-                CLL=False,
-                ESS=False,
-                filter_mean=False,
-                prediction_mean=False,
-                should_trans=True,
+                subkey,
+                config.to_pfilter_config(should_trans=True),
+                inputs.to_pfilter_inputs(),
             )["neg_loglik"]
 
             return jnp.squeeze(neg_loglik_val)
@@ -361,7 +225,6 @@ def _panel_train_internal(
             f"Optimizer '{optimizer.__class__.__name__}' not supported for panel train"
         )
 
-    ylen = config.n_obs * config.U
     n_chunks = (config.U + config.chunk_size - 1) // config.chunk_size
 
     # Reshape for chunk-wise processing, which vectorizes more
@@ -402,28 +265,7 @@ def _panel_train_internal(
         jnp.arange(config.M),
     )
 
-    neg_loglik_init = (
-        _chunked_panel_mop_internal(
-            shared_array,
-            unit_array,
-            inputs.unit_param_permutations,
-            inputs.dt_array_extended,
-            inputs.nstep_array,
-            inputs.t0,
-            inputs.times,
-            inputs.ys,
-            inputs.covars_extended,
-            inputs.keys[0],
-            config.J,
-            config.rinitializer,
-            config.rprocess_interp,
-            config.dmeasure,
-            config.accumvars,
-            config.chunk_size,
-            inputs.alpha,
-        )
-        * ylen
-    )
+    neg_loglik_init = jnp.nan
 
     neg_logliks = jnp.concatenate((jnp.array([neg_loglik_init]), history.neg_loglik))
     shared_copies = jnp.concatenate(
@@ -463,7 +305,6 @@ def _iteration_scan_step(
         carry.opt_state_unit_chunked,
         m,
     )
-
     initial_chunk_carry = ChunkState(
         shared_ests=carry.shared_ests,
         opt_state_shared=carry.opt_state_shared,
@@ -483,7 +324,6 @@ def _iteration_scan_step(
         opt_state_unit_chunked=chunk_metrics.opt_state_unit_chunk,
         global_step=final_chunk_carry.global_step,
     )
-
     unit_flat = chunk_metrics.unit_ests_chunk.reshape(
         (
             chunk_metrics.unit_ests_chunk.shape[0]
@@ -491,13 +331,11 @@ def _iteration_scan_step(
             -1,
         )
     )
-
     iter_metrics = IterationMetrics(
         neg_loglik=jnp.mean(chunk_metrics.neg_loglik),
         shared_ests=final_chunk_carry.shared_ests,
         unit_ests=unit_flat,
     )
-
     return new_carry, iter_metrics
 
 
@@ -592,21 +430,18 @@ def _compute_chunk_loss(
     shared_tiled = jnp.tile(s_ests, (config.chunk_size, 1))
     theta_unordered = jnp.concatenate([shared_tiled, u_ests], axis=1)
     theta_chunk = jax.vmap(lambda t, p: t[p])(theta_unordered, perm_chunk)
+    mop_config = config.to_mop_config()
+    mop_inputs = replace(
+        inputs.to_mop_inputs(),
+        ys=ys_chunk,
+        covars_extended=covars_chunk,
+        alpha=curr_alpha,
+    )
     res = _panel_mop_internal_vmap(
         theta_chunk,
-        ys_chunk,
-        inputs.dt_array_extended,
-        inputs.nstep_array,
-        inputs.t0,
-        inputs.times,
-        config.J,
-        config.rinitializer,
-        config.rprocess_interp,
-        config.dmeasure,
-        config.accumvars,
-        covars_chunk,
-        curr_alpha,
         keys_chunk,
+        mop_config,
+        mop_inputs,
     )
     return jnp.sum(res) / (config.chunk_size * config.n_obs)
 

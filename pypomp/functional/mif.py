@@ -4,8 +4,30 @@ from typing import Callable
 from .structs import PompStruct, PanelPompStruct
 from ..core.algorithms.mif import (
     _jv_mif_internal,
+)
+from ..core.algorithms.panel_mif import (
     _jv_panel_mif_internal,
 )
+from ..core.algorithms.types import (
+    MifConfig,
+    MifInputs,
+    PanelMifConfig,
+    PanelMifInputs,
+)
+
+
+def _wrap_cooling_fn(cooling_fn: Callable | float) -> Callable:
+    if not callable(cooling_fn):
+        a = float(cooling_fn)
+        if not (0 <= a <= 1):
+            raise ValueError("a should be between 0 and 1")
+        factor = a ** (1 / 50)
+
+        def fn(nt, m, ntimes):
+            return factor ** (nt / ntimes + m)
+
+        return fn
+    return cooling_fn
 
 
 def mif(
@@ -92,30 +114,32 @@ def mif(
         direction="to_est",
     )
 
+    if struct.dmeas_per is None:
+        raise ValueError("dmeasure is required for MIF")
+    if struct.dmeas_pf is None:
+        raise ValueError("dmeasure_pf is required for MIF")
+
+    cooling_callable = _wrap_cooling_fn(cooling_fn)
+
+    config = MifConfig.from_mif_struct(
+        struct=struct,
+        J=J,
+        M=M,
+        cooling_fn=cooling_callable,
+        thresh=thresh,
+        n_monitors=n_monitors,
+        return_ancestry=False,
+    )
+    inputs = MifInputs.from_mif_struct(
+        struct=struct,
+        sigmas=sigmas_array,
+        sigmas_init=sigmas_init_array,
+    )
     res = _jv_mif_internal(
         thetas_est,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys,
-        struct.rinit_per,
-        struct.rproc_per,
-        struct.dmeas_per,
-        sigmas_array,
-        sigmas_init_array,
-        struct.accumvars,
-        struct.covars_extended,
-        M,
-        cooling_fn,
-        J,
-        thresh,
         keys,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        n_monitors,
-        False,
+        config,
+        inputs,
     )
     traces_natural = struct.par_trans._transform_array(
         res[1],
@@ -228,33 +252,34 @@ def panel_mif(
         direction="to_est",
     )
 
+    if struct.dmeas_per is None:
+        raise ValueError("dmeasure is required for Panel MIF")
+    if struct.dmeas_pf is None:
+        raise ValueError("dmeasure_pf is required for Panel MIF")
+
+    cooling_callable = _wrap_cooling_fn(cooling_fn)
+
+    config = PanelMifConfig.from_panel_mif_struct(
+        struct=struct,
+        J=J,
+        M=M,
+        U=U,
+        cooling_fn=cooling_callable,
+        thresh=thresh,
+        n_monitors=n_monitors,
+        block=block,
+    )
+    inputs = PanelMifInputs.from_panel_mif_struct(
+        struct=struct,
+        sigmas=sigmas_array,
+        sigmas_init=sigmas_init_array,
+    )
     shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
         shared_est,
         unit_est,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys_per_unit,
-        struct.rinit_per,
-        struct.rproc_per,
-        struct.dmeas_per,
-        sigmas_array,
-        sigmas_init_array,
-        struct.accumvars,
-        struct.covars_per_unit,
-        struct.unit_param_permutations,
-        M,
-        cooling_fn,
-        J,
-        U,
-        thresh,
         keys,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        n_monitors,
-        block,
+        config,
+        inputs,
     )
 
     n_shared = len(struct.shared_param_names)

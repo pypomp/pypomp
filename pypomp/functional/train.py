@@ -3,6 +3,8 @@ from .structs import PompStruct, PanelPompStruct
 from ..core.algorithms.train import (
     _vmapped_train_internal,
     _vmapped_panel_train_internal,
+)
+from ..core.algorithms.types import (
     PanelTrainConfig,
     PanelTrainInputs,
     TrainConfig,
@@ -91,29 +93,10 @@ def train(
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
-    assert struct.dmeas_pf is not None, "dmeasure is required for train"
-    config = TrainConfig(
-        J=J,
-        rinitializer=struct.rinit_pf,
-        rprocess_interp=struct.rproc_pf,
-        dmeasure=struct.dmeas_pf,
-        accumvars=struct.accumvars,
-        M=M,
-        alpha_cooling=alpha_cooling,
-        thresh=thresh,
-        n_monitors=n_monitors,
+    config = TrainConfig.from_train_struct(
+        struct, J, M, alpha_cooling, thresh, n_monitors
     )
-
-    inputs = TrainInputs(
-        ys=struct.ys,
-        dt_array_extended=struct.dt_array_extended,
-        nstep_array=struct.nstep_array,
-        t0=struct.t0,
-        times=struct.times.astype(float),
-        covars_extended=struct.covars_extended,
-        eta=eta,
-        alpha=alpha,
-    )
+    inputs = TrainInputs.from_train_struct(struct, eta, alpha)
 
     return _vmapped_train_internal(
         thetas_array,
@@ -211,8 +194,6 @@ def panel_train(
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
-    U = len(struct.unit_names)
-
     shared_est, unit_est = struct.par_trans._transform_panel_array(
         shared_array,
         unit_array,
@@ -221,32 +202,11 @@ def panel_train(
         direction="to_est",
     )
 
-    assert struct.dmeas_pf is not None, "dmeasure is required for panel_train"
-    config = PanelTrainConfig(
-        J=J,
-        rinitializer=struct.rinit_pf,
-        rprocess_interp=struct.rproc_pf,
-        dmeasure=struct.dmeas_pf,
-        accumvars=struct.accumvars,
-        chunk_size=chunk_size,
-        M=M,
-        alpha_cooling=alpha_cooling,
-        n_obs=struct.ys_per_unit.shape[1],
-        U=U,
+    config = PanelTrainConfig.from_panel_train_struct(
+        struct, J, chunk_size, M, alpha_cooling
     )
-
-    inputs = PanelTrainInputs(
-        unit_param_permutations=struct.unit_param_permutations,
-        dt_array_extended=struct.dt_array_extended,
-        nstep_array=struct.nstep_array,
-        t0=struct.t0,
-        times=struct.times.astype(float),
-        ys=struct.ys_per_unit,
-        covars_extended=struct.covars_per_unit,
-        keys=keys,
-        eta_shared=eta_shared,
-        eta_spec=eta_spec,
-        alpha=alpha,
+    inputs = PanelTrainInputs.from_panel_train_struct(
+        struct, keys, eta_shared, eta_spec, alpha
     )
 
     (

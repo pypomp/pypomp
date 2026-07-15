@@ -28,7 +28,7 @@ Random Walk Standard Deviation
    ~RWSigma.hyperbolic_cooling
    ~RWSigma.custom_cooling
    ~RWSigma.copy
-   ~RWSigma.cool
+   ~RWSigma.cooled
 
 .. rubric:: Dict-like Interface
 

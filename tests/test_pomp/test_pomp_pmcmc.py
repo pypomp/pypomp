@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import pypomp as pp
-from pypomp.core.results import PompPMCMCResult
+from pypomp.core.results import Result
 from pypomp.proposals import (
     mvn_diag_rw,
     mvn_rw,
@@ -21,8 +21,8 @@ from pypomp.proposals import (
 )
 
 
-def _pmcmc_res(res) -> PompPMCMCResult:
-    assert isinstance(res, PompPMCMCResult)
+def _pmcmc_res(res) -> Result:
+    assert isinstance(res, Result)
     return res
 
 
@@ -188,11 +188,11 @@ class TestProposals:
 
 class TestPMCMC:
     def test_basic_run(self, sir):
-        """PMCMC should run and produce a PompPMCMCResult."""
+        """PMCMC should run and produce a Result."""
         prop = mvn_diag_rw({"beta1": 1.0, "gamma": 0.1})
         sir.pmcmc(J=20, Nmcmc=5, proposal=prop, key=jax.random.key(0))
         res = sir.results_history[-1]
-        assert isinstance(res, PompPMCMCResult)
+        assert isinstance(res, Result)
         assert res.method == "pmcmc"
         assert res.Nmcmc == 5
         assert res.J == 20
@@ -423,7 +423,7 @@ class TestPMCMC:
         prop = mvn_rw(np.array([[1.0]]), ["beta1"])
         sir.pmcmc(J=20, Nmcmc=3, proposal=prop, key=jax.random.key(8))
         res = _pmcmc_res(sir.results_history[-1])
-        assert isinstance(res, PompPMCMCResult)
+        assert isinstance(res, Result)
 
     def test_with_adaptive_proposal(self, sir):
         prop = mvn_rw_adaptive(
@@ -433,7 +433,7 @@ class TestPMCMC:
         )
         sir.pmcmc(J=20, Nmcmc=8, proposal=prop, key=jax.random.key(9))
         res = _pmcmc_res(sir.results_history[-1])
-        assert isinstance(res, PompPMCMCResult)
+        assert isinstance(res, Result)
 
 
 # ---------------------------------------------------------------
@@ -521,7 +521,7 @@ class TestPMCMCMerge:
         sir2.pmcmc(J=20, Nmcmc=3, proposal=prop, key=jax.random.key(21))
         res2 = _pmcmc_res(sir2.results_history[-1])
 
-        merged = PompPMCMCResult.merge(res1, res2)
+        merged = Result.merge(res1, res2)
         assert merged.n_chains == res1.n_chains + res2.n_chains
         assert merged.Nmcmc == 3  # unchanged
         assert merged.accepts.shape == (merged.n_chains,)
@@ -548,8 +548,8 @@ class TestPMCMCMerge:
         res2 = _pmcmc_res(sir2.results_history[-1])
 
         with pytest.raises(ValueError, match="same Nmcmc"):
-            PompPMCMCResult.merge(res1, res2)
+            Result.merge(res1, res2)
 
     def test_merge_empty_raises(self):
         with pytest.raises(ValueError, match="At least one"):
-            PompPMCMCResult.merge()
+            Result.merge()

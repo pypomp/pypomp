@@ -17,10 +17,10 @@ from ..core.rw_sigma import RWSigma
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Optimizer, Adam
 from ..core.results import (
-    PanelPompPFilterResult,
-    PanelPompMIFResult,
-    PanelPompTrainResult,
-    PanelPompDpopTrainResult,
+    build_panel_pfilter_result,
+    build_panel_mif_result,
+    build_panel_train_result,
+    build_panel_dpop_train_result,
 )
 
 from ..core.parameters import PanelParameters
@@ -440,7 +440,7 @@ class PanelEstimationMixin(Base):
         -------
         None
             Updates the unit-specific log-likelihoods ``self.theta.logLik_unit``
-            and appends a :class:`PanelPompPFilterResult` to the history.
+            and appends a :class:`~pypomp.core.results.Result` to the history.
         """
         # 1. Setup keys and prepare parameters.
         start_time = time.time()
@@ -591,8 +591,7 @@ class PanelEstimationMixin(Base):
 
         # 7. Record execution results in history.
         execution_time = time.time() - start_time
-        result = PanelPompPFilterResult(
-            method="pfilter",
+        result = build_panel_pfilter_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_for_result,
@@ -600,8 +599,8 @@ class PanelEstimationMixin(Base):
             J=J,
             reps=reps,
             thresh=thresh,
-            CLL_da=CLL_da,
-            ESS_da=ESS_da,
+            CLL=CLL_da,
+            ESS=ESS_da,
             filter_mean=filter_mean_da,
             prediction_mean=prediction_mean_da,
         )
@@ -649,7 +648,7 @@ class PanelEstimationMixin(Base):
         -------
         None
             Updates ``self.theta`` with final estimates and appends a
-            :class:`PanelPompMIFResult` to the history.
+            :class:`~pypomp.core.results.Result` to the history.
 
         References
         ----------
@@ -787,8 +786,7 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
-        result = PanelPompMIFResult(
-            method="mif",
+        result = build_panel_mif_result(
             execution_time=time.time() - start_time,
             key=old_key,
             theta=theta_for_result,
@@ -869,7 +867,7 @@ class PanelEstimationMixin(Base):
         -------
         None
             Updates ``self.theta`` with final estimates and appends a
-            :class:`PanelPompTrainResult` to the history.
+            :class:`~pypomp.core.results.Result` to the history.
 
         References
         ----------
@@ -1026,8 +1024,7 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
-        result = PanelPompTrainResult(
-            method="train",
+        result = build_panel_train_result(
             execution_time=time.time() - start_time,
             key=old_key,
             theta=theta_for_result,
@@ -1389,8 +1386,7 @@ class PanelEstimationMixin(Base):
 
         execution_time = time.time() - start_time
 
-        result = PanelPompDpopTrainResult(
-            method="dpop_train",
+        result = build_panel_dpop_train_result(
             execution_time=execution_time,
             key=old_key,
             theta=self.theta,

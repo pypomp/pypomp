@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 
 import pypomp as pp
-from pypomp.core.results import PanelPompTrainResult
+from pypomp.core.results import Result
 
 
 def _build_lg_panel():
@@ -47,7 +47,8 @@ def _train_and_get_result(seed: int, optimizer=None):
         key=jax.random.key(seed),
     )
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompTrainResult)
+    assert isinstance(res, Result)
+    assert res.method == "train"
     return res
 
 
@@ -58,8 +59,8 @@ def two_compatible_results():
 
 def test_merge_happy_path(two_compatible_results):
     r1, r2 = two_compatible_results
-    merged = PanelPompTrainResult.merge(r1, r2)
-    assert isinstance(merged, PanelPompTrainResult)
+    merged = Result.merge(r1, r2)
+    assert isinstance(merged, Result)
     assert merged.optimizer == r1.optimizer
     assert merged.J == r1.J
     assert merged.M == r1.M
@@ -77,21 +78,21 @@ def test_merge_happy_path(two_compatible_results):
 
 def test_merge_empty_args_raises():
     with pytest.raises(ValueError, match="At least one"):
-        PanelPompTrainResult.merge()
+        Result.merge()
 
 
 def test_merge_wrong_type_raises(two_compatible_results):
     r1, _ = two_compatible_results
 
-    with pytest.raises(TypeError, match="must be of type PanelPompTrainResult"):
-        PanelPompTrainResult.merge(r1, "not_a_result")  # type: ignore
+    with pytest.raises(TypeError, match="must be of type Result"):
+        Result.merge(r1, "not_a_result")  # type: ignore
 
 
 def test_merge_mismatched_optimizer_raises():
     r1 = _train_and_get_result(seed=0, optimizer=pp.Adam())
     r2 = _train_and_get_result(seed=1, optimizer=pp.FullMatrixAdam())
     with pytest.raises(ValueError, match="same optimizer"):
-        PanelPompTrainResult.merge(r1, r2)
+        Result.merge(r1, r2)
 
 
 def test_train_result_equality(two_compatible_results):

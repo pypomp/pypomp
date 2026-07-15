@@ -19,11 +19,11 @@ from .rw_sigma import RWSigma
 from .learning_rate import LearningRate
 from .optimizer import Optimizer, Adam
 from .results import (
-    PompPFilterResult,
-    PompMIFResult,
-    PompTrainResult,
-    PompPMCMCResult,
-    PompABCResult,
+    build_pfilter_result,
+    build_mif_result,
+    build_train_result,
+    build_pmcmc_result,
+    build_abc_result,
 )
 from pypomp.proposals import _expand_proposal
 from .parameters import PompParameters
@@ -158,7 +158,7 @@ class PompEstimationMixin(Base):
         Returns
         -------
         None
-            A :class:`~pypomp.core.results.PompPFilterResult` is appended
+            A :class:`~pypomp.core.results.Result` is appended
             to :attr:`results_history`.  Retrieve a dataframe summary with
             :meth:`results` or the log-likelihoods directly via ``model.theta.logLik``.
 
@@ -258,8 +258,7 @@ class PompEstimationMixin(Base):
         theta_obj_in.logLik = logLik_estimates
         self.theta = theta_obj_in
 
-        result = PompPFilterResult(
-            method="pfilter",
+        result = build_pfilter_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_for_results,
@@ -267,8 +266,8 @@ class PompEstimationMixin(Base):
             J=J,
             reps=reps,
             thresh=thresh,
-            CLL_da=CLL_da,
-            ESS_da=ESS_da,
+            CLL=CLL_da,
+            ESS=ESS_da,
             filter_mean=filter_mean_da,
             prediction_mean=prediction_mean_da,
         )
@@ -326,7 +325,7 @@ class PompEstimationMixin(Base):
         Returns
         -------
         None
-            A :class:`~pypomp.core.results.PompMIFResult` is appended to
+            A :class:`~pypomp.core.results.Result` is appended to
             :attr:`results_history`, containing the log-likelihood monitor,
             parameter traces over iterations, and algorithm settings.
 
@@ -436,12 +435,11 @@ class PompEstimationMixin(Base):
         else:
             execution_time = None
 
-        result = PompMIFResult(
-            method="mif",
+        result = build_mif_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_obj_for_result,
-            traces_da=traces_da,
+            traces=traces_da,
             J=J,
             M=M,
             rw_sd=rw_sd,
@@ -521,7 +519,7 @@ class PompEstimationMixin(Base):
         Returns
         -------
         None
-            A :class:`~pypomp.core.results.PompTrainResult` is appended
+            A :class:`~pypomp.core.results.Result` is appended
             to :attr:`results_history`, containing log-likelihood and
             parameter traces over iterations.
 
@@ -622,12 +620,11 @@ class PompEstimationMixin(Base):
         else:
             execution_time = None
 
-        result = PompTrainResult(
-            method="train",
+        result = build_train_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_obj_for_result,
-            traces_da=joined_array,
+            traces=joined_array,
             optimizer=optimizer,
             J=J,
             M=M,
@@ -803,21 +800,32 @@ class PompEstimationMixin(Base):
         Metropolis-Hastings update. Results are stored in
         :attr:`Pomp.results_history`.
 
-        Args:
-            J: Number of particles per particle-filter likelihood evaluation.
-            Nmcmc: Number of MCMC iterations per chain.
-            proposal: Proposal object from :mod:`pypomp.proposals`.
-            dprior: Pure-JAX log-prior function with signature
-                ``dprior(theta_arr) -> scalar``. If ``None``, a flat improper
-                prior is used.
-            key: JAX PRNG key. Defaults to :attr:`fresh_key`.
-            theta: Starting parameter values. Defaults to :attr:`theta`.
-            thresh: Adaptive resampling threshold passed to the particle filter.
-            track_time: Whether to record execution time.
+        Parameters
+        ----------
+        J : int
+            Number of particles per particle-filter likelihood evaluation.
+        Nmcmc : int
+            Number of MCMC iterations per chain.
+        proposal : Proposal
+            Proposal object from :mod:`pypomp.proposals`.
+        dprior : Callable, optional
+            Pure-JAX log-prior function with signature
+            ``dprior(theta_arr) -> scalar``. If ``None``, a flat improper prior
+            is used.
+        key : jax.Array, optional
+            JAX PRNG key. Defaults to :attr:`fresh_key`.
+        theta : PompParameters, optional
+            Starting parameter values. Defaults to :attr:`theta`.
+        thresh : float, default 0.0
+            Adaptive resampling threshold passed to the particle filter.
+        track_time : bool, default True
+            Whether to record execution time.
 
-        Returns:
-            None. Updates :attr:`Pomp.results_history` with a
-            :class:`~pypomp.core.results.PompPMCMCResult`.
+        Returns
+        -------
+        None
+            Updates :attr:`Pomp.results_history` with a
+            :class:`~pypomp.core.results.Result`.
         """
         start_time = time.time()
 
@@ -882,12 +890,11 @@ class PompEstimationMixin(Base):
         self.theta = PompParameters(final_theta_da, logLik=ll_traces[:, -1])
 
         execution_time = time.time() - start_time if track_time else None
-        result = PompPMCMCResult(
-            method="pmcmc",
+        result = build_pmcmc_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_obj_for_result,
-            traces_da=traces_da,
+            traces=traces_da,
             Nmcmc=Nmcmc,
             J=J,
             accepts=np.asarray(accepts, dtype=np.int32),
@@ -914,21 +921,33 @@ class PompEstimationMixin(Base):
         One independent ABC-MCMC chain is run for each parameter replicate in
         ``theta``. Results are stored in :attr:`Pomp.results_history`.
 
-        Args:
-            Nabc: Number of ABC-MCMC iterations per chain.
-            probes: Mapping from probe name to pure-JAX summary statistic.
-            scale: Positive scaling factor for each probe.
-            epsilon: ABC distance threshold.
-            proposal: Proposal object from :mod:`pypomp.proposals`.
-            dprior: Pure-JAX log-prior function. If ``None``, a flat improper
-                prior is used.
-            key: JAX PRNG key. Defaults to :attr:`fresh_key`.
-            theta: Starting parameter values. Defaults to :attr:`theta`.
-            track_time: Whether to record execution time.
+        Parameters
+        ----------
+        Nabc : int
+            Number of ABC-MCMC iterations per chain.
+        probes : dict
+            Mapping from probe name to pure-JAX summary statistic.
+        scale : dict
+            Positive scaling factor for each probe.
+        epsilon : float
+            ABC distance threshold.
+        proposal : Proposal
+            Proposal object from :mod:`pypomp.proposals`.
+        dprior : Callable, optional
+            Pure-JAX log-prior function. If ``None``, a flat improper prior is
+            used.
+        key : jax.Array, optional
+            JAX PRNG key. Defaults to :attr:`fresh_key`.
+        theta : PompParameters, optional
+            Starting parameter values. Defaults to :attr:`theta`.
+        track_time : bool, default True
+            Whether to record execution time.
 
-        Returns:
-            None. Updates :attr:`Pomp.results_history` with a
-            :class:`~pypomp.core.results.PompABCResult`.
+        Returns
+        -------
+        None
+            Updates :attr:`Pomp.results_history` with a
+            :class:`~pypomp.core.results.Result`.
         """
         start_time = time.time()
 
@@ -1018,12 +1037,11 @@ class PompEstimationMixin(Base):
         self.theta = PompParameters(final_theta_da)
 
         execution_time = time.time() - start_time if track_time else None
-        result = PompABCResult(
-            method="abc",
+        result = build_abc_result(
             execution_time=execution_time,
             key=old_key,
             theta=theta_obj_for_result,
-            traces_da=traces_da,
+            traces=traces_da,
             Nabc=Nabc,
             epsilon=float(epsilon),
             accepts=np.asarray(accepts, dtype=np.int32),

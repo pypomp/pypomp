@@ -8,30 +8,10 @@ In addition to accessing the stored values directly, you can access these result
 
 .. currentmodule:: pypomp.core.results
 
-.. rubric:: Results History
+.. rubric:: Results Containers
 .. autosummary::
    :toctree: generated/
    :nosignatures:
 
+   Result
    ResultsHistory
-
-.. rubric:: Pomp Results
-.. autosummary::
-   :toctree: generated/
-   :nosignatures:
-
-   PompPFilterResult
-   PompMIFResult
-   PompTrainResult
-   PompPMCMCResult
-   PompABCResult
-
-.. rubric:: PanelPomp Results
-.. autosummary::
-   :toctree: generated/
-   :nosignatures:
-
-   PanelPompPFilterResult
-   PanelPompMIFResult
-   PanelPompTrainResult
-   PanelPompDpopTrainResult

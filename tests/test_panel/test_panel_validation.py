@@ -187,10 +187,9 @@ def test_panel_pomp_eq_unit_objects_mismatch(lg_panel_setup_some_shared):
 def test_panel_pomp_eq_results_history_mismatch(lg_panel_setup_some_shared):
     panel1, _, _ = lg_panel_setup_some_shared
     panel2 = deepcopy(panel1)
-    from pypomp.core.results import PanelPompPFilterResult
+    from pypomp.core.results import build_panel_pfilter_result
 
-    dummy_result = PanelPompPFilterResult(
-        method="pfilter",
+    dummy_result = build_panel_pfilter_result(
         execution_time=0.1,
         key=jax.random.key(1),
         theta=panel2.theta,

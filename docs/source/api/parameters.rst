@@ -18,8 +18,8 @@ Parameters
    ~PompParameters.get_param_names
    ~PompParameters.params
    ~PompParameters.set_params
-   ~PompParameters.transform
-   ~PompParameters.prune
+   ~PompParameters.transformed
+   ~PompParameters.pruned
    ~PompParameters.merge
 
 .. autoclass:: PanelParameters
@@ -40,7 +40,7 @@ Parameters
    ~PanelParameters.get_unit_names
    ~PanelParameters.subset
    ~PanelParameters.to_jax_array
-   ~PanelParameters.transform
-   ~PanelParameters.prune
-   ~PanelParameters.mix_and_match
+   ~PanelParameters.transformed
+   ~PanelParameters.pruned
+   ~PanelParameters.mixed_and_matched
    ~PanelParameters.merge

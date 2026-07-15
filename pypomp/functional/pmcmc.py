@@ -33,19 +33,30 @@ def pmcmc(
     larger JAX programs; see :meth:`pypomp.core.pomp.Pomp.pmcmc` for a
     higher-level interface.
 
-    Args:
-        struct: Compiled POMP model (see :class:`PompStruct`).
-        thetas_array: Starting parameter vectors, shape ``(n_chains, d)``.
-        proposal: Proposal object (see :mod:`pypomp.proposals`).  Shared across
-            chains; per-chain state is initialised internally.
-        dprior: Log-prior density.  Pure JAX function with signature
-            ``dprior(theta_arr) -> scalar``.
-        Nmcmc: Number of MCMC iterations per chain.
-        J: Number of particles per filter evaluation.
-        thresh: Adaptive resampling threshold for the particle filter.
-        keys: PRNG keys, shape ``(n_chains, ...)``.
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled POMP model (see :class:`PompStruct`).
+    thetas_array : jax.Array
+        Starting parameter vectors, shape ``(n_chains, d)``.
+    proposal
+        Proposal object (see :mod:`pypomp.proposals`).  Shared across
+        chains; per-chain state is initialised internally.
+    dprior : Callable
+        Log-prior density.  Pure JAX function with signature
+        ``dprior(theta_arr) -> scalar``.
+    Nmcmc : int
+        Number of MCMC iterations per chain.
+    J : int
+        Number of particles per filter evaluation.
+    thresh : float
+        Adaptive resampling threshold for the particle filter.
+    keys : jax.Array
+        PRNG keys, shape ``(n_chains, ...)``.
 
-    Returns:
+    Returns
+    -------
+    tuple[jax.Array, jax.Array, jax.Array, jax.Array]
         Tuple ``(loglik_traces, log_prior_traces, theta_traces, accepts)``:
 
         * ``loglik_traces``: shape ``(n_chains, Nmcmc + 1)``.

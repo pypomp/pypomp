@@ -205,10 +205,12 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     panel_specific.mif(J=J, M=M, rw_sd=measles_rw_sd.geometric_cooling(a=a), key=key)
     res_specific = panel_specific.results_history[-1]
 
-    from pypomp.core.results.panel import PanelPompMIFResult
+    from pypomp.core.results import Result
 
-    assert isinstance(res_shared, PanelPompMIFResult)
-    assert isinstance(res_specific, PanelPompMIFResult)
+    assert isinstance(res_shared, Result)
+    assert isinstance(res_specific, Result)
+    assert res_shared.method == "mif"
+    assert res_specific.method == "mif"
 
     # Verify log-likelihoods match
     assert jnp.allclose(res_shared.logLiks.values, res_specific.logLiks.values), (

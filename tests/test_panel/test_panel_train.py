@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 import numpy as np
 import pypomp as pp
-from pypomp.core.results import PanelPompTrainResult
+from pypomp.core.results import Result
 
 
 def _get_lg_panel():
@@ -60,7 +60,8 @@ def test_panel_train(chunk_size, opt_instance):
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompTrainResult)
+    assert isinstance(res, Result)
+    assert res.method == "train"
     assert res.shared_traces.shape[0] == 1  # n_reps
     assert res.shared_traces.shape[1] == M + 1
     assert res.unit_traces.shape[0] == 1  # n_reps
@@ -88,7 +89,7 @@ def test_panel_train_clipping():
         optimizer=pp.SGD(clip_norm=None),
     )
     res_no_clip = panel.results_history[-1]
-    assert isinstance(res_no_clip, PanelPompTrainResult)
+    assert isinstance(res_no_clip, Result)
     shared_vars = panel.canonical_shared_param_names
     p0 = res_no_clip.shared_traces.sel(
         theta_idx=0, iteration=0, variable=shared_vars
@@ -107,7 +108,7 @@ def test_panel_train_clipping():
         optimizer=pp.SGD(clip_norm=1e-5),
     )
     res_clip = panel.results_history[-1]
-    assert isinstance(res_clip, PanelPompTrainResult)
+    assert isinstance(res_clip, Result)
     p1_clip = res_clip.shared_traces.sel(
         theta_idx=0, iteration=1, variable=shared_vars
     ).values

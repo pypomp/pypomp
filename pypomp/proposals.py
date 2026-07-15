@@ -39,10 +39,13 @@ import numpy as np
 class MVNDiagRW:
     """Diagonal multivariate normal random-walk proposal.
 
-    Attributes:
-        sd_arr: ``(d,)`` array of per-parameter random-walk standard
-            deviations, in the order given by ``param_names``.
-        param_names: Tuple of parameter names corresponding to ``sd_arr``.
+    Attributes
+    ----------
+    sd_arr : jax.Array
+        ``(d,)`` array of per-parameter random-walk standard
+        deviations, in the order given by ``param_names``.
+    param_names : tuple of str
+        Tuple of parameter names corresponding to ``sd_arr``.
     """
 
     sd_arr: jax.Array
@@ -74,11 +77,14 @@ jax.tree_util.register_pytree_node(
 class MVNRWFull:
     """Full-covariance multivariate normal random-walk proposal.
 
-    Attributes:
-        chol: ``(d, d)`` lower-triangular Cholesky factor of the proposal
-            covariance.
-        param_names: Tuple of parameter names corresponding to the rows/columns
-            of the covariance.
+    Attributes
+    ----------
+    chol : jax.Array
+        ``(d, d)`` lower-triangular Cholesky factor of the proposal
+        covariance.
+    param_names : tuple of str
+        Tuple of parameter names corresponding to the rows/columns
+        of the covariance.
     """
 
     chol: jax.Array
@@ -157,15 +163,23 @@ class MVNRWAdaptive:
     Cholesky is computed each step with a small jitter (``1e-10 * I``) for
     JIT-friendly numerical robustness.
 
-    Attributes:
-        init_rw_var: ``(d, d)`` initial covariance matrix.
-        param_names: Tuple of parameter names corresponding to rows/columns
-            of ``init_rw_var``.
-        scale_start: Iteration index at which Phase 1 begins.
-        scale_cooling: Cooling base for the scale update.
-        shape_start: Accepted-proposal count at which to switch to Phase 2.
-        target: Target Metropolis acceptance ratio.
-        max_scaling: Upper bound for the scaling factor.
+    Attributes
+    ----------
+    init_rw_var : jax.Array
+        ``(d, d)`` initial covariance matrix.
+    param_names : tuple of str
+        Tuple of parameter names corresponding to rows/columns
+        of ``init_rw_var``.
+    scale_start : int
+        Iteration index at which Phase 1 begins.
+    scale_cooling : float
+        Cooling base for the scale update.
+    shape_start : int
+        Accepted-proposal count at which to switch to Phase 2.
+    target : float
+        Target Metropolis acceptance ratio.
+    max_scaling : float
+        Upper bound for the scaling factor.
     """
 
     init_rw_var: jax.Array
@@ -399,19 +413,29 @@ def mvn_rw_adaptive(
     Provide exactly one of ``rw_sd`` (diagonal initialisation) or ``rw_var``
     (full initial covariance).
 
-    Args:
-        rw_sd: Named dict of per-parameter random-walk SDs.
-        rw_var: Full initial covariance matrix.
-        param_names: Required when ``rw_var`` is supplied.
-        scale_start: Iteration at which to begin scale adaptation.
-        scale_cooling: Cooling base for the scale update (in (0, 1]).
-        shape_start: Number of accepted proposals before switching to
-            empirical covariance.
-        target: Target Metropolis acceptance ratio.
-        max_scaling: Upper bound for the scaling factor.
+    Parameters
+    ----------
+    rw_sd : dict, optional
+        Named dict of per-parameter random-walk SDs.
+    rw_var : array_like, optional
+        Full initial covariance matrix.
+    param_names : list of str, optional
+        Required when ``rw_var`` is supplied.
+    scale_start : int, default 200
+        Iteration at which to begin scale adaptation.
+    scale_cooling : float, default 0.999
+        Cooling base for the scale update (in (0, 1]).
+    shape_start : int, default 200
+        Number of accepted proposals before switching to empirical covariance.
+    target : float, default 0.234
+        Target Metropolis acceptance ratio.
+    max_scaling : float, default 50.0
+        Upper bound for the scaling factor.
 
-    Returns:
-        :class:`MVNRWAdaptive` instance.
+    Returns
+    -------
+    MVNRWAdaptive
+        A :class:`MVNRWAdaptive` instance.
     """
     if (rw_sd is None) == (rw_var is None):
         raise ValueError("Exactly one of rw_sd and rw_var must be given.")

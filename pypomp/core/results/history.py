@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from typing import overload, Sequence, Any
 import pandas as pd
 import warnings
-from .base import BaseResult
+from .result import Result
 
 
 class ResultsHistory:
@@ -9,24 +11,24 @@ class ResultsHistory:
 
     Parameters
     ----------
-    entries : sequence of BaseResult, optional
+    entries : sequence of Result, optional
         Initial list of results to populate the history.
     """
 
-    def __init__(self, entries: Sequence[BaseResult] | None = None):
-        self._entries: list[BaseResult] = list(entries) if entries else []
+    def __init__(self, entries: Sequence[Result] | None = None):
+        self._entries: list[Result] = list(entries) if entries else []
 
-    def append(self, entry: BaseResult):
+    def append(self, entry: Result):
         """Add a new result to the history.
 
         Parameters
         ----------
-        entry : BaseResult
+        entry : Result
             The result object to add.
         """
         self._entries.append(entry)
 
-    def add(self, entry: BaseResult):
+    def add(self, entry: Result):
         """Alias for append() for backward compatibility."""
         self.append(entry)
 
@@ -99,12 +101,12 @@ class ResultsHistory:
         return ResultsHistory(merged_entries)
 
     @overload
-    def __getitem__(self, index: int) -> BaseResult: ...
+    def __getitem__(self, index: int) -> Result: ...
 
     @overload
-    def __getitem__(self, index: slice) -> "ResultsHistory": ...
+    def __getitem__(self, index: slice) -> ResultsHistory: ...
 
-    def __getitem__(self, index: int | slice) -> "BaseResult | ResultsHistory":
+    def __getitem__(self, index: int | slice) -> Result | ResultsHistory:
         if isinstance(index, slice):
             return ResultsHistory(self._entries[index])
         return self._entries[index]
@@ -121,7 +123,7 @@ class ResultsHistory:
         """Clear all entries from the history."""
         self._entries.clear()
 
-    def last(self) -> BaseResult:
+    def last(self) -> Result:
         """Get last entry."""
         if not self._entries:
             raise ValueError("History is empty")

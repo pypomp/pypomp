@@ -29,23 +29,36 @@ def abc(
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Functional ABC-MCMC entry point.
 
-    Args:
-        struct: Compiled POMP model (see :class:`PompStruct`).  Requires
-            ``struct.rmeas_pf`` to be non-``None``.
-        thetas_array: Starting parameter vectors, shape ``(n_chains, d)``.
-        proposal: Proposal object (see :mod:`pypomp.proposals`).
-        dprior: Pure-JAX log-prior, ``dprior(theta_arr) -> scalar``.
-        probe_fn: Pure-JAX probe function, ``probe_fn(y_arr) -> (n_probes,)``
-            where ``y_arr`` has shape ``(n_obs, ydim)``.
-        obs_probes: Observed probes, shape ``(n_probes,)``.
-        scale_arr: Per-probe scale, shape ``(n_probes,)``.
-        epsilon: ABC distance threshold (acceptance requires
-            ``distance < epsilon**2``).
-        ydim: Observation dimensionality (static).
-        Nabc: Number of MCMC iterations per chain.
-        keys: PRNG keys, shape ``(n_chains, ...)``.
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled POMP model (see :class:`PompStruct`).  Requires
+        ``struct.rmeas_pf`` to be non-``None``.
+    thetas_array : jax.Array
+        Starting parameter vectors, shape ``(n_chains, d)``.
+    proposal
+        Proposal object (see :mod:`pypomp.proposals`).
+    dprior : Callable
+        Pure-JAX log-prior, ``dprior(theta_arr) -> scalar``.
+    probe_fn : Callable
+        Pure-JAX probe function, ``probe_fn(y_arr) -> (n_probes,)``
+        where ``y_arr`` has shape ``(n_obs, ydim)``.
+    obs_probes : jax.Array
+        Observed probes, shape ``(n_probes,)``.
+    scale_arr : jax.Array
+        Per-probe scale, shape ``(n_probes,)``.
+    epsilon : float
+        ABC distance threshold (acceptance requires ``distance < epsilon**2``).
+    ydim : int
+        Observation dimensionality (static).
+    Nabc : int
+        Number of MCMC iterations per chain.
+    keys : jax.Array
+        PRNG keys, shape ``(n_chains, ...)``.
 
-    Returns:
+    Returns
+    -------
+    tuple[jax.Array, jax.Array, jax.Array, jax.Array]
         ``(distance_traces, log_prior_traces, theta_traces, accepts)`` with
         shapes ``(n_chains, Nabc + 1)``, ``(n_chains, Nabc + 1)``,
         ``(n_chains, Nabc + 1, d)``, ``(n_chains,)`` respectively.

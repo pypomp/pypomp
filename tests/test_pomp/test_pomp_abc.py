@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 import pypomp as pp
-from pypomp.core.results import PompABCResult
+from pypomp.core.results import Result
 from pypomp.proposals import mvn_diag_rw, mvn_rw, mvn_rw_adaptive
 
 
-def _abc_res(res) -> PompABCResult:
-    assert isinstance(res, PompABCResult)
+def _abc_res(res) -> Result:
+    assert isinstance(res, Result)
     return res
 
 
@@ -60,7 +60,7 @@ class TestABC:
             key=jax.random.key(0),
         )
         res = _abc_res(sir.results_history[-1])
-        assert isinstance(res, PompABCResult)
+        assert isinstance(res, Result)
         assert res.method == "abc"
         assert res.Nabc == 5
         assert res.n_chains == 1
@@ -208,7 +208,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(7),
         )
-        assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
+        assert isinstance(_abc_res(sir.results_history[-1]), Result)
 
     def test_with_adaptive_proposal(self, sir):
         prop = mvn_rw_adaptive(
@@ -224,7 +224,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(8),
         )
-        assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
+        assert isinstance(_abc_res(sir.results_history[-1]), Result)
 
     def test_tight_epsilon_low_acceptance(self, sir):
         prop = mvn_diag_rw({"beta1": 10.0})
@@ -464,7 +464,7 @@ class TestABCMerge:
         )
         res2 = _abc_res(sir2.results_history[-1])
 
-        merged = PompABCResult.merge(res1, res2)
+        merged = Result.merge(res1, res2)
         assert merged.n_chains == res1.n_chains + res2.n_chains
         assert merged.Nabc == 3
         assert merged.epsilon == 1e6
@@ -503,4 +503,4 @@ class TestABCMerge:
         res2 = _abc_res(sir2.results_history[-1])
 
         with pytest.raises(ValueError, match="epsilon"):
-            PompABCResult.merge(res1, res2)
+            Result.merge(res1, res2)

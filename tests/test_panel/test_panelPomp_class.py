@@ -270,11 +270,13 @@ def test_performance_comprehensive():
     )
 
     # Add multiple MIF results to history (stress test with many results)
-    from pypomp.core.results import PanelPompMIFResult, PanelPompPFilterResult
+    from pypomp.core.results import (
+        build_panel_mif_result,
+        build_panel_pfilter_result,
+    )
 
     for i in range(6):  # 6 MIF runs
-        result = PanelPompMIFResult(
-            method="mif",
+        result = build_panel_mif_result(
             execution_time=1.0,
             key=jax.random.key(42),
             theta=pp.PanelParameters(
@@ -295,6 +297,7 @@ def test_performance_comprehensive():
                 }
             ).geometric_cooling(0.1),
             thresh=0.0,
+            n_monitors=0,
             block=True,
         )
         panel.results_history.add(result)
@@ -306,8 +309,7 @@ def test_performance_comprehensive():
             dims=["theta_idx", "unit", "rep"],
             coords={"theta_idx": range(n_reps), "unit": units, "rep": range(3)},
         )
-        result = PanelPompPFilterResult(
-            method="pfilter",
+        result = build_panel_pfilter_result(
             execution_time=1.0,
             key=jax.random.key(42),
             theta=pp.PanelParameters(

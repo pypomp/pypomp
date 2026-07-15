@@ -1,39 +1,34 @@
-from .base import (
-    BaseResult,
-    PompEstimationTracesMixin,
-    PanelPompEstimationTracesMixin,
-)
+from .result import Result
 from .pomp import (
-    PompBaseResult,
-    PompPFilterResult,
-    PompMIFResult,
-    PompTrainResult,
-    PompPMCMCResult,
-    PompABCResult,
+    build_pfilter_result,
+    build_mif_result,
+    build_train_result,
+    build_pmcmc_result,
+    build_abc_result,
 )
 from .panel import (
-    PanelPompBaseResult,
-    PanelPompPFilterResult,
-    PanelPompMIFResult,
-    PanelPompTrainResult,
-    PanelPompDpopTrainResult,
+    build_panel_pfilter_result,
+    build_panel_mif_result,
+    build_panel_train_result,
+    build_panel_dpop_train_result,
 )
 from .history import ResultsHistory
 
+# ``BaseResult`` is retained as an alias of the unified ``Result`` for any
+# external code that imported the old base type.
+BaseResult = Result
+
 __all__ = [
+    "Result",
     "BaseResult",
-    "PompEstimationTracesMixin",
-    "PanelPompEstimationTracesMixin",
-    "PompBaseResult",
-    "PompPFilterResult",
-    "PompMIFResult",
-    "PompTrainResult",
-    "PompPMCMCResult",
-    "PompABCResult",
-    "PanelPompBaseResult",
-    "PanelPompPFilterResult",
-    "PanelPompMIFResult",
-    "PanelPompTrainResult",
-    "PanelPompDpopTrainResult",
+    "build_pfilter_result",
+    "build_mif_result",
+    "build_train_result",
+    "build_pmcmc_result",
+    "build_abc_result",
+    "build_panel_pfilter_result",
+    "build_panel_mif_result",
+    "build_panel_train_result",
+    "build_panel_dpop_train_result",
     "ResultsHistory",
 ]

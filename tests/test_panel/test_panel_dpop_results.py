@@ -5,7 +5,7 @@ import jax
 from copy import deepcopy
 
 import pypomp as pp
-from pypomp.core.results import PanelPompDpopTrainResult
+from pypomp.core.results import Result
 
 _test_times = np.arange(1 / 52, 3 / 52, 1 / 52)
 
@@ -53,7 +53,8 @@ def dpop_results_module():
             key=jax.random.key(seed),
         )
         res = p.results_history[-1]
-        assert isinstance(res, PanelPompDpopTrainResult)
+        assert isinstance(res, Result)
+        assert res.method == "dpop_train"
         return res
 
     res0 = _run(seed=0)
@@ -69,44 +70,28 @@ def test_dpop_result_equality(dpop_results_module):
     assert res0 == res1_copy
     assert res0 != res_different
 
-    # Test mismatch on other attributes
-    res_diff_opt = deepcopy(res0)
-    res_diff_opt.optimizer = pp.SGD()
-    assert res0 != res_diff_opt
-
-    res_diff_j = deepcopy(res0)
-    res_diff_j.J = 999
-    assert res0 != res_diff_j
-
-    res_diff_m = deepcopy(res0)
-    res_diff_m.M = 999
-    assert res0 != res_diff_m
-
-    res_diff_eta = deepcopy(res0)
-    res_diff_eta.eta = 0.5
-    assert res0 != res_diff_eta
-
-    res_diff_alpha = deepcopy(res0)
-    res_diff_alpha.alpha = 0.5
-    assert res0 != res_diff_alpha
-
-    res_diff_alpha_cooling = deepcopy(res0)
-    res_diff_alpha_cooling.alpha_cooling = 0.5
-    assert res0 != res_diff_alpha_cooling
-
-    res_diff_state = deepcopy(res0)
-    res_diff_state.process_weight_state = "diff_state"
-    assert res0 != res_diff_state
-
-    res_diff_decay = deepcopy(res0)
-    res_diff_decay.decay = 9.9
-    assert res0 != res_diff_decay
+    # Test mismatch on config entries
+    for key, val in [
+        ("optimizer", pp.SGD()),
+        ("J", 999),
+        ("M", 999),
+        ("eta", 0.5),
+        ("alpha", 0.5),
+        ("alpha_cooling", 0.5),
+        ("process_weight_state", "diff_state"),
+        ("decay", 9.9),
+    ]:
+        res_diff = deepcopy(res0)
+        res_diff.config[key] = val
+        assert res0 != res_diff
 
 
 def test_dpop_result_empty_traces():
     # If traces are empty, traces() should return an empty DataFrame
-    res = PanelPompDpopTrainResult(
+    res = Result(
         method="dpop_train",
+        kind="trace",
+        panel=True,
         execution_time=0.1,
         key=jax.random.key(0),
     )
@@ -124,22 +109,22 @@ def test_dpop_result_merge(dpop_results_module):
     res0, res1 = dpop_results_module
 
     # Happy path
-    merged = PanelPompDpopTrainResult.merge(res0, res1)
-    assert isinstance(merged, PanelPompDpopTrainResult)
+    merged = Result.merge(res0, res1)
+    assert isinstance(merged, Result)
     assert merged.shared_traces.shape[0] == 2
     assert merged.unit_traces.shape[0] == 2
     assert merged.logLiks.shape[0] == 2
 
     # Raises ValueError when no results provided
     with pytest.raises(ValueError, match="At least one"):
-        PanelPompDpopTrainResult.merge()
+        Result.merge()
 
     # Raises TypeError when mismatched type
     with pytest.raises(TypeError, match="All merged objects must be of type"):
-        PanelPompDpopTrainResult.merge(res0, "not_a_result")  # type: ignore
+        Result.merge(res0, "not_a_result")  # type: ignore
 
     # Raises ValueError when mismatched parameters
     res_diff = deepcopy(res1)
-    res_diff.J = 999
+    res_diff.config["J"] = 999
     with pytest.raises(ValueError, match="must have the same J"):
-        PanelPompDpopTrainResult.merge(res0, res_diff)
+        Result.merge(res0, res_diff)

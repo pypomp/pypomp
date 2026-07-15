@@ -2,7 +2,7 @@ import xarray as xr
 import numpy as np
 import jax
 from copy import deepcopy
-from pypomp.core.results.panel import PanelPompPFilterResult
+from pypomp.core.results.panel import build_panel_pfilter_result
 
 
 def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0.0, key=None):
@@ -150,11 +150,14 @@ def test_pfilter_dataframe_shared_loglik_excludes_theta_idx():
         dims=["theta_idx", "unit", "rep"],
         coords={"unit": ["u1", "u2"], "rep": [0]},
     )
-    result = PanelPompPFilterResult(
-        method="pfilter",
+    result = build_panel_pfilter_result(
         execution_time=0.0,
         key=jax.random.key(0),
+        theta=None,
         logLiks=logliks,
+        J=0,
+        reps=1,
+        thresh=0.0,
     )
 
     df = result.to_dataframe()

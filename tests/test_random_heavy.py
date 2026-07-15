@@ -90,6 +90,8 @@ def run_performance_test(
 
 
 def test_poisson_performance() -> None:
+    if check_and_skip_ci():
+        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
     n = 1_000_000
     key = jax.random.key(1001)
     lam = jnp.array([0.01, 0.2, 1.0, 8.0, 10.0, 12.0, 50.0, 100.0], dtype=jnp.float32)
@@ -114,6 +116,8 @@ def test_poisson_performance() -> None:
 
 
 def test_binomial_performance() -> None:
+    if check_and_skip_ci():
+        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
     n = 1_000_000
     key = jax.random.key(1002)
     trials = jnp.array([1, 5, 20, 50, 100, 200], dtype=jnp.float32)
@@ -143,6 +147,8 @@ def test_binomial_performance() -> None:
 
 
 def test_gamma_performance() -> None:
+    if check_and_skip_ci():
+        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
     n = 1_000_000
     key = jax.random.key(1003)
     alpha = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
@@ -166,6 +172,8 @@ def test_gamma_performance() -> None:
 
 
 def test_nbinomial_performance() -> None:
+    if check_and_skip_ci():
+        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
     n = 1_000_000
     key = jax.random.key(1004)
     size = jnp.array([1.0, 5.0, 20.0, 100.0], dtype=jnp.float32)

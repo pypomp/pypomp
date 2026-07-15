@@ -65,9 +65,7 @@ class PompAnalysisMixin(Base):
 
         See Also
         --------
-        pypomp.core.results.PompPFilterResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompPFilterResult` class.
-        pypomp.core.results.PompMIFResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompMIFResult` class.
-        pypomp.core.results.PompTrainResult.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.PompTrainResult` class.
+        pypomp.core.results.Result.to_dataframe : Dataframe returned by :class:`~pypomp.core.results.Result` class.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 

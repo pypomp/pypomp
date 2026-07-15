@@ -4,7 +4,7 @@ import numpy as np
 import jax
 import pytest
 import pypomp as pp
-from pypomp.core.results import PanelPompDpopTrainResult
+from pypomp.core.results import Result
 
 
 # Short times series for fast test execution
@@ -48,7 +48,7 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompDpopTrainResult)
+    assert isinstance(res, Result)
     assert res.method == "dpop_train"
     assert res.shared_traces.dims == ("theta_idx", "iteration", "variable")
     assert res.unit_traces.dims == ("theta_idx", "iteration", "unit", "variable")
@@ -89,7 +89,7 @@ def test_panel_dpop_train_sgd(sir_panel_dpop):
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompDpopTrainResult)
+    assert isinstance(res, Result)
     assert res.optimizer == pp.SGD()
 
 
@@ -114,7 +114,7 @@ def test_panel_dpop_train_shared_dataframe_and_eta(sir_panel_with_shared_dpop):
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompDpopTrainResult)
+    assert isinstance(res, Result)
 
     # Should have shared params in the shared traces
     shared_vars = list(res.shared_traces.coords["variable"].values)
@@ -149,7 +149,7 @@ def test_panel_dpop_train_adjusts_nondividing_chunk_size(sir_panel_dpop, chunk_s
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompDpopTrainResult)
+    assert isinstance(res, Result)
     assert res.unit_traces.shape[2] == 2
 
 
@@ -175,7 +175,7 @@ def test_panel_dpop_train_multi_replicate(sir_panel_dpop):
     )
 
     res = panel.results_history[-1]
-    assert isinstance(res, PanelPompDpopTrainResult)
+    assert isinstance(res, Result)
     assert res.shared_traces.shape[0] == 2  # 2 replicates
     assert res.unit_traces.shape[0] == 2
 
@@ -201,14 +201,14 @@ def test_panel_dpop_train_reproducibility(sir_panel_dpop_module):
     panel1.theta = deepcopy(theta)
     panel1.dpop_train(theta=deepcopy(panel1.theta), **kwargs)
     res1 = panel1.results_history[-1]
-    assert isinstance(res1, PanelPompDpopTrainResult)
+    assert isinstance(res1, Result)
 
     panel2 = deepcopy(panel_orig)
     panel2.results_history.clear()
     panel2.theta = deepcopy(theta)
     panel2.dpop_train(theta=deepcopy(panel2.theta), **kwargs)
     res2 = panel2.results_history[-1]
-    assert isinstance(res2, PanelPompDpopTrainResult)
+    assert isinstance(res2, Result)
 
     np.testing.assert_array_equal(
         np.array(res1.unit_traces), np.array(res2.unit_traces)

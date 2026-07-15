@@ -180,7 +180,7 @@ def _standardize_panel_theta(
     return ds, shared_names_list, unit_specific_names_list
 
 
-class PanelParameters(ParameterSet[xr.Dataset]):
+class PanelParameters(ParameterSet):
     """Parameter set for panel POMP models.
 
     Manages parameters partitioned into shared and unit-specific parameters.
@@ -242,23 +242,10 @@ class PanelParameters(ParameterSet[xr.Dataset]):
 
         if isinstance(theta, xr.Dataset):
             self._data = theta.copy(deep=True)
-            raw_s = self._data.attrs.get("shared_names")
-            if raw_s is None:
-                raw_s = (
-                    list(self._data["shared"].coords["parameter"].values)
-                    if "shared" in self._data
-                    else []
-                )
-            self._canonical_shared_param_names = [str(x) for x in raw_s]
-
-            raw_u = self._data.attrs.get("unit_specific_names")
-            if raw_u is None:
-                raw_u = (
-                    list(self._data["unit_specific"].coords["parameter"].values)
-                    if "unit_specific" in self._data
-                    else []
-                )
-            self._canonical_unit_param_names = [str(x) for x in raw_u]
+            (
+                self._canonical_shared_param_names,
+                self._canonical_unit_param_names,
+            ) = self._names_from_dataset(self._data)
         else:
             ds, s_names, u_names = _standardize_panel_theta(theta)
             self._data = ds
@@ -272,6 +259,26 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._logLik = self._logLik_unit.sum(axis=1)
         self._canonical_param_names = list(
             set(self._canonical_shared_param_names + self._canonical_unit_param_names)
+        )
+
+    @staticmethod
+    def _names_from_dataset(ds: xr.Dataset) -> tuple[list[str], list[str]]:
+        """Recover shared / unit-specific parameter names from a Dataset.
+
+        Prefers the ``shared_names`` / ``unit_specific_names`` ``.attrs`` set by
+        :meth:`from_arrays` and falls back to the ``parameter`` coordinate of
+        each data variable when the attributes are absent.
+        """
+
+        def _names(var: str, attr: str) -> list[str]:
+            raw = ds.attrs.get(attr)
+            if raw is None:
+                raw = list(ds[var].coords["parameter"].values) if var in ds else []
+            return [str(x) for x in raw]
+
+        return (
+            _names("shared", "shared_names"),
+            _names("unit_specific", "unit_specific_names"),
         )
 
     def _format_logLik_unit(
@@ -295,6 +302,76 @@ class PanelParameters(ParameterSet[xr.Dataset]):
                 f"logLik_unit shape mismatch: {ll_unit.shape} vs ({n_reps}, {n_units})"
             )
         return ll_unit
+
+    @classmethod
+    def from_arrays(
+        cls,
+        shared_values: np.ndarray,
+        unit_specific_values: np.ndarray,
+        shared_names: list[str],
+        unit_specific_names: list[str],
+        unit_names: list[str],
+        logLik_unit: np.ndarray | None = None,
+        estimation_scale: bool = False,
+    ) -> "PanelParameters":
+        """Build a PanelParameters directly from value arrays.
+
+        This is the canonical way to construct a panel parameter set from raw
+        numeric arrays (e.g. sampled draws or the final iteration of a trace),
+        avoiding the need to hand-build the internal ``xarray.Dataset``.
+
+        Parameters
+        ----------
+        shared_values : np.ndarray
+            Shared parameter values of shape ``(n_reps, n_shared)``.
+        unit_specific_values : np.ndarray
+            Unit-specific parameter values of shape
+            ``(n_reps, n_units, n_unit_specific)``.
+        shared_names : list of str
+            Names of the shared parameters (columns of ``shared_values``).
+        unit_specific_names : list of str
+            Names of the unit-specific parameters.
+        unit_names : list of str
+            Names of the units.
+        logLik_unit : np.ndarray, optional
+            Unit-specific log-likelihoods of shape ``(n_reps, n_units)``.
+        estimation_scale : bool, optional
+            Whether the parameters are on the estimation scale.  Defaults to
+            ``False``.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set wrapping the given arrays.
+        """
+        shared_names = list(shared_names)
+        unit_specific_names = list(unit_specific_names)
+        unit_names = list(unit_names)
+        n_reps = np.asarray(shared_values).shape[0]
+        ds = xr.Dataset(
+            data_vars={
+                "shared": xr.DataArray(
+                    np.asarray(shared_values, dtype=float),
+                    dims=["theta_idx", "parameter"],
+                    coords={
+                        "theta_idx": np.arange(n_reps),
+                        "parameter": shared_names,
+                    },
+                ),
+                "unit_specific": xr.DataArray(
+                    np.asarray(unit_specific_values, dtype=float),
+                    dims=["theta_idx", "unit", "parameter"],
+                    coords={
+                        "theta_idx": np.arange(n_reps),
+                        "unit": unit_names,
+                        "parameter": unit_specific_names,
+                    },
+                ),
+            }
+        )
+        ds.attrs["shared_names"] = shared_names
+        ds.attrs["unit_specific_names"] = unit_specific_names
+        return cls(ds, logLik_unit=logLik_unit, estimation_scale=estimation_scale)
 
     @property
     def logLik(self) -> np.ndarray:
@@ -356,30 +433,6 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         ):
             return list(self._data["unit_specific"].coords["unit"].values)
         return []
-
-    def subset(self, indices: Union[int, list[int], slice]) -> "PanelParameters":
-        """Return a new PanelParameters object with subset replicates.
-
-        Parameters
-        ----------
-        indices : int or list of int or slice
-            Replicate indices to keep.
-
-        Returns
-        -------
-        PanelParameters
-            A new parameter set containing only the selected replicates.
-        """
-        if isinstance(indices, int):
-            indices = [indices]
-
-        sub_data = self._data.isel(theta_idx=indices)
-        sub_data.coords["theta_idx"] = np.arange(sub_data.sizes["theta_idx"])
-
-        sub_ll = self._logLik_unit[indices]
-        return PanelParameters(
-            sub_data, logLik_unit=sub_ll, estimation_scale=self.estimation_scale
-        )
 
     def to_jax_array(
         self,
@@ -588,23 +641,7 @@ class PanelParameters(ParameterSet[xr.Dataset]):
             raise ValueError("theta cannot be None")
         if isinstance(value, xr.Dataset):
             self._data = value.copy(deep=True)
-            raw_s = self._data.attrs.get("shared_names")
-            if raw_s is None:
-                raw_s = (
-                    list(self._data["shared"].coords["parameter"].values)
-                    if "shared" in self._data
-                    else []
-                )
-            s_names = [str(x) for x in raw_s]
-
-            raw_u = self._data.attrs.get("unit_specific_names")
-            if raw_u is None:
-                raw_u = (
-                    list(self._data["unit_specific"].coords["parameter"].values)
-                    if "unit_specific" in self._data
-                    else []
-                )
-            u_names = [str(x) for x in raw_u]
+            s_names, u_names = self._names_from_dataset(self._data)
         else:
             self._data, s_names, u_names = _standardize_panel_theta(value)
             s_names = [str(x) for x in s_names]
@@ -713,55 +750,28 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._canonical_shared_param_names = [str(x) for x in s_names]
         self._canonical_unit_param_names = [str(x) for x in u_names]
 
+    def _check_merge_compatible(self, other: Any) -> None:
+        if other._canonical_shared_param_names != self._canonical_shared_param_names:
+            raise ValueError(
+                "All PanelParameters objects must have the same canonical shared parameter names."
+            )
+        if other._canonical_unit_param_names != self._canonical_unit_param_names:
+            raise ValueError(
+                "All PanelParameters objects must have the same canonical unit parameter names."
+            )
+        if other.get_unit_names() != self.get_unit_names():
+            raise ValueError(
+                "All PanelParameters objects must have the same unit names."
+            )
+
+    def _finalize_merged_data(self, merged_data: xr.Dataset) -> None:
+        merged_data.attrs["shared_names"] = self._canonical_shared_param_names
+        merged_data.attrs["unit_specific_names"] = self._canonical_unit_param_names
+
     @staticmethod
-    def merge(*param_objs: "PanelParameters") -> "PanelParameters":
-        """Merge replicates from multiple PanelParameters objects.
-
-        Parameters
-        ----------
-        *param_objs : PanelParameters
-            One or more parameter sets to merge.
-
-        Returns
-        -------
-        PanelParameters
-            A new parameter set containing the concatenated replicates.
-        """
-        if len(param_objs) == 0:
-            raise ValueError("At least one PanelParameters object must be provided.")
-        first = param_objs[0]
-
-        for obj in param_objs:
-            if not isinstance(obj, PanelParameters):
-                raise TypeError("All merged objects must be of type PanelParameters.")
-            if obj._canonical_shared_param_names != first._canonical_shared_param_names:
-                raise ValueError(
-                    "All PanelParameters objects must have the same canonical shared parameter names."
-                )
-            if obj._canonical_unit_param_names != first._canonical_unit_param_names:
-                raise ValueError(
-                    "All PanelParameters objects must have the same canonical unit parameter names."
-                )
-            if obj.estimation_scale != first.estimation_scale:
-                raise ValueError(
-                    "All PanelParameters objects must have the same estimation scale."
-                )
-            if obj.get_unit_names() != first.get_unit_names():
-                raise ValueError(
-                    "All PanelParameters objects must have the same unit names."
-                )
-
-        merged_data = xr.concat([obj._data for obj in param_objs], dim="theta_idx")
-        merged_data.coords["theta_idx"] = np.arange(merged_data.sizes["theta_idx"])
-        merged_data.attrs["shared_names"] = first._canonical_shared_param_names
-        merged_data.attrs["unit_specific_names"] = first._canonical_unit_param_names
-
-        all_logLik_unit = [obj._logLik_unit for obj in param_objs]
-        merged_logLik_unit = (
-            np.concatenate(all_logLik_unit, axis=0) if all_logLik_unit else np.array([])
-        )
-        return PanelParameters(
-            merged_data,
-            logLik_unit=merged_logLik_unit,
-            estimation_scale=first.estimation_scale,
-        )
+    def _concat_logLik(param_objs: tuple[Any, ...]) -> dict[str, np.ndarray]:
+        return {
+            "logLik_unit": np.concatenate(
+                [obj._logLik_unit for obj in param_objs], axis=0
+            )
+        }

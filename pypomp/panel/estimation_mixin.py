@@ -196,32 +196,13 @@ class PanelEstimationMixin(Base):
         else:
             unit_specific_values = np.empty((n, len(units), 0))
 
-        shared_da = xr.DataArray(
-            shared_values,
-            dims=["theta_idx", "parameter"],
-            coords={
-                "theta_idx": np.arange(n),
-                "parameter": shared,
-            },
+        return PanelParameters.from_arrays(
+            shared_values=shared_values,
+            unit_specific_values=unit_specific_values,
+            shared_names=shared,
+            unit_specific_names=specific,
+            unit_names=units,
         )
-        unit_specific_da = xr.DataArray(
-            unit_specific_values,
-            dims=["theta_idx", "unit", "parameter"],
-            coords={
-                "theta_idx": np.arange(n),
-                "unit": units,
-                "parameter": specific,
-            },
-        )
-        ds = xr.Dataset(
-            data_vars={
-                "shared": shared_da,
-                "unit_specific": unit_specific_da,
-            }
-        )
-        ds.attrs["shared_names"] = shared
-        ds.attrs["unit_specific_names"] = specific
-        return PanelParameters(ds)
 
     @overload
     def simulate(
@@ -756,32 +737,12 @@ class PanelEstimationMixin(Base):
             },
         )
 
-        ds = xr.Dataset(
-            data_vars={
-                "shared": xr.DataArray(
-                    shared_traces[:, -1, 1:].astype(float),
-                    dims=["theta_idx", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "parameter": shared_index,
-                    },
-                ),
-                "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, :, 1:].astype(float),
-                    dims=["theta_idx", "unit", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "unit": unit_names,
-                        "parameter": spec_index,
-                    },
-                ),
-            }
-        )
-        ds.attrs["shared_names"] = shared_index
-        ds.attrs["unit_specific_names"] = spec_index
-
-        self.theta = PanelParameters(
-            theta=ds,
+        self.theta = PanelParameters.from_arrays(
+            shared_values=shared_traces[:, -1, 1:],
+            unit_specific_values=unit_traces[:, -1, :, 1:],
+            shared_names=shared_index,
+            unit_specific_names=spec_index,
+            unit_names=unit_names,
             logLik_unit=unit_traces[:, -1, :, 0].astype(float),
             estimation_scale=False,
         )
@@ -994,32 +955,12 @@ class PanelEstimationMixin(Base):
             },
         )
 
-        ds = xr.Dataset(
-            data_vars={
-                "shared": xr.DataArray(
-                    shared_traces[:, -1, 1:].astype(float),
-                    dims=["theta_idx", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "parameter": shared_index,
-                    },
-                ),
-                "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, :, 1:].astype(float),
-                    dims=["theta_idx", "unit", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "unit": unit_names,
-                        "parameter": spec_index,
-                    },
-                ),
-            }
-        )
-        ds.attrs["shared_names"] = shared_index
-        ds.attrs["unit_specific_names"] = spec_index
-
-        self.theta = PanelParameters(
-            theta=ds,
+        self.theta = PanelParameters.from_arrays(
+            shared_values=shared_traces[:, -1, 1:],
+            unit_specific_values=unit_traces[:, -1, :, 1:],
+            shared_names=shared_index,
+            unit_specific_names=spec_index,
+            unit_names=unit_names,
             logLik_unit=np.full((n_reps, U), np.nan),
             estimation_scale=False,
         )
@@ -1354,32 +1295,12 @@ class PanelEstimationMixin(Base):
 
         logLik_unit_out = unit_traces[:, -1, :, 0].astype(float)
 
-        ds = xr.Dataset(
-            data_vars={
-                "shared": xr.DataArray(
-                    shared_traces[:, -1, 1:].astype(float),
-                    dims=["theta_idx", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "parameter": shared_index,
-                    },
-                ),
-                "unit_specific": xr.DataArray(
-                    unit_traces[:, -1, :, 1:].astype(float),
-                    dims=["theta_idx", "unit", "parameter"],
-                    coords={
-                        "theta_idx": np.arange(n_reps),
-                        "unit": unit_names,
-                        "parameter": spec_index,
-                    },
-                ),
-            }
-        )
-        ds.attrs["shared_names"] = shared_index
-        ds.attrs["unit_specific_names"] = spec_index
-
-        self.theta = PanelParameters(
-            theta=ds,
+        self.theta = PanelParameters.from_arrays(
+            shared_values=shared_traces[:, -1, 1:],
+            unit_specific_values=unit_traces[:, -1, :, 1:],
+            shared_names=shared_index,
+            unit_specific_names=spec_index,
+            unit_names=unit_names,
             logLik_unit=logLik_unit_out,
             estimation_scale=False,
         )

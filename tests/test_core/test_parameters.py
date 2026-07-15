@@ -191,9 +191,9 @@ def test_base_parameter_set_transform():
 
 
 def test_standardize_pomp_theta_validation():
-    # Call _standardize_pomp_theta directly to cover early exits and errors
+    # A 3D (theta_idx, unit, parameter) DataArray is accepted by the constructor
     da = xr.DataArray([[[1.0]]], dims=["theta_idx", "unit", "parameter"])
-    assert _standardize_pomp_theta(da) is da
+    assert pp.PompParameters(da).num_replicates() == 1
 
     with pytest.raises(ValueError, match="theta cannot be None"):
         _standardize_pomp_theta(None)
@@ -243,9 +243,10 @@ def test_pomp_parameters_init_dataarray():
     # 2D DataArray without theta_idx (should rename other dimension)
     da_2d_rename = xr.DataArray([[1.0, 2.0]], dims=["other", "parameter"])
     p_rename = pp.PompParameters(da_2d_rename)
-    assert p_rename._data.dims == ("theta_idx", "unit", "parameter")
+    assert p_rename.num_replicates() == 1
+    assert p_rename.num_params() == 2
 
-    # 3D DataArray check
+    # 3D DataArray check (singleton unit is collapsed)
     da_3d = xr.DataArray([[[1.0], [2.0]]], dims=["theta_idx", "unit", "parameter"])
     p_3d = pp.PompParameters(da_3d)
     assert p_3d.num_replicates() == 1
@@ -255,11 +256,11 @@ def test_pomp_parameters_init_dataarray():
         np.ones((1, 1, 1)), dims=["parameter", "unit", "theta_idx"]
     )
     p_3d_other = pp.PompParameters(da_3d_other)
-    assert p_3d_other._data.dims == ("theta_idx", "unit", "parameter")
+    assert p_3d_other.num_replicates() == 1
 
-    # 3D DataArray with bad dimensions (line 183 coverage) raises KeyError on sizes
+    # 3D DataArray with unexpected dimensions raises a clear error
     da_3d_bad_dims = xr.DataArray(np.ones((1, 1, 1)), dims=["x", "y", "z"])
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="3D DataArray must have dims"):
         pp.PompParameters(da_3d_bad_dims)
 
     # 4D DataArray error

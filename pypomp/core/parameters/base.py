@@ -9,8 +9,6 @@ from typing import (
     Literal,
     Iterator,
     Any,
-    Generic,
-    TypeVar,
     cast,
     overload,
 )
@@ -21,22 +19,24 @@ except ImportError:
     from typing_extensions import Self
 from ..par_trans import ParTrans
 
-T_data = TypeVar("T_data", xr.DataArray, xr.Dataset)
 
-
-class ParameterSet(ABC, Generic[T_data]):
+class ParameterSet(ABC):
     """
     Abstract base class for parameter sets used in POMP models.
 
-    All parameter sets store parameters internally as a 3D ``xarray.DataArray``
-    with dimensions ``("theta_idx", "unit", "parameter")``:
+    All parameter sets store parameters internally as an ``xarray.Dataset`` with
+    two variables:
 
-    - ``theta_idx``: Coordinate indexing each parameter set/replicate.
-    - ``unit``: Coordinate indexing model units ("shared" or specific unit names).
-    - ``parameter``: Coordinate indexing parameter names.
+    - ``shared`` with dims ``("theta_idx", "parameter")``: parameters common to
+      every unit (all parameters for a standard, single-unit POMP).
+    - ``unit_specific`` with dims ``("theta_idx", "unit", "parameter")``:
+      per-unit parameters (empty for a standard POMP).
+
+    where ``theta_idx`` indexes replicates, ``unit`` indexes model units, and
+    ``parameter`` indexes parameter names.
     """
 
-    _data: T_data
+    _data: xr.Dataset
     estimation_scale: bool
 
     @abstractmethod
@@ -70,19 +70,17 @@ class ParameterSet(ABC, Generic[T_data]):
 
     def get_param_names(self) -> list[str]:
         """Return the list of parameter names contained in this set."""
-        if isinstance(self._data, xr.Dataset):
-            shared = (
-                list(self._data["shared"].coords["parameter"].values)
-                if "shared" in self._data
-                else []
-            )
-            unit_spec = (
-                list(self._data["unit_specific"].coords["parameter"].values)
-                if "unit_specific" in self._data
-                else []
-            )
-            return sorted(list(set(shared + unit_spec)))
-        return list(self._data.coords["parameter"].values)
+        shared = (
+            list(self._data["shared"].coords["parameter"].values)
+            if "shared" in self._data
+            else []
+        )
+        unit_spec = (
+            list(self._data["unit_specific"].coords["parameter"].values)
+            if "unit_specific" in self._data
+            else []
+        )
+        return sorted(set(shared + unit_spec))
 
     def __len__(self) -> int:
         """Return the number of parameter sets/replicates."""
@@ -182,6 +180,76 @@ class ParameterSet(ABC, Generic[T_data]):
         new_obj._slice_logLik(new_indices)
         return new_obj
 
+    def subset(self, indices: Union[int, list[int], slice]) -> Self:
+        """Return a new parameter set with only the selected replicates.
+
+        Parameters
+        ----------
+        indices : int or list of int or slice
+            Replicate indices to keep.
+
+        Returns
+        -------
+        Self
+            A new parameter set containing only the selected replicates,
+            re-indexed from 0.
+        """
+        if isinstance(indices, int):
+            indices = [indices]
+        new_obj = copy.deepcopy(self)
+        new_obj._data = new_obj._data.isel(theta_idx=indices)
+        new_obj._data.coords["theta_idx"] = np.arange(new_obj._data.sizes["theta_idx"])
+        new_obj._slice_logLik(cast(Any, indices))
+        return new_obj
+
+    @classmethod
+    def merge(cls, *param_objs: Self) -> Self:
+        """Merge replicates from multiple parameter sets of this type.
+
+        Parameters
+        ----------
+        *param_objs : Self
+            One or more parameter sets to merge.  All must share the same
+            canonical parameter names and estimation scale.
+
+        Returns
+        -------
+        Self
+            A new parameter set containing the concatenated replicates.
+        """
+        if len(param_objs) == 0:
+            raise ValueError(f"At least one {cls.__name__} object must be provided.")
+        first = param_objs[0]
+        for obj in param_objs:
+            if not isinstance(obj, cls):
+                raise TypeError(f"All merged objects must be of type {cls.__name__}.")
+            if obj.estimation_scale != first.estimation_scale:
+                raise ValueError(
+                    f"All {cls.__name__} objects must have the same estimation scale."
+                )
+            first._check_merge_compatible(obj)
+
+        merged_data = cast(
+            Any,
+            xr.concat(cast(Any, [obj._data for obj in param_objs]), dim="theta_idx"),
+        )
+        merged_data.coords["theta_idx"] = np.arange(merged_data.sizes["theta_idx"])
+        first._finalize_merged_data(merged_data)
+        ctor = cast(Any, cls)
+        return ctor(
+            merged_data,
+            estimation_scale=first.estimation_scale,
+            **cls._concat_logLik(param_objs),
+        )
+
+    def _finalize_merged_data(self, merged_data: xr.Dataset) -> None:
+        """Adjust the concatenated data in place before construction.
+
+        Default is a no-op; subclasses may override (e.g. to restore
+        ``.attrs`` metadata that ``xr.concat`` does not carry).
+        """
+        pass
+
     def __eq__(self, other) -> bool:
         if not isinstance(other, type(self)):
             return False
@@ -237,12 +305,12 @@ class ParameterSet(ABC, Generic[T_data]):
     def params(self, as_list: Literal[True]) -> list[Any]: ...
 
     @overload
-    def params(self, as_list: Literal[False] = False) -> T_data: ...
+    def params(self, as_list: Literal[False] = False) -> Any: ...
 
     @overload
-    def params(self, as_list: bool = False) -> list[Any] | T_data: ...
+    def params(self, as_list: bool = False) -> list[Any] | Any: ...
 
-    def params(self, as_list: bool = False) -> list[Any] | T_data:
+    def params(self, as_list: bool = False) -> list[Any] | Any:
         """Get the parameter values in this parameter set.
 
         Parameters
@@ -250,7 +318,7 @@ class ParameterSet(ABC, Generic[T_data]):
         as_list : bool, optional
             If ``True``, returns the parameters as a list of Python
             dictionaries.  If ``False`` (default), returns the internal xarray
-            representation (DataArray or Dataset).
+            representation.  Subclasses may narrow the non-list return type.
 
         Returns
         -------
@@ -279,7 +347,14 @@ class ParameterSet(ABC, Generic[T_data]):
         pass
 
     @abstractmethod
-    def subset(self, indices: Union[int, list[int], slice]) -> Self:
+    def _check_merge_compatible(self, other: Any) -> None:
+        """Raise if ``other`` cannot be merged with ``self`` (name mismatch)."""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def _concat_logLik(param_objs: tuple[Any, ...]) -> dict[str, np.ndarray]:
+        """Return the log-likelihood keyword arguments for the merged object."""
         pass
 
     @abstractmethod

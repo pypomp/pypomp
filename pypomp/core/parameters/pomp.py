@@ -7,7 +7,6 @@ import xarray as xr
 from typing import (
     Mapping,
     Sequence,
-    Union,
     Literal,
     Any,
     cast,
@@ -18,16 +17,84 @@ from .base import ParameterSet
 from ..par_trans import ParTrans
 
 
-def _standardize_pomp_theta(
-    theta: Mapping[str, float]
-    | Sequence[Mapping[str, float]]
-    | PompParameters
-    | xr.DataArray
-    | None,
-) -> xr.DataArray:
-    if isinstance(theta, xr.DataArray):
-        return theta
+def _empty_unit_specific(n_reps: int) -> xr.DataArray:
+    """Return the empty ``unit_specific`` array used by single-unit parameters."""
+    return xr.DataArray(
+        np.empty((n_reps, 0, 0)),
+        dims=["theta_idx", "unit", "parameter"],
+        coords={"theta_idx": np.arange(n_reps), "unit": [], "parameter": []},
+    )
 
+
+def _pomp_dataset(shared_da: xr.DataArray) -> xr.Dataset:
+    """Wrap a ``(theta_idx, parameter)`` shared DataArray into the canonical
+    parameter Dataset.
+
+    A standard (non-panel) POMP has no units, so every parameter is stored in
+    the ``shared`` variable and ``unit_specific`` is empty.  This is the same
+    two-variable Dataset that :class:`PanelParameters` uses, which lets both
+    classes share all replicate/log-likelihood machinery in the base class.
+    """
+    n_reps = shared_da.sizes["theta_idx"]
+    param_names = [str(x) for x in shared_da.coords["parameter"].values]
+    ds = xr.Dataset(
+        data_vars={
+            "shared": shared_da,
+            "unit_specific": _empty_unit_specific(n_reps),
+        }
+    )
+    ds.attrs["shared_names"] = param_names
+    ds.attrs["unit_specific_names"] = []
+    return ds
+
+
+def _shared_from_dataarray(theta: xr.DataArray) -> xr.DataArray:
+    """Normalize a user-supplied DataArray to a ``(theta_idx, parameter)`` array."""
+    da = theta.astype(float)
+    if da.ndim == 3:
+        if set(da.dims) != {"theta_idx", "unit", "parameter"}:
+            raise ValueError(
+                "3D DataArray must have dims ('theta_idx', 'unit', 'parameter')"
+            )
+        da = da.transpose("theta_idx", "unit", "parameter").isel(unit=0, drop=True)
+    elif da.ndim > 3:
+        raise ValueError("DataArray must be 1D, 2D, or 3D")
+
+    da = da.drop_vars(["theta_idx"], errors="ignore")
+    if da.ndim == 1:
+        if "parameter" not in da.dims:
+            if len(da.dims) == 1:
+                da = da.rename({da.dims[0]: "parameter"})
+            else:
+                raise ValueError("1D DataArray must have 'parameter' dimension")
+        da = da.expand_dims(dim={"theta_idx": [0]}, axis=0)
+    elif da.ndim == 2:
+        if "parameter" not in da.dims:
+            raise ValueError("2D DataArray must have 'parameter' dimension")
+        if "theta_idx" not in da.dims:
+            other_dim = [d for d in da.dims if d != "parameter"][0]
+            da = da.rename({other_dim: "theta_idx"})
+        da = da.transpose("theta_idx", "parameter")
+    else:
+        raise ValueError("DataArray must be 1D, 2D, or 3D")
+
+    if "parameter" in da.coords:
+        param_names: list[Any] = [str(x) for x in da.coords["parameter"].values]
+    else:
+        param_names = list(range(da.sizes["parameter"]))
+    return xr.DataArray(
+        np.asarray(da.values, dtype=float),
+        dims=["theta_idx", "parameter"],
+        coords={
+            "theta_idx": np.arange(da.sizes["theta_idx"]),
+            "parameter": param_names,
+        },
+    )
+
+
+def _standardize_pomp_theta(
+    theta: Mapping[str, float] | Sequence[Mapping[str, float]] | None,
+) -> xr.Dataset:
     if theta is None:
         raise ValueError("theta cannot be None")
 
@@ -79,25 +146,28 @@ def _standardize_pomp_theta(
     reps = len(clean_dicts)
     param_names = list(clean_dicts[0].keys())
 
-    # Contiguous array of shape (J, 1, P)
-    values = pd.DataFrame(clean_dicts)[param_names].values[:, np.newaxis, :]
+    # Contiguous array of shape (J, P), preserving insertion order of the keys.
+    values = pd.DataFrame(clean_dicts)[param_names].values
 
-    return xr.DataArray(
+    shared_da = xr.DataArray(
         values,
-        dims=["theta_idx", "unit", "parameter"],
+        dims=["theta_idx", "parameter"],
         coords={
             "theta_idx": np.arange(reps),
-            "unit": ["shared"],
             "parameter": param_names,
         },
     )
+    return _pomp_dataset(shared_da)
 
 
-class PompParameters(ParameterSet[xr.DataArray]):
+class PompParameters(ParameterSet):
     """Parameter set for standard POMP models.
 
-    Wraps a 3D ``xarray.DataArray`` with dimensions ``("theta_idx", "unit",
-    "parameter")``, where the ``"unit"`` dimension is always ``"shared"``.
+    Internally wraps an ``xarray.Dataset`` with two variables, ``shared``
+    (dims ``("theta_idx", "parameter")``) and an empty ``unit_specific``.  A
+    standard POMP has no units, so all parameters live in ``shared``.  This is
+    the same representation used by :class:`PanelParameters`, allowing both to
+    share the replicate/log-likelihood machinery defined in the base class.
 
     Parameters
     ----------
@@ -107,7 +177,8 @@ class PompParameters(ParameterSet[xr.DataArray]):
         - A single dictionary: ``dict[str, float]``
         - A sequence of dictionaries: ``list[dict[str, float]]``
         - An existing :class:`PompParameters` object
-        - An ``xarray.DataArray`` with dimensions ``("theta_idx", "unit", "parameter")``
+        - An ``xarray.DataArray`` (1D over parameters, 2D over
+          ``(theta_idx, parameter)``, or 3D with a singleton ``unit``)
     logLik : np.ndarray, optional
         Log-likelihood values associated with each parameter set.
     estimation_scale : bool, optional
@@ -115,7 +186,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
         ``False``.
     """
 
-    _data: xr.DataArray
+    _data: xr.Dataset
     estimation_scale: bool
     _logLik: np.ndarray
 
@@ -125,16 +196,18 @@ class PompParameters(ParameterSet[xr.DataArray]):
         | Sequence[Mapping[str, float]]
         | PompParameters
         | xr.DataArray
+        | xr.Dataset
         | None,
         logLik: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
         if theta is None:
-            self._data = xr.DataArray(
-                np.empty((0, 1, 0)),
-                dims=["theta_idx", "unit", "parameter"],
-                coords={"theta_idx": [], "unit": ["shared"], "parameter": []},
+            empty_shared = xr.DataArray(
+                np.empty((0, 0)),
+                dims=["theta_idx", "parameter"],
+                coords={"theta_idx": [], "parameter": []},
             )
+            self._data = _pomp_dataset(empty_shared)
             self._logLik = np.full(0, np.nan)
             self.estimation_scale = False
             return
@@ -149,45 +222,19 @@ class PompParameters(ParameterSet[xr.DataArray]):
             self.estimation_scale = theta.estimation_scale
             return
 
-        if isinstance(theta, xr.DataArray):
-            theta = theta.astype(float)
-            theta = theta.drop_vars(["theta_idx", "unit"], errors="ignore")
-            if theta.ndim == 1:
-                if "parameter" not in theta.dims:
-                    if len(theta.dims) == 1:
-                        theta = theta.rename({theta.dims[0]: "parameter"})
-                    else:
-                        raise ValueError("1D DataArray must have 'parameter' dimension")
-                theta_expanded = theta.expand_dims(dim={"theta_idx": [0]}, axis=0)
-                self._data = theta_expanded.expand_dims(
-                    dim={"unit": ["shared"]}, axis=1
-                ).copy(deep=True)
-            elif theta.ndim == 2:
-                dims = list(theta.dims)
-                if "parameter" not in dims:
-                    raise ValueError("2D DataArray must have 'parameter' dimension")
-                if "theta_idx" not in dims:
-                    other_dim = [d for d in dims if d != "parameter"][0]
-                    theta = theta.rename({other_dim: "theta_idx"})
-                theta = theta.transpose("theta_idx", "parameter")
-                self._data = theta.expand_dims(dim={"unit": ["shared"]}, axis=1).copy(
-                    deep=True
-                )
-            elif theta.ndim == 3:
-                dims = list(theta.dims)
-                if set(dims) == {"theta_idx", "unit", "parameter"}:
-                    self._data = theta.transpose("theta_idx", "unit", "parameter").copy(
-                        deep=True
-                    )
-                else:
-                    self._data = theta.copy(deep=True)
-            else:
-                raise ValueError("DataArray must be 1D, 2D, or 3D")
+        if isinstance(theta, xr.Dataset):
+            self._data = theta.copy(deep=True)
+        elif isinstance(theta, xr.DataArray):
+            self._data = _pomp_dataset(_shared_from_dataarray(theta))
         else:
             self._data = _standardize_pomp_theta(theta)
 
         self.estimation_scale = estimation_scale
         self._logLik = self._format_logLik(logLik, self._data.sizes["theta_idx"])
+
+    def get_param_names(self) -> list[str]:
+        """Return the parameter names in their original (insertion) order."""
+        return [str(x) for x in self._data["shared"].coords["parameter"].values]
 
     def _format_logLik(self, ll: np.ndarray | None, n_reps: int) -> np.ndarray:
         """Helper to standardize logLik input."""
@@ -224,7 +271,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
         if param_names is None:
             param_names = self.get_param_names()
         try:
-            ordered_values = self._data.sel(parameter=param_names).values[:, 0, :]
+            ordered_values = self._data["shared"].sel(parameter=param_names).values
         except KeyError as e:
             raise KeyError(
                 f"Parameter {e} expected by model but missing from parameter set."
@@ -242,30 +289,6 @@ class PompParameters(ParameterSet[xr.DataArray]):
     @logLik.setter
     def logLik(self, value):
         self._logLik = self._format_logLik(value, self.num_replicates())
-
-    def subset(self, indices: Union[int, list[int], slice]) -> "PompParameters":
-        """Return a new PompParameters object with subset replicates.
-
-        Parameters
-        ----------
-        indices : int or list of int or slice
-            Replicate indices to keep.
-
-        Returns
-        -------
-        PompParameters
-            A new parameter set containing only the selected replicates.
-        """
-        if isinstance(indices, int):
-            indices = [indices]
-
-        sub_data = self._data.isel(theta_idx=indices)
-        sub_data.coords["theta_idx"] = np.arange(sub_data.sizes["theta_idx"])
-        sub_logLik = self._logLik[indices]
-
-        return PompParameters(
-            sub_data, logLik=sub_logLik, estimation_scale=self.estimation_scale
-        )
 
     @overload
     def params(self, as_list: Literal[True]) -> list[dict[str, float]]: ...
@@ -285,8 +308,9 @@ class PompParameters(ParameterSet[xr.DataArray]):
         ----------
         as_list : bool, optional
             If ``True``, returns the parameters as a list of Python
-            dictionaries.  If ``False`` (default), returns the internal 3D
-            ``xarray.DataArray``.
+            dictionaries.  If ``False`` (default), returns a 3D
+            ``xarray.DataArray`` with dims ``("theta_idx", "unit", "parameter")``
+            and a single ``"shared"`` unit.
 
         Returns
         -------
@@ -294,7 +318,9 @@ class PompParameters(ParameterSet[xr.DataArray]):
             The parameters either as a list of dictionaries mapping parameter
             names to floats, or as a DataArray.
         """
-        return super().params(as_list)
+        if as_list:
+            return cast(list[dict[str, float]], self._to_list())
+        return self._data["shared"].expand_dims(dim={"unit": ["shared"]}, axis=1)
 
     def set_params(
         self,
@@ -321,7 +347,7 @@ class PompParameters(ParameterSet[xr.DataArray]):
         return cast(
             list[dict[str, float]],
             pd.DataFrame(
-                self._data.values[:, 0, :], columns=self.get_param_names()
+                self._data["shared"].values, columns=self.get_param_names()
             ).to_dict(orient="records"),
         )
 
@@ -334,8 +360,18 @@ class PompParameters(ParameterSet[xr.DataArray]):
     def _eq_logLik(self, other: "PompParameters") -> bool:
         return np.array_equal(self._logLik, other._logLik, equal_nan=True)
 
+    def _check_merge_compatible(self, other: Any) -> None:
+        if other.get_param_names() != self.get_param_names():
+            raise ValueError(
+                "All PompParameters objects must have the same canonical parameter names."
+            )
+
+    @staticmethod
+    def _concat_logLik(param_objs: tuple[Any, ...]) -> dict[str, np.ndarray]:
+        return {"logLik": np.concatenate([obj._logLik for obj in param_objs])}
+
     def _getitem_int(self, index: int) -> dict[str, float]:
-        return dict(zip(self.get_param_names(), self._data.values[index, 0]))
+        return dict(zip(self.get_param_names(), self._data["shared"].values[index]))
 
     def _transform_and_load(
         self,
@@ -347,42 +383,3 @@ class PompParameters(ParameterSet[xr.DataArray]):
             par_trans._to_floats(theta_i, direction) for theta_i in param_list
         ]
         self._data = _standardize_pomp_theta(transformed_list)
-
-    @staticmethod
-    def merge(*param_objs: "PompParameters") -> "PompParameters":
-        """Merge replicates from multiple PompParameters objects.
-
-        Parameters
-        ----------
-        *param_objs : PompParameters
-            One or more parameter sets to merge.
-
-        Returns
-        -------
-        PompParameters
-            A new parameter set containing the concatenated replicates.
-        """
-        if len(param_objs) == 0:
-            raise ValueError("At least one PompParameters object must be provided.")
-        first = param_objs[0]
-
-        for obj in param_objs:
-            if not isinstance(obj, PompParameters):
-                raise TypeError("All merged objects must be of type PompParameters.")
-            if obj.get_param_names() != first.get_param_names():
-                raise ValueError(
-                    "All PompParameters objects must have the same canonical parameter names."
-                )
-            if obj.estimation_scale != first.estimation_scale:
-                raise ValueError(
-                    "All PompParameters objects must have the same estimation scale."
-                )
-
-        merged_data = xr.concat([obj._data for obj in param_objs], dim="theta_idx")
-        merged_data.coords["theta_idx"] = np.arange(merged_data.sizes["theta_idx"])
-
-        all_logLik = [obj._logLik for obj in param_objs]
-        merged_logLik = np.concatenate(all_logLik) if all_logLik else np.array([])
-        return PompParameters(
-            merged_data, logLik=merged_logLik, estimation_scale=first.estimation_scale
-        )

@@ -10,8 +10,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
 import warnings
 
-from ..core.algorithms.pfilter import _chunked_panel_pfilter_internal
-from ..core.algorithms.types import PfilterConfig, PfilterInputs
+
 from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
 from ..core.algorithms.helpers import run_jax_batch_sharded
 from ..core.rw_sigma import RWSigma
@@ -443,6 +442,7 @@ class PanelEstimationMixin(Base):
             Updates the unit-specific log-likelihoods ``self.theta.logLik_unit``
             and appends a :class:`PanelPompPFilterResult` to the history.
         """
+        # 1. Setup keys and prepare parameters.
         start_time = time.time()
         thresh = float(max(0.0, thresh))
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
@@ -459,105 +459,88 @@ class PanelEstimationMixin(Base):
 
         chunk_size = max(1, int(chunk_size))
 
-        ys_per_unit = jnp.stack(
-            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
+        # 2. Extract unit-level parameter values from panel parameters.
+        thetas_panel = jnp.stack(
+            [
+                jnp.array(
+                    [
+                        [t[name] for name in self.unit_objects[u].canonical_param_names]
+                        for t in self.get_unit_parameters(u, theta=theta_obj_in)
+                    ]
+                )
+                for u in unit_names
+            ],
+            axis=1,
         )
-        covars_per_unit = self._get_covars_per_unit(unit_names)
+        thetas_panel_repl = jnp.repeat(thetas_panel, reps, axis=0)
 
-        thetas_per_unit = []
-        for unit in unit_names:
-            theta_list = self.get_unit_parameters(unit, theta=theta_obj_in)
-            obj = self.unit_objects[unit]
-            unit_arr = jnp.array(
-                [[t[name] for name in obj.canonical_param_names] for t in theta_list]
-            )
-            thetas_per_unit.append(unit_arr)
-
-        thetas_panel = jnp.stack(thetas_per_unit, axis=1)  # (n_theta_reps, U, n_params)
-        thetas_panel_repl = jnp.repeat(
-            thetas_panel, reps, axis=0
-        )  # (n_theta_reps * reps, U, n_params)
-
+        # 3. Construct PanelPompStruct and apply padding if necessary.
         padding = (chunk_size - (U % chunk_size)) % chunk_size
         U_padded = U + padding
 
-        # Pre-allocate keys at padded size: jnp.pad on PRNG keys would fail
-        # because their dtype (key<fry>) cannot be filled with a scalar. When
-        # padding == 0 (the common case), this matches the unpadded behavior.
         rep_unit_keys = jax.random.split(new_key, n_theta_reps * reps * U_padded)
         rep_unit_keys = rep_unit_keys.reshape(
             (n_theta_reps * reps, U_padded) + rep_unit_keys.shape[1:]
         )
 
+        struct = self.to_struct()
         if padding > 0:
             thetas_panel_repl = jnp.pad(
                 thetas_panel_repl, ((0, 0), (0, padding), (0, 0))
             )
-            ys_per_unit = jnp.pad(ys_per_unit, ((0, padding), (0, 0), (0, 0)))
-            if covars_per_unit is not None:
-                covars_per_unit = jnp.pad(
-                    covars_per_unit, ((0, padding), (0, 0), (0, 0))
-                )
+            ys_padded = jnp.pad(struct.ys_per_unit, ((0, padding), (0, 0), (0, 0)))
+            covars_padded = (
+                jnp.pad(struct.covars_per_unit, ((0, padding), (0, 0), (0, 0)))
+                if struct.covars_per_unit is not None
+                else None
+            )
+            struct = struct._replace(
+                ys_per_unit=ys_padded, covars_per_unit=covars_padded
+            )
 
-        config = PfilterConfig(
-            J=J,
-            rinitializer=rep_unit.rinit.struct_pf,
-            rprocess_interp=rep_unit.rproc.struct_pf_interp,
-            dmeasure=rep_unit.dmeas.struct_pf,
-            accumvars=rep_unit.rproc.accumvars,
-            thresh=thresh,
-            CLL=CLL,
-            ESS=ESS,
-            filter_mean=filter_mean,
-            prediction_mean=prediction_mean,
-            should_trans=False,
-        )
-        inputs = PfilterInputs(
-            ys=ys_per_unit,
-            dt_array_extended=jnp.array(rep_unit._dt_array_extended),
-            nstep_array=jnp.array(rep_unit._nstep_array),
-            t0=rep_unit.t0,
-            times=jnp.array(rep_unit.ys.index),
-            covars_extended=covars_per_unit,
-        )
-
+        # 4. Execute the sharded panel particle filter in parallel batches.
         results_jax = run_jax_batch_sharded(
-            _chunked_panel_pfilter_internal,
-            {0: 0, 1: 0},
+            F.panel_pfilter,
+            {1: 0, 3: 0},
             {
-                "neg_loglik": 0,
+                "logLik": 0,
                 "CLL": 0,
                 "ESS": 0,
                 "filter_mean": 0,
                 "prediction_mean": 0,
             },
+            struct,
             thetas_panel_repl,
+            J,
             rep_unit_keys,
-            config,
-            inputs,
-            chunk_size,
+            thresh=thresh,
+            chunk_size=chunk_size,
+            CLL=CLL,
+            ESS=ESS,
+            filter_mean=filter_mean,
+            prediction_mean=prediction_mean,
         )
 
         results = jax.device_get(results_jax)
         del results_jax
 
-        neg_logliks = results["neg_loglik"][:, :U]  # shape: (n_theta_reps * reps, U)
-        neg_logliks = neg_logliks.reshape(n_theta_reps, reps, U)
+        # 5. Extract and reshape log-likelihood values.
+        logLik_per_unit = results["logLik"][:, :U]
+        logLik_per_unit = logLik_per_unit.reshape(n_theta_reps, reps, U)
 
         results_da = xr.DataArray(
-            (-neg_logliks),
+            logLik_per_unit,
             dims=["theta_idx", "rep", "unit"],
             coords={"unit": unit_names, "rep": range(reps)},
         ).transpose("theta_idx", "unit", "rep")
 
         results_np = np.array(results_da.values)
-        logLik_unit = logmeanexp(
-            results_np, axis=-1, ignore_nan=False
-        )  # shape: (n_theta_reps, len(self.unit_objects))
+        logLik_unit = logmeanexp(results_np, axis=-1, ignore_nan=False)
 
         theta_obj_in.logLik_unit = logLik_unit
         self.theta = theta_obj_in
 
+        # 6. Extract and format requested diagnostics.
         def _reshape_and_stack_diagnostics(arr, dims, coord_names):
             if arr is None or arr.size == 0:
                 return None
@@ -580,7 +563,6 @@ class PanelEstimationMixin(Base):
             if CLL
             else None
         )
-
         ESS_da = (
             _reshape_and_stack_diagnostics(
                 results.get("ESS"), ["theta_idx", "unit", "rep", "time"], ["time"]
@@ -588,7 +570,6 @@ class PanelEstimationMixin(Base):
             if ESS
             else None
         )
-
         filter_mean_da = (
             _reshape_and_stack_diagnostics(
                 results.get("filter_mean"),
@@ -598,7 +579,6 @@ class PanelEstimationMixin(Base):
             if filter_mean
             else None
         )
-
         prediction_mean_da = (
             _reshape_and_stack_diagnostics(
                 results.get("prediction_mean"),
@@ -609,8 +589,8 @@ class PanelEstimationMixin(Base):
             else None
         )
 
+        # 7. Record execution results in history.
         execution_time = time.time() - start_time
-
         result = PanelPompPFilterResult(
             method="pfilter",
             execution_time=execution_time,

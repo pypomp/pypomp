@@ -291,3 +291,93 @@ def lg_panel_mp(lg_panel_mp_module):
     panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key, J, M, a
+
+
+# ---------------------------------------------------------------------------
+# SIR panel fixtures for test_panel_dpop_train.py
+# ---------------------------------------------------------------------------
+
+
+import numpy as np  # noqa: E402 (module-level import at end of conftest is fine)
+
+
+def _build_sir_panel_dpop():
+    """Build a 2-unit all-unit-specific SIR panel for dpop_train tests."""
+    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
+    sir1 = pp.models.sir(seed=100, times=test_times)
+    sir2 = pp.models.sir(seed=200, times=test_times)
+    param_names = sir1.canonical_param_names
+    theta1 = sir1.theta[0]
+    theta2 = sir2.theta[0]
+    unit_specific = pd.DataFrame(
+        {
+            "unit1": [theta1[p] for p in param_names],
+            "unit2": [theta2[p] for p in param_names],
+        },
+        index=pd.Index(param_names),
+    )
+    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
+    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
+    return panel, theta
+
+
+def _build_sir_panel_with_shared_dpop():
+    """Build a 2-unit SIR panel with gamma and mu shared for dpop_train tests."""
+    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
+    sir1 = pp.models.sir(seed=100, times=test_times)
+    sir2 = pp.models.sir(seed=200, times=test_times)
+    param_names = sir1.canonical_param_names
+    theta1 = sir1.theta[0]
+    theta2 = sir2.theta[0]
+
+    shared_names = ["gamma", "mu"]
+    unit_names_param = [p for p in param_names if p not in shared_names]
+
+    shared = pd.DataFrame(
+        {"shared": [(theta1[p] + theta2[p]) / 2 for p in shared_names]},
+        index=pd.Index(shared_names),
+    )
+    unit_specific = pd.DataFrame(
+        {
+            "unit1": [theta1[p] for p in unit_names_param],
+            "unit2": [theta2[p] for p in unit_names_param],
+        },
+        index=pd.Index(unit_names_param),
+    )
+    theta = pp.PanelParameters(
+        theta=[{"shared": shared, "unit_specific": unit_specific}]
+    )
+    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
+    return panel, theta
+
+
+@pytest.fixture(scope="module")
+def sir_panel_dpop_module():
+    """Build the all-unit-specific SIR panel once per module."""
+    return _build_sir_panel_dpop()
+
+
+@pytest.fixture(scope="function")
+def sir_panel_dpop(sir_panel_dpop_module):
+    """Per-test SIR panel with cleared results_history and reset theta."""
+    panel_orig, theta = sir_panel_dpop_module
+    panel = deepcopy(panel_orig)
+    panel.results_history.clear()
+    panel.theta = deepcopy(theta)
+    return panel
+
+
+@pytest.fixture(scope="module")
+def sir_panel_with_shared_dpop_module():
+    """Build the shared-params SIR panel once per module."""
+    return _build_sir_panel_with_shared_dpop()
+
+
+@pytest.fixture(scope="function")
+def sir_panel_with_shared_dpop(sir_panel_with_shared_dpop_module):
+    """Per-test shared-params SIR panel with reset mutable state."""
+    panel_orig, theta = sir_panel_with_shared_dpop_module
+    panel = deepcopy(panel_orig)
+    panel.results_history.clear()
+    panel.theta = deepcopy(theta)
+    return panel

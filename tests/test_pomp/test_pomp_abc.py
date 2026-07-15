@@ -3,7 +3,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
@@ -19,35 +18,6 @@ def _abc_res(res) -> PompABCResult:
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------
-
-
-def _get_sir():
-    """Return a fresh SIR Pomp for testing."""
-    return pp.models.sir(seed=42)
-
-
-def _get_deterministic_measurement_pomp():
-    """One-observation POMP with exact ABC distance in theta['mu']."""
-
-    def rinit(theta_, key, covars, t0):
-        return {"X": 0.0}
-
-    def rproc(X_, theta_, key, covars, t, dt):
-        return {"X": X_["X"]}
-
-    def rmeas(X_, theta_, key, covars, t):
-        return jnp.array([theta_["mu"]])
-
-    return pp.Pomp(
-        ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
-        theta=pp.PompParameters({"mu": 0.0}),
-        statenames=["X"],
-        t0=0.0,
-        rinit=rinit,
-        rproc=rproc,
-        rmeas=rmeas,
-        nstep=1,
-    )
 
 
 def _default_probes():
@@ -79,8 +49,7 @@ def _informative_dprior(theta_arr):
 
 
 class TestABC:
-    def test_basic_run(self):
-        sir = _get_sir()
+    def test_basic_run(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0, "gamma": 0.1})
         sir.abc(
             Nabc=5,
@@ -99,8 +68,7 @@ class TestABC:
         assert var_list[0] == "distance"
         assert var_list[1] == "log_prior"
 
-    def test_with_dprior(self):
-        sir = _get_sir()
+    def test_with_dprior(self, sir):
         prop = mvn_diag_rw({"gamma": 0.1})
         sir.abc(
             Nabc=5,
@@ -115,8 +83,7 @@ class TestABC:
         lps = res.traces_da.sel(variable="log_prior").values
         assert not np.allclose(lps, 0.0)
 
-    def test_flat_prior_default(self):
-        sir = _get_sir()
+    def test_flat_prior_default(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
             Nabc=3,
@@ -131,8 +98,7 @@ class TestABC:
             res.traces_da.sel(variable="log_prior").values, 0.0
         )
 
-    def test_acceptance_rate_in_range(self):
-        sir = _get_sir()
+    def test_acceptance_rate_in_range(self, sir):
         prop = mvn_diag_rw({"beta1": 0.01, "gamma": 0.001})
         sir.abc(
             Nabc=10,
@@ -146,7 +112,11 @@ class TestABC:
         for r in res.acceptance_rate:
             assert 0.0 <= r <= 1.0
 
-    def test_reproducibility(self):
+    def test_reproducibility(self, sir_module):
+        """Uses sir_module directly to get two independent deep copies."""
+        model_orig, theta = sir_module
+        from copy import deepcopy
+
         Nabc = 5
         probes = _default_probes()
         scale = _default_scale()
@@ -154,7 +124,9 @@ class TestABC:
         proposal = mvn_diag_rw({"beta1": 1.0})
         key = jax.random.key(99)
 
-        sir1 = _get_sir()
+        sir1 = deepcopy(model_orig)
+        sir1.results_history.clear()
+        sir1.theta = theta
         sir1.abc(
             Nabc=Nabc,
             probes=probes,
@@ -163,7 +135,10 @@ class TestABC:
             proposal=proposal,
             key=key,
         )
-        sir2 = _get_sir()
+
+        sir2 = deepcopy(model_orig)
+        sir2.results_history.clear()
+        sir2.theta = theta
         sir2.abc(
             Nabc=Nabc,
             probes=probes,
@@ -172,13 +147,13 @@ class TestABC:
             proposal=proposal,
             key=key,
         )
+
         np.testing.assert_array_equal(
             np.asarray(_abc_res(sir1.results_history[-1]).traces_da.values),
             np.asarray(_abc_res(sir2.results_history[-1]).traces_da.values),
         )
 
-    def test_to_dataframe(self):
-        sir = _get_sir()
+    def test_to_dataframe(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
             Nabc=3,
@@ -195,8 +170,7 @@ class TestABC:
         assert "iteration" in df.columns
         assert len(df) == 4
 
-    def test_traces_method(self):
-        sir = _get_sir()
+    def test_traces_method(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
             Nabc=3,
@@ -210,8 +184,7 @@ class TestABC:
         assert "method" in df.columns
         assert (df["method"] == "abc").all()
 
-    def test_print_summary(self, capsys):
-        sir = _get_sir()
+    def test_print_summary(self, sir, capsys):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
             Nabc=3,
@@ -225,8 +198,7 @@ class TestABC:
         out = capsys.readouterr().out
         assert "Method: abc" in out
 
-    def test_with_mvn_rw(self):
-        sir = _get_sir()
+    def test_with_mvn_rw(self, sir):
         prop = mvn_rw(np.array([[1.0]]), ["beta1"])
         sir.abc(
             Nabc=3,
@@ -238,8 +210,7 @@ class TestABC:
         )
         assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
 
-    def test_with_adaptive_proposal(self):
-        sir = _get_sir()
+    def test_with_adaptive_proposal(self, sir):
         prop = mvn_rw_adaptive(
             rw_sd={"beta1": 1.0, "gamma": 0.1},
             scale_start=2,
@@ -255,8 +226,7 @@ class TestABC:
         )
         assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
 
-    def test_tight_epsilon_low_acceptance(self):
-        sir = _get_sir()
+    def test_tight_epsilon_low_acceptance(self, sir):
         prop = mvn_diag_rw({"beta1": 10.0})
         sir.abc(
             Nabc=10,
@@ -270,8 +240,7 @@ class TestABC:
         # Very tight epsilon -> typically few accepts
         assert int(res.accepts[0]) <= 10
 
-    def test_theta_updated_to_final_trace(self):
-        sir = _get_sir()
+    def test_theta_updated_to_final_trace(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
             Nabc=5,
@@ -287,8 +256,7 @@ class TestABC:
         for name in sir.canonical_param_names:
             assert sir.theta[0][name] == float(final_row.sel(variable=name).values)
 
-    def test_input_theta_is_deepcopied_and_unchanged(self):
-        sir = _get_sir()
+    def test_input_theta_is_deepcopied_and_unchanged(self, sir):
         theta_input = pp.PompParameters(sir.theta)
         theta_before = pp.PompParameters(theta_input)
         prop = mvn_diag_rw({"beta1": 1.0})
@@ -313,8 +281,7 @@ class TestABC:
         theta_input.set_params(mutated)
         assert res.theta == theta_before
 
-    def test_impossible_prior_rejects_all_proposals(self):
-        sir = _get_sir()
+    def test_impossible_prior_rejects_all_proposals(self, sir):
         beta1_idx = sir.canonical_param_names.index("beta1")
         beta1_start = float(sir.theta[0]["beta1"])
 
@@ -343,12 +310,11 @@ class TestABC:
             np.full((1, 6), beta1_start),
         )
 
-    def test_abc_distance_matches_manual_probe_distance(self):
-        pomp = _get_deterministic_measurement_pomp()
+    def test_abc_distance_matches_manual_probe_distance(self, deterministic_meas_pomp):
         probes = {"mean": lambda y: jnp.mean(y)}
         scale = {"mean": 2.0}
 
-        pomp.abc(
+        deterministic_meas_pomp.abc(
             Nabc=1,
             probes=probes,
             scale=scale,
@@ -356,7 +322,7 @@ class TestABC:
             proposal=mvn_diag_rw({"mu": 0.01}),
             key=jax.random.key(74),
         )
-        res = _abc_res(pomp.results_history[-1])
+        res = _abc_res(deterministic_meas_pomp.results_history[-1])
 
         recorded = float(
             res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="distance").values
@@ -371,8 +337,7 @@ class TestABC:
 
 
 class TestABCMultiChain:
-    def test_three_chains(self):
-        sir = _get_sir()
+    def test_three_chains(self, sir):
         t1 = dict(sir.theta[0])
         t2 = dict(sir.theta[0])
         t2["beta1"] = 380.0
@@ -399,8 +364,7 @@ class TestABCMultiChain:
 
 
 class TestABCValidation:
-    def test_invalid_Nabc(self):
-        sir = _get_sir()
+    def test_invalid_Nabc(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="Nabc"):
             sir.abc(
@@ -412,8 +376,7 @@ class TestABCValidation:
                 key=jax.random.key(0),
             )
 
-    def test_invalid_epsilon(self):
-        sir = _get_sir()
+    def test_invalid_epsilon(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="epsilon"):
             sir.abc(
@@ -425,8 +388,7 @@ class TestABCValidation:
                 key=jax.random.key(0),
             )
 
-    def test_empty_probes(self):
-        sir = _get_sir()
+    def test_empty_probes(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="probes"):
             sir.abc(
@@ -438,8 +400,7 @@ class TestABCValidation:
                 key=jax.random.key(0),
             )
 
-    def test_scale_keys_mismatch(self):
-        sir = _get_sir()
+    def test_scale_keys_mismatch(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="scale keys"):
             sir.abc(
@@ -451,8 +412,7 @@ class TestABCValidation:
                 key=jax.random.key(0),
             )
 
-    def test_negative_scale(self):
-        sir = _get_sir()
+    def test_negative_scale(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="must be positive"):
             sir.abc(
@@ -471,10 +431,17 @@ class TestABCValidation:
 
 
 class TestABCMerge:
-    def test_merge_two_chains(self):
-        sir = _get_sir()
+    def test_merge_two_chains(self, sir_module):
+        """Needs two independent runs; takes two deep copies from sir_module."""
+        from copy import deepcopy
+
+        model_orig, theta = sir_module
         prop = mvn_diag_rw({"beta1": 1.0})
-        sir.abc(
+
+        sir1 = deepcopy(model_orig)
+        sir1.results_history.clear()
+        sir1.theta = theta
+        sir1.abc(
             Nabc=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -482,8 +449,12 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(20),
         )
-        res1 = _abc_res(sir.results_history[-1])
-        sir.abc(
+        res1 = _abc_res(sir1.results_history[-1])
+
+        sir2 = deepcopy(model_orig)
+        sir2.results_history.clear()
+        sir2.theta = theta
+        sir2.abc(
             Nabc=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -491,16 +462,24 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(21),
         )
-        res2 = _abc_res(sir.results_history[-1])
+        res2 = _abc_res(sir2.results_history[-1])
+
         merged = PompABCResult.merge(res1, res2)
         assert merged.n_chains == res1.n_chains + res2.n_chains
         assert merged.Nabc == 3
         assert merged.epsilon == 1e6
 
-    def test_merge_different_epsilon_raises(self):
-        sir = _get_sir()
+    def test_merge_different_epsilon_raises(self, sir_module):
+        """Needs two independent runs with different epsilon."""
+        from copy import deepcopy
+
+        model_orig, theta = sir_module
         prop = mvn_diag_rw({"beta1": 1.0})
-        sir.abc(
+
+        sir1 = deepcopy(model_orig)
+        sir1.results_history.clear()
+        sir1.theta = theta
+        sir1.abc(
             Nabc=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -508,8 +487,12 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(30),
         )
-        res1 = _abc_res(sir.results_history[-1])
-        sir.abc(
+        res1 = _abc_res(sir1.results_history[-1])
+
+        sir2 = deepcopy(model_orig)
+        sir2.results_history.clear()
+        sir2.theta = theta
+        sir2.abc(
             Nabc=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -517,6 +500,7 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(31),
         )
-        res2 = _abc_res(sir.results_history[-1])
+        res2 = _abc_res(sir2.results_history[-1])
+
         with pytest.raises(ValueError, match="epsilon"):
             PompABCResult.merge(res1, res2)

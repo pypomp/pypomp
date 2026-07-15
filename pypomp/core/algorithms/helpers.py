@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 from typing import Any, Callable
 from functools import partial
-from pypomp.functional.structs import PompStruct
 
 
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
@@ -315,6 +314,8 @@ def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
 
 def is_dynamic(val: Any) -> bool:
     """Helper to detect if a value is/contains a JAX array or PyTree structure."""
+    from pypomp.functional.structs import PompStruct
+
     try:
         leaves = jax.tree_util.tree_leaves(val)
         return any(isinstance(x, (jax.Array, np.ndarray, PompStruct)) for x in leaves)

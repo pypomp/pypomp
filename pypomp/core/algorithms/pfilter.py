@@ -19,9 +19,12 @@ def _pfilter_internal(
     inputs: PfilterInputs,
 ) -> dict[str, jax.Array]:
     """Main internal function for particle the filtering algorithm."""
+    # 1. Setup and initialize keys.
     split_keys = jax.random.split(key, num=config.J + 1)
     key = split_keys[0]
     keys = split_keys[1:]
+
+    # 2. Initialize particle states at t0.
     covars0 = None if inputs.covars_extended is None else inputs.covars_extended[0]
     particlesF = config.rinitializer(
         theta, keys, covars0, inputs.t0, config.should_trans
@@ -29,7 +32,8 @@ def _pfilter_internal(
     norm_weights = jnp.log(jnp.ones(config.J) / config.J)
     counts = jnp.ones(config.J).astype(int)
     loglik = 0.0
-    # prepare arrays to store diagnostics if requested
+
+    # 3. Prepare arrays to store diagnostics/metrics if requested.
     n_obs = len(inputs.ys)
     CLL_arr = jnp.zeros(n_obs) if config.CLL else jnp.zeros(0)
     ESS_arr = jnp.zeros(n_obs) if config.ESS else jnp.zeros(0)
@@ -44,6 +48,7 @@ def _pfilter_internal(
         else jnp.zeros((0, particlesF.shape[-1]))
     )
 
+    # 4. Prepare input for particle filter loop and run it.
     initial_state = PfilterState(
         t=inputs.t0,
         particlesF=particlesF,
@@ -77,6 +82,7 @@ def _pfilter_internal(
         init_val=initial_state,
     )
 
+    # 5. Package and return the results.
     output = {"neg_loglik": -final_state.loglik}
 
     if config.CLL:
@@ -99,10 +105,13 @@ def _pfilter_step(
     state: PfilterState,
 ) -> PfilterState:
     """Run the particle filter for one observation interval."""
+    # 1. Setup and initialize keys.
     split_keys = jax.random.split(state.key, num=config.J + 1)
     key = split_keys[0]
     keys = split_keys[1:]
     nstep = inputs.nstep_array[i].astype(int)
+
+    # 2. Propagate particles for one observation interval.
     particlesP, t_idx = config.rprocess_interp(
         state.particlesF,
         theta,
@@ -117,15 +126,20 @@ def _pfilter_step(
     )
     t = inputs.times[i]
 
+    # 3. Update covariates to current observation time.
     covars_t = None if inputs.covars_extended is None else inputs.covars_extended[t_idx]
+
+    # 4. Compute log-likelihood contribution of current observation.
     measurements = config.dmeasure(
         inputs.ys[i], particlesP, theta, covars_t, t, config.should_trans
     )
 
+    # 5. Update running log-likelihood and normalize particle weights.
     weights = state.norm_weights + measurements
     norm_weights, loglik_t = _normalize_weights(weights)
     loglik = state.loglik + loglik_t
 
+    # 6. Compute and store diagnostics/metrics if requested.
     CLL_arr = state.CLL_arr
     ESS_arr = state.ESS_arr
     filter_mean_arr = state.filter_mean_arr
@@ -143,6 +157,7 @@ def _pfilter_step(
         prediction_mean_t = particlesP.mean(axis=0)
         prediction_mean_arr = prediction_mean_arr.at[i].set(prediction_mean_t)
 
+    # 7. Resample particles if criteria met.
     resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(config.thresh)
     key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights = jax.lax.cond(
@@ -151,6 +166,8 @@ def _pfilter_step(
         _no_resampler,
         *(state.counts, particlesP, norm_weights, subkey),
     )
+
+    # 8. Return the updated filter state.
 
     return PfilterState(
         t=t,
@@ -254,6 +271,7 @@ def _chunked_panel_pfilter_internal(
     chunk_size: int,
 ) -> dict[str, jax.Array]:
     """Run pfilter in vmapped chunks over multiple panel units."""
+    # 1. Reshape inputs for chunked processing.
     n_reps, U, n_params = thetas.shape
     n_chunks = U // chunk_size
 
@@ -268,6 +286,7 @@ def _chunked_panel_pfilter_internal(
     )
     keys_c = keys.reshape((n_reps, n_chunks, chunk_size) + keys.shape[2:])
 
+    # 2. Define unit/chunk processing loop.
     def process_rep(theta_r, key_r):
         def scan_fn(carry, chunk_idx):
             theta_chunk = theta_r[chunk_idx]
@@ -292,8 +311,10 @@ def _chunked_panel_pfilter_internal(
             )
             return carry, res
 
+        # 3. Perform scan and run the chunked particle filter.
         _, res_chunks = jax.lax.scan(scan_fn, None, jnp.arange(n_chunks))
 
+        # 4. Reshape outputs back to the original panel format.
         def reshape_back(arr):
             return arr.reshape((U,) + arr.shape[2:])
 

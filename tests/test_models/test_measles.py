@@ -86,7 +86,6 @@ def london_003():
     "model,theta",
     [
         ("001", BASE_THETA),
-        ("001c", BASE_THETA),
         ("003", BASE_THETA),
         (
             "002",
@@ -271,3 +270,13 @@ def test_measles_panel_pomp():
         float(hastings_covars["std_log_pop_1950"].iloc[0]),
         hastings_std_val,
     )
+
+
+def test_uk_measles_units():
+    units = pp.models.UKMeasles.units()
+    assert isinstance(units, list)
+    assert len(units) > 0
+    assert all(isinstance(u, str) for u in units)
+    assert "London" in units
+    assert "Liverpool" in units
+    assert units == sorted(units)

@@ -38,29 +38,63 @@ def fast_nbinomial(
     poisson_inverse_cdf_loops: int = 20,
     gamma_adjustment_size: int = 3,
 ) -> Array:
-    """
-    Generate negative binomial random variables using approximate inverse CDF methods for the gamma and Poisson distributions (fast_gamma and fast_poisson) in order to run fast on GPUs.
+    """Sample Negative Binomial random variates using a GPU-optimized algorithm.
 
-    The Negative Binomial distribution NB(n, p) represents the number of failures
-    before n successes, where p is the probability of success.
-    Alternatively, it can be parameterized by n (size) and mu (mean).
+    Draws from NB(n, p) (number of failures before ``n`` successes) via a
+    Gamma-Poisson mixture.  Both steps use the approximate GPU-optimized
+    samplers :func:`fast_gamma` and :func:`fast_poisson`.
 
-    NB(n, p) has mean mu = n * (1-p) / p.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    n : jax.Array
+        Size (number of successes) parameter.  Must be positive.
+    p : jax.Array or None, optional
+        Success probability in ``(0, 1]``.  Mutually exclusive with
+        ``mu``.
+    mu : jax.Array or None, optional
+        Mean of the distribution: ``mu = n * (1 - p) / p``.  Mutually
+        exclusive with ``p``.
+    dtype : np.dtype or None, optional
+        Output dtype (float or integer).  Defaults to ``float64`` if
+        ``jax_enable_x64=True``, otherwise ``float32``.
+    gamma_newton_loops : int, optional
+        Newton-Raphson iterations for the Gamma sampler.  Defaults to
+        ``3``.
+    poisson_newton_loops : int, optional
+        Newton-Raphson iterations for the Poisson sampler.  Defaults to
+        ``5``.
+    poisson_inverse_cdf_loops : int, optional
+        Exact inverse CDF iterations for the Poisson sampler.  Defaults
+        to ``20``.
+    gamma_adjustment_size : int, optional
+        Uniform adjustment steps for the Gamma sampler.  Defaults to
+        ``3``.
 
-    Args:
-        key: PRNG key used as the random key.
-        n: Number of successes (size parameter). Must be positive.
-        p: Probability of success (0 < p <= 1). Exactly one of p or mu must be provided.
-        mu: Mean of the distribution. Exactly one of p or mu must be provided.
-        dtype: optional, a float or integer dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32).
-        gamma_newton_loops: Cap on iterations for the Newton-Raphson method used for the gamma sampler.
-        poisson_newton_loops: Cap on iterations for the Newton-Raphson method used for the Poisson sampler.
-        poisson_inverse_cdf_loops: Cap on iterations for the exact inverse CDF method used for the Poisson sampler.
-        gamma_adjustment_size: Size of uniform adjustments to apply for the gamma sampler (handles small shape values).
+    Returns
+    -------
+    jax.Array
+        Negative Binomial samples with the broadcast shape of the
+        inputs.
 
-    Returns:
-        Negative binomial random variables with the same broadcast shape as the inputs.
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from pypomp.random import fast_nbinomial
+    >>> fast_nbinomial(jax.random.key(0), n=jnp.array(5.0), mu=jnp.array(3.0))
+    Array(2, dtype=int32)
+
+    See Also
+    --------
+    fast_gamma : Gamma sampler used internally.
+    fast_poisson : Poisson sampler used internally.
     """
     if (p is None and mu is None) or (p is not None and mu is not None):
         raise ValueError("Exactly one of p or mu must be provided.")

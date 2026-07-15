@@ -1,6 +1,7 @@
 import jax
 from .structs import PompStruct
 from ..core.algorithms.mop import _vmapped_mop_internal
+from ..core.algorithms.types import MopConfig, MopInputs
 
 
 def mop(
@@ -10,50 +11,53 @@ def mop(
     alpha: float,
     keys: jax.Array,
 ) -> jax.Array:
+    """MOP differentiable particle filter log-likelihood objective.
+
+    A pure functional implementation of the Measurement Off-Parameter (MOP)
+    differentiable particle filter (Tan et al. 2024 [1]_), intended for composition
+    within custom JAX loops or higher-order functions.
+
+    Unlike the standard particle filter (:func:`~pypomp.functional.pfilter`), the MOP
+    objective is designed to be fully differentiable with respect to the model
+    parameters using automatic differentiation.
+
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.
+    thetas_array : jax.Array
+        Array of initial parameters of shape ``(n_reps, n_params)``, aligned
+        with the canonical order of ``struct.param_names``.
+    J : int
+        Number of particles.
+    alpha : float
+        Alpha parameter for MOP.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+
+    Returns
+    -------
+    jax.Array
+        Negative MOP log-likelihood estimates.
+
+    See Also
+    --------
+    pypomp.Pomp.train : High-level OOP training interface.
+    pypomp.functional.align_params : Prepare parameter arrays.
+
+    References
+    ----------
+    .. [1] Tan, Kevin, Giles Hooker, and Edward L. Ionides. "Accelerated Inference
+       for Partially Observed Markov Processes using Automatic Differentiation."
+       *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
-    This is a pure functional implementation of the MOP differentiable particle
-    filter, intended for users who need to compose it within custom JAX
-    loops or higher-order functions. For a more user-friendly (but impurely-functional) interface
-    to train models using the MOP objective, see :meth:`pypomp.core.pomp.Pomp.train`.
 
-    Unlike the standard particle filter (:func:`pypomp.functional.pfilter`), the MOP objective is specifically
-    designed to be fully differentiable with respect to the model parameters. This allows
-    for the computation of gradients and Hessians of the log-likelihood using
-    JAX's automatic differentiation capabilities.
-
-    This function evaluates the log-likelihood for the given parameter sets, but it is
-    primarily intended to be used as an objective function within gradient-based
-    optimization routines (e.g., :func:`pypomp.functional.train`).
-
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, n_params).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        J (int): Number of particles.
-        alpha (float): Alpha parameter for MOP.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-
-    Returns:
-        jax.Array: Negative MOP log-likelihood estimates.
-
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
-    """
+    config = MopConfig.from_mop_struct(struct, J)
+    inputs = MopInputs.from_mop_struct(struct, alpha)
 
     return _vmapped_mop_internal(
         thetas_array,
-        struct.ys,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        J,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        struct.covars_extended,
-        alpha,
         keys,
+        config,
+        inputs,
     )

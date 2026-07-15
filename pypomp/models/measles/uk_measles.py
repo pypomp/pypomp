@@ -5,7 +5,6 @@ import os
 import pickle
 import pypomp.models.measles.model_001 as m001
 import pypomp.models.measles.model_001b as m001b
-import pypomp.models.measles.model_001c as m001c
 import pypomp.models.measles.model_001d as m001d
 import pypomp.models.measles.model_002 as m002
 import pypomp.models.measles.model_002d as m002d
@@ -42,22 +41,134 @@ def evaluate_spline_with_linear_extrapolation(spline, x, x_min, x_max):
     return y
 
 
-# Not sure if this is the best way to implement this.
 class UKMeasles:
+    """Class interface for building UK Measles POMP models and accessing data.
+
+    This class constructs POMP models based on the He et al. 2010 [1]_ formulation
+    and accesses epidemiological case reports data from Korevaar et al. 2020 [2]_.
+
+    Model Variants
+    --------------
+    The following sub-models (selected via the ``model`` parameter in :meth:`Pomp`
+    and :meth:`PanelPomp`) are available:
+
+    * **"001"**: Standard He10 model (He et al. 2010 [1]_) including mixing parameter
+      ``alpha`` and death rate ``mu``.
+    * **"001b"** (Default): He10 model without ``alpha`` (mixing parameter fixed to 1)
+      and without ``mu`` (death rate parameter omitted).
+    * **"001d"**: He10 model without ``alpha`` or ``mu`` (similar to "001b"), but
+      configured with gradient-stable transitions and measurement densities for
+      DPOP training.
+    * **"002"**: He10 model without ``alpha`` or ``mu``, where the transmission import
+      rate ``iota`` scales with population size: ``iota = exp(iota1 + iota2 * log(pop))``.
+      Designed for shared parameter panel modeling.
+    * **"002d"**: DPOP-enabled version of **"002"** combining the population-scaling
+      ``iota`` parameterization with gradient-stable transitions/measurement densities.
+    * **"003"**: Variant of the He10 model formulated with a continuous process model.
+
+    Model Parameters
+    ----------------
+    R0 : float
+        Basic reproduction number.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Log transformed.
+    sigma : float
+        Rate of transition from susceptible to exposed (1/latent period).
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Log transformed.
+    gamma : float
+        Rate of transition from exposed to infectious (1/infectious period).
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Log transformed.
+    iota : float
+        Daily imported cases rate.
+
+        * **Active Models**: "001", "001b", "001d", "003" (omitted in "002", "002d").
+        * **Estimation Scale**: Log transformed.
+    iota1 : float
+        Baseline imported cases (used in population-scaling import rate formulation).
+
+        * **Active Models**: "002", "002d" (replaces ``iota``).
+        * **Estimation Scale**: Untransformed (natural scale).
+    iota2 : float
+        Rate at which imported cases increase with log population size.
+
+        * **Active Models**: "002", "002d" (replaces ``iota``).
+        * **Estimation Scale**: Untransformed (natural scale).
+    sigmaSE : float
+        Rate of stochastic extrademographic variation / process noise.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Log transformed.
+    cohort : float
+        Cohort effect coefficient reflecting entry rate of children into school.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Logit transformed.
+    amplitude : float
+        Seasonality amplitude coefficient of transmission rate.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Logit transformed.
+    rho : float
+        Reporting probability.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Logit transformed.
+    psi : float
+        Reporting error over-dispersion.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Log transformed.
+    mu : float
+        Background death rate.
+
+        * **Active Models**: "001" only.
+        * **Estimation Scale**: Log transformed.
+    alpha : float
+        Mixing parameter/exponent for force of infection (e.g. transmission rate scales with ``(I + iota)**alpha``).
+
+        * **Active Models**: "001" only.
+        * **Estimation Scale**: Log transformed.
+    S_0, E_0, I_0, R_0 : float
+        Initial proportions of susceptible, exposed, infectious, and recovered populations.
+
+        * **Active Models**: All models.
+        * **Estimation Scale**: Transformed as log ratio proportions (normalized relative to sum).
+
+    References
+    ----------
+    .. [1] He, Daihai, Edward L. Ionides, and Aaron A. King. "Plug-and-play inference
+       for disease dynamics: measles in large and small populations as a case study."
+       *Journal of The Royal Society Interface* 7, no. 43 (2010): 271–283.
+       https://doi.org/10.1098/rsif.2009.0151.
+    .. [2] Korevaar, Hannah, C. Jessica Metcalf, and Bryan T. Grenfell. "Structure,
+       space and size: competing drivers of variation in urban and rural measles
+       transmission." *Journal of The Royal Society Interface* 17, no. 168 (2020):
+       20200010. https://doi.org/10.1098/rsif.2020.0010.
+    """
+
     _module_dir = os.path.dirname(os.path.abspath(__file__))
     _data_dir = os.path.join(_module_dir, os.pardir, os.pardir, "data/uk_measles")
     _data_file = os.path.join(_data_dir, "uk_measles.pkl")
     _data = None
-
-    MODELS = {
+    _MODELS = {
         "001": m001,
         "001b": m001b,
-        "001c": m001c,
         "001d": m001d,
         "002": m002,
         "002d": m002d,
         "003": m003,
     }
+
+    @classmethod
+    def units(cls) -> list[str]:
+        """List of all unique unit names in the UKMeasles dataset."""
+        raw_data = cls._get_data()
+        return sorted(list(raw_data["measles"]["unit"].unique()))
 
     @classmethod
     def _get_data(cls):
@@ -195,7 +306,7 @@ class UKMeasles:
         cls,
         unit: str,
         theta: PompParameters,
-        model: Literal["001", "001b", "001c", "001d", "002", "002d", "003"] = "001b",
+        model: Literal["001", "001b", "001d", "002", "002d", "003"] = "001b",
         interp_method: Literal["shifted_splines", "linear"] = "shifted_splines",
         first_year: int = 1950,
         last_year: int = 1963,
@@ -211,9 +322,10 @@ class UKMeasles:
             The name of the unit to use.
         theta : PompParameters
             Parameters for the model.
-        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
-            The model to use.
-        interp_method : Literal["shifted_splines", "linear"]
+        model : {"001", "001b", "001d", "002", "002d", "003"}
+            The sub-model variant to use. See the class-level documentation
+            for details on each variant.
+        interp_method : {"shifted_splines", "linear"}
             The method to use to interpolate the covariates.
         first_year : int
             The first year of the data to use.
@@ -289,7 +401,7 @@ class UKMeasles:
 
         # ----pomp-construction-----------------------------------------------
 
-        mod = cls.MODELS[model]
+        mod = cls._MODELS[model]
 
         missing_params = [
             p for p in mod.param_names if p not in theta.get_param_names()
@@ -321,7 +433,7 @@ class UKMeasles:
         cls,
         units: list[str],
         theta: PanelParameters,
-        model: Literal["001", "001b", "001c", "001d", "002", "002d", "003"] = "001b",
+        model: Literal["001", "001b", "001d", "002", "002d", "003"] = "001b",
         interp_method: Literal["shifted_splines", "linear"] = "shifted_splines",
         first_year: int = 1950,
         last_year: int = 1963,
@@ -337,9 +449,10 @@ class UKMeasles:
             List of units to include in the panel.
         theta : PanelParameters
             Parameters for the panel model.
-        model : Literal["001", "001b", "001c", "001d", "002", "002d", "003"]
-            The model to use.
-        interp_method : Literal["shifted_splines", "linear"]
+        model : {"001", "001b", "001d", "002", "002d", "003"}
+            The sub-model variant to use. See the class-level documentation
+            for details on each variant.
+        interp_method : {"shifted_splines", "linear"}
             The method to use to interpolate the covariates.
         first_year : int
             The first year of the data to use.
@@ -358,11 +471,11 @@ class UKMeasles:
         if not isinstance(theta, PanelParameters):
             raise TypeError("theta must be a PanelParameters instance")
 
-        mod = cls.MODELS[model]
+        mod = cls._MODELS[model]
         param_names = mod.param_names
 
         pomp_dict = {}
-        theta_list = theta.params()
+        theta_list = theta.params(as_list=True)
 
         for unit in units:
             unit_theta_dict = {}

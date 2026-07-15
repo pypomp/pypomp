@@ -41,8 +41,8 @@ class DummyResult(BaseResult):
     def to_dataframe(self, ignore_nan: bool = False):
         return pd.DataFrame([{"custom": self.custom_field, "logLik": 1.0}])
 
-    @staticmethod
-    def merge(*results):
+    @classmethod
+    def merge(cls, *results):
         return results[0]
 
     @property
@@ -238,8 +238,8 @@ def test_pomp_estimation_traces_mixin():
         def traces(self):
             return super().traces()
 
-        @staticmethod
-        def merge(*results):
+        @classmethod
+        def merge(cls, *results):
             return results[0]
 
         @property
@@ -306,8 +306,8 @@ def test_panel_pomp_estimation_traces_mixin():
         def traces(self):
             return super().traces()
 
-        @staticmethod
-        def merge(*results):
+        @classmethod
+        def merge(cls, *results):
             return results[0]
 
         @property
@@ -389,11 +389,11 @@ def test_results_history(capsys):
         def traces(self):
             return self._traces_val
 
-        @staticmethod
-        def merge(*results):
+        @classmethod
+        def merge(cls, *results):
             # Sum up execution times for mock merge verification
             m_time = sum(r.execution_time for r in results)
-            return MockResult(results[0].method, m_time)
+            return cls(results[0].method, m_time)
 
         @property
         def _summary_config(self):
@@ -666,7 +666,7 @@ def test_pomp_train_result():
         M=1,
         eta=lr,
         alpha=0.95,
-        thresh=0,
+        thresh=0.0,
         alpha_cooling=0.99,
     )
 
@@ -685,7 +685,7 @@ def test_pomp_train_result():
         M=1,
         eta=lr,
         alpha=0.95,
-        thresh=0,
+        thresh=0.0,
         alpha_cooling=0.99,
     )
     res_merged = PompTrainResult.merge(res, res2)

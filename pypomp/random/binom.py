@@ -25,24 +25,60 @@ from ._dtype_helpers import (
 )
 
 
-@partial(jax.jit, static_argnames=["dtype"])
+@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def fast_multinomial(
-    key: Array, n: Array, p: Array, dtype: np.dtype | None = None
+    key: Array,
+    n: Array,
+    p: Array,
+    order: int = 2,
+    exact_max: int = 5,
+    dtype: np.dtype | None = None,
 ) -> Array:
-    """
-    Generate multinomial random variables using the inverse CDF method with fast_binomial in order to run fast on GPUs.
+    """Sample multinomial random variates using a GPU-optimized inverse CDF algorithm.
 
-    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016). Our implementation of the method does not produce exact multinomial random variables, but it is very close to exact.
+    Generates multinomial counts by sequentially sampling binomial
+    components via :func:`fast_binomial`.  Follows the methodology from
+    Giles and Beentjes (2024) [1]_.  Results are very close to exact but not
+    guaranteed to be identical to a reference sampler.
 
-    Args:
-        key: PRNG key used as the random key.
-        n: Number of trials for the multinomial distribution. Shape: (...,)
-        p: Probabilities for each category. Shape: (..., k), where k = num categories.
-           Probabilities along the last axis must sum to 1.
-        dtype: optional, a float dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32). If integer, returns -1 for invalid inputs instead of nan.
-    Returns:
-        Multinomial counts. Same shape as p, but with specified dtype.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    n : jax.Array
+        Number of trials.  Shape ``(...,)``.
+    p : jax.Array
+        Category probabilities.  Shape ``(..., k)`` where ``k`` is the
+        number of categories.  Probabilities along the last axis are
+        normalised automatically.
+    order : int, optional
+        Order of the beta-function approximation (0, 1, or 2).  Defaults
+        to ``2`` (most accurate).
+    exact_max : int, optional
+        Maximum iterations for the bottom-up exact inverse CDF stage.
+        Defaults to ``5``.
+    dtype : np.dtype or None, optional
+        Output dtype (float or integer).  Defaults to ``float64`` if
+        ``jax_enable_x64=True``, otherwise ``float32``.  Integer dtypes
+        return ``-1`` for invalid inputs.
+
+    Returns
+    -------
+    jax.Array
+        Multinomial count array with the same shape as ``p`` and the
+        specified ``dtype``.
+
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    References
+    ----------
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     if not (
@@ -75,7 +111,14 @@ def fast_multinomial(
         p_remain_safe = jnp.where(p_remain > 0.0, p_remain, 1.0)
         p_cur = p[..., j] / p_remain_safe
         p_cur = jnp.clip(p_cur, 0.0, 1.0)
-        x = fast_binomial(keys[j], n_remaining, p_cur, dtype=dtype)
+        x = fast_binomial(
+            keys[j],
+            n_remaining,
+            p_cur,
+            order=order,
+            exact_max=exact_max,
+            dtype=dtype,
+        )
         out.append(x)
         n_remaining = n_remaining - x
         p_remain = p_remain - p[..., j]
@@ -93,26 +136,59 @@ def fast_binomial(
     exact_max: int = 5,
     dtype: np.dtype | None = None,
 ) -> Array:
-    """
-    Generate binomial random variables using a JAX implementation of the inverse incomplete beta function approximation in order to run fast on GPUs.
+    """Sample binomial random variates using a GPU-optimized inverse CDF algorithm.
 
-    The implementation follows the methodology from Giles and Beentjes (2024). To more accurately handle cases where np is very small or the random draw is expected to be close to 0 or n, we apply the exact inverse CDF method in a manner similar to Giles (2016). Our implementation of the method does not produce exact binomial random variables, but it is very close to exact.
+    Generates binomial counts with parameters ``(n, p)`` using an
+    approximate inverse incomplete beta function method.  The
+    implementation follows Giles and Beentjes (2024) [1]_, with an optional
+    exact inverse CDF correction for small or extreme quantiles.
+    Results are very close to exact but not guaranteed to be identical
+    to a reference sampler.
 
-    Args:
-        key: PRNG key used as the random key.
-        n: Number of trials for the binomial distribution.
-        p: Success probability for the binomial distribution.
-        order: Order of approximation (0, 1, or 2). Default is 2 for best accuracy.
-        exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
-        dtype: optional, a float dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32). If integer, returns -1 for invalid inputs instead of nan.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    n : jax.Array
+        Number of Bernoulli trials.
+    p : jax.Array
+        Success probability in ``[0, 1]``.
+    order : int, optional
+        Order of the beta-function approximation (0, 1, or 2).  Defaults
+        to ``2`` (most accurate).
+    exact_max : int, optional
+        Maximum iterations for the bottom-up exact inverse CDF stage.
+        Defaults to ``5``.
+    dtype : np.dtype or None, optional
+        Output dtype (float or integer).  Defaults to ``float64`` if
+        ``jax_enable_x64=True``, otherwise ``float32``.  Integer dtypes
+        return ``-1`` for invalid inputs.
 
-    Returns:
-        Binomial random variables with the same shape as n and p.
+    Returns
+    -------
+    jax.Array
+        Binomial samples with the broadcast shape of ``n`` and ``p`` and
+        the specified ``dtype``.
 
-    References:
-        * Giles, Michael B., and Casper Beentjes. "Approximation of an Inverse of the Incomplete Beta Function." In Mathematical Software – ICMS 2024, vol. 14749. Lecture Notes in Computer Science. Springer Nature Switzerland, 2024. https://doi.org/10.1007/978-3-031-64529-7_22.
-        * Giles, Michael B. "Algorithm 955: Approximation of the Inverse Poisson Cumulative Distribution Function." ACM Transactions on Mathematical Software 42, no. 1 (2016): 1–22. https://doi.org/10.1145/2699466.
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from pypomp.random import fast_binomial
+    >>> fast_binomial(jax.random.key(0), n=jnp.array(10), p=jnp.array(0.3))
+    Array(3., dtype=float32)
+
+    References
+    ----------
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -162,36 +238,54 @@ def binominv(
     u: Array,
     n: Array,
     p: Array,
-    exact_max: int,
+    exact_max: int = 5,
     order: int = 2,
     dtype: np.dtype | None = None,
 ) -> Array:
-    """
-    Inverse binomial CDF approximation using Giles and Beentjes (2024).
+    """Compute the approximate inverse binomial CDF using JAX primitives.
 
-    Computes the smallest integer k such that P(X <= k) >= u, where
-    X ~ Binomial(n, p).
+    Vectorised implementation using the normal asymptotic expansion
+    formulas from Giles and Beentjes (2024) [1]_.  A bottom-up exact
+    inverse CDF calculation is performed for small values.
 
-    Uses the normal asymptotic expansion formulas from Section 2 of the paper:
-    - Q_N0 (order=0): Basic approximation
-    - Q_N1 (order=1): First-order correction
-    - Q_N2 (order=2): Second-order correction (default, most accurate)
+    Parameters
+    ----------
+    u : jax.Array
+        Uniform probabilities in ``[0, 1]``.  Scalar or array.
+    n : jax.Array
+        Number of trials.  Must be a positive integer or float.
+    p : jax.Array
+        Success probability in ``[0, 1]``.
+    exact_max : int, optional
+        Maximum iterations for the bottom-up exact inverse CDF stage.
+        Defaults to ``5``.
+    order : int, optional
+        Order of approximation (0, 1, or 2).  Defaults to ``2``.
+    dtype : np.dtype or None, optional
+        Floating-point dtype for computation.  Inferred from inputs if
+        ``None``.
 
-    The binomial CDF can be expressed as:
-        F(k; n, p) = I_{1-p}(n-k, k+1)
-    where I_x(a, b) is the regularized incomplete beta function.
+    Returns
+    -------
+    jax.Array
+        Array of binomial quantiles with the broadcast shape of the
+        inputs.
 
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        n: Number of trials (must be positive integer or positive float).
-        p: Success probability (must be in [0, 1]).
-        exact_max: Maximum number of loop iterations to perform for the bottom up exact inverse CDF method.
-        order: Order of approximation (0, 1, or 2).
-        dtype: Data type for computation.
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
 
-    Returns:
-        Array with the same broadcast shape as inputs, containing integer
-        values k such that P(X <= k) >= u.
+    See Also
+    --------
+    fast_binomial : High-level sampler that wraps this function.
+
+    References
+    ----------
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     u, n, p = jnp.broadcast_arrays(u, n, p)
     if dtype is None:
@@ -199,40 +293,53 @@ def binominv(
         if not dtypes.issubdtype(dtype, np.floating):
             dtype = jnp.float32
 
-    dtype = _get_available_dtype(dtype)
+    dtype = check_and_canonicalize_user_dtype(dtype)
     assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `binominv` must be a float or integer dtype, got {dtype}"
+        )
 
-    u = jnp.asarray(u, dtype=dtype)
-    n = jnp.asarray(n, dtype=dtype)
-    p = jnp.asarray(p, dtype=dtype)
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
 
-    nan = jnp.array(jnp.nan, dtype=dtype)
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
 
-    invalid_n = n < 0.0
-    invalid_p = (p < 0.0) | (p > 1.0)
-    invalid_u = (u < 0.0) | (u > 1.0)
+    u_float = jnp.asarray(u, dtype=float_dtype)
+    n_float = jnp.asarray(n, dtype=float_dtype)
+    p_float = jnp.asarray(p, dtype=float_dtype)
+
+    nan = jnp.array(jnp.nan, dtype=float_dtype)
+
+    invalid_n = n_float < 0.0
+    invalid_p = (p_float < 0.0) | (p_float > 1.0)
+    invalid_u = (u_float < 0.0) | (u_float > 1.0)
     invalid = invalid_n | invalid_p | invalid_u
 
-    n_is_zero = n == 0.0
-    u_is_zero = u == 0.0
-    u_is_one = u == 1.0
-    p_is_zero = p == 0.0
-    p_is_one = p == 1.0
+    n_is_zero = n_float == 0.0
+    u_is_zero = u_float == 0.0
+    u_is_one = u_float == 1.0
+    p_is_zero = p_float == 0.0
+    p_is_one = p_float == 1.0
 
-    p_val = jnp.asarray(p, dtype=dtype)
+    p_val = jnp.asarray(p_float, dtype=float_dtype)
     flip = p_val > 0.5
     p_safe = jnp.where(flip, 1.0 - p_val, p_val)
-    u_flipped = jnp.where(flip, 1.0 - u, u)
+    u_flipped = jnp.where(flip, 1.0 - u_float, u_float)
 
-    n_safe = jnp.where(invalid_n, 1.0, n)
+    n_safe = jnp.where(invalid_n, 1.0, n_float)
     p_safe = jnp.clip(p_safe, 0.0, 1.0)
 
     # Clip u_safe to avoid norm.ppf underflow/overflow
-    u_clip_min = (
-        jnp.array(1e-16, dtype=dtype)
-        if dtypes.issubdtype(dtype, np.float64)
-        else jnp.array(1e-9, dtype=dtype)
-    )
+    u_clip_min = jnp.finfo(float_dtype).eps
     u_safe = jnp.clip(u_flipped, u_clip_min, 1.0 - u_clip_min)
 
     q = 1.0 - p_safe
@@ -240,7 +347,7 @@ def binominv(
     w2 = w * w
     np_ = n_safe * p_safe
     npq_ = np_ * q
-    sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(dtype).tiny))
+    sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(float_dtype).tiny))
     pq = p_safe * q
 
     args = (u_safe, n_safe, p_safe, q, w, w2, np_, sqrt_npq, pq)
@@ -260,7 +367,7 @@ def binominv(
 
     u_exact = jnp.clip(u_flipped, 0.0, 1.0)
     k_bottom_up = _binom_bottom_up(
-        u_exact, n_safe, p_safe, k_approx, dtype, max_k=exact_max
+        u_exact, n_safe, p_safe, k_approx, float_dtype, max_k=exact_max
     )
 
     x_cutoff = 10
@@ -281,7 +388,9 @@ def binominv(
     k_result = jnp.clip(k_result, 0.0, n_safe)
     k_result = jnp.where(invalid, nan, k_result)
 
-    return k_result
+    if dtypes.issubdtype(dtype, np.integer):
+        return jnp.nan_to_num(k_result, nan=-1.0).astype(dtype)
+    return k_result.astype(dtype)
 
 
 def _binom_bottom_up(

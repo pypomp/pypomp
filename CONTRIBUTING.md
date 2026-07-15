@@ -1,6 +1,6 @@
 # Contributing to pypomp
 
-Thank you for your interest in contributing to **pypomp**! We welcome all contributions, including bug reports, feature requests, documentation improvements, and code submissions.
+Thank you for your interest in contributing to Pypomp! We welcome all contributions, including bug reports, feature requests, documentation improvements, and code submissions.
 
 To ensure a smooth collaboration process, please read and follow these guidelines.
 
@@ -70,6 +70,91 @@ This commit also includes:
 * `refactor`: Code restructuring that neither fixes a bug nor adds a feature
 * `test`: Adding or correcting tests (e.g., `test(mif): add test coverage for learning rates`)
 * `chore`: Maintenance tasks, dependencies, or tool configurations (e.g., `chore: update github action python version`)
+
+---
+
+## Docstring Standards
+
+All public-facing docstrings in `pypomp` follow the **NumPy-style** format, as parsed by [Sphinx Napoleon](https://www.sphinx-doc.org/en/master/usage/extensions/napoleon.html). The [NumPy docstring guide](https://numpydoc.readthedocs.io/en/latest/format.html) is the authoritative reference. Google-style docstrings are **not** used.
+
+### Scope
+
+Apply the full standard to:
+
+- Public classes and their public methods
+- Public module-level functions
+- Module docstrings (`"""..."""` at the top of each `.py` file)
+- Attribute annotations using PEP 257 inline docstrings
+
+Do **not** apply the full standard to underscore-prefixed (private) functions or methods. A minimal one-liner is sufficient for private helpers.
+
+### Template
+
+```python
+def example_function(param_a, param_b=None):
+    """One-line summary in imperative mood, ending with a period.
+
+    Extended description goes here. Explain the purpose, algorithm,
+    any important caveats, and how this fits into the broader API.
+    Can span multiple paragraphs.
+
+    Parameters
+    ----------
+    param_a : int
+        Description of param_a.
+    param_b : str or None, optional
+        Description of param_b. Defaults to None.
+
+    Returns
+    -------
+    float
+        Description of the return value.
+
+    Raises
+    ------
+    ValueError
+        If param_a is negative. Optional section. Use judiciously, i.e.,
+        only for errors that are non-obvious or have a large chance of
+        getting raised.
+
+    Notes
+    -----
+    Mathematical details, implementation notes, or caveats go here.
+    Optional section.
+
+    Examples
+    --------
+    >>> example_function(1)
+    1.0
+    Optional section.
+
+    See Also
+    --------
+    related_function : Brief description of the related function.
+    Optional section.
+
+    References
+    ----------
+    .. [1] Author, "Title," Journal, year. https://doi.org/...
+    Optional section.
+    """
+```
+
+### Rules
+
+1. **One-line summary**: ≤ 79 characters, imperative mood (e.g. "Compute the log-likelihood." not "Computes..."), ends with a period. Appears immediately after the opening `"""` with no blank line before it.
+2. **Extended description**: Separated from the summary by a blank line. Use full sentences.
+3. **Types in Parameters/Returns**: Use plain English type descriptions that match the signature — e.g. `int`, `PompParameters or None`, `jax.Array`, `list of str`. Append `, optional` for parameters with defaults. Do **not** use Sphinx roles (`:class:`, etc.) inside `Parameters` type fields — save those for the prose description.
+4. **`Returns` for None-returning methods**: Methods that mutate `self` and return `None` still use a `Returns` section. Document the return value as `None` and describe what gets updated in the extended description.
+5. **Attribute docstrings**: Use PEP 257 inline style — a one-liner docstring immediately after each class attribute declaration:
+   ```python
+   ys: pd.DataFrame
+   """The measurement data frame with observation times as the index."""
+   ```
+6. **Examples**: Use `>>> ` doctest format. Include examples on all major user-facing entry points.
+7. **Cross-references in prose**: Use Sphinx roles (`:class:`, `:meth:`, `:func:`, `:attr:`) in the extended description and section prose — e.g. `:class:`~pypomp.PompParameters``.
+8. **Sections order**: Summary → Extended Description → Parameters → Returns → Raises → Notes → Examples → See Also → References.
+9. **Private items**: A single-line docstring is sufficient. Full NumPy format is not required.
 
 ---
 

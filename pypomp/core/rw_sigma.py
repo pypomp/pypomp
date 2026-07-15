@@ -1,3 +1,4 @@
+from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,9 +11,39 @@ def default_cooling(nt: Any, m: Any, ntimes: Any) -> float:
 
 
 class RWSigma:
-    """
-    Represents the random walk standard deviation for the parameters of a model
-    used in the Iterated Filtering 2 (IF2) algorithm.
+    """Random walk standard deviation configuration for IF2 parameter perturbation.
+
+    Stores per-parameter random walk standard deviations and a cooling
+    schedule used by the Iterated Filtering 2 (IF2) algorithm.  The
+    cooling schedule reduces the perturbation magnitude over iterations
+    so parameters converge to their maximum likelihood estimates.
+
+    Parameters
+    ----------
+    sigmas : dict of str to float
+        Mapping from parameter names to non-negative standard deviations
+        for the perturbation random walk.
+    init_names : sequence of str, optional
+        Subset of parameter names to treat as "initial" parameters (e.g.
+        initial state parameters).  These are perturbed with
+        ``sigmas_init`` instead of ``sigmas`` in the algorithm.  Defaults
+        to an empty sequence.
+    cooling_fn : callable or None, optional
+        Custom cooling function of signature
+        ``(nt, m, ntimes) -> float``.  If ``None``, defaults to a
+        geometric schedule with ``a=0.5``.
+
+    Examples
+    --------
+    >>> rw = RWSigma({"beta": 0.02, "gamma": 0.01}).geometric_cooling(0.5)
+    >>> rw  # doctest: +SKIP
+    RWSigma({'beta': 0.02, 'gamma': 0.01}, geometric a=0.5)
+
+    See Also
+    --------
+    :meth:`Pomp.mif <pypomp.Pomp.mif>` : Uses RWSigma to run IF2.
+
+    :meth:`PanelPomp.mif <pypomp.PanelPomp.mif>` : Uses RWSigma to run PIF/MPIF.
     """
 
     sigmas: dict[str, float]
@@ -126,24 +157,27 @@ class RWSigma:
             self.M = None
             self.cooling_fn = default_cooling
 
-    def geometric_cooling(self, a: float) -> "RWSigma":
-        """
-        Configure the RWSigma instance to use geometric cooling.
+    def geometric_cooling(self, a: float) -> RWSigma:
+        """Return a copy of this instance using geometric cooling.
 
-        The returned cooling function computes a cooling factor as:
-            cooling_factor = factor ** (nt / ntimes + m)
-        where:
-            factor = a ** (1 / 50)
-            nt: Time step index (integer).
-            m: Current iteration index (integer).
-            ntimes: Total number of time steps (integer).
+        The cooling factor at iteration ``m``, time step ``nt``, with
+        ``ntimes`` total steps is:
 
-        Args:
-            a (float): The cooling parameter, representing the cooling factor
-                applied after 50 iterations of the algorithm. Must be in [0, 1].
+        .. math::
 
-        Returns:
-            RWSigma: A new RWSigma instance configured with geometric cooling.
+           f = (a^{1/50})^{\\text{nt}/\\text{ntimes} + m}
+
+        Parameters
+        ----------
+        a : float
+            Cumulative cooling factor after 50 algorithm iterations.
+            Must be in the interval :math:`[0, 1]`.
+
+        Returns
+        -------
+        RWSigma
+            A new :class:`RWSigma` instance with geometric cooling
+            configured.
         """
         if not (0 <= a <= 1):
             raise ValueError("a should be between 0 and 1")
@@ -160,26 +194,30 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("geometric", a))
         return obj
 
-    def cosine_cooling(self, c: float, M: int) -> "RWSigma":
-        """
-        Configure the RWSigma instance to use cosine cooling.
+    def cosine_cooling(self, c: float, M: int) -> RWSigma:
+        """Return a copy of this instance using cosine annealing cooling.
 
-        The returned cooling function computes a cooling factor as:
-            cooling_factor = c + (1.0 - c) * 0.5 * (1.0 + cos(pi * progress))
-        where:
-            progress = (nt / ntimes + m) / M
-            nt: Time step index (integer).
-            m: Current iteration index (integer).
-            ntimes: Total number of time steps (integer).
+        The cooling factor at progress ``p = (nt / ntimes + m) / M`` is:
 
-        Args:
-            c (float): The minimum cooling factor at the end of the schedule (when
-                progress >= 1). Must be in [0, 1].
-            M (int): The number of iterations over which the cooling schedule is
-                defined. Must be positive.
+        .. math::
 
-        Returns:
-            RWSigma: A new RWSigma instance configured with cosine cooling.
+           \\text{factor} = c + (1-c) \\cdot 0.5 \\cdot (1 + \\cos(\\pi p))
+
+        Parameters
+        ----------
+        c : float
+            Minimum cooling factor reached at ``p >= 1``.  Must be in the
+            interval :math:`[0, 1]`.
+        M : int
+            Number of iterations over which the cosine schedule is
+            defined.  Typically set to the total number of IF2
+            iterations.  Must be positive.
+
+        Returns
+        -------
+        RWSigma
+            A new :class:`RWSigma` instance with cosine cooling
+            configured.
         """
         if not (0 <= c <= 1):
             raise ValueError("c should be between 0 and 1")
@@ -198,22 +236,27 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("cosine", c, M))
         return obj
 
-    def hyperbolic_cooling(self, s: float) -> "RWSigma":
-        """
-        Configure the RWSigma instance to use hyperbolic cooling.
+    def hyperbolic_cooling(self, s: float) -> RWSigma:
+        """Return a copy of this instance using hyperbolic cooling.
 
-        The returned cooling function computes a cooling factor as:
-            cooling_factor = 1.0 / (1.0 + s * (nt / ntimes + m))
-        where:
-            nt: Time step index (integer).
-            m: Current iteration index (integer).
-            ntimes: Total number of time steps (integer).
+        The cooling factor at iteration ``m``, time step ``nt``, with
+        ``ntimes`` total steps is:
 
-        Args:
-            s (float): The hyperbolic cooling parameter/rate. Must be non-negative.
+        .. math::
 
-        Returns:
-            RWSigma: A new RWSigma instance configured with hyperbolic cooling.
+           \\text{factor} = \\frac{1}{1 + s \\cdot (\\text{nt}/\\text{ntimes} + m)}
+
+        Parameters
+        ----------
+        s : float
+            Hyperbolic decay rate.  Larger ``s`` gives faster cooling.
+            Must be non-negative.
+
+        Returns
+        -------
+        RWSigma
+            A new :class:`RWSigma` instance with hyperbolic cooling
+            configured.
         """
         if s < 0:
             raise ValueError("s must be non-negative")
@@ -229,9 +272,20 @@ class RWSigma:
         obj._cooling_info = cast(tuple[Any, ...], ("hyperbolic", s))
         return obj
 
-    def custom_cooling(self, cooling_fn: Callable) -> "RWSigma":
-        """
-        Configure the RWSigma instance to use a custom cooling function.
+    def custom_cooling(self, cooling_fn: Callable) -> RWSigma:
+        """Return a copy of this instance using a custom cooling function.
+
+        Parameters
+        ----------
+        cooling_fn : callable
+            A function with signature ``(nt, m, ntimes) -> float``
+            where ``nt`` is the current time step, ``m`` is the current
+            iteration, and ``ntimes`` is the total number of time steps.
+
+        Returns
+        -------
+        RWSigma
+            A new :class:`RWSigma` instance with the custom schedule.
         """
         obj = RWSigma(self.sigmas, init_names=self.init_names, cooling_fn=cooling_fn)
         obj.a = None
@@ -322,7 +376,7 @@ class RWSigma:
         sigmas_init_array = all_sigmas_array * init_mask
         return sigmas_array, sigmas_init_array
 
-    def copy(self) -> "RWSigma":
+    def copy(self) -> RWSigma:
         """Return a copy of the RWSigma instance."""
         obj = RWSigma(
             self.sigmas.copy(),
@@ -336,15 +390,19 @@ class RWSigma:
         obj._cooling_info = self._cooling_info
         return obj
 
-    def cool(self, factor: float) -> "RWSigma":
-        """
-        Adjust all sigmas by the given factor, returning a new RWSigma copy.
+    def cooled(self, factor: float) -> RWSigma:
+        """Scale all standard deviations by ``factor`` and return a new instance.
 
-        Args:
-            factor (float): Value by which to multiply each sigma.
+        Parameters
+        ----------
+        factor : float
+            Multiplicative scaling applied to every sigma.  Must be
+            non-negative.
 
-        Returns:
-            RWSigma: A new RWSigma instance with adjusted sigmas.
+        Returns
+        -------
+        RWSigma
+            A new :class:`RWSigma` instance with scaled sigmas.
         """
         if factor < 0:
             raise ValueError("factor must be >= 0")
@@ -368,11 +426,6 @@ class RWSigma:
         Args:
             param_name (str): The name of the parameter whose sigma value you wish to set.
             value (float): The new sigma value.
-
-        Raises:
-            KeyError: If param_name is not found in sigmas.
-            TypeError: If value cannot be coerced to a float.
-            ValueError: If the value is negative.
         """
         if param_name not in self.sigmas:
             raise KeyError(f"Parameter '{param_name}' not found in sigmas.")

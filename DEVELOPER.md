@@ -1,6 +1,6 @@
 # Developer Guide
 
-This document provides instructions for developers contributing to the **pypomp** repository.
+This document provides instructions for developers contributing to the Pypomp repository.
 
 ---
 

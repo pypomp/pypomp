@@ -5,12 +5,52 @@ from ..core.par_trans import ParTrans
 
 
 class PompStruct(NamedTuple):
-    """
-    A lightweight, immutable JAX PyTree holding the static data and compiled
-    simulator functions for a POMP model.
+    """Lightweight immutable JAX PyTree containing a compiled POMP model.
 
-    This object contains all the plumbing necessary to evaluate the core
-    JAX algorithms (like pfilter, mif) purely functionally.
+    Packs the static data arrays and pre-compiled simulator callables for
+    a POMP model into a single NamedTuple that can be passed through JAX
+    JIT/vmap/grad boundaries.  Obtain an instance from an existing
+    :class:`~pypomp.Pomp` object via :meth:`~pypomp.Pomp.to_struct`.
+
+    Attributes
+    ----------
+    ys : jnp.ndarray
+        Observation array of shape ``(n_times, n_obs)``.
+    dt_array_extended : jnp.ndarray
+        Integration step sizes, extended to include the step from ``t0`` to ``t1``.
+    nstep_array : jnp.ndarray
+        Number of integration steps per observation interval.
+    t0 : float
+        Initial time.
+    times : jnp.ndarray
+        Observation times of shape ``(n_times,)``.
+    covars_extended : jnp.ndarray or None
+        Covariate array interpolated onto the integration grid, or
+        ``None`` if no covariates are used.
+    accumvars : tuple of int or None
+        Indices of accumulator state variables, or ``None``.
+    rinit_pf : callable
+        Compiled initial state simulator for the particle filter.
+    rproc_pf : callable
+        Compiled state transition simulator for the particle filter.
+    dmeas_pf : callable or None
+        Compiled measurement log-density for the particle filter.
+    rinit_per : callable
+        Compiled initial state simulator for the IF2 perturbation loop.
+    rproc_per : callable
+        Compiled state transition simulator for the IF2 perturbation loop.
+    dmeas_per : callable or None
+        Compiled measurement log-density for the IF2 perturbation loop.
+    rmeas_pf : callable or None
+        Compiled measurement simulator for :func:`simulate`.
+    par_trans : ParTrans
+        Parameter transformation object.
+    param_names : list of str
+        Canonical parameter name ordering.
+
+    See Also
+    --------
+    pypomp.Pomp.to_struct : Construct a PompStruct from a Pomp model.
     """
 
     ys: jnp.ndarray

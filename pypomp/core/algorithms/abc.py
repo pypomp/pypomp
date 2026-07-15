@@ -22,7 +22,7 @@ operating on a ``(n_obs, ydim)`` JAX array, plus a matching
 """
 
 from functools import partial
-from typing import Callable
+from typing import Callable, cast
 
 import jax
 import jax.numpy as jnp
@@ -142,6 +142,10 @@ def _abc_internal(
     )
 
     final_accepts = final_carry[4]
+
+    dist_trace = cast(jax.Array, dist_trace)
+    lp_trace = cast(jax.Array, lp_trace)
+    theta_trace = cast(jax.Array, theta_trace)
 
     dist_trace = jnp.concatenate((jnp.asarray([dist0]), dist_trace))
     lp_trace = jnp.concatenate((jnp.asarray([lp0]), lp_trace))

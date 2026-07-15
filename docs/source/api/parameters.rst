@@ -1,8 +1,8 @@
 Parameters
 ==========
 
-.. currentmodule:: pypomp.core.parameters
-   
+.. currentmodule:: pypomp
+
 .. autoclass:: PompParameters
    :no-members:
 
@@ -43,4 +43,4 @@ Parameters
    ~PanelParameters.transform
    ~PanelParameters.prune
    ~PanelParameters.mix_and_match
-
+   ~PanelParameters.merge

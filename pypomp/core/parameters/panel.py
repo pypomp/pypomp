@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import pandas as pd
 import jax.numpy as jnp
 import numpy as np
@@ -9,6 +10,8 @@ from typing import (
     Literal,
     Any,
     overload,
+    Mapping,
+    Sequence,
 )
 
 from .base import ParameterSet
@@ -17,12 +20,12 @@ from ..par_trans import ParTrans
 
 def _standardize_panel_theta(
     theta: Union[
-        dict[str, pd.DataFrame | None],
-        list[dict[str, pd.DataFrame | None]],
+        Mapping[str, pd.DataFrame | None],
+        Sequence[Mapping[str, pd.DataFrame | None]],
         None,
     ],
 ) -> tuple[xr.Dataset, list[str], list[str]]:
-    if theta is None:
+    if theta is None or (isinstance(theta, Sequence) and len(theta) == 0):
         shared_da = xr.DataArray(
             np.empty((0, 0)),
             dims=["theta_idx", "parameter"],
@@ -41,7 +44,7 @@ def _standardize_panel_theta(
         )
         return ds, [], []
 
-    if isinstance(theta, dict):
+    if isinstance(theta, Mapping):
         theta_list = [theta]
     else:
         theta_list = list(theta)
@@ -178,25 +181,25 @@ def _standardize_panel_theta(
 
 
 class PanelParameters(ParameterSet[xr.Dataset]):
-    """
-    Manages parameters for PanelPomp models.
+    """Parameter set for panel POMP models.
 
-    Internal storage is a 3D ``xarray.DataArray`` with dimensions
-    ``("theta_idx", "unit", "parameter")``.
+    Manages parameters partitioned into shared and unit-specific parameters.
 
     Parameters
     ----------
-    theta : PanelParameters | dict | list | xr.DataArray, optional
-        Parameters for the panel model. Accepts:
+    theta : mapping or sequence of mapping or PanelParameters or xr.Dataset or None
+        Parameters for the panel model.  Accepts:
 
-        - A single dictionary with ``"shared"`` and ``"unit_specific"`` keys (each containing a DataFrame).
-        - A list of such dictionaries.
-        - An existing :class:`~pypomp.core.parameters.PanelParameters` object.
-        - An existing ``xarray.DataArray`` with dimensions ``("theta_idx", "unit", "parameter")``.
+        - A dictionary with keys ``"shared"`` and ``"unit_specific"`` mapping to
+          dataframes.
+        - A sequence of such dictionaries.
+        - An existing :class:`PanelParameters` object.
+        - An ``xarray.Dataset`` containing shared and unit-specific parameter variables.
     logLik_unit : np.ndarray, optional
-        A numpy array of unit-specific log-likelihoods of shape ``(num_theta_idx, n_units)``.
+        Unit-specific log-likelihoods of shape ``(n_reps, n_units)``.
     estimation_scale : bool, optional
-        Whether the parameters are on the estimation scale. Defaults to False.
+        Whether the parameters are on the estimation scale.  Defaults to
+        ``False``.
     """
 
     _data: xr.Dataset
@@ -210,8 +213,8 @@ class PanelParameters(ParameterSet[xr.Dataset]):
     def __init__(
         self,
         theta: Union[
-            dict[str, pd.DataFrame | None],
-            list[dict[str, pd.DataFrame | None]],
+            Mapping[str, pd.DataFrame | None],
+            Sequence[Mapping[str, pd.DataFrame | None]],
             "PanelParameters",
             xr.Dataset,
             None,
@@ -320,15 +323,33 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         self._logLik = self._logLik_unit.sum(axis=1)
 
     def get_shared_param_names(self) -> list[str]:
-        """Return the list of shared parameter names."""
+        """Get the list of shared parameter names.
+
+        Returns
+        -------
+        list of str
+            Shared parameter names.
+        """
         return self._canonical_shared_param_names
 
     def get_unit_param_names(self) -> list[str]:
-        """Return the list of unit-specific parameter names."""
+        """Get the list of unit-specific parameter names.
+
+        Returns
+        -------
+        list of str
+            Unit-specific parameter names.
+        """
         return self._canonical_unit_param_names
 
     def get_unit_names(self) -> list[str]:
-        """Return the list of unit names."""
+        """Get the list of unit names.
+
+        Returns
+        -------
+        list of str
+            Unit names.
+        """
         if (
             "unit_specific" in self._data
             and "unit" in self._data["unit_specific"].coords
@@ -337,8 +358,17 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         return []
 
     def subset(self, indices: Union[int, list[int], slice]) -> "PanelParameters":
-        """
-        Return a new PanelParameters object with the specified parameter set (theta_idx) indices.
+        """Return a new PanelParameters object with subset replicates.
+
+        Parameters
+        ----------
+        indices : int or list of int or slice
+            Replicate indices to keep.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing only the selected replicates.
         """
         if isinstance(indices, int):
             indices = [indices]
@@ -357,22 +387,23 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         unit_names: list[str] | None = None,
         **kwargs,
     ) -> jax.Array:
-        """
-        Convert to a JAX array matching the order of param_names and unit_names.
+        """Convert parameter values to a JAX array.
 
         Parameters
         ----------
-        param_names : list[str], optional
-            A list of parameter names in the desired order. If None (default),
-            returns the array matching the canonical order of parameters.
-        unit_names : list[str], optional
-            A list of unit names in the desired order. If None (default),
-            returns array for all units.
+        param_names : list of str, optional
+            Parameter names in the desired order.  If ``None`` (default),
+            returns the array in the canonical parameter order.
+        unit_names : list of str, optional
+            Unit names in the desired order.  If ``None`` (default),
+            returns the array for all units.
+        **kwargs : dict
+            Unused in panel parameters.
 
         Returns
         -------
         jax.Array
-            A JAX array of shape (num_theta_idx, n_units, n_params).
+            JAX array of shape ``(n_reps, n_units, n_params)``.
         """
         if param_names is None:
             param_names = self.get_param_names()
@@ -421,15 +452,35 @@ class PanelParameters(ParameterSet[xr.Dataset]):
 
         return jnp.array(out_array)
 
-    def mix_and_match(self) -> None:
-        """
-        Mixes unit-specific and shared parameters independently by sorting each
-        unit's unit-specific parameters and the shared parameters in descending
-        order of their respective log-likelihood contribution.
+    def mixed_and_matched(self) -> PanelParameters:
+        """Sort parameters independently and cross-combine them.
+
+        Ranks the shared parameters of all replicates based on their overall
+        panel log-likelihoods.  Independently, for each unit, ranks the
+        unit-specific parameters of all replicates based on that unit's
+        individual log-likelihoods.
+
+        Finally, reconstructs the parameter set by pairing them by rank: the
+        ``n``-th new replicate is formed by combining the ``n``-th best shared
+        parameter set with the ``n``-th best unit-specific parameter set for
+        each unit.  This cross-combines the best-performing components from
+        different replicates to construct potentially superior new parameter sets.
+
+        In particular, if all parameter sets share the same values for the
+        shared parameters, then the overall panel likelihood factors
+        completely across units.  Consequently, the new best replicate (rank 0)
+        is guaranteed to have a panel log-likelihood equal to the sum of the
+        maximum log-likelihoods obtained for each unit individually across all
+        original replicates.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing the mixed-and-matched replicates.
         """
         unit_names = self.get_unit_names()
         if self.num_replicates() == 0:
-            return
+            return copy.deepcopy(self)
 
         shared_ranks = self._logLik.argsort()[::-1]
 
@@ -472,44 +523,47 @@ class PanelParameters(ParameterSet[xr.Dataset]):
                 "parameter": specific_keys,
             },
         )
-        self._data = xr.Dataset(
+        new_obj = copy.deepcopy(self)
+        new_obj._data = xr.Dataset(
             data_vars={
                 "shared": new_shared_da,
                 "unit_specific": unit_specific_da,
             }
         )
 
-        self._logLik_unit = new_ll_unit
-        self._logLik = new_ll_unit.sum(axis=1)
+        new_obj._logLik_unit = new_ll_unit
+        new_obj._logLik = new_ll_unit.sum(axis=1)
+        return new_obj
 
     @overload
     def params(
-        self, as_list: Literal[True] = True
+        self, as_list: Literal[True]
     ) -> list[dict[str, pd.DataFrame | None]]: ...
 
     @overload
-    def params(self, as_list: Literal[False]) -> xr.Dataset: ...
+    def params(self, as_list: Literal[False] = False) -> xr.Dataset: ...
 
     @overload
     def params(
-        self, as_list: bool = True
+        self, as_list: bool = False
     ) -> list[dict[str, pd.DataFrame | None]] | xr.Dataset: ...
 
     def params(
-        self, as_list: bool = True
+        self,
+        as_list: bool = False,
     ) -> list[dict[str, pd.DataFrame | None]] | xr.Dataset:
-        """
-        Get the parameters in this set.
+        """Get the parameter values in this set.
 
         Parameters
         ----------
-        as_list : bool, default True
-            If True, returns the parameters as a list of dictionaries with keys "shared" and "unit_specific".
-            If False, returns the internal xarray Dataset.
+        as_list : bool, optional
+            If ``True``, returns the parameters as a list of Python
+            dictionaries with keys ``"shared"`` and ``"unit_specific"``.
+            If ``False`` (default), returns the internal ``xarray.Dataset``.
 
         Returns
         -------
-        list[dict[str, pd.DataFrame | None]] | xr.Dataset
+        list of dict or xr.Dataset
             The parameters either as a list of dictionaries or as a Dataset.
         """
         return super().params(as_list)
@@ -520,16 +574,15 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         | list[dict[str, pd.DataFrame | None]]
         | xr.Dataset,
     ) -> None:
-        """
-        Set or overwrite the parameter values.
+        """Overwrite parameter values.
 
         Parameters
         ----------
-        value : dict[str, pd.DataFrame | None] | list[dict[str, pd.DataFrame | None]] | xr.Dataset
+        value : dict or list of dict or xr.Dataset
             The new panel parameter values. Accepts:
             - A single dictionary with ``"shared"`` and ``"unit_specific"`` keys (each containing a DataFrame).
             - A list of such dictionaries.
-            - An existing :class:`xarray.Dataset` of panel parameters.
+            - An :class:`xarray.Dataset` of panel parameters.
         """
         if value is None:
             raise ValueError("theta cannot be None")
@@ -631,17 +684,49 @@ class PanelParameters(ParameterSet[xr.Dataset]):
         param_list: list[Any],
         direction: Literal["to_est", "from_est"],
     ) -> None:
-        transformed_list = par_trans._panel_transform_list(
-            param_list, direction=direction
+        ds, s_names, u_names = _standardize_panel_theta(param_list)
+
+        shared_arr = (
+            ds["shared"].sel(parameter=s_names).values if len(s_names) > 0 else None
         )
-        ds, s_names, u_names = _standardize_panel_theta(transformed_list)
+        unit_arr = (
+            ds["unit_specific"].sel(parameter=u_names).values
+            if len(u_names) > 0
+            else None
+        )
+
+        transformed_shared, transformed_unit = par_trans._transform_panel_array(
+            shared_array=shared_arr,
+            unit_array=unit_arr,
+            shared_names=s_names,
+            unit_specific_names=u_names,
+            direction=direction,
+        )
+
+        if transformed_shared is not None:
+            ds["shared"].loc[{"parameter": s_names}] = transformed_shared
+
+        if transformed_unit is not None:
+            ds["unit_specific"].loc[{"parameter": u_names}] = transformed_unit
+
         self._data = ds
         self._canonical_shared_param_names = [str(x) for x in s_names]
         self._canonical_unit_param_names = [str(x) for x in u_names]
 
     @staticmethod
     def merge(*param_objs: "PanelParameters") -> "PanelParameters":
-        """Merge replications from multiple PanelParameters objects."""
+        """Merge replicates from multiple PanelParameters objects.
+
+        Parameters
+        ----------
+        *param_objs : PanelParameters
+            One or more parameter sets to merge.
+
+        Returns
+        -------
+        PanelParameters
+            A new parameter set containing the concatenated replicates.
+        """
         if len(param_objs) == 0:
             raise ValueError("At least one PanelParameters object must be provided.")
         first = param_objs[0]

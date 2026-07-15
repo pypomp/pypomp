@@ -13,7 +13,10 @@ def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
     assert hasattr(result, "unit_traces")
     assert hasattr(result, "logLiks")
 
-    theta_list1, theta_list2 = result.theta.params(), theta_orig.params()
+    theta_list1, theta_list2 = (
+        result.theta.params(as_list=True),
+        theta_orig.params(as_list=True),
+    )
     assert len(theta_list1) == len(theta_list2)
     for d1, d2 in zip(theta_list1, theta_list2):
         for k in ["shared", "unit_specific"]:
@@ -66,9 +69,9 @@ def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
 
     original_theta = deepcopy(panel.theta)
     reordered_theta = deepcopy(panel.theta)
-    reordered_theta.set_params(list(reversed(reordered_theta.params())))
+    reordered_theta.set_params(list(reversed(reordered_theta.params(as_list=True))))
 
-    for t_dict in reordered_theta.params():
+    for t_dict in reordered_theta.params(as_list=True):
         if t_dict["shared"] is not None:
             t_dict["shared"] = t_dict["shared"].iloc[::-1]
         if t_dict["unit_specific"] is not None:

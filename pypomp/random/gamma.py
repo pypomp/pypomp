@@ -26,28 +26,53 @@ def fast_gamma(
     adjustment_size: int = 3,
     newton_steps: int = 3,
 ) -> jax.Array:
-    """
-    Generate a Gamma random variable using an approximate inverse CDF method in order to run fast on GPUs.
+    """Sample Gamma random variates using a GPU-optimized inverse CDF algorithm.
 
-    The implementation follows the methodology from Temme (1992). To extend the method to small alpha values, we apply a multi-step trick. The method does not produce exact Gamma random variables, but it is very close to exact.
+    Generates Gamma(alpha, 1)-distributed samples using an approximate
+    inverse CDF method based on Temme (1992) [1]_.  A multi-step adjustment
+    trick extends accuracy to ``alpha`` values less than 2.
+    Results are very close to exact but not guaranteed to be identical
+    to a reference sampler.
 
-    Args:
-        key: a PRNG key used as the random key.
-        alpha: shape parameters for the Gamma(alpha, 1) distribution.
-        dtype: optional, a float dtype for the returned values (default float64 if
-            jax_enable_x64 is true, otherwise float32).
-        adjustment_size: number of uniform adjustments to apply.
-            The function generates Gamma(alpha + adjustment_size) and reduces
-            it to Gamma(alpha) using adjustment_size uniform adjustments. The larger the value, the more accurate the approximation at low alpha values (e.g.,
-            alpha < 2).
-        newton_steps: number of Newton-Raphson iterations to perform for refining
-            the CDF inverse approximation.
+    Parameters
+    ----------
+    key : jax.Array
+        JAX PRNG key.
+    alpha : jax.Array
+        Shape parameter(s) for the Gamma(alpha, 1) distribution.  Must
+        be positive.
+    dtype : np.dtype or None, optional
+        Floating-point output dtype.  Defaults to ``float64`` if
+        ``jax_enable_x64=True``, otherwise ``float32``.
+    adjustment_size : int, optional
+        Number of uniform adjustments to apply for small-``alpha``
+        accuracy.  Defaults to ``3``.
+    newton_steps : int, optional
+        Number of Newton-Raphson refinement steps.  Defaults to ``3``.
 
-    Returns:
-        A jax.Array with the same shape as alpha.
+    Returns
+    -------
+    jax.Array
+        Gamma samples with the same shape as ``alpha``.
 
-    References:
-        * Temme, N. M. "Asymptotic Inversion of Incomplete Gamma Functions." Mathematics of Computation 58, no. 198 (1992): 755–64. https://doi.org/10.2307/2153214.
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from pypomp.random import fast_gamma
+    >>> fast_gamma(jax.random.key(0), alpha=jnp.array(2.0))
+    Array(1.8..., dtype=float32)
+
+    References
+    ----------
+    .. [1] Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
+       Functions." *Mathematics of Computation* 58, no. 198 (1992):
+       755–64. https://doi.org/10.2307/2153214.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -89,33 +114,91 @@ def fast_gamma(
 
 
 @partial(jax.jit, static_argnames=["dtype", "newton_steps"])
-def gammainv(u: Array, alpha: Array, dtype=jnp.float32, newton_steps: int = 3) -> Array:
-    """
-    Vectorized inverse Gamma CDF approximation using JAX primitives.
+def gammainv(
+    u: Array,
+    alpha: Array,
+    dtype: np.dtype | None = None,
+    newton_steps: int = 3,
+) -> Array:
+    """Compute the approximate inverse Gamma CDF using JAX primitives.
 
-    Args:
-        u: Probabilities (scalar or array) in the interval [0, 1].
-        alpha: Corresponding Gamma shape parameter(s), must be positive.
-        dtype: Data type for computation (default float32).
-        newton_steps: Number of Newton-Raphson iterations to perform (default: 3).
+    Vectorised implementation following the asymptotic inversion method
+    from Temme (1992) [1]_.  The approximation is most accurate for large
+    ``alpha`` (at least four significant digits for ``alpha >= 2``).
 
-    Returns:
-        DeviceArray with the same broadcast shape as `u` and `alpha`.
+    Parameters
+    ----------
+    u : jax.Array
+        Uniform probabilities in ``[0, 1]``.  Scalar or array.
+    alpha : jax.Array
+        Gamma shape parameter(s).  Must be positive.  Broadcast-
+        compatible with ``u``.
+    dtype : np.dtype or None, optional
+        Floating-point dtype for computation.  Inferred from inputs if
+        ``None``.
+    newton_steps : int, optional
+        Number of Newton-Raphson refinement iterations.  Defaults to
+        ``3``.
+
+    Returns
+    -------
+    jax.Array
+        Array of Gamma quantiles with the broadcast shape of ``u`` and
+        ``alpha``.
+
+    Notes
+    -----
+    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
+    quant/tests/samplers/test.html>`_.
+
+    See Also
+    --------
+    fast_gamma : High-level sampler that wraps this function.
+
+    References
+    ----------
+    .. [1] Temme, N. M. "Asymptotic Inversion of Incomplete Gamma
+       Functions." *Mathematics of Computation* 58, no. 198 (1992):
+       755–64. https://doi.org/10.2307/2153214.
     """
     u, alpha = jnp.broadcast_arrays(u, alpha)
+    if dtype is None:
+        dtype = jnp.result_type(u, alpha)
+        if not dtypes.issubdtype(dtype, np.floating):
+            dtype = jnp.float32
 
-    u = jnp.asarray(u, dtype=dtype)
-    alpha = jnp.asarray(alpha, dtype=dtype)
+    dtype = check_and_canonicalize_user_dtype(dtype)
+    assert dtype is not None
+    if not (
+        dtypes.issubdtype(dtype, np.floating) or dtypes.issubdtype(dtype, np.integer)
+    ):
+        raise ValueError(
+            f"dtype argument to `gammainv` must be a float or integer dtype, got {dtype}"
+        )
 
-    zero = jnp.array(0.0, dtype=dtype)
-    one = jnp.array(1.0, dtype=dtype)
+    if dtypes.issubdtype(dtype, np.integer):
+        if dtypes.issubdtype(dtype, np.int64):
+            float_dtype = jnp.float64
+        else:
+            float_dtype = jnp.float32
+    else:
+        float_dtype = dtype
 
-    alpha_invalid = alpha <= zero
-    alpha_safe = jnp.where(alpha_invalid, one, alpha)
+    float_dtype = _get_available_dtype(float_dtype)
+    assert float_dtype is not None
 
-    eta_0 = ndtri(u) / jnp.sqrt(alpha_safe)
+    u_float = jnp.asarray(u, dtype=float_dtype)
+    alpha_float = jnp.asarray(alpha, dtype=float_dtype)
 
-    eps = _compute_epsilon(eta_0, dtype)
+    zero = jnp.array(0.0, dtype=float_dtype)
+    one = jnp.array(1.0, dtype=float_dtype)
+
+    alpha_invalid = alpha_float <= zero
+    alpha_safe = jnp.where(alpha_invalid, one, alpha_float)
+
+    eta_0 = ndtri(u_float) / jnp.sqrt(alpha_safe)
+
+    eps = _compute_epsilon(eta_0, float_dtype)
 
     correction = (
         (eps[0] / alpha_safe)
@@ -126,20 +209,24 @@ def gammainv(u: Array, alpha: Array, dtype=jnp.float32, newton_steps: int = 3) -
 
     eta = eta_0 + correction
 
-    lam = _solve_lambda_from_eta(eta, dtype, newton_steps=newton_steps)
+    lam = _solve_lambda_from_eta(eta, float_dtype, newton_steps=newton_steps)
 
     x = alpha_safe * lam
 
-    nan = jnp.array(jnp.nan, dtype=dtype)
-    inf = jnp.array(jnp.inf, dtype=dtype)
+    nan = jnp.array(jnp.nan, dtype=float_dtype)
+    inf = jnp.array(jnp.inf, dtype=float_dtype)
 
-    x = jnp.where(u < zero, nan, x)
-    x = jnp.where(u == zero, zero, x)
-    x = jnp.where(u == one, inf, x)
-    x = jnp.where(u > one, nan, x)
+    x = jnp.where(u_float < zero, nan, x)
+    x = jnp.where(u_float == zero, zero, x)
+    x = jnp.where(u_float == one, inf, x)
+    x = jnp.where(u_float > one, nan, x)
     x = jnp.where(alpha_invalid, nan, x)
     x = jnp.where(x < zero, zero, x)
-    return x
+
+    if dtypes.issubdtype(dtype, np.integer):
+        x = jnp.where(jnp.isnan(x) | jnp.isinf(x), -1.0, x)
+        return x.astype(dtype)
+    return x.astype(dtype)
 
 
 _LAM_GUESS_COEFFS: tuple[float, ...] = (

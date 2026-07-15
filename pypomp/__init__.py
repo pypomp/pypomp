@@ -1,5 +1,26 @@
 """
-pypomp: Modeling and inference using partially observed Markov process (POMP) models.
+pypomp: JAX-accelerated modeling and inference for partially observed Markov process (POMP) models.
+
+The top-level namespace exports the core modelling classes (:class:`Pomp`,
+:class:`PanelPomp`), parameter containers (:class:`PompParameters`,
+:class:`PanelParameters`), configuration helpers (:class:`ParTrans`,
+:class:`RWSigma`, :class:`LearningRate`), optimizers (:class:`Adam`,
+:class:`SGD`, etc.), and the :func:`mcap` inference utility.
+
+Submodules
+----------
+random
+    JAX-compatible GPU-optimized random variable samplers.
+functional
+    Pure-functional JAX implementations of pfilter, mif, train, simulate.
+maths
+    Numerical utilities (logmeanexp, logit, expit).
+models
+    Built-in example POMP models (SIR, Dacca, measles, etc.).
+benchmarks
+    Baseline statistical benchmarks (ARMA, negative binomial).
+types
+    Annotated type aliases used in user-defined model component functions.
 """
 
 from .core.parameters import PanelParameters, PompParameters

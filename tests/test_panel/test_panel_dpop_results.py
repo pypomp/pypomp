@@ -135,5 +135,5 @@ def test_dpop_result_merge():
     # Raises ValueError when mismatched parameters
     res_diff = deepcopy(res2)
     res_diff.J = 999
-    with pytest.raises(ValueError, match="same optimizer, J, M, eta, alpha"):
+    with pytest.raises(ValueError, match="must have the same J"):
         PanelPompDpopTrainResult.merge(res1, res_diff)

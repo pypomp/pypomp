@@ -1,3 +1,7 @@
+"""
+Numerical utilities.
+"""
+
 from typing import Any, overload
 import numpy as np
 import warnings
@@ -20,16 +24,33 @@ def logmeanexp(
 def logmeanexp(
     x, axis: int | tuple[int, ...] | None = None, ignore_nan: bool = False
 ) -> Any:
-    """
-    Calculates the mean likelihood for an array of log-likelihoods,
-    and returns the corresponding log-likelihood. This is appropriate
-    when the estimator is unbiased on the natural scale.
+    """Compute the log of the mean likelihood from log-likelihood values.
 
-    Args:
-        x (array-like): collection of log-likelihoods
-        axis (int, tuple, or None): axis or axes along which to compute the mean.
-            If None (default), compute over the entire array.
-        ignore_nan (bool): if True, drop NaNs (or treat as -inf in exp space) before computing.
+    Calculates ``log(mean(exp(x)))`` in a numerically stable way using the
+    log-sum-exp trick.  This is appropriate when the estimator is unbiased
+    on the natural (probability) scale, e.g. for averaging particle filter
+    log-likelihood estimates across replicates.
+
+    Parameters
+    ----------
+    x : array-like
+        Collection of log-likelihood values.
+    axis : int, tuple of int, or None, optional
+        Axis or axes along which to compute the mean.  If ``None``
+        (default), compute over the entire array.
+    ignore_nan : bool, optional
+        If ``True``, treat NaN entries as ``-inf`` (i.e. zero probability)
+        before computing.  Defaults to ``False``.
+
+    Returns
+    -------
+    float or np.ndarray
+        The log-mean-exp value.  A scalar ``float`` when ``axis=None``,
+        otherwise a ``numpy.ndarray`` with the reduced dimension removed.
+
+    See Also
+    --------
+    logmeanexp_se : Jackknife standard error for this estimator.
     """
     x_array = np.asarray(x, dtype=float)
 
@@ -72,18 +93,37 @@ def logmeanexp_se(x: Any, axis: int, ignore_nan: bool = False) -> np.ndarray: ..
 
 
 def logmeanexp_se(x, axis: int | None = None, ignore_nan: bool = False) -> Any:
-    """
-    A jack-knife standard error for the log-likelihood estimate
-    calculated via logmeanexp(). For comparison with R-pomp::logmeanexp,
-    note that np.std divides by n whereas R-sd divides by (n-1), so
-    np.var gives the Gaussian MLE and R-var gives the unbiased
-    estimator.
+    """Compute a jackknife standard error for the :func:`logmeanexp` estimator.
 
-    Args:
-        x (array-like): collection of log-likelihoods
-        axis (int or None): axis along which to compute the SE.
-            If None (default), compute over the entire array.
-        ignore_nan (bool): if True, drop NaNs before computing.
+    Estimates the standard error of the log-likelihood estimate produced by
+    :func:`logmeanexp` using the jackknife (leave-one-out) method.
+
+    .. note::
+
+        ``numpy.std`` divides by ``n`` (MLE), whereas R's ``sd`` divides by
+        ``n - 1`` (unbiased). This function matches the NumPy convention, so
+        results will differ slightly from R's ``pomp::logmeanexp`` SE output.
+
+    Parameters
+    ----------
+    x : array-like
+        Collection of log-likelihood values.
+    axis : int or None, optional
+        Axis along which to compute the SE.  If ``None`` (default), compute
+        over the entire array.
+    ignore_nan : bool, optional
+        If ``True``, remove NaN entries before computing.  Defaults to
+        ``False``.
+
+    Returns
+    -------
+    float or np.ndarray
+        The jackknife standard error.  ``np.nan`` if fewer than 2 values
+        are present.
+
+    See Also
+    --------
+    logmeanexp : The estimator whose SE this computes.
     """
     if axis is not None:
         return np.apply_along_axis(logmeanexp_se, axis, x, ignore_nan=ignore_nan)

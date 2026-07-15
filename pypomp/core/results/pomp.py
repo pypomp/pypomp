@@ -3,7 +3,7 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 
-from .base import BaseResult, PompEstimationTracesMixin, _merge_results
+from .base import BaseResult, PompEstimationTracesMixin
 from ...maths import logmeanexp, logmeanexp_se
 from ..rw_sigma import RWSigma
 from ..learning_rate import LearningRate
@@ -24,7 +24,9 @@ class PompPFilterResult(PompBaseResult):
     """Result from Pomp.pfilter() method."""
 
     logLiks: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
-    """Log-likelihoods for each parameter set and replicate."""
+    """Log-likelihoods for each parameter set and replicate.
+    Dimensions: ("theta_idx", "rep")
+    """
     J: int = 0
     """The number of particles used for filtering."""
     reps: int = 1
@@ -32,13 +34,21 @@ class PompPFilterResult(PompBaseResult):
     thresh: float = 0.0
     """The resampling threshold used by the filter."""
     CLL_da: xr.DataArray | None = None
-    """Conditional log-likelihoods for each unit and time point."""
+    """Conditional log-likelihoods for each unit and time point.
+    Dimensions: ("theta_idx", "rep", "time")
+    """
     ESS_da: xr.DataArray | None = None
-    """Effective Sample Size for each unit and time point."""
+    """Effective Sample Size for each unit and time point.
+    Dimensions: ("theta_idx", "rep", "time")
+    """
     filter_mean: xr.DataArray | None = None
-    """The mean of the filtering distribution for each state variable."""
+    """The mean of the filtering distribution for each state variable.
+    Dimensions: ("theta_idx", "rep", "state", "time")
+    """
     prediction_mean: xr.DataArray | None = None
-    """The mean of the predictive distribution for each state variable."""
+    """The mean of the predictive distribution for each state variable.
+    Dimensions: ("theta_idx", "rep", "state", "time")
+    """
 
     def __post_init__(self):
         self.method = "pfilter"
@@ -53,7 +63,24 @@ class PompPFilterResult(PompBaseResult):
         ]
 
     def to_dataframe(self, ignore_nan: bool = False) -> pd.DataFrame:
-        """Convert pfilter result to DataFrame."""
+        """Convert results to a pandas DataFrame.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether to ignore rows containing NaN when computing log-likelihoods and standard errors.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame representation of the results. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``logLik``: The estimated log-likelihood.
+            3. ``se``: The standard error of the log-likelihood estimate.
+            4. Parameter columns: One column per model parameter in their defined order.
+        """
         if not self.theta or self.logLiks.size == 0:
             return pd.DataFrame()
         arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
@@ -64,74 +91,35 @@ class PompPFilterResult(PompBaseResult):
             else np.full_like(logLik, np.nan)
         )
         se = np.atleast_1d(se)
-        theta_df = pd.DataFrame(self.theta.params())
+        theta_df = pd.DataFrame(self.theta.params(as_list=True))
         df = pd.DataFrame(
             {"theta_idx": np.arange(len(theta_df)), "logLik": logLik, "se": se}
         )
         return pd.concat([df, theta_df], axis=1)
 
-    def CLL(self, average: bool = False) -> pd.DataFrame:
-        """Return conditional log-likelihoods as a DataFrame."""
-        if self.CLL_da is None or self.CLL_da.size == 0:
-            return pd.DataFrame()
-        if not average:
-            return self.CLL_da.to_dataframe(name="CLL").reset_index()
-        avg = logmeanexp(np.asarray(self.CLL_da.values), axis=1)
-        return (
-            xr.DataArray(
-                avg,
-                dims=["theta_idx", "time"],
-                coords={
-                    "theta_idx": self.CLL_da.coords.get(
-                        "theta_idx", np.arange(avg.shape[0])
-                    ),
-                    "time": self.CLL_da.coords.get("time", np.arange(avg.shape[1])),
-                },
-            )
-            .to_dataframe(name="CLL")
-            .reset_index()
-        )
-
-    def ESS(self, average: bool = False) -> pd.DataFrame:
-        """Return Effective Sample Size as a DataFrame."""
-        if self.ESS_da is None or self.ESS_da.size == 0:
-            return pd.DataFrame()
-        ess = self.ESS_da.mean(dim="rep") if average else self.ESS_da
-        return ess.to_dataframe(name="ESS").reset_index()
-
     def traces(self) -> pd.DataFrame:
-        """Return traces DataFrame for this pfilter result."""
-        if not self.theta or not len(self.logLiks):
-            return pd.DataFrame()
-        arr = np.asarray(getattr(self.logLiks, "values", self.logLiks))
-        logliks = np.atleast_1d(logmeanexp(arr, axis=-1))
-        se = (
-            logmeanexp_se(arr, axis=-1)
-            if arr.shape[-1] > 1
-            else np.full_like(logliks, np.nan)
-        )
-        se = np.atleast_1d(se)
-        base_df = pd.DataFrame(
-            {
-                "theta_idx": np.arange(len(self.theta)),
-                "iteration": 0,
-                "method": self.method,
-                "logLik": logliks,
-                "se": se,
-            }
-        )
-        if not self.theta:
-            return base_df
-        return pd.concat([base_df, pd.DataFrame(self.theta.params())], axis=1)
+        """Return parameter and likelihood trace history.
 
-    @staticmethod
-    def merge(*results: "PompPFilterResult") -> "PompPFilterResult":
-        return _merge_results(
-            PompPFilterResult,
-            results,
-            ["J", "reps", "thresh", "method"],
-            ["logLiks", "CLL_da", "ESS_da", "filter_mean", "prediction_mean"],
-        )
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame of the traces. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``iteration``: The iteration index (fixed at 0 for ``pfilter``).
+            3. ``method``: The name of the method (``'pfilter'``).
+            4. ``logLik``: The estimated log-likelihood.
+            5. ``se``: The standard error of the log-likelihood estimate.
+            6. Parameter columns: One column per model parameter in their defined order.
+        """
+        df = self.to_dataframe()
+        if df.empty:
+            return df
+        df.insert(1, "iteration", 0)
+        df.insert(2, "method", self.method)
+        cols = ["theta_idx", "iteration", "method", "logLik", "se"]
+        other_cols = [c for c in df.columns if c not in cols]
+        return df[cols + other_cols]
 
 
 @dataclass(eq=False)
@@ -139,7 +127,9 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
     """Result from Pomp.mif() method."""
 
     traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
-    """Parameter traces and log-likelihoods across iterations."""
+    """Log-likelihood and parameter traces across iterations.
+    Dimensions: ("theta_idx", "iteration", "variable")
+    """
     J: int = 0
     """The number of particles used for filtering."""
     M: int = 0
@@ -164,22 +154,15 @@ class PompMIFResult(PompEstimationTracesMixin, PompBaseResult):
             ("Number of monitors", "n_monitors"),
         ]
 
-    @staticmethod
-    def merge(*results: "PompMIFResult") -> "PompMIFResult":
-        return _merge_results(
-            PompMIFResult,
-            results,
-            ["J", "M", "thresh", "n_monitors", "rw_sd", "method"],
-            ["traces_da"],
-        )
-
 
 @dataclass(eq=False)
 class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """Result from Pomp.train() method."""
 
-    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))  # type: ignore[assignment]
-    """Parameter traces and log-likelihoods across iterations."""
+    traces_da: xr.DataArray = field(default_factory=lambda: xr.DataArray([]))
+    """Log-likelihood and parameter traces across iterations.
+    Dimensions: ("theta_idx", "iteration", "variable")
+    """
     optimizer: Optimizer = field(default_factory=Adam)
     """The optimizer used for training."""
     J: int = 0
@@ -190,7 +173,7 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
     """The learning rate object."""
     alpha: float = 0.97
     """The discount factor for the gradient moving average."""
-    thresh: int = 0
+    thresh: float = 0.0
     """The resampling threshold used."""
     alpha_cooling: float = 1.0
     """The cooling factor for the discount factor."""
@@ -211,24 +194,6 @@ class PompTrainResult(PompEstimationTracesMixin, PompBaseResult):
             ("Cooling factor for alpha", "alpha_cooling"),
         ]
         return config
-
-    @staticmethod
-    def merge(*results: "PompTrainResult") -> "PompTrainResult":
-        return _merge_results(
-            PompTrainResult,
-            results,
-            [
-                "optimizer",
-                "J",
-                "M",
-                "eta",
-                "alpha",
-                "thresh",
-                "alpha_cooling",
-                "method",
-            ],
-            ["traces_da"],
-        )
 
 
 @dataclass(eq=False)
@@ -317,15 +282,19 @@ class PompPMCMCResult(PompBaseResult):
             last = self.traces_da.isel(iteration=-1).sel(variable="logLik").values
             print(f"\nFinal logLik per chain: {np.asarray(last)}")
 
-    @staticmethod
-    def merge(*results: "PompPMCMCResult") -> "PompPMCMCResult":
+    @classmethod
+    def merge(cls, *results: BaseResult) -> "PompPMCMCResult":
         """Concatenate PMCMC chains from multiple results."""
         if len(results) == 0:
             raise ValueError("At least one PompPMCMCResult must be provided.")
-        first = results[0]
-        for result in results:
-            if not isinstance(result, PompPMCMCResult):
+        pmcmc_results: list[PompPMCMCResult] = []
+        for r in results:
+            if not isinstance(r, PompPMCMCResult):
                 raise TypeError("All results must be PompPMCMCResult.")
+            pmcmc_results.append(r)
+
+        first = pmcmc_results[0]
+        for result in pmcmc_results:
             if result.J != first.J:
                 raise ValueError("All results must have the same J.")
             if result.Nmcmc != first.Nmcmc:
@@ -336,16 +305,18 @@ class PompPMCMCResult(PompBaseResult):
                 raise ValueError("All results must have the same variable ordering.")
 
         merged_da = xr.concat(
-            [result.traces_da for result in results], dim="theta_idx"
-        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in results)))
-        theta_objs = [result.theta for result in results if result.theta is not None]
+            [result.traces_da for result in pmcmc_results], dim="theta_idx"
+        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in pmcmc_results)))
+        theta_objs = [
+            result.theta for result in pmcmc_results if result.theta is not None
+        ]
         merged_theta = PompParameters.merge(*theta_objs) if theta_objs else None
         merged_accepts = np.concatenate(
-            [np.asarray(result.accepts).ravel() for result in results]
+            [np.asarray(result.accepts).ravel() for result in pmcmc_results]
         )
         execution_times = [
             result.execution_time
-            for result in results
+            for result in pmcmc_results
             if result.execution_time is not None
         ]
 
@@ -448,15 +419,19 @@ class PompABCResult(PompBaseResult):
             last = self.traces_da.isel(iteration=-1).sel(variable="distance").values
             print(f"\nFinal distance per chain: {np.asarray(last)}")
 
-    @staticmethod
-    def merge(*results: "PompABCResult") -> "PompABCResult":
+    @classmethod
+    def merge(cls, *results: BaseResult) -> "PompABCResult":
         """Concatenate ABC-MCMC chains from multiple results."""
         if len(results) == 0:
             raise ValueError("At least one PompABCResult must be provided.")
-        first = results[0]
-        for result in results:
-            if not isinstance(result, PompABCResult):
+        abc_results: list[PompABCResult] = []
+        for r in results:
+            if not isinstance(r, PompABCResult):
                 raise TypeError("All results must be PompABCResult.")
+            abc_results.append(r)
+
+        first = abc_results[0]
+        for result in abc_results:
             if result.Nabc != first.Nabc:
                 raise ValueError("All results must have the same Nabc.")
             if result.epsilon != first.epsilon:
@@ -467,16 +442,18 @@ class PompABCResult(PompBaseResult):
                 raise ValueError("All results must have the same variable ordering.")
 
         merged_da = xr.concat(
-            [result.traces_da for result in results], dim="theta_idx"
-        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in results)))
-        theta_objs = [result.theta for result in results if result.theta is not None]
+            [result.traces_da for result in abc_results], dim="theta_idx"
+        ).assign_coords(theta_idx=np.arange(sum(r.n_chains for r in abc_results)))
+        theta_objs = [
+            result.theta for result in abc_results if result.theta is not None
+        ]
         merged_theta = PompParameters.merge(*theta_objs) if theta_objs else None
         merged_accepts = np.concatenate(
-            [np.asarray(result.accepts).ravel() for result in results]
+            [np.asarray(result.accepts).ravel() for result in abc_results]
         )
         execution_times = [
             result.execution_time
-            for result in results
+            for result in abc_results
             if result.execution_time is not None
         ]
 

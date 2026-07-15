@@ -5,7 +5,7 @@ from copy import deepcopy
 from pypomp.core.results.panel import PanelPompPFilterResult
 
 
-def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0, key=None):
+def check_pfilter_result(result, theta_orig, J=2, reps=1, thresh=0.0, key=None):
     """Helper to verify common pfilter result attributes."""
     n_theta = theta_orig.num_replicates()
     n_units = len(result.logLiks.coords["unit"])

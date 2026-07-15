@@ -1,7 +1,7 @@
 Random Walk Standard Deviation
 ==============================
 
-.. currentmodule:: pypomp.core.rw_sigma
+.. currentmodule:: pypomp
 
 .. autoclass:: RWSigma
    :no-members:
@@ -29,9 +29,22 @@ Random Walk Standard Deviation
    ~RWSigma.custom_cooling
    ~RWSigma.copy
    ~RWSigma.cool
+
+.. rubric:: Dict-like Interface
+
+.. raw:: html
+
+   <details>
+   <summary>Show inherited dictionary methods</summary>
+
+.. autosummary::
+   :toctree: generated/
+
    ~RWSigma.keys
    ~RWSigma.values
    ~RWSigma.items
    ~RWSigma.get
 
+.. raw:: html
 
+   </details>

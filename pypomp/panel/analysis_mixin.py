@@ -19,8 +19,12 @@ class PanelAnalysisMixin(Base):
 
     @property
     def ys(self) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the observations from all units.
+        """Tidy DataFrame containing observations from all units.
+
+        Returns
+        -------
+        pd.DataFrame
+            Long-format DataFrame of observations.
         """
         ys_list = []
         for unit, obj in self.unit_objects.items():
@@ -30,84 +34,151 @@ class PanelAnalysisMixin(Base):
             ys_list.append(unit_ys)
         return pd.concat(ys_list).reset_index(drop=True)
 
-    def prune(self, n: int = 1, refill: bool = True):
-        """
-        Prune the parameter sets to the top `n` based on log-likelihoods stored in the PanelParameters object under theta.
+    def prune(self, n: int = 1, refill: bool = True) -> None:
+        """Prune replicates down to the top ``n`` by log-likelihood.
 
-        Args:
-            n: Number of top parameter sets to keep.
-            refill: If True, repeat the top `n` parameter sets to match the
-                previous number of replicates. If False, keep only the `n` sets.
+        Parameters
+        ----------
+        n : int, optional
+            Number of top parameter sets to keep.  Defaults to ``1``.
+        refill : bool, optional
+            If ``True`` (default), duplicate the top ``n`` sets to restore the
+            original number of replicates.
         """
-        self.theta.prune(n=n, refill=refill)
+        self.theta = self.theta.pruned(n=n, refill=refill)
 
-    def mix_and_match(self):
+    def mix_and_match(self) -> None:
+        """Sort parameters independently and cross-combine them.
+
+        Ranks the shared parameters of all replicates based on their overall
+        panel log-likelihoods.  Independently, for each unit, ranks the
+        unit-specific parameters of all replicates based on that unit's
+        individual log-likelihoods.
+
+        Finally, reconstructs the parameter set by pairing them by rank: the
+        ``n``-th new replicate is formed by combining the ``n``-th best shared
+        parameter set with the ``n``-th best unit-specific parameter set for
+        each unit.  This cross-combines the best-performing components from
+        different replicates to construct potentially superior new parameter sets.
+
+        In particular, if all parameter sets share the same values for the
+        shared parameters, then the overall panel likelihood factors
+        completely across units.  Consequently, the new best replicate (rank 0)
+        is guaranteed to have a panel log-likelihood equal to the sum of the
+        maximum log-likelihoods obtained for each unit individually across all
+        original replicates.
         """
-        Sorts unit-specific parameters and shared parameters in descending order of unit log-likelihood and shared log-likelihood, respectively, then combines them to form new parameter sets. The nth best parameter for a given unit or for the shared parameters is placed in the nth parameter set.
-        """
-        self.theta.mix_and_match()
+        self.theta = self.theta.mixed_and_matched()
 
     def results(self, index: int = -1, ignore_nan: bool = False) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the results of the method run at the given index.
+        """Get the results DataFrame for the specified history index.
 
-        Args:
-            index (int, optional): The index of the result to retrieve. Defaults to -1.
-            ignore_nan (bool, optional): Boolean flag controlling whether to ignore
-                NaN values in the log-likelihoods. Defaults to False.
-        Returns:
-            pd.DataFrame: A DataFrame with the log-likelihoods and parameters used.
+        Parameters
+        ----------
+        index : int, optional
+            History index.  Defaults to ``-1`` (the last result).
+        ignore_nan : bool, optional
+            Whether to ignore NaNs when computing log-likelihoods and standard errors.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame of results.
         """
         return self.results_history.results(index=index, ignore_nan=ignore_nan)
 
     def CLL(self, index: int = -1, average: bool = False) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the conditional log-likelihoods of the method run at the given index.
+        """Get conditional log-likelihoods for the specified history index.
 
-        Args:
-            index (int, optional): The index of the result to retrieve. Defaults to -1.
-            average (bool, optional): Boolean flag controlling whether to average
-                the conditional log-likelihoods over replicates using logmeanexp.
-                Defaults to False.
-        Returns:
-            pd.DataFrame: A DataFrame with the conditional log-likelihoods.
+        Parameters
+        ----------
+        index : int, optional
+            History index.  Defaults to ``-1`` (the last result).
+        average : bool, optional
+            Whether to average conditional log-likelihoods over replicates
+            in likelihood space.  Defaults to ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame of conditional log-likelihoods. The columns appear
+            in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier.
+            3. ``rep``: The replicate index (only if ``average=False``).
+            4. ``time``: The observation time point.
+            5. ``CLL``: The conditional log-likelihood value.
         """
         return self.results_history.CLL(index=index, average=average)
 
     def ESS(self, index: int = -1, average: bool = False) -> pd.DataFrame:
-        """
-        Returns a tidy DataFrame with the effective sample size of the method run at the given index.
+        """Get Effective Sample Size for the specified history index.
 
-        Args:
-            index (int, optional): The index of the result to retrieve. Defaults to -1.
-            average (bool, optional): Boolean flag controlling whether to average
-                the effective sample size over replicates using arithmetic mean.
-                Defaults to False.
-        Returns:
-            pd.DataFrame: A DataFrame with the effective sample size.
+        Parameters
+        ----------
+        index : int, optional
+            History index.  Defaults to ``-1`` (the last result).
+        average : bool, optional
+            Whether to average ESS values over replicates.  Defaults to
+            ``False``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame of ESS values. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier.
+            3. ``rep``: The replicate index (only if ``average=False``).
+            4. ``time``: The observation time point.
+            5. ``ESS``: The Effective Sample Size value.
         """
         return self.results_history.ESS(index=index, average=average)
 
-    def time(self):
-        """
-        Return a DataFrame summarizing the execution times of methods run.
+    def time(self) -> pd.DataFrame:
+        """Get a DataFrame summarizing execution times of run methods.
 
-        Returns:
-            pd.DataFrame: A DataFrame where each row contains:
-                - 'method': The name of the method run.
-                - 'time': The execution time in seconds.
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns ``'method'`` and ``'time'``.
         """
         return self.results_history.time()
 
     def traces(self) -> pd.DataFrame:
-        """
-        Return a tidy DataFrame with the full trace of log-likelihoods and parameters from the entire result history.
+        """Get a tidy DataFrame with the full trace history of replicates.
+
+        Returns
+        -------
+        pd.DataFrame
+            Tidy DataFrame of the traces. The columns appear in the following order:
+
+            1. ``theta_idx``: The index of the parameter set.
+            2. ``unit``: The unit identifier (or ``'shared'`` for shared parameter rows).
+            3. ``iteration``: The iteration counter.
+            4. ``method``: The name of the method.
+            5. ``logLik``: The estimated log-likelihood.
+            6. ``se``: The standard error of the log-likelihood.
+            7. Parameter columns: Shared and unit-specific parameters sharded by unit.
         """
         return self.results_history.traces()
 
     def plot_traces(self, which: str = "shared", show: bool = True) -> Any:
-        """
-        Plots the parameter and log-likelihood traces from the entire result history.
+        """Plot parameter and log-likelihood traces from the result history.
+
+        Parameters
+        ----------
+        which : str, optional
+            Which parameter trace to plot.  Can be ``"shared"`` (default),
+            ``"unitLogLik"``, or the name of a unit-specific parameter.
+        show : bool, optional
+            Whether to display the plot immediately.  Defaults to ``True``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            The generated figure object.
         """
         traces = self.traces()
         assert isinstance(traces, pd.DataFrame)
@@ -170,15 +241,26 @@ class PanelAnalysisMixin(Base):
         theta: PanelParameters | None = None,
         show: bool = True,
     ) -> Any:
-        """
-        Runs simulations for the PanelPomp model and plots them against true data.
+        """Simulate and plot observations against real data.
 
-        Args:
-            key (jax.Array): JAX random key for simulation.
-            nsim (int): Number of simulations to perform per parameter set.
-            mode (str): Plotting mode, either "lines" or "quantiles".
-            theta (PanelParameters, optional): Parameters to use. Defaults to self.theta.
-            show (bool): Whether to display the plot.
+        Parameters
+        ----------
+        key : jax.Array
+            JAX random key.
+        nsim : int, optional
+            Number of simulations to run per replicate.  Defaults to ``20``.
+        mode : {"lines", "quantiles"}, optional
+            Plotting style.  Defaults to ``"lines"``.
+        theta : PanelParameters or None, optional
+            Parameters to simulate from.  If ``None``, defaults to
+            ``self.theta``.
+        show : bool, optional
+            Whether to display the plot immediately.  Defaults to ``True``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            The generated figure object.
         """
         if theta is None:
             theta = (

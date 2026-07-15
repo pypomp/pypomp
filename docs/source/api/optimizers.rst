@@ -1,16 +1,16 @@
 Optimizers
 ==========
 
-.. currentmodule:: pypomp.core.optimizer
+.. currentmodule:: pypomp
 
-**pypomp** provides a variety of class-based optimization algorithms that can be passed to model training methods to customize parameter estimation.
+Pypomp provides a variety of class-based optimization algorithms that can be passed to model training methods to customize parameter estimation.
 
 .. rubric:: Classes
 .. autosummary::
    :toctree: generated/
    :template: autosummary/optimizer_class.rst
 
-   Optimizer
+   core.optimizer.Optimizer
    SGD
    Adam
    FullMatrixAdam

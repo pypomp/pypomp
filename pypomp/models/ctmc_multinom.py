@@ -18,7 +18,6 @@ import jax.numpy as jnp
 from jax.scipy.special import gammaln
 
 from pypomp.random.binom import fast_multinomial as fast_rmultinomial
-from pypomp.types import Numeric
 
 
 def _euler_multinomial_probs(
@@ -64,7 +63,7 @@ def _euler_multinomial_probs(
 
 def _multinomial_logpmf(
     counts: jax.Array,
-    n: Numeric,
+    n: jax.Array | float,
     probs: jax.Array,
 ) -> jax.Array:
     """
@@ -91,7 +90,7 @@ def _multinomial_logpmf(
 
 def reulermultinom(
     key: jax.Array,
-    n: Numeric,
+    n: jax.Array | float,
     rates: jax.Array,
     dt: float,
     shape=(),
@@ -138,7 +137,7 @@ def reulermultinom(
 
 def deulermultinom(
     x: jax.Array,
-    n: Numeric,
+    n: jax.Array | float,
     rates: jax.Array,
     dt: float,
 ) -> jax.Array:
@@ -174,7 +173,7 @@ def deulermultinom(
 
 
 def sample_and_log_prob(
-    N: Numeric,
+    N: jax.Array | float,
     rates: jax.Array,
     dt: float,
     key: jax.Array,

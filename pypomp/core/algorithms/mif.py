@@ -1,122 +1,54 @@
 import jax
 import jax.numpy as jnp
 from jax import jit
-from typing import Callable
 from .helpers import _normalize_weights
 from .helpers import _resampler_thetas
 from .helpers import _no_resampler_thetas
 
 from .pfilter import _vmapped_pfilter_internal
+from .types import (
+    MifConfig,
+    MifInputs,
+    PfilterConfig,
+    PfilterInputs,
+    PerfilterState,
+    PerfilterStepInputs,
+)
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
 def _mif_internal(
     theta_Jd: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys: jax.Array,
-    rinitializers: Callable,  # static
-    rprocesses_interp: Callable,  # static
-    dmeasures: Callable,  # static
-    sigmas: float | jax.Array,
-    sigmas_init: float | jax.Array,
-    accumvars: jax.Array | None,
-    covars_extended: jax.Array | None,
-    M: int,  # static
-    cooling_fn: Callable,  # static
-    m_offset: int | jax.Array,
-    J: int,  # static
-    thresh: float,
     key: jax.Array,
-    rinitializer_pf: Callable,  # static
-    rprocess_pf: Callable,  # static
-    dmeasure_pf: Callable,  # static
-    n_monitors: int,  # static
-    return_ancestry: bool = False,  # static
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    times = times.astype(float)
-    all_keys = jax.random.split(key, num=M + 1)
+    config: MifConfig,
+    inputs: MifInputs,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    # 1. Prepare keys.
+    all_keys = jax.random.split(key, num=config.M + 1)
     m_keys = all_keys[1:]
 
-    def mif_scan_body(carry, scan_inputs):
-        current_theta_Jd, current_ancestry = carry
-        m, iter_key = scan_inputs
-
-        next_theta_Jd, neg_loglik_per, ancestry = _perfilter_internal(
-            m_offset + m,
-            current_theta_Jd,
-            iter_key,
-            dt_array_extended=dt_array_extended,
-            nstep_array=nstep_array,
-            t0=t0,
-            times=times,
-            ys=ys,
-            J=J,
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
-            rinitializers=rinitializers,
-            rprocesses_interp=rprocesses_interp,
-            dmeasures=dmeasures,
-            accumvars=accumvars,
-            covars_extended=covars_extended,
-            thresh=thresh,
-            cooling_fn=cooling_fn,
-            return_ancestry=return_ancestry,
-        )
-
-        if n_monitors >= 1:
-            current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
-            key_mon, *subkeys = jax.random.split(iter_key, n_monitors + 1)
-            neg_loglik_m = jnp.mean(
-                _vmapped_pfilter_internal(
-                    current_theta_mean,
-                    dt_array_extended,
-                    nstep_array,
-                    t0,
-                    times,
-                    ys,
-                    J,
-                    rinitializer_pf,
-                    rprocess_pf,
-                    dmeasure_pf,
-                    accumvars,
-                    covars_extended,
-                    thresh,
-                    jnp.array(subkeys),
-                    False,
-                    False,
-                    False,
-                    False,
-                    True,
-                )["neg_loglik"]
-            )
-        else:
-            neg_loglik_m = neg_loglik_per
-
-        return (next_theta_Jd, ancestry), (
-            jnp.mean(next_theta_Jd, axis=0),
-            neg_loglik_m,
-        )
-
-    if return_ancestry:
-        init_ancestry = jnp.arange(J)
-    else:
-        init_ancestry = jnp.zeros((0,), dtype=jnp.int32)
-
-    init_carry = (theta_Jd, init_ancestry)
-    scan_xs = (jnp.arange(M), m_keys)
-
-    (final_theta_Jd, final_ancestry), (thetas_history_mean, neg_logliks_history) = (
-        jax.lax.scan(
-            f=mif_scan_body,
-            init=init_carry,
-            xs=scan_xs,
-        )
+    # 2. Prepare scan input
+    config_pf = config.to_pfilter_config()
+    inputs_pf = inputs.to_pfilter_inputs()
+    init_carry = theta_Jd
+    scan_xs = (jnp.arange(config.M), m_keys)
+    mif_scan_body_fn = jax.tree_util.Partial(
+        _mif_scan_body,
+        config,
+        inputs,
+        config_pf,
+        inputs_pf,
     )
 
+    # 3. Run the perturbed particle filter + optional unperturbed particle filter.
+    final_theta_Jd, (thetas_history_mean, neg_logliks_history) = jax.lax.scan(
+        f=mif_scan_body_fn,
+        init=init_carry,
+        xs=scan_xs,
+    )
+
+    # 4. Collect results.
     # thetas_traces_Md: (M+1, n_theta)
     thetas_traces_Md = jnp.concatenate(
         [jnp.mean(theta_Jd, axis=0)[None, :], thetas_history_mean], axis=0
@@ -124,485 +56,232 @@ def _mif_internal(
     # neg_logliks_M: (M,)
     neg_logliks_M = neg_logliks_history
 
-    return neg_logliks_M, thetas_traces_Md, final_theta_Jd, final_ancestry
+    return neg_logliks_M, thetas_traces_Md, final_theta_Jd
 
 
-_vmapped_mif_internal = jax.vmap(
-    _mif_internal,
-    in_axes=(0,) + (None,) * 17 + (0,) + (None,) * 5,
-)
+def _mif_scan_body(
+    config: MifConfig,
+    inputs: MifInputs,
+    config_pf: PfilterConfig,
+    inputs_pf: PfilterInputs,
+    carry: jax.Array,
+    scan_inputs: tuple[int | jax.Array, jax.Array],
+) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
+    """Runs one iteration of IF2; optionally runs pfilter for unperturbed logLik."""
+    current_theta_Jd = carry
+    m, iter_key = scan_inputs
 
-_jv_mif_internal = jit(
-    _vmapped_mif_internal,
-    static_argnames=(
-        "rinitializers",
-        "rprocesses_interp",
-        "dmeasures",
-        "M",
-        "cooling_fn",
-        "J",
-        "rinitializer_pf",
-        "rprocess_pf",
-        "dmeasure_pf",
-        "n_monitors",
-        "return_ancestry",
-    ),
-)
+    # 1. Run the perturbed filter.
+    next_theta_Jd, neg_loglik_per, _ = _perfilter_internal(
+        m_current=m,
+        thetas_Jd=current_theta_Jd,
+        key=iter_key,
+        config=config,
+        inputs=inputs,
+    )
+
+    # 2. Optionally run pfilter for unperturbed logLik
+    if config.n_monitors >= 1:
+        current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
+        mon_keys = jax.random.split(iter_key, config.n_monitors)
+        neg_loglik_m = jnp.mean(
+            _vmapped_pfilter_internal(
+                current_theta_mean,
+                mon_keys,
+                config_pf,
+                inputs_pf,
+            )["neg_loglik"]
+        )
+    else:
+        neg_loglik_m = neg_loglik_per
+
+    return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), neg_loglik_m)
 
 
 def _perfilter_internal(
     m_current: int | jax.Array,
     thetas_Jd: jax.Array,
     key: jax.Array,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys: jax.Array,
-    J: int,
-    sigmas: float | jax.Array,
-    sigmas_init: float | jax.Array,
-    rinitializers: Callable,
-    rprocesses_interp: Callable,
-    dmeasures: Callable,
-    accumvars: jax.Array | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    cooling_fn: Callable,
-    return_ancestry: bool,
+    config: MifConfig,
+    inputs: MifInputs,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """
-    Internal function for one iteration of the perturbed particle filtering algorithm.
-    """
+    """Runs one iteration of the perturbed particle filtering algorithm."""
+    # 1. Setup.
+    J = config.J
     loglik = jnp.array(0.0)
+    norm_weights = jnp.full(J, -jnp.log(J))
+    counts = jnp.ones(J, dtype=int)
+    time_indices = jnp.arange(len(inputs.ys))
+    cooling_factors = jax.vmap(
+        lambda i: config.cooling_fn(i, m_current, len(inputs.times))
+    )(time_indices)
+    # Ancestry tracking is for PIF (Panel.mif with block=False).
+    if config.return_ancestry:
+        ancestry = jnp.arange(J)
+    else:
+        ancestry = jnp.zeros((0,), dtype=jnp.int32)
+
+    # 2. Perturb the parameters for t0
     key, subkey = jax.random.split(key)
-    sigmas_init_cooled = cooling_fn(0, m_current, len(times)) * sigmas_init
+    sigmas_init_cooled = (
+        config.cooling_fn(0, m_current, len(inputs.times)) * inputs.sigmas_init
+    )
     thetas_Jd = thetas_Jd + sigmas_init_cooled * jax.random.normal(
         shape=thetas_Jd.shape, key=subkey
     )
 
+    # 3. Initialize particle states at t0
     split_keys = jax.random.split(key, num=J + 1)
     key = split_keys[0]
     keys = split_keys[1:]
-    covars0 = None if covars_extended is None else covars_extended[0]
-    particlesF_Jx = rinitializers(thetas_Jd, keys, covars0, t0, SHOULD_TRANS)
-
-    norm_weights = jnp.full(J, -jnp.log(J))
-    counts = jnp.ones(J, dtype=int)
-
-    time_indices = jnp.arange(len(ys))
-    cooling_factors = jax.vmap(lambda i: cooling_fn(i, m_current, len(times)))(
-        time_indices
+    covars0 = None if inputs.covars_extended is None else inputs.covars_extended[0]
+    particlesF_Jx = config.rinitializer(
+        thetas_Jd, keys, covars0, inputs.t0, SHOULD_TRANS
     )
 
-    all_keys = jax.random.split(key, num=len(ys) + 1)
+    # 4. Prepare scan inputs
+    all_keys = jax.random.split(key, num=len(inputs.ys) + 1)
     step_keys_raw = all_keys[1:]
-
-    perfilter_scan_xs = (
-        ys,
-        times,
-        nstep_array,
-        cooling_factors,
-        step_keys_raw,
+    perfilter_scan_xs = PerfilterStepInputs(
+        y=inputs.ys,
+        time=inputs.times,
+        nstep=inputs.nstep_array,
+        cooling_factor=cooling_factors,
+        step_key=step_keys_raw,
+    )
+    init_state = PerfilterState(
+        t=inputs.t0,
+        particlesF=particlesF_Jx,
+        thetas=thetas_Jd,
+        loglik=loglik,
+        norm_weights=norm_weights,
+        counts=counts,
+        t_idx=0,
+        ancestry=ancestry,
+    )
+    scan_body_fn = jax.tree_util.Partial(
+        _perfilter_scan_body,
+        config,
+        inputs,
     )
 
-    if return_ancestry:
-        ancestry = jnp.arange(J)
-    else:
-        ancestry = jnp.zeros((0,), dtype=jnp.int32)
-    init_state = (
-        t0,
-        particlesF_Jx,
-        thetas_Jd,
-        loglik,
-        norm_weights,
-        counts,
-        0,
-        ancestry,
+    # 5. Run the perturbed particle filter over the time series.
+    final_state, _ = jax.lax.scan(
+        f=scan_body_fn,
+        init=init_state,
+        xs=perfilter_scan_xs,
     )
 
-    def scan_body(carry, xs):
-        return _perfilter_helper(
-            carry,
-            xs,
-            rprocesses_interp=rprocesses_interp,
-            dmeasures=dmeasures,
-            sigmas=sigmas,
-            accumvars=accumvars,
-            covars_extended=covars_extended,
-            dt_array_extended=dt_array_extended,
-            thresh=thresh,
-            return_ancestry=return_ancestry,
-        )
+    return final_state.thetas, -final_state.loglik, final_state.ancestry
 
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx, ancestry), _ = (
-        jax.lax.scan(
-            f=scan_body,
-            init=init_state,
-            xs=perfilter_scan_xs,
-        )
+
+def _perfilter_scan_body(
+    config: MifConfig,
+    inputs: MifInputs,
+    carry: PerfilterState,
+    xs: PerfilterStepInputs,
+) -> tuple[PerfilterState, None]:
+    """Runs the perturbed particle filter for one observation interval."""
+    # 1. Setup.
+    key_perturb, key_process, key_resample = jax.random.split(xs.step_key, 3)
+    nstep_int = jnp.asarray(xs.nstep).astype(int)
+
+    # 2. Perturb the parameters.
+    sigmas_cooled = xs.cooling_factor * inputs.sigmas
+    perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
+        shape=carry.thetas.shape, key=key_perturb
     )
 
-    return thetas_Jd, -loglik, ancestry
-
-
-def _perfilter_helper(
-    carry: tuple[
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        int,
-        jax.Array,
-    ],
-    xs: tuple[
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-    ],
-    rprocesses_interp: Callable,
-    dmeasures: Callable,
-    sigmas: float | jax.Array,
-    accumvars: jax.Array | None,
-    covars_extended: jax.Array | None,
-    dt_array_extended: jax.Array,
-    thresh: float,
-    return_ancestry: bool,
-) -> tuple[
-    tuple[
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        jax.Array,
-        int,
-        jax.Array,
-    ],
-    None,
-]:
-    """
-    Runs one iteration of the perturbed particle filtering algorithm.
-    """
-    (t, particlesF_Jx, thetas_Jd, loglik, norm_weights, counts, t_idx, ancestry) = carry
-    (y, time, nstep, cooling_factor, step_key) = xs
-    J = len(particlesF_Jx)
-
-    key_perturb, key_process, key_resample = jax.random.split(step_key, 3)
-
-    sigmas_cooled = cooling_factor * sigmas
-    thetas_Jd = thetas_Jd + sigmas_cooled * jax.random.normal(
-        shape=thetas_Jd.shape, key=key_perturb
-    )
-
-    keys = jax.random.split(key_process, num=J + 1)[1:]
-
-    nstep = nstep.astype(int)
-
-    particlesP_Jx, t_idx = rprocesses_interp(
-        particlesF_Jx,
-        thetas_Jd,
-        keys,
-        covars_extended,
-        dt_array_extended,
-        t,
-        t_idx,
-        nstep,
-        accumvars,
+    # 3. Propagate the particles for one observation interval.
+    keys_step = jax.random.split(key_process, num=config.J + 1)[1:]
+    particlesP_Jx, updated_t_idx = config.rprocess_interp(
+        carry.particlesF,
+        perturbed_thetas,
+        keys_step,
+        inputs.covars_extended,
+        inputs.dt_array_extended,
+        carry.t,
+        carry.t_idx,
+        nstep_int,
+        config.accumvars,
         SHOULD_TRANS,
     )
-    t = time
 
-    covars_t = None if covars_extended is None else covars_extended[t_idx]
+    # 4. Update covars to current observation time.
+    covars_t = (
+        None
+        if inputs.covars_extended is None
+        else inputs.covars_extended[updated_t_idx]
+    )
 
+    # 5. Compute log-likelihood contribution of current observation.
     measurements = jnp.nan_to_num(
-        dmeasures(y, particlesP_Jx, thetas_Jd, covars_t, t, SHOULD_TRANS).squeeze(),
+        config.dmeasure(
+            xs.y, particlesP_Jx, perturbed_thetas, covars_t, xs.time, SHOULD_TRANS
+        ).squeeze(),
         nan=jnp.log(1e-18),
     )
 
-    weights = norm_weights + measurements
-    norm_weights, loglik_t = _normalize_weights(weights)
-    loglik = loglik + loglik_t
+    # 6. Update the running log-likelihood and normalize particle weights.
+    weights = carry.norm_weights + measurements
+    norm_weights_updated, loglik_t = _normalize_weights(weights)
+    loglik_updated = carry.loglik + loglik_t
 
-    oddr = jnp.exp(jnp.max(norm_weights)) / jnp.exp(jnp.min(norm_weights))
-    counts, particlesF_Jx, norm_weights, thetas_Jd = jax.lax.cond(
-        oddr > thresh,
-        _resampler_thetas,
-        _no_resampler_thetas,
-        *(counts, particlesP_Jx, norm_weights, thetas_Jd, key_resample),
+    # 7. Resample if necessary.
+    should_resample = jnp.max(norm_weights_updated) - jnp.min(
+        norm_weights_updated
+    ) > jnp.log(config.thresh)
+    counts_resampled, particlesF_resampled, norm_weights_resampled, thetas_resampled = (
+        jax.lax.cond(
+            should_resample,
+            _resampler_thetas,
+            _no_resampler_thetas,
+            *(
+                carry.counts,
+                particlesP_Jx,
+                norm_weights_updated,
+                perturbed_thetas,
+                key_resample,
+            ),
+        )
     )
 
-    if return_ancestry:
+    # 8. Update the ancestry (used for PIF, i.e., Panel.mif with block=False).
+    if config.return_ancestry:
         step_indices = jax.lax.cond(
-            oddr > thresh,
-            lambda: counts,
-            lambda: jnp.arange(J),
+            should_resample,
+            lambda: counts_resampled,
+            lambda: jnp.arange(config.J),
         )
-        ancestry = ancestry[step_indices]
+        ancestry_updated = carry.ancestry[step_indices]
+    else:
+        ancestry_updated = carry.ancestry
 
-    return (
-        t,
-        particlesF_Jx,
-        thetas_Jd,
-        loglik,
-        norm_weights,
-        counts,
-        t_idx,
-        ancestry,
-    ), None
-
-
-def _panel_mif_internal(
-    shared_array: jax.Array,  # (J, n_shared)
-    unit_array: jax.Array,  # (J, U, n_spec)
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys_per_unit: jax.Array,  # (U, T, ...)
-    rinitializers: Callable,
-    rprocesses_interp: Callable,
-    dmeasures: Callable,
-    sigmas: jax.Array,
-    sigmas_init: jax.Array,
-    accumvars: jax.Array | None,
-    covars_per_unit: jax.Array | None,  # (U, ...) or None
-    unit_param_permutations: jax.Array,  # (U, n_params)
-    M: int,
-    cooling_fn: Callable,
-    J: int,
-    U: int,
-    thresh: float,
-    key: jax.Array,
-    rinitializer_pf: Callable,
-    rprocess_pf: Callable,
-    dmeasure_pf: Callable,
-    n_monitors: int,
-    block: bool,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """
-    Fully JIT-compiled Panel IF2 across M iterations and U units.
-
-    Returns
-        shared_array_final: (J, n_shared)
-        unit_array_final: (J, U, n_spec)
-        shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
-        unit_traces: (M+1, U, n_spec+1) where [:,:,0] is per-unit logLik per iter, [:,:,1:] are means
-    """
-    n_shared = shared_array.shape[1]
-    n_spec = unit_array.shape[2]
-    inv_perms = jax.vmap(jnp.argsort)(unit_param_permutations)
-
-    shared_means0 = jnp.mean(shared_array, axis=0) if n_shared > 0 else jnp.zeros((0,))
-    unit_means0 = jnp.mean(unit_array, axis=0) if n_spec > 0 else jnp.zeros((U, 0))
-
-    shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
-    unit_trace_0 = jnp.concatenate([jnp.full((U, 1), jnp.nan), unit_means0], axis=-1)[
-        None, :, :
-    ]
-
-    all_keys = jax.random.split(key, num=M + 1)
-    m_keys = all_keys[1:]
-
-    def iter_body(carry, scan_inputs):
-        (
-            shared_array_m,
-            unit_array_m,
-        ) = carry
-        m, iter_key = scan_inputs
-
-        sum_loglik_iter = 0.0
-
-        def unit_scan_fn(inner_carry, unit_inputs):
-            (
-                shared_array_u,
-                unit_array_m_carry,
-                sum_loglik_u,
-            ) = inner_carry
-
-            (
-                unit_param_perm_u,
-                ys_u,
-                covars_u_dummy,
-                u_idx,
-                unit_key,
-                inv_perm_u,
-            ) = unit_inputs
-
-            covars_u = None if covars_per_unit is None else covars_u_dummy
-
-            # Build per-unit thetas: (J, n_params) in unit's canonical order
-            if n_spec > 0:
-                unit_array_u_m_single = unit_array_m_carry[:, u_idx, :]
-            else:
-                unit_array_u_m_single = jnp.zeros((J, 0))
-
-            if (n_shared + n_spec) > 0:
-                thetas_u_panel_order = jnp.concatenate(
-                    [shared_array_u, unit_array_u_m_single], axis=1
-                )
-            else:
-                thetas_u_panel_order = jnp.zeros((J, 0))
-
-            thetas_u = thetas_u_panel_order[:, unit_param_perm_u]
-            sigmas_u = sigmas[unit_param_perm_u]
-            sigmas_init_u = sigmas_init[unit_param_perm_u]
-
-            subkey = unit_key
-
-            nLL_u, _, updated_final_thetas_u, ancestry_u = _mif_internal(
-                thetas_u,
-                dt_array_extended,
-                nstep_array,
-                t0,
-                times,
-                ys_u,
-                rinitializers,
-                rprocesses_interp,
-                dmeasures,
-                sigmas_u,
-                sigmas_init_u,
-                accumvars,
-                covars_u,
-                1,
-                cooling_fn,
-                m,
-                J,
-                thresh,
-                subkey,
-                rinitializer_pf,
-                rprocess_pf,
-                dmeasure_pf,
-                n_monitors,
-                return_ancestry=not block,
-            )
-            nLL_u = nLL_u[0]
-            # skips initial parameters from output:
-            updated_thetas_u = updated_final_thetas_u  # (J, n_params)
-
-            updated_thetas_panel = updated_thetas_u[:, inv_perm_u]
-
-            if n_shared > 0:
-                new_shared_array = updated_thetas_panel[:, :n_shared]
-            else:
-                new_shared_array = shared_array_u
-
-            if n_spec > 0:
-                updated_spec_u = updated_thetas_panel[:, n_shared:]
-                if not block:
-                    unit_array_m_carry = unit_array_m_carry[ancestry_u, :, :]
-                new_unit_array_carry = unit_array_m_carry.at[:, u_idx, :].set(
-                    updated_spec_u
-                )
-            else:
-                updated_spec_u = unit_array_u_m_single
-                new_unit_array_carry = unit_array_m_carry
-
-            loglik_u = -nLL_u
-            sum_loglik_u = sum_loglik_u + loglik_u
-
-            if n_spec > 0:
-                unit_traces_u_m_local = jnp.concatenate(
-                    [jnp.array([loglik_u]), jnp.mean(updated_spec_u, axis=0)]
-                )
-            else:
-                unit_traces_u_m_local = jnp.array([loglik_u])
-
-            new_inner_carry = (
-                new_shared_array,
-                new_unit_array_carry,
-                sum_loglik_u,
-            )
-
-            scan_outputs = unit_traces_u_m_local
-
-            return new_inner_carry, scan_outputs
-
-        unit_keys = jax.random.split(iter_key, num=U)
-
-        unit_scan_seq = (
-            unit_param_permutations,
-            ys_per_unit,
-            covars_per_unit
-            if covars_per_unit is not None
-            else jnp.zeros((U, 0)),  # dummy
-            jnp.arange(U),
-            unit_keys,
-            inv_perms,
-        )
-
-        initial_inner_carry = (
-            shared_array_m,
-            unit_array_m,
-            sum_loglik_iter,
-        )
-
-        final_inner_carry, unit_traces_m_new_seq = jax.lax.scan(
-            f=unit_scan_fn,
-            init=initial_inner_carry,
-            xs=unit_scan_seq,
-        )
-
-        (
-            shared_array_m,
-            unit_array_m,
-            sum_loglik_iter,
-        ) = final_inner_carry
-
-        unit_traces_m_row = unit_traces_m_new_seq
-
-        if n_shared > 0:
-            shared_means = jnp.mean(shared_array_m, axis=0)
-            shared_traces_m_row = jnp.concatenate(
-                [jnp.array([sum_loglik_iter]), shared_means]
-            )
-        else:
-            shared_traces_m_row = jnp.array([sum_loglik_iter])
-
-        return (
-            (shared_array_m, unit_array_m),
-            (shared_traces_m_row, unit_traces_m_row),
-        )
-
-    initial_iter_carry = (shared_array, unit_array)
-    iter_scan_xs = (jnp.arange(M), m_keys)
-
-    (final_iter_state, (shared_traces_history, unit_traces_history)) = jax.lax.scan(
-        f=iter_body,
-        init=initial_iter_carry,
-        xs=iter_scan_xs,
+    # 9. Return the updated state
+    new_state = PerfilterState(
+        t=xs.time,
+        particlesF=particlesF_resampled,
+        thetas=thetas_resampled,
+        loglik=loglik_updated,
+        norm_weights=norm_weights_resampled,
+        counts=counts_resampled,
+        t_idx=updated_t_idx,
+        ancestry=ancestry_updated,
     )
-
-    (shared_array, unit_array) = final_iter_state
-
-    shared_traces = jnp.concatenate([shared_trace_0, shared_traces_history], axis=0)
-    unit_traces = jnp.concatenate([unit_trace_0, unit_traces_history], axis=0)
-
-    return (shared_array, unit_array, shared_traces, unit_traces)
+    return new_state, None
 
 
-_vmapped_panel_mif_internal = jax.vmap(
-    _panel_mif_internal, in_axes=((0, 0) + (None,) * 18 + (0,) + (None,) * 5)
+_vmapped_mif_internal = jax.vmap(
+    _mif_internal,
+    in_axes=(
+        0,  # theta_Jd
+        0,  # key
+        None,  # config
+        None,  # inputs
+    ),
 )
 
-_jv_panel_mif_internal = jit(
-    _vmapped_panel_mif_internal,
-    static_argnames=(
-        "rinitializers",
-        "rprocesses_interp",
-        "dmeasures",
-        "M",
-        "cooling_fn",
-        "J",
-        "U",
-        "rinitializer_pf",
-        "rprocess_pf",
-        "dmeasure_pf",
-        "n_monitors",
-        "block",
-    ),
+_jv_mif_internal = jit(
+    _vmapped_mif_internal,
+    static_argnames=("config",),
 )

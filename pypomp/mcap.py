@@ -145,9 +145,7 @@ def _fit_local_quadratic(
 # MCAP result container
 @dataclass
 class MCAPResult:
-    """
-    Results of a Monte Carlo adjusted profile (MCAP) analysis.
-    """
+    """Results of a Monte Carlo adjusted profile (MCAP) analysis."""
 
     level: float
     """The confidence level of the profile likelihood confidence interval."""
@@ -192,30 +190,39 @@ def mcap(
     n_grid: int = 1000,
     loess_degree: int = 2,
 ) -> MCAPResult:
-    """
-    Monte Carlo adjusted profile.
+    """Compute Monte Carlo-adjusted profile (MCAP) confidence intervals.
 
-    Given a collection of points maximizing the likelihood over a range of fixed values of a focal parameter, this function constructs a profile likelihood confidence interval accommodating both Monte Carlo error in the profile and statistical uncertainty present in the likelihood function.
+    Constructs a profile likelihood confidence interval accommodating both
+    Monte Carlo noise in the profile and statistical uncertainty in the
+    likelihood function (Ionides et al. 2017 [1]_).
 
     Parameters
     ----------
-    parameter : npt.ArrayLike
-        The parameter values at which the log-likelihood was evaluated.
-    loglik : npt.ArrayLike
-        The log-likelihood values corresponding to the parameter values.
+    parameter : array-like
+        Parameter values at which log-likelihoods were evaluated.
+    loglik : array-like
+        Log-likelihood values corresponding to ``parameter``.
     level : float, optional
-        The confidence level to construct the profile likelihood confidence interval for.
+        Confidence level for the interval.  Defaults to ``0.95``.
     span : float, optional
-        The span parameter for the loess smoother.
+        Span parameter for the LOESS smoother.  Defaults to ``0.75``.
     n_grid : int, optional
-        The number of grid points to evaluate the smoothed log-likelihood at.
+        Number of grid points for evaluating the smoothed log-likelihood.
+        Defaults to ``1000``.
     loess_degree : int, optional
-        The degree of the loess smoother.
+        Polynomial degree for the LOESS smoother.  Defaults to ``2``.
 
     Returns
     -------
-    MCAPResult : MCAPResult
-        The MCAP result object containing the profile likelihood confidence interval and other statistics.
+    MCAPResult
+        Object containing the computed confidence interval and SE decomposition.
+
+    References
+    ----------
+    .. [1] Ionides, Edward L., Carles Bretó, Joonha Park, R. A. Smith, and Aaron A. King.
+       "Monte Carlo profile confidence intervals for dynamic systems."
+       *Journal of The Royal Society Interface* 14, no. 132 (2017): 20170126.
+       https://doi.org/10.1098/rsif.2017.0126.
     """
     x: FloatArray = np.asarray(parameter, dtype=float)
     y: FloatArray = np.asarray(loglik, dtype=float)

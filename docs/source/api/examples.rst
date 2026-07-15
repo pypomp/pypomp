@@ -1,7 +1,7 @@
 Example Models
 ==============
 
-**pypomp** includes several example models:
+Pypomp includes several example models:
 
 .. currentmodule:: pypomp.models
 
@@ -9,6 +9,7 @@ Example Models
    :toctree: generated/
 
    ~dhaka
-   ~spx
-   UKMeasles.Pomp
    ~LG
+   ~sir
+   ~spx
+   ~UKMeasles

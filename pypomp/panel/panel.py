@@ -16,25 +16,19 @@ from copy import deepcopy
 
 
 class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
-    """
-    The PanelPomp class represents a panel of partially observed Markov process models.
-    It extends the single-unit POMP framework to handle multiple units that share
-    structural characteristics but may have distinct parameter values and observations.
+    """Panel of partially observed Markov process models.
 
-    In particular, the class provides methods for:
-
-    - Simulation of panel models
-    - Particle filtering for panel models
-    - Marginalized Panel Iterated Filtering (MPIF)
-    - Gradient descent via automatic differentiation
+    Extends the single-unit POMP framework to handle multiple units that share
+    structural characteristics but may have distinct parameter values and
+    observations.
 
     Parameters
     ----------
-    Pomp_dict : dict[str, :class:`~pypomp.core.pomp.Pomp`]
-        A dictionary mapping unit names to :class:`~pypomp.core.pomp.Pomp` objects. Each :class:`~pypomp.core.pomp.Pomp` object represents a single unit in the panel data.
-        The keys are used as unit identifiers.
-    theta : :class:`~pypomp.core.parameters.PanelParameters`, optional
-        A :class:`~pypomp.core.parameters.PanelParameters` object containing the model parameters.
+    Pomp_dict : dict of str to Pomp
+        Mapping from unit names to :class:`~pypomp.Pomp` objects.
+    theta : PanelParameters
+        A :class:`~pypomp.core.parameters.PanelParameters` object containing
+        the model parameters.
     """
 
     unit_objects: dict[str, Pomp]
@@ -99,13 +93,16 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         return list(self.unit_objects.keys())
 
-    def to_struct(self):
-        """
-        Exports the static data and compiled simulator functions into a lightweight
-        JAX PyTree (PanelPompStruct) for use with the functional API (pypomp.functional).
+    def to_struct(self) -> PanelPompStruct:
+        """Export static data and compiled simulators into a JAX PyTree.
 
-        Returns:
-            PanelPompStruct: The compiled structural representation of the panel model.
+        Converts the panel model into a :class:`PanelPompStruct` suitable for
+        use with pure-functional algorithms in :mod:`pypomp.functional`.
+
+        Returns
+        -------
+        PanelPompStruct
+            The compiled structural representation of the panel model.
         """
 
         unit_names = self.get_unit_names()

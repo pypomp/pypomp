@@ -92,45 +92,51 @@ def test_base_parameter_set_methods():
 
 
 def test_base_parameter_set_prune():
-    # PompParameters empty reps prune error
+    # PompParameters empty reps pruned error
     pomp_empty = pp.PompParameters(None)
     with pytest.raises(ValueError, match="No parameter sets available to prune."):
-        pomp_empty.prune(1)
+        pomp_empty.pruned(1)
 
     # PompParameters n < 1 error
     pomp = pp.PompParameters({"a": 1.0}, logLik=np.array(1.5))
     with pytest.raises(ValueError, match="n must be at least 1."):
-        pomp.prune(0)
+        pomp.pruned(0)
 
     # PompParameters all nan logLik error
     pomp_nan_lik = pp.PompParameters({"a": 1.0})
     with pytest.raises(ValueError, match="No valid log-likelihoods available to prune"):
-        pomp_nan_lik.prune(1)
+        pomp_nan_lik.pruned(1)
 
-    # Normal prune for PompParameters
-    pomp_multi = pp.PompParameters(
+    # Normal pruned for PompParameters (non-mutating)
+    pomp_multi_orig = pp.PompParameters(
         [{"a": 1.0}, {"a": 2.0}, {"a": 3.0}], logLik=np.array([1.0, 3.0, 2.0])
     )
     # n=2, refill=True
-    pomp_multi.prune(n=2, refill=True)
+    pomp_multi = pomp_multi_orig.pruned(n=2, refill=True)
+    assert len(pomp_multi_orig) == 3
+    assert list(pomp_multi_orig.logLik) == [1.0, 3.0, 2.0]
     assert len(pomp_multi) == 3
     # The top two elements are 2.0 and 3.0. With refill, they repeat to fill 3 elements: [2.0, 3.0, 2.0]
     assert list(pomp_multi.logLik) == [3.0, 2.0, 3.0]
 
     # n=2, refill=False
-    pomp_multi2 = pp.PompParameters(
+    pomp_multi2_orig = pp.PompParameters(
         [{"a": 1.0}, {"a": 2.0}, {"a": 3.0}], logLik=np.array([1.0, 3.0, 2.0])
     )
-    pomp_multi2.prune(n=2, refill=False)
+    pomp_multi2 = pomp_multi2_orig.pruned(n=2, refill=False)
+    assert len(pomp_multi2_orig) == 3
     assert len(pomp_multi2) == 2
     assert list(pomp_multi2.logLik) == [3.0, 2.0]
 
-    # PanelParameters prune with nan logLik (should fallback to zeros and not raise error)
+    # PanelParameters pruned with nan logLik (should fallback to zeros and not raise error)
     # Give it a unit-specific parameter so n_units > 0 and logLik is [nan, nan, nan]
     unit_df = pd.DataFrame({"u1": [1.0]}, index=pd.Index(["up1"]))
-    panel = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_df}] * 3)
+    panel_orig = pp.PanelParameters(
+        theta=[{"shared": None, "unit_specific": unit_df}] * 3
+    )
     # logLik_unit is all NaN initially. Pruning should set logLik to zero and proceed.
-    panel.prune(n=2, refill=False)
+    panel = panel_orig.pruned(n=2, refill=False)
+    assert len(panel_orig) == 3
     assert len(panel) == 2
     assert np.all(np.isnan(panel.logLik))
 
@@ -155,26 +161,28 @@ def test_base_parameter_set_transform():
     pomp = pp.PompParameters({"a": 2.0, "b": 5.0})
     assert pomp.estimation_scale is False
 
-    # params method variations
+    assert isinstance(pomp.params(), xr.DataArray)
     assert isinstance(pomp.params(as_list=False), xr.DataArray)
     assert isinstance(pomp.params(as_list=True), list)
 
-    # Auto transform (direction is None) -> will transform from natural to estimation scale
-    pomp.transform(p_trans)
-    assert pomp.estimation_scale is True
-    assert np.allclose(pomp[0]["a"], np.log(2.0))
-    assert np.allclose(pomp[0]["b"], 5.0)
+    # Auto transformed (direction is None) -> will transform from natural to estimation scale
+    pomp_transformed = pomp.transformed(p_trans)
+    assert pomp.estimation_scale is False  # original remains unmodified
+    assert pomp_transformed.estimation_scale is True
+    assert np.allclose(pomp_transformed[0]["a"], np.log(2.0))
+    assert np.allclose(pomp_transformed[0]["b"], 5.0)
 
     # Transform back using explicit direction
-    pomp.transform(p_trans, direction="from_est")
-    assert pomp.estimation_scale is False
-    assert np.allclose(pomp[0]["a"], 2.0)
-    assert np.allclose(pomp[0]["b"], 5.0)
+    pomp_back = pomp_transformed.transformed(p_trans, direction="from_est")
+    assert pomp_transformed.estimation_scale is True  # remains unmodified
+    assert pomp_back.estimation_scale is False
+    assert np.allclose(pomp_back[0]["a"], 2.0)
+    assert np.allclose(pomp_back[0]["b"], 5.0)
 
     # Transform to_est again explicitly
-    pomp.transform(p_trans, direction="to_est")
-    assert pomp.estimation_scale is True
-    assert np.allclose(pomp[0]["a"], np.log(2.0))
+    pomp_to_est = pomp_back.transformed(p_trans, direction="to_est")
+    assert pomp_to_est.estimation_scale is True
+    assert np.allclose(pomp_to_est[0]["a"], np.log(2.0))
 
 
 # =====================================================================
@@ -546,20 +554,23 @@ def test_panel_parameters_to_jax_array_edge_cases():
 
 
 def test_panel_parameters_mix_and_match():
-    # mix_and_match on reps=0 does nothing
-    panel_empty = pp.PanelParameters(None)
-    panel_empty.mix_and_match()
+    # mixed_and_matched on reps=0 does nothing (returns copy)
+    panel_empty_orig = pp.PanelParameters(None)
+    panel_empty = panel_empty_orig.mixed_and_matched()
+    assert len(panel_empty_orig) == 0
     assert len(panel_empty) == 0
 
-    # normal mix_and_match sorting check
+    # normal mixed_and_matched sorting check
     shared_df = pd.DataFrame({"shared": [1.0]}, index=["s1"])
     unit_df = pd.DataFrame({"u1": [2.0], "u2": [3.0]}, index=["up1"])
-    panel = pp.PanelParameters(
+    panel_orig = pp.PanelParameters(
         theta=cast(Any, [{"shared": shared_df, "unit_specific": unit_df}] * 3),
         logLik_unit=np.array([[1.0, 5.0], [3.0, 2.0], [2.0, 4.0]]),
     )
 
-    panel.mix_and_match()
+    panel = panel_orig.mixed_and_matched()
+    # original remains unmodified:
+    assert panel_orig.logLik_unit[0, 0] == 1.0
     expected_u1_ll = [3.0, 2.0, 1.0]
     expected_u2_ll = [5.0, 4.0, 2.0]
     np.testing.assert_allclose(panel.logLik_unit[:, 0], expected_u1_ll)
@@ -595,6 +606,7 @@ def test_panel_parameters_utility_and_magic():
 
     # list call / iteration / params extraction
     assert isinstance(list(panel), list)
+    assert isinstance(panel.params(), xr.Dataset)
     assert isinstance(panel.params(as_list=True), list)
     assert isinstance(panel.params(as_list=False), xr.Dataset)
 
@@ -619,7 +631,7 @@ def test_panel_parameters_utility_and_magic():
         return dict(theta)
 
     p_trans = ParTrans(to_est=to_est_fn, from_est=from_est_fn)
-    panel.transform(p_trans)
+    panel = panel.transformed(p_trans)
 
     # set_params using dict value to trigger 556-558 coverage
     panel.set_params({"shared": shared_df, "unit_specific": unit_df})

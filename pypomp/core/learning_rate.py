@@ -65,20 +65,20 @@ class LearningRate:
         return validated
 
     def to_array(self, param_names: list[str], M: int) -> jax.Array:
-        """
-        Convert the learning rates into a JAX array of shape (M, n_params).
+        """Convert the learning rates into a JAX array.
 
         Parameters
         ----------
-        param_names : list[str]
-            List of parameter names in canonical order.
+        param_names : list of str
+            Parameter names in canonical order.
         M : int
             Number of iterations in the training schedule.
 
         Returns
         -------
         jax.Array
-            A 2D array where each column is the learning rate schedule for a parameter.
+            A 2D array of shape ``(M, n_params)`` where each column is the
+            learning rate schedule for a parameter.
         """
         n_params = len(param_names)
         M_eff = max(M, 1)
@@ -101,20 +101,20 @@ class LearningRate:
         return jnp.array(schedule)
 
     def cosine_decay(self, final_factor: float, M: int) -> "LearningRate":
-        """
-        Apply a cosine cooling schedule to all current rates.
+        """Apply a cosine cooling schedule to all current rates.
 
         Parameters
         ----------
         final_factor : float
-            The factor to reach at the end of the schedule (between 0 and 1).
+            Multiplier to reach at the end of the schedule.  Must be in the
+            interval :math:`[0, 1]`.
         M : int
             Number of iterations for the schedule.
 
         Returns
         -------
-        :class:`~pypomp.core.learning_rate.LearningRate`
-            A new :class:`~pypomp.core.learning_rate.LearningRate` object with cosine decay applied.
+        LearningRate
+            A new learning rate object with cosine decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")
@@ -139,20 +139,21 @@ class LearningRate:
         return LearningRate(new_rates)
 
     def geometric_decay(self, decay_rate: float, M: int) -> "LearningRate":
-        """
-        Apply a geometric decay schedule: eta_t = eta_0 * (decay_rate ^ t).
+        """Apply a geometric decay schedule.
+
+        The rate at step ``t`` is ``eta_t = eta_0 * (decay_rate ^ t)``.
 
         Parameters
         ----------
         decay_rate : float
-            The decay rate per iteration (between 0 and 1).
+            Decay factor per iteration.  Must be in the interval :math:`[0, 1]`.
         M : int
             Number of iterations for the schedule.
 
         Returns
         -------
-        :class:`~pypomp.core.learning_rate.LearningRate`
-            A new :class:`~pypomp.core.learning_rate.LearningRate` object with geometric decay applied.
+        LearningRate
+            A new learning rate object with geometric decay applied.
         """
         if not (0 <= decay_rate <= 1):
             raise ValueError("decay_rate should be between 0 and 1")
@@ -174,20 +175,23 @@ class LearningRate:
         return LearningRate(new_rates)
 
     def linear_decay(self, final_factor: float, M: int) -> "LearningRate":
-        """
-        Apply a linear decay schedule from 1.0 down to final_factor.
+        """Apply a linear decay schedule.
+
+        Linearly interpolates learning rates from their initial values down to
+        initial values multiplied by ``final_factor``.
 
         Parameters
         ----------
         final_factor : float
-            The factor to reach at the end of the schedule (between 0 and 1).
+            Multiplier to reach at the end of the schedule.  Must be in the
+            interval :math:`[0, 1]`.
         M : int
             Number of iterations for the schedule.
 
         Returns
         -------
-        :class:`~pypomp.core.learning_rate.LearningRate`
-            A new :class:`~pypomp.core.learning_rate.LearningRate` object with linear decay applied.
+        LearningRate
+            A new learning rate object with linear decay applied.
         """
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")

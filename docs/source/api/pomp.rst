@@ -1,7 +1,7 @@
 Pomp Class
 ==========
 
-.. currentmodule:: pypomp.core.pomp
+.. currentmodule:: pypomp
 
 .. autoclass:: Pomp
    :no-members:
@@ -38,22 +38,33 @@ Pomp Class
    ~Pomp.pmcmc
    ~Pomp.abc
 
-.. rubric:: Supporting Methods
+.. rubric:: Results
 .. autosummary::
    :toctree: generated/
 
-   ~Pomp.sample_params
-   ~Pomp.prune
    ~Pomp.results
    ~Pomp.traces
    ~Pomp.CLL
    ~Pomp.ESS
+
+.. rubric:: Other Supporting Methods
+.. autosummary::
+   :toctree: generated/
+
+   ~Pomp.sample_params
+   ~Pomp.to_struct
+   ~Pomp.prune
    ~Pomp.time
    ~Pomp.arma
    ~Pomp.negbin
    ~Pomp.probe
    ~Pomp.print_summary
    ~Pomp.print_metadata
+   ~Pomp.merge
+
+.. rubric:: Visualization
+.. autosummary::
+   :toctree: generated/
+
    ~Pomp.plot_traces
    ~Pomp.plot_simulations
-   ~Pomp.merge

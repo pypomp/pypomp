@@ -1,7 +1,7 @@
 Learning Rate
 =============
 
-.. currentmodule:: pypomp.core.learning_rate
+.. currentmodule:: pypomp
 
 .. autoclass:: LearningRate
    :no-members:

@@ -101,7 +101,7 @@ def test_to_jax_array_defaults():
     arr_pomp = pomp_params.to_jax_array()
     assert arr_pomp.shape == (1, 2)
     names = pomp_params.get_param_names()
-    expected_values = [pomp_params.params()[0][name] for name in names]
+    expected_values = [pomp_params.params(as_list=True)[0][name] for name in names]
     np.testing.assert_allclose(np.asarray(arr_pomp[0]), expected_values)
 
     # 2. PanelParameters defaults

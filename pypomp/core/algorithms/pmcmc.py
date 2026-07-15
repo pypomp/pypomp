@@ -13,13 +13,14 @@ XLA program.
 """
 
 from functools import partial
-from typing import Callable
+from typing import Callable, cast
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
 from .pfilter import _pfilter_internal
+from .types import PfilterConfig, PfilterInputs
 
 
 @partial(
@@ -33,6 +34,7 @@ from .pfilter import _pfilter_internal
         "accumvars",
         "dprior",
         "should_trans",
+        "thresh",
     ),
 )
 def _pmcmc_internal(
@@ -88,24 +90,24 @@ def _pmcmc_internal(
     def _run_pfilter(theta: jax.Array, k: jax.Array) -> jax.Array:
         out = _pfilter_internal(
             theta,
-            dt_array_extended,
-            nstep_array,
-            t0,
-            times,
-            ys,
-            J,
-            rinitializer,
-            rprocess_interp,
-            dmeasure,
-            accumvars,
-            covars_extended,
-            thresh,
             k,
-            False,  # CLL
-            False,  # ESS
-            False,  # filter_mean
-            False,  # prediction_mean
-            should_trans,
+            PfilterConfig(
+                J=J,
+                rinitializer=rinitializer,
+                rprocess_interp=rprocess_interp,
+                dmeasure=dmeasure,
+                accumvars=accumvars,
+                thresh=thresh,
+                should_trans=should_trans,
+            ),
+            PfilterInputs(
+                ys=ys,
+                dt_array_extended=dt_array_extended,
+                nstep_array=nstep_array,
+                t0=t0,
+                times=times,
+                covars_extended=covars_extended,
+            ),
         )
         return -out["neg_loglik"]
 
@@ -160,6 +162,10 @@ def _pmcmc_internal(
     )
 
     final_accepts = final_carry[4]
+
+    ll_trace = cast(jax.Array, ll_trace)
+    lp_trace = cast(jax.Array, lp_trace)
+    theta_trace = cast(jax.Array, theta_trace)
 
     # Prepend iteration-0 (the initial evaluation) to each trace.
     ll_trace = jnp.concatenate((jnp.asarray([loglik0]), ll_trace))

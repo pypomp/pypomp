@@ -11,6 +11,11 @@ from pypomp.core.results import PompABCResult
 from pypomp.proposals import mvn_diag_rw, mvn_rw, mvn_rw_adaptive
 
 
+def _abc_res(res) -> PompABCResult:
+    assert isinstance(res, PompABCResult)
+    return res
+
+
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------
@@ -85,7 +90,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(0),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         assert isinstance(res, PompABCResult)
         assert res.method == "abc"
         assert res.Nabc == 5
@@ -106,7 +111,7 @@ class TestABC:
             dprior=_informative_dprior,
             key=jax.random.key(1),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         lps = res.traces_da.sel(variable="log_prior").values
         assert not np.allclose(lps, 0.0)
 
@@ -121,7 +126,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(2),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         np.testing.assert_array_equal(
             res.traces_da.sel(variable="log_prior").values, 0.0
         )
@@ -137,26 +142,39 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(3),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         for r in res.acceptance_rate:
             assert 0.0 <= r <= 1.0
 
     def test_reproducibility(self):
-        kwargs = dict(
-            Nabc=5,
-            probes=_default_probes(),
-            scale=_default_scale(),
-            epsilon=1e6,
-            proposal=mvn_diag_rw({"beta1": 1.0}),
-            key=jax.random.key(99),
-        )
+        Nabc = 5
+        probes = _default_probes()
+        scale = _default_scale()
+        epsilon = 1e6
+        proposal = mvn_diag_rw({"beta1": 1.0})
+        key = jax.random.key(99)
+
         sir1 = _get_sir()
-        sir1.abc(**kwargs)
+        sir1.abc(
+            Nabc=Nabc,
+            probes=probes,
+            scale=scale,
+            epsilon=epsilon,
+            proposal=proposal,
+            key=key,
+        )
         sir2 = _get_sir()
-        sir2.abc(**kwargs)
+        sir2.abc(
+            Nabc=Nabc,
+            probes=probes,
+            scale=scale,
+            epsilon=epsilon,
+            proposal=proposal,
+            key=key,
+        )
         np.testing.assert_array_equal(
-            np.asarray(sir1.results_history[-1].traces_da.values),
-            np.asarray(sir2.results_history[-1].traces_da.values),
+            np.asarray(_abc_res(sir1.results_history[-1]).traces_da.values),
+            np.asarray(_abc_res(sir2.results_history[-1]).traces_da.values),
         )
 
     def test_to_dataframe(self):
@@ -170,7 +188,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(4),
         )
-        df = sir.results_history[-1].to_dataframe()
+        df = _abc_res(sir.results_history[-1]).to_dataframe()
         assert "distance" in df.columns
         assert "log_prior" in df.columns
         assert "theta_idx" in df.columns
@@ -188,7 +206,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(5),
         )
-        df = sir.results_history[-1].traces()
+        df = _abc_res(sir.results_history[-1]).traces()
         assert "method" in df.columns
         assert (df["method"] == "abc").all()
 
@@ -203,7 +221,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(6),
         )
-        sir.results_history[-1].print_summary()
+        _abc_res(sir.results_history[-1]).print_summary()
         out = capsys.readouterr().out
         assert "Method: abc" in out
 
@@ -218,7 +236,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(7),
         )
-        assert isinstance(sir.results_history[-1], PompABCResult)
+        assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
 
     def test_with_adaptive_proposal(self):
         sir = _get_sir()
@@ -235,7 +253,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(8),
         )
-        assert isinstance(sir.results_history[-1], PompABCResult)
+        assert isinstance(_abc_res(sir.results_history[-1]), PompABCResult)
 
     def test_tight_epsilon_low_acceptance(self):
         sir = _get_sir()
@@ -248,7 +266,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(9),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         # Very tight epsilon -> typically few accepts
         assert int(res.accepts[0]) <= 10
 
@@ -263,7 +281,7 @@ class TestABC:
             proposal=prop,
             key=jax.random.key(71),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
 
         final_row = res.traces_da.isel(theta_idx=0, iteration=-1)
         for name in sir.canonical_param_names:
@@ -284,7 +302,7 @@ class TestABC:
             theta=theta_input,
             key=jax.random.key(72),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
 
         assert theta_input == theta_before
         assert res.theta == theta_before
@@ -317,7 +335,7 @@ class TestABC:
             dprior=point_mass_prior,
             key=jax.random.key(73),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
 
         assert int(res.accepts[0]) == 0
         np.testing.assert_array_equal(
@@ -338,7 +356,7 @@ class TestABC:
             proposal=mvn_diag_rw({"mu": 0.01}),
             key=jax.random.key(74),
         )
-        res = pomp.results_history[-1]
+        res = _abc_res(pomp.results_history[-1])
 
         recorded = float(
             res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="distance").values
@@ -370,7 +388,7 @@ class TestABCMultiChain:
             theta=pp.PompParameters([t1, t2, t3]),
             key=jax.random.key(11),
         )
-        res = sir.results_history[-1]
+        res = _abc_res(sir.results_history[-1])
         assert res.n_chains == 3
         assert res.accepts.shape == (3,)
 
@@ -464,7 +482,7 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(20),
         )
-        res1 = sir.results_history[-1]
+        res1 = _abc_res(sir.results_history[-1])
         sir.abc(
             Nabc=3,
             probes=_default_probes(),
@@ -473,7 +491,7 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(21),
         )
-        res2 = sir.results_history[-1]
+        res2 = _abc_res(sir.results_history[-1])
         merged = PompABCResult.merge(res1, res2)
         assert merged.n_chains == res1.n_chains + res2.n_chains
         assert merged.Nabc == 3
@@ -490,7 +508,7 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(30),
         )
-        res1 = sir.results_history[-1]
+        res1 = _abc_res(sir.results_history[-1])
         sir.abc(
             Nabc=3,
             probes=_default_probes(),
@@ -499,6 +517,6 @@ class TestABCMerge:
             proposal=prop,
             key=jax.random.key(31),
         )
-        res2 = sir.results_history[-1]
+        res2 = _abc_res(sir.results_history[-1])
         with pytest.raises(ValueError, match="epsilon"):
             PompABCResult.merge(res1, res2)

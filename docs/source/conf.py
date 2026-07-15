@@ -15,7 +15,43 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "pypomp"
 copyright = "2026, pypomp team"
 author = "pypomp team"
-release = "0.4.7.1"
+
+# Read version dynamically from pyproject.toml
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore
+    except ImportError:
+        tomllib = None
+
+if tomllib is not None:
+    try:
+        with open(
+            os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "../../pyproject.toml")
+            ),
+            "rb",
+        ) as f:
+            release = tomllib.load(f)["project"]["version"]
+    except Exception:
+        release = "unknown"
+else:
+    import re
+
+    try:
+        with open(
+            os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "../../pyproject.toml")
+            ),
+            "r",
+            encoding="utf-8",
+        ) as f:
+            content = f.read()
+        match = re.search(r'^version\s*=\s*"(.*?)"', content, re.M)
+        release = match.group(1) if match else "unknown"
+    except Exception:
+        release = "unknown"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -36,7 +72,8 @@ templates_path = ["_templates"]
 exclude_patterns: list[str] = []
 
 # Napoleon settings for docstring parsing
-napoleon_google_docstring = True
+# Standardized on NumPy-style; Google-style is disabled.
+napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False
@@ -44,7 +81,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = False
 napoleon_use_admonition_for_notes = False
 napoleon_use_admonition_for_references = False
-napoleon_use_ivar = False
+napoleon_use_ivar = True
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_custom_sections = [("Model Parameters", "params")]
@@ -56,6 +93,14 @@ autodoc_default_options = {
 autodoc_member_order = "bysource"
 autodoc_use_legacy_class_based = True  # fixes bug where Sphinx 9.1.0 fails to generate hyperlinks for base classes defined in the same module
 
+# Map internal class names to public ones so Intersphinx can resolve links (especially for pandas)
+autodoc_type_aliases = {
+    "pandas.core.frame.DataFrame": "pandas.DataFrame",
+    "pandas.core.series.Series": "pandas.Series",
+    "DataFrame": "pandas.DataFrame",
+    "Series": "pandas.Series",
+}
+
 # Enable domain objects (classes, functions, methods) to appear in the floating right-sidebar TOC
 toc_object_entries = True
 toc_object_entries_show_parents = "hide"
@@ -66,6 +111,7 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "jax": ("https://docs.jax.dev/en/latest/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
+    "xarray": ("https://docs.xarray.dev/en/stable/", None),
 }
 
 
@@ -84,3 +130,29 @@ html_theme_options = {
 }
 
 html_title = "pypomp"
+
+
+# Helper to resolve intersphinx references that use internal paths
+def resolve_intersphinx_aliases(app, env, node, contnode):
+    reftarget_aliases = {
+        "pandas.core.frame.DataFrame": "pandas.DataFrame",
+        "pandas.core.series.Series": "pandas.Series",
+        "pd.DataFrame": "pandas.DataFrame",
+        "pd.Series": "pandas.Series",
+        "DataFrame": "pandas.DataFrame",
+        "Series": "pandas.Series",
+        "pandas._libs.tslibs.timestamps.Timestamp": "pandas.Timestamp",
+        "pd.Timestamp": "pandas.Timestamp",
+        "Timestamp": "pandas.Timestamp",
+    }
+    alias = node.get("reftarget")
+    if alias in reftarget_aliases:
+        from sphinx.ext.intersphinx import missing_reference
+
+        node["reftarget"] = reftarget_aliases[alias]
+        return missing_reference(app, env, node, contnode)
+    return None
+
+
+def setup(app):
+    app.connect("missing-reference", resolve_intersphinx_aliases)

@@ -4,8 +4,30 @@ from typing import Callable
 from .structs import PompStruct, PanelPompStruct
 from ..core.algorithms.mif import (
     _jv_mif_internal,
+)
+from ..core.algorithms.panel_mif import (
     _jv_panel_mif_internal,
 )
+from ..core.algorithms.types import (
+    MifConfig,
+    MifInputs,
+    PanelMifConfig,
+    PanelMifInputs,
+)
+
+
+def _wrap_cooling_fn(cooling_fn: Callable | float) -> Callable:
+    if not callable(cooling_fn):
+        a = float(cooling_fn)
+        if not (0 <= a <= 1):
+            raise ValueError("a should be between 0 and 1")
+        factor = a ** (1 / 50)
+
+        def fn(nt, m, ntimes):
+            return factor ** (nt / ntimes + m)
+
+        return fn
+    return cooling_fn
 
 
 def mif(
@@ -16,83 +38,115 @@ def mif(
     M: int,
     cooling_fn: Callable | float,
     J: int,
-    thresh: float,
     keys: jax.Array,
-    n_monitors: int,
+    thresh: float = 0.0,
+    n_monitors: int = 0,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Run the Iterated Filtering 2 (IF2) algorithm on a POMP model struct.
+
+    Pure-functional implementation of the Iterated Filtering 2 (IF2) algorithm
+    (Ionides et al. 2015 [1]_), intended for users who need to compose the algorithm
+    within custom JAX loops or higher-order functions.
+    For the standard interface, see :meth:`pypomp.Pomp.mif`.
+
+    JAX vectorises the computation across all starting parameter sets
+    simultaneously.
+
+    Parameters
+    ----------
+    struct : PompStruct
+        Compiled structural representation of the POMP model.  Obtain via
+        :meth:`~pypomp.Pomp.to_struct`.
+    thetas_array : jax.Array
+        Initial parameter array of shape ``(n_reps, J, n_params)`` on the
+        natural scale.  Must be aligned with ``struct.param_names``.
+    sigmas_array : jax.Array
+        Per-parameter random walk standard deviations.  Shape
+        ``(n_params,)``.
+    sigmas_init_array : jax.Array
+        Initial random walk standard deviations.  Shape ``(n_params,)``.
+    M : int
+        Number of IF2 iterations.
+    cooling_fn : callable or float
+        Cooling schedule.  Pass a callable ``(nt, m, ntimes) -> float``
+        for custom schedules, or a single float for geometric cooling.
+    J : int
+        Number of particles.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+    thresh : float, optional
+        ESS-based resampling threshold.  Defaults to ``0.0``.
+    n_monitors : int, optional
+        Number of unperturbed filter runs for log-likelihood monitoring.
+        Defaults to ``0``.
+
+    Returns
+    -------
+    tuple of (jax.Array, jax.Array, jax.Array)
+        - Negative log-likelihood history of shape ``(n_reps, M)``.
+        - Parameter trace history of shape ``(n_reps, M+1, n_params)``
+          on the natural scale.
+        - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
+          natural scale.
+
+    Notes
+    -----
+    To align and stack input parameter dictionaries into the correct
+    canonical ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.Pomp.mif : Object-oriented interface.
+    align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Ionides, Edward L., Dao Nguyen, Yves Atchadé, Stilian Stoev, and Aaron A. King.
+       "Inference for dynamic and latent variable models via iterated, perturbed Bayes maps."
+       *Proceedings of the National Academy of Sciences* 112, no. 3 (2015): 719–724.
+       https://doi.org/10.1073/pnas.1410597112.
     """
-    This is a pure functional implementation of the Iterated Filtering algorithm,
-    intended for users who need to compose it within custom JAX loops or
-    higher-order functions. For a more user-friendly (but impurely-functional) interface, see
-    :meth:`pypomp.core.pomp.Pomp.mif`.
 
-    This implementation leverages JAX to efficiently vectorize the algorithm across
-    multiple initial parameter sets simultaneously.
-
-    Args:
-        struct (PompStruct): The compiled structural representation of the POMP model.
-        thetas_array (jax.Array): Array of initial parameters. Shape (n_reps, J, n_params) on the natural scale.
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        sigmas_array (jax.Array): Array of random walk sigmas. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names`.
-        sigmas_init_array (jax.Array): Array of initial random walk sigmas. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names`.
-        M (int): Number of iterations.
-        cooling_fn (Callable | float): Cooling function taking (nt, m, ntimes) or float cooling factor.
-        J (int): Number of particles.
-        thresh (float): Resampling threshold.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-        n_monitors (int): Number of monitors for likelihood averaging.
-
-    Returns:
-        tuple[jax.Array, jax.Array, jax.Array]:
-            Negative log-likelihood history: Shape (n_reps, M).
-            Parameter trace history: Shape (n_reps, M+1, n_params) on the natural scale.
-            Final particle swarm: Shape (n_reps, J, n_params) on the natural scale.
-
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, use :func:`pypomp.functional.align_params`.
-    """
-
-    thetas_est = struct.par_trans._transform_array_jax(
+    thresh = float(max(0.0, thresh))
+    thetas_est = struct.par_trans._transform_array(
         thetas_array,
         struct.param_names,
         direction="to_est",
     )
 
+    if struct.dmeas_per is None:
+        raise ValueError("dmeasure is required for MIF")
+    if struct.dmeas_pf is None:
+        raise ValueError("dmeasure_pf is required for MIF")
+
+    cooling_callable = _wrap_cooling_fn(cooling_fn)
+
+    config = MifConfig.from_mif_struct(
+        struct=struct,
+        J=J,
+        M=M,
+        cooling_fn=cooling_callable,
+        thresh=thresh,
+        n_monitors=n_monitors,
+        return_ancestry=False,
+    )
+    inputs = MifInputs.from_mif_struct(
+        struct=struct,
+        sigmas=sigmas_array,
+        sigmas_init=sigmas_init_array,
+    )
     res = _jv_mif_internal(
         thetas_est,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys,
-        struct.rinit_per,
-        struct.rproc_per,
-        struct.dmeas_per,
-        sigmas_array,
-        sigmas_init_array,
-        struct.accumvars,
-        struct.covars_extended,
-        M,
-        cooling_fn,
-        0,
-        J,
-        thresh,
         keys,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        n_monitors,
-        False,
+        config,
+        inputs,
     )
-    traces_natural = struct.par_trans._transform_array_jax(
+    traces_natural = struct.par_trans._transform_array(
         res[1],
         struct.param_names,
         direction="from_est",
     )
-    final_thetas_natural = struct.par_trans._transform_array_jax(
+    final_thetas_natural = struct.par_trans._transform_array(
         res[2],
         struct.param_names,
         direction="from_est",
@@ -109,52 +163,88 @@ def panel_mif(
     M: int,
     cooling_fn: Callable | float,
     J: int,
-    thresh: float,
     keys: jax.Array,
+    thresh: float = 0.0,
     n_monitors: int = 0,
     block: bool = True,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Estimate panel POMP parameters using Panel Iterated Filtering.
+
+    A pure functional implementation of the (Marginal) Panel Iterated
+    Filtering (PIF/MPIF) algorithm (Bretó et al. 2020 [1]_; Wheeler et al. 2025 [2]_), intended for composition within custom JAX
+    loops.
+
+    This function estimates parameters for a Panel POMP model by introducing
+    random perturbations to the parameters and sequentially filtering them
+    across all units.  The perturbation variance is decayed according to a
+    given cooling schedule.
+
+    Parameters
+    ----------
+    struct : PanelPompStruct
+        Compiled structural representation of the Panel POMP model.
+    shared_array : jax.Array
+        Swarm of initial shared parameters of shape ``(n_reps, J, n_shared)``
+        on the natural scale.
+    unit_array : jax.Array
+        Swarm of initial unit-specific parameters of shape
+        ``(n_reps, J, U, n_spec)`` on the natural scale.
+    sigmas_array : jax.Array
+        Random walk standard deviations of shape ``(n_params,)``.
+    sigmas_init_array : jax.Array
+        Initial random walk standard deviations of shape ``(n_params,)``.
+    M : int
+        Number of iterated filtering iterations.
+    cooling_fn : callable or float
+        Cooling schedule function or constant decay factor.
+    J : int
+        Number of particles.
+    keys : jax.Array
+        Random keys of shape ``(n_reps, ...)``.
+    thresh : float, optional
+        Resampling threshold.  Defaults to ``0.0``.
+    n_monitors : int, optional
+        Number of monitor runs to perform at each iteration.  Defaults to
+        ``0``.
+    block : bool, optional
+        Whether to use block updates (MPIF).  Defaults to ``True``.
+
+    Returns
+    -------
+    shared_traces : jax.Array
+        Shared parameter history trace of shape ``(n_reps, M + 1, n_shared + 1)``.
+    unit_traces : jax.Array
+        Unit-specific parameter history trace of shape
+        ``(n_reps, M + 1, U, n_spec + 1)``.
+    final_shared_swarm : jax.Array
+        Final swarm of shared parameters of shape ``(n_reps, J, n_shared)``.
+    final_unit_swarm : jax.Array
+        Final swarm of unit-specific parameters of shape ``(n_reps, J, U, n_spec)``.
+
+    Notes
+    -----
+    To align and stack input parameter arrays into the correct canonical
+    ordering, use :func:`pypomp.functional.align_params`.
+
+    See Also
+    --------
+    pypomp.PanelPomp.mif : Object-oriented interface.
+    align_params : Parameter alignment utility.
+
+    References
+    ----------
+    .. [1] Bretó, Carles, Edward L. Ionides, and Aaron A. King. "Panel Data Analysis
+       via Mechanistic Models." *Journal of the American Statistical Association*
+       115, no. 531 (2020): 1178–1188. https://doi.org/10.1080/01621459.2019.1604367.
+    .. [2] Wheeler, Jesse, Aaron J. Abkemeier, and Edward L. Ionides. "Iterating
+       marginalized Bayes maps for likelihood maximization with application to nonlinear
+       panel models." *arXiv preprint arXiv:2511.17438* (2025). https://arxiv.org/abs/2511.17438.
     """
-    Pure functional implementation of the (Marginal) Panel Iterated Filtering (PIF/MPIF) algorithm,
-    intended for users who need to compose it within custom JAX loops.
 
-    This function estimates parameters for a Panel POMP model by introducing random perturbations
-    to the parameters and sequentially filtering them across all units. The perturbation variance
-    is decayed according to a cooling schedule.
-
-    Args:
-        struct (PanelPompStruct): The compiled structural representation of the Panel POMP model.
-        shared_array (jax.Array): Swarm of initial shared parameters on natural scale.
-            Shape (n_reps, J, n_shared). Must be aligned with the canonical order of `struct.shared_param_names` (e.g. prepared via `align_params`).
-        unit_array (jax.Array): Swarm of initial unit-specific parameters on natural scale.
-            Shape (n_reps, J, U, n_spec). Must be aligned with the canonical order of `struct.unit_param_names` (e.g. prepared via `align_params`).
-        sigmas_array (jax.Array): Random walk standard deviations. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        sigmas_init_array (jax.Array): Initial random walk standard deviations. Shape (n_params,).
-            Must be aligned with the canonical order of `struct.param_names` (e.g. prepared via `align_params`).
-        M (int): Number of iterated filtering iterations.
-        cooling_fn (Callable | float): Cooling schedule function or constant decay factor.
-        J (int): Number of particles.
-        thresh (float): Resampling threshold.
-        keys (jax.Array): Random keys. Shape (n_reps, ...).
-        n_monitors (int, optional): Number of monitor runs to perform at each iteration. Defaults to 0.
-        block (bool, optional): Whether to use MPIF. Defaults to True.
-
-    Returns:
-        tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-            shared_traces: Shared parameter history trace. Shape (n_reps, M + 1, n_shared + 1).
-            unit_traces: Unit-specific parameter history trace. Shape (n_reps, M + 1, U, n_spec + 1).
-            final_shared_swarm: Final swarm of shared parameters. Shape (n_reps, J, n_shared).
-            final_unit_swarm: Final swarm of unit-specific parameters. Shape (n_reps, J, U, n_spec).
-
-    Note:
-        To align and stack input parameter dictionaries/scalars into the correct canonical ordering required by
-        these arrays, you can use :func:`pypomp.functional.align_params`.
-    """
-
+    thresh = float(max(0.0, thresh))
     U = len(struct.unit_names)
 
-    shared_est, unit_est = struct.par_trans._transform_panel_array_jax(
+    shared_est, unit_est = struct.par_trans._transform_panel_array(
         shared_array,
         unit_array,
         struct.shared_param_names,
@@ -162,33 +252,34 @@ def panel_mif(
         direction="to_est",
     )
 
+    if struct.dmeas_per is None:
+        raise ValueError("dmeasure is required for Panel MIF")
+    if struct.dmeas_pf is None:
+        raise ValueError("dmeasure_pf is required for Panel MIF")
+
+    cooling_callable = _wrap_cooling_fn(cooling_fn)
+
+    config = PanelMifConfig.from_panel_mif_struct(
+        struct=struct,
+        J=J,
+        M=M,
+        U=U,
+        cooling_fn=cooling_callable,
+        thresh=thresh,
+        n_monitors=n_monitors,
+        block=block,
+    )
+    inputs = PanelMifInputs.from_panel_mif_struct(
+        struct=struct,
+        sigmas=sigmas_array,
+        sigmas_init=sigmas_init_array,
+    )
     shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
         shared_est,
         unit_est,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys_per_unit,
-        struct.rinit_per,
-        struct.rproc_per,
-        struct.dmeas_per,
-        sigmas_array,
-        sigmas_init_array,
-        struct.accumvars,
-        struct.covars_per_unit,
-        struct.unit_param_permutations,
-        M,
-        cooling_fn,
-        J,
-        U,
-        thresh,
         keys,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        n_monitors,
-        block,
+        config,
+        inputs,
     )
 
     n_shared = len(struct.shared_param_names)
@@ -211,14 +302,12 @@ def panel_mif(
             else jnp.zeros((unit_traces.shape[0], unit_traces.shape[1], U, 0))
         )
 
-        shared_transformed, unit_transformed = (
-            struct.par_trans._transform_panel_array_jax(
-                shared_params,
-                unit_params,
-                struct.shared_param_names,
-                struct.unit_param_names,
-                direction="from_est",
-            )
+        shared_transformed, unit_transformed = struct.par_trans._transform_panel_array(
+            shared_params,
+            unit_params,
+            struct.shared_param_names,
+            struct.unit_param_names,
+            direction="from_est",
         )
 
         if n_shared > 0:
@@ -231,7 +320,7 @@ def panel_mif(
             )
 
     final_shared_swarm_natural, final_unit_swarm_natural = (
-        struct.par_trans._transform_panel_array_jax(
+        struct.par_trans._transform_panel_array(
             shared_array_f,
             unit_array_f,
             struct.shared_param_names,

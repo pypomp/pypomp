@@ -23,6 +23,7 @@ mirror the previous API and return the corresponding dataclass instance.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar, Sequence, cast
 
 import jax
 import jax.numpy as jnp
@@ -314,7 +315,10 @@ def mvn_rw(rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
     return MVNRWFull(chol=chol, param_names=tuple(param_names))
 
 
-def _expand_proposal(proposal, canonical_names):
+ProposalT = TypeVar("ProposalT", MVNDiagRW, MVNRWFull, MVNRWAdaptive)
+
+
+def _expand_proposal(proposal: ProposalT, canonical_names: Sequence[str]) -> ProposalT:
     """Expand a proposal that may cover only a subset of model parameters
     so that it operates on the full canonical parameter vector.
 
@@ -332,7 +336,7 @@ def _expand_proposal(proposal, canonical_names):
             if p not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p!r} not in model.")
             full_sd = full_sd.at[name_to_idx[p]].set(proposal.sd_arr[i_local])
-        return MVNDiagRW(sd_arr=full_sd, param_names=names)
+        return cast(ProposalT, MVNDiagRW(sd_arr=full_sd, param_names=names))
 
     if isinstance(proposal, MVNRWFull):
         # Embed the Cholesky factor directly so non-proposed parameters have
@@ -349,7 +353,7 @@ def _expand_proposal(proposal, canonical_names):
                 full_chol = full_chol.at[i_global, j_global].set(
                     proposal.chol[i_local, j_local]
                 )
-        return MVNRWFull(chol=full_chol, param_names=names)
+        return cast(ProposalT, MVNRWFull(chol=full_chol, param_names=names))
 
     if isinstance(proposal, MVNRWAdaptive):
         full_var = jnp.zeros((d, d))
@@ -364,14 +368,17 @@ def _expand_proposal(proposal, canonical_names):
                 full_var = full_var.at[i_global, j_global].set(
                     proposal.init_rw_var[i_local, j_local]
                 )
-        return MVNRWAdaptive(
-            init_rw_var=full_var,
-            param_names=names,
-            scale_start=proposal.scale_start,
-            scale_cooling=proposal.scale_cooling,
-            shape_start=proposal.shape_start,
-            target=proposal.target,
-            max_scaling=proposal.max_scaling,
+        return cast(
+            ProposalT,
+            MVNRWAdaptive(
+                init_rw_var=full_var,
+                param_names=names,
+                scale_start=proposal.scale_start,
+                scale_cooling=proposal.scale_cooling,
+                shape_start=proposal.shape_start,
+                target=proposal.target,
+                max_scaling=proposal.max_scaling,
+            ),
         )
 
     raise TypeError(f"Unsupported proposal type: {type(proposal).__name__}")

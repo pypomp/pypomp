@@ -4,6 +4,8 @@ This version supports DPOP (Differentiable Particle Filter) by accumulating
 process log-density in the state variable 'logw'.
 """
 
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jspecial
@@ -38,9 +40,15 @@ DEFAULT_THETA = {
 
 
 # Periodic B-spline basis (from pomp's C implementation)
-def _bspline_eval(x, knots, i, degree, deriv=0):
+def _bspline_eval(
+    x: Any,
+    knots: Any,
+    i: int,
+    degree: int,
+    deriv: int = 0,
+) -> Any:
     if deriv > degree:
-        return 0.0
+        return jnp.zeros_like(x)
     elif deriv > 0:
         i2 = i + 1
         p2 = degree - 1
@@ -75,7 +83,13 @@ def _bspline_eval(x, knots, i, degree, deriv=0):
             return jnp.where((knots[i] <= x) & (x < knots[i + 1]), 1.0, 0.0)
 
 
-def periodic_bspline_basis_eval(x, period, degree, nbasis, deriv=0):
+def periodic_bspline_basis_eval(
+    x: Any,
+    period: float,
+    degree: int,
+    nbasis: int,
+    deriv: int = 0,
+) -> jax.Array:
     nknots = nbasis + 2 * degree + 1
     shift = (degree - 1) // 2
     dx = period / nbasis

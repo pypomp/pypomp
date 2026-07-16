@@ -1,6 +1,7 @@
 {
   "exclude": [
     "**/.venv",
+    "**/.claude",
     "scratch",
     "dist"
   ],

@@ -722,3 +722,70 @@ class PerfilterStepInputs:
     nstep: jax.Array
     cooling_factor: jax.Array
     step_key: jax.Array
+
+
+@register_dataclass
+@dataclass(frozen=True)
+class AbcConfig:
+    Nabc: int
+    rinitializer: Callable
+    rprocess_interp: Callable
+    rmeasure: Callable
+    accumvars: tuple[int, ...] | None
+    dprior: Callable
+    probe_fn: Callable
+    ydim: int
+
+    @classmethod
+    def from_abc_struct(
+        cls,
+        struct: PompStruct,
+        Nabc: int,
+        dprior: Callable,
+        probe_fn: Callable,
+        ydim: int,
+    ) -> AbcConfig:
+        if struct.rmeas_pf is None:
+            raise ValueError("abc requires struct.rmeas_pf to be non-None.")
+        return cls(
+            Nabc=Nabc,
+            rinitializer=struct.rinit_pf,
+            rprocess_interp=struct.rproc_pf,
+            rmeasure=struct.rmeas_pf,
+            accumvars=struct.accumvars,
+            dprior=dprior,
+            probe_fn=probe_fn,
+            ydim=ydim,
+        )
+
+
+@register_dataclass
+@dataclass(frozen=True)
+class AbcInputs:
+    obs_probes: jax.Array
+    scale_arr: jax.Array
+    epsilon: float
+    dt_array_extended: jax.Array
+    nstep_array: jax.Array
+    t0: float
+    times: jax.Array
+    covars_extended: jax.Array | None
+
+    @classmethod
+    def from_abc_struct(
+        cls,
+        struct: PompStruct,
+        obs_probes: jax.Array,
+        scale_arr: jax.Array,
+        epsilon: float,
+    ) -> AbcInputs:
+        return cls(
+            obs_probes=obs_probes,
+            scale_arr=scale_arr,
+            epsilon=epsilon,
+            dt_array_extended=struct.dt_array_extended,
+            nstep_array=struct.nstep_array,
+            t0=struct.t0,
+            times=struct.times,
+            covars_extended=struct.covars_extended,
+        )

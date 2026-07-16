@@ -22,47 +22,25 @@ operating on a ``(n_obs, ydim)`` JAX array, plus a matching
 """
 
 from functools import partial
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
 from .simulate import _simulate_internal
+from .types import AbcConfig, AbcInputs
 
 
 @partial(
     jit,
-    static_argnames=(
-        "Nabc",
-        "rinitializer",
-        "rprocess_interp",
-        "rmeasure",
-        "accumvars",
-        "dprior",
-        "probe_fn",
-        "ydim",
-    ),
+    static_argnames=("config",),
 )
 def _abc_internal(
     theta_arr: jax.Array,
-    proposal,
-    dprior: Callable,
-    probe_fn: Callable,
-    obs_probes: jax.Array,
-    scale_arr: jax.Array,
-    epsilon: float,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    rinitializer: Callable,
-    rprocess_interp: Callable,
-    rmeasure: Callable,
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    ydim: int,
-    Nabc: int,
+    proposal: Any,
+    config: AbcConfig,
+    inputs: AbcInputs,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Run one ABC-MCMC chain of length ``Nabc`` starting at ``theta_arr``.
@@ -74,33 +52,17 @@ def _abc_internal(
     * ``theta_trace``: shape ``(Nabc + 1, d)``.
     * ``accepts``: scalar count of accepted proposals.
     """
-    eps2 = jnp.asarray(epsilon, dtype=theta_arr.dtype) ** 2
+    # 1. Prepare simulation distance function.
+    sim_distance_fn = jax.tree_util.Partial(
+        _abc_sim_distance,
+        config=config,
+        inputs=inputs,
+    )
 
-    def _sim_distance(theta: jax.Array, sim_key: jax.Array) -> jax.Array:
-        _, Y = _simulate_internal(
-            rinitializer,
-            rprocess_interp,
-            rmeasure,
-            theta,
-            t0,
-            times,
-            dt_array_extended,
-            nstep_array,
-            ydim,
-            covars_extended,
-            accumvars,
-            1,  # nsim
-            sim_key,
-        )
-        # Y shape: (n_obs, ydim, 1) -> (n_obs, ydim)
-        y_arr = Y[..., 0]
-        sim_p = probe_fn(y_arr)
-        return jnp.sum(((obs_probes - sim_p) / scale_arr) ** 2)
-
-    # ---- Initial evaluation ----
+    # 2. Initial evaluation.
     key, init_sim_key = jax.random.split(key)
-    dist0 = _sim_distance(theta_arr, init_sim_key)
-    lp0 = dprior(theta_arr)
+    dist0 = sim_distance_fn(theta_arr, init_sim_key)
+    lp0 = config.dprior(theta_arr)
     prop_state0 = proposal.init_state(theta_arr)
 
     init_carry = (
@@ -112,33 +74,18 @@ def _abc_internal(
         key,
     )
 
-    def step(carry, n):
-        theta_cur, dist_cur, lp_cur, prop_state, accepts, key = carry
-        key, prop_key, sim_key, accept_key = jax.random.split(key, 4)
+    # 3. Setup scan step function.
+    step_fn = jax.tree_util.Partial(
+        _abc_step,
+        proposal,
+        config,
+        inputs,
+        sim_distance_fn,
+    )
 
-        theta_prop, new_prop_state = proposal.step(
-            prop_state, theta_cur, prop_key, n, accepts
-        )
-        lp_prop = dprior(theta_prop)
-        dist_prop = _sim_distance(theta_prop, sim_key)
-
-        # MH on the prior (symmetric proposal -> just the prior ratio).
-        log_alpha_prior = lp_prop - lp_cur
-        u = jax.random.uniform(accept_key)
-        prior_pass = jnp.isfinite(lp_prop) & (jnp.log(u) < log_alpha_prior)
-        dist_pass = dist_prop < eps2
-        accept = prior_pass & dist_pass
-
-        new_theta = jnp.where(accept, theta_prop, theta_cur)
-        new_dist = jnp.where(accept, dist_prop, dist_cur)
-        new_lp = jnp.where(accept, lp_prop, lp_cur)
-        new_accepts = accepts + accept.astype(jnp.int32)
-
-        new_carry = (new_theta, new_dist, new_lp, new_prop_state, new_accepts, key)
-        return new_carry, (new_dist, new_lp, new_theta)
-
+    # 4. Run the scan loop.
     final_carry, (dist_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step, init_carry, jnp.arange(1, Nabc + 1, dtype=jnp.int32)
+        step_fn, init_carry, jnp.arange(1, config.Nabc + 1, dtype=jnp.int32)
     )
 
     final_accepts = final_carry[4]
@@ -147,6 +94,7 @@ def _abc_internal(
     lp_trace = cast(jax.Array, lp_trace)
     theta_trace = cast(jax.Array, theta_trace)
 
+    # 5. Collect traces and prepend initial evaluation.
     dist_trace = jnp.concatenate((jnp.asarray([dist0]), dist_trace))
     lp_trace = jnp.concatenate((jnp.asarray([lp0]), lp_trace))
     theta_trace = jnp.concatenate((theta_arr[None, :], theta_trace), axis=0)
@@ -154,27 +102,94 @@ def _abc_internal(
     return dist_trace, lp_trace, theta_trace, final_accepts
 
 
+def _abc_step(
+    proposal: Any,
+    config: AbcConfig,
+    inputs: AbcInputs,
+    sim_distance_fn: Callable,
+    carry: tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
+    n: int | jax.Array,
+) -> tuple[
+    tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
+    tuple[jax.Array, jax.Array, jax.Array],
+]:
+    """Run one step of the ABC-MCMC chain."""
+    # 1. Unpack carry state.
+    theta_cur, dist_cur, lp_cur, prop_state, accepts, key = carry
+    key, prop_key, sim_key, accept_key = jax.random.split(key, 4)
+
+    # 2. Draw a proposal theta_prop from the proposal distribution.
+    theta_prop, new_prop_state = proposal.step(
+        prop_state, theta_cur, prop_key, n, accepts
+    )
+    lp_prop = config.dprior(theta_prop)
+
+    # 3. Simulate and compute distance for the proposed theta.
+    dist_prop = sim_distance_fn(theta_prop, sim_key)
+
+    # 4. Perform Metropolis-Hastings acceptance check.
+    # MH on the prior (symmetric proposal -> just the prior ratio).
+    log_alpha_prior = lp_prop - lp_cur
+    u = jax.random.uniform(accept_key)
+    prior_pass = jnp.isfinite(lp_prop) & (jnp.log(u) < log_alpha_prior)
+    eps2 = jnp.asarray(inputs.epsilon, dtype=theta_cur.dtype) ** 2
+    dist_pass = dist_prop < eps2
+    accept = prior_pass & dist_pass
+
+    # 5. Update state variables based on acceptance.
+    new_theta = cast(jax.Array, jnp.where(accept, theta_prop, theta_cur))
+    new_dist = cast(jax.Array, jnp.where(accept, dist_prop, dist_cur))
+    new_lp = cast(jax.Array, jnp.where(accept, lp_prop, lp_cur))
+    new_accepts = cast(jax.Array, accepts + accept.astype(jnp.int32))
+
+    # 6. Return new carry and outputs.
+    new_carry = (new_theta, new_dist, new_lp, new_prop_state, new_accepts, key)
+    return new_carry, (new_dist, new_lp, new_theta)
+
+
+def _abc_sim_distance(
+    theta: jax.Array,
+    sim_key: jax.Array,
+    config: AbcConfig,
+    inputs: AbcInputs,
+) -> jax.Array:
+    """Simulate a dataset under ``theta`` and compute the probe distance.
+
+    Returns the squared scaled Euclidean distance.
+    """
+    # 1. Simulate a single synthetic dataset under theta.
+    _, Y = _simulate_internal(
+        config.rinitializer,
+        config.rprocess_interp,
+        config.rmeasure,
+        theta,
+        inputs.t0,
+        inputs.times,
+        inputs.dt_array_extended,
+        inputs.nstep_array,
+        config.ydim,
+        inputs.covars_extended,
+        config.accumvars,
+        1,  # nsim
+        sim_key,
+    )
+    # Y shape: (n_obs, ydim, 1) -> (n_obs, ydim)
+    y_arr = Y[..., 0]
+
+    # 2. Compute probe values.
+    sim_p = config.probe_fn(y_arr)
+
+    # 3. Return the squared scaled Euclidean distance.
+    return jnp.sum(((inputs.obs_probes - sim_p) / inputs.scale_arr) ** 2)
+
+
 _vmapped_abc_internal = jax.vmap(
     _abc_internal,
     in_axes=(
         0,  # theta_arr per chain
         None,  # proposal
-        None,  # dprior
-        None,  # probe_fn
-        None,  # obs_probes
-        None,  # scale_arr
-        None,  # epsilon
-        None,  # dt_array_extended
-        None,  # nstep_array
-        None,  # t0
-        None,  # times
-        None,  # rinitializer
-        None,  # rprocess_interp
-        None,  # rmeasure
-        None,  # accumvars
-        None,  # covars_extended
-        None,  # ydim
-        None,  # Nabc
+        None,  # config
+        None,  # inputs
         0,  # key per chain
     ),
 )

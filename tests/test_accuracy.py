@@ -846,3 +846,142 @@ def test_panel_train_accuracy(
         if "a" in panel.canonical_param_names
         else None,
     )
+
+
+def test_pomp_pmcmc_accuracy():
+    """
+    Verify that PMCMC parameter estimation converges toward the true parameter values
+    starting from perturbed parameters, using vectorized replicates.
+    """
+    T = 100
+    key = jax.random.key(1234)
+    ys_dummy = pd.DataFrame(0.0, index=np.arange(1, T + 1, dtype=float), columns=["Y"])
+
+    true_a, true_sx, true_sy = 0.8, 0.5, 0.3
+    sim_model = make_lgm_pomp(ys_dummy, true_a, true_sx, true_sy).simulate(
+        key=key, nsim=1, as_pomp=True
+    )
+
+    pert_a, pert_sx, pert_sy = 0.5, 0.8, 0.6
+    fit_model = make_lgm_pomp(sim_model.ys, a=pert_a, sigma_x=pert_sx, sigma_y=pert_sy)
+
+    t_start = [{"a": pert_a, "sigma_x": pert_sx, "sigma_y": pert_sy} for _ in range(10)]
+    fit_model.theta = pp.PompParameters(t_start)
+
+    a_idx = fit_model.canonical_param_names.index("a")
+    sx_idx = fit_model.canonical_param_names.index("sigma_x")
+    sy_idx = fit_model.canonical_param_names.index("sigma_y")
+
+    def dprior(theta_arr):
+        a_val = theta_arr[a_idx]
+        sx_val = theta_arr[sx_idx]
+        sy_val = theta_arr[sy_idx]
+        in_bounds = (a_val > 0.0) & (a_val < 1.0) & (sx_val > 0.0) & (sy_val > 0.0)
+        return jnp.where(in_bounds, 0.0, -jnp.inf)
+
+    prop = pp.proposals.mvn_diag_rw({"a": 0.05, "sigma_x": 0.05, "sigma_y": 0.05})
+
+    fit_model.pmcmc(
+        J=1000,
+        Nmcmc=250,
+        proposal=prop,
+        dprior=dprior,
+        key=key,
+    )
+
+    save_traces_plotnine(
+        fit_model,
+        "tests/plots/pomp_pmcmc_traces.png",
+        true_values={"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+        expected_values={"a": 0.8 - (1 + 3 * 0.8) / 100},  # Hurwicz bias for T=100
+    )
+
+    res = fit_model.results_history[-1]
+    traces = res.traces_da.isel(iteration=slice(100, None))
+
+    mean_theta = traces.mean(dim=["theta_idx", "iteration"])
+    est_a = mean_theta.sel(variable="a").item()
+    est_sx = mean_theta.sel(variable="sigma_x").item()
+    est_sy = mean_theta.sel(variable="sigma_y").item()
+
+    err_a = np.abs(est_a - true_a)
+    err_sx = np.abs(est_sx - true_sx)
+    err_sy = np.abs(est_sy - true_sy)
+
+    assert err_a < 0.12, f"PMCMC err_a: {err_a}"
+    assert err_sx < 0.15, f"PMCMC err_sx: {err_sx}"
+    assert err_sy < 0.20, f"PMCMC err_sy: {err_sy}"
+
+
+def test_pomp_abc_accuracy():
+    """
+    Verify that ABC parameter estimation converges toward the true parameter values
+    starting from perturbed parameters, using vectorized replicates.
+    """
+    T = 100
+    key = jax.random.key(1234)
+    ys_dummy = pd.DataFrame(0.0, index=np.arange(1, T + 1, dtype=float), columns=["Y"])
+
+    true_a, true_sx, true_sy = 0.8, 0.5, 0.3
+    sim_model = make_lgm_pomp(ys_dummy, true_a, true_sx, true_sy).simulate(
+        key=key, nsim=1, as_pomp=True
+    )
+
+    pert_a, pert_sx, pert_sy = 0.5, 0.8, 0.3
+    fit_model = make_lgm_pomp(sim_model.ys, a=pert_a, sigma_x=pert_sx, sigma_y=pert_sy)
+
+    t_start = [{"a": pert_a, "sigma_x": pert_sx, "sigma_y": pert_sy} for _ in range(5)]
+    fit_model.theta = pp.PompParameters(t_start)
+
+    a_idx = fit_model.canonical_param_names.index("a")
+    sx_idx = fit_model.canonical_param_names.index("sigma_x")
+
+    def dprior(theta_arr):
+        a_val = theta_arr[a_idx]
+        sx_val = theta_arr[sx_idx]
+        in_bounds = (a_val > 0.0) & (a_val < 1.0) & (sx_val > 0.0)
+        return jnp.where(in_bounds, 0.0, -jnp.inf)
+
+    probes = {
+        "var": lambda y: jnp.var(y[:, 0]),
+        "autocov": lambda y: jnp.mean(y[1:, 0] * y[:-1, 0]),
+    }
+
+    scale = {
+        "var": 0.1,
+        "autocov": 0.1,
+    }
+
+    prop = pp.proposals.mvn_diag_rw({"a": 0.05, "sigma_x": 0.05})
+
+    fit_model.abc(
+        Nabc=30000,
+        probes=probes,
+        scale=scale,
+        epsilon=0.5,
+        proposal=prop,
+        dprior=dprior,
+        key=key,
+    )
+
+    save_traces_plotnine(
+        fit_model,
+        "tests/plots/pomp_abc_traces.png",
+        true_values={"a": 0.8, "sigma_x": 0.5, "sigma_y": 0.3},
+    )
+
+    res = fit_model.results_history[-1]
+    traces = res.traces_da.isel(iteration=slice(15000, None))
+
+    mean_theta = traces.mean(dim=["theta_idx", "iteration"])
+    est_a = mean_theta.sel(variable="a").item()
+    est_sx = mean_theta.sel(variable="sigma_x").item()
+    est_sy = mean_theta.sel(variable="sigma_y").item()
+
+    err_a = np.abs(est_a - true_a)
+    err_sx = np.abs(est_sx - true_sx)
+    err_sy = np.abs(est_sy - true_sy)
+
+    assert err_a < 0.09, f"ABC err_a: {err_a}"
+    assert err_sx < 0.09, f"ABC err_sx: {err_sx}"
+    assert err_sy < 0.09, f"ABC err_sy: {err_sy}"

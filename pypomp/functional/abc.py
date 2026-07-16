@@ -6,18 +6,19 @@ that takes a :class:`pypomp.functional.structs.PompStruct` plus pre-computed
 ``obs_probes`` and ``scale_arr`` and runs ``n_chains`` chains in parallel.
 """
 
-from typing import Callable
+from typing import Any, Callable
 
 import jax
 
 from .structs import PompStruct
 from ..core.algorithms.abc import _vmapped_abc_internal
+from ..core.algorithms.types import AbcConfig, AbcInputs
 
 
 def abc(
     struct: PompStruct,
     thetas_array: jax.Array,
-    proposal,
+    proposal: Any,
     dprior: Callable,
     probe_fn: Callable,
     obs_probes: jax.Array,
@@ -65,24 +66,25 @@ def abc(
     """
     if struct.rmeas_pf is None:
         raise ValueError("ABC requires struct.rmeas_pf to be non-None.")
+
+    config = AbcConfig.from_abc_struct(
+        struct,
+        Nabc=Nabc,
+        dprior=dprior,
+        probe_fn=probe_fn,
+        ydim=ydim,
+    )
+    inputs = AbcInputs.from_abc_struct(
+        struct,
+        obs_probes=obs_probes,
+        scale_arr=scale_arr,
+        epsilon=epsilon,
+    )
+
     return _vmapped_abc_internal(
         thetas_array,
         proposal,
-        dprior,
-        probe_fn,
-        obs_probes,
-        scale_arr,
-        epsilon,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.rmeas_pf,
-        struct.accumvars,
-        struct.covars_extended,
-        ydim,
-        Nabc,
+        config,
+        inputs,
         keys,
     )

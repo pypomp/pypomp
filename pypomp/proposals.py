@@ -1,5 +1,5 @@
 """
-JIT-compatible MCMC proposal distributions for use with pmcmc.
+JIT-compatible MCMC proposal distributions for use with PMCMC and ABC.
 
 Each proposal is a frozen dataclass registered as a JAX PyTree so it can flow
 through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose two methods:
@@ -23,7 +23,7 @@ mirror the previous API and return the corresponding dataclass instance.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeVar, Sequence, cast, Protocol, Any
+from typing import Sequence, cast, Protocol, Any
 
 import jax
 import jax.numpy as jnp
@@ -74,8 +74,8 @@ class MVNDiagRW:
         state: tuple,
         theta_arr: jax.Array,
         key: jax.Array,
-        n: jax.Array,
-        accepts: jax.Array,
+        n: jax.Array | int,
+        accepts: jax.Array | int,
     ) -> tuple[jax.Array, tuple]:
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + z * self.sd_arr, state
@@ -113,8 +113,8 @@ class MVNRWFull:
         state: tuple,
         theta_arr: jax.Array,
         key: jax.Array,
-        n: jax.Array,
-        accepts: jax.Array,
+        n: jax.Array | int,
+        accepts: jax.Array | int,
     ) -> tuple[jax.Array, tuple]:
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + self.chol @ z, state
@@ -220,20 +220,22 @@ class MVNRWAdaptive:
         state: AdaptiveState,
         theta_arr: jax.Array,
         key: jax.Array,
-        n: jax.Array,
-        accepts: jax.Array,
+        n: jax.Array | int,
+        accepts: jax.Array | int,
     ) -> tuple[jax.Array, AdaptiveState]:
         d = theta_arr.shape[-1]
         dt = theta_arr.dtype
-        nf = jnp.maximum(n.astype(dt), 1.0)
-        af = accepts.astype(dt)
+        n_arr = jnp.asarray(n, dtype=dt)
+        accepts_arr = jnp.asarray(accepts, dtype=dt)
+        nf = jnp.maximum(n_arr, 1.0)
+        af = accepts_arr
 
         # Lazy-seed theta_mean on the very first call.
         seeded_mean = jnp.where(state.initialized > 0, state.theta_mean, theta_arr)
 
         # ---- Phase 1: scale adaptation (if n >= scale_start and accepts < shape_start) ----
         accept_rate = af / nf
-        cool = self.scale_cooling ** jnp.maximum(n.astype(dt) - self.scale_start, 0.0)
+        cool = self.scale_cooling ** jnp.maximum(n_arr - self.scale_start, 0.0)
         scale_factor = jnp.exp(cool * (accept_rate - self.target))
         scaling_p1 = jnp.minimum(state.scaling * scale_factor, self.max_scaling)
         in_phase1 = (n >= self.scale_start) & (accepts < self.shape_start)
@@ -344,10 +346,7 @@ def mvn_rw(rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
     return MVNRWFull(chol=chol, param_names=tuple(param_names))
 
 
-ProposalT = TypeVar("ProposalT", MVNDiagRW, MVNRWFull, MVNRWAdaptive)
-
-
-def _expand_proposal(proposal: ProposalT, canonical_names: Sequence[str]) -> ProposalT:
+def _expand_proposal(proposal: Proposal, canonical_names: Sequence[str]) -> Proposal:
     """Expand a proposal that may cover only a subset of model parameters
     so that it operates on the full canonical parameter vector.
 
@@ -365,7 +364,7 @@ def _expand_proposal(proposal: ProposalT, canonical_names: Sequence[str]) -> Pro
             if p not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p!r} not in model.")
             full_sd = full_sd.at[name_to_idx[p]].set(proposal.sd_arr[i_local])
-        return cast(ProposalT, MVNDiagRW(sd_arr=full_sd, param_names=names))
+        return cast(Proposal, MVNDiagRW(sd_arr=full_sd, param_names=names))
 
     if isinstance(proposal, MVNRWFull):
         # Embed the Cholesky factor directly so non-proposed parameters have
@@ -382,7 +381,7 @@ def _expand_proposal(proposal: ProposalT, canonical_names: Sequence[str]) -> Pro
                 full_chol = full_chol.at[i_global, j_global].set(
                     proposal.chol[i_local, j_local]
                 )
-        return cast(ProposalT, MVNRWFull(chol=full_chol, param_names=names))
+        return cast(Proposal, MVNRWFull(chol=full_chol, param_names=names))
 
     if isinstance(proposal, MVNRWAdaptive):
         full_var = jnp.zeros((d, d))
@@ -398,7 +397,7 @@ def _expand_proposal(proposal: ProposalT, canonical_names: Sequence[str]) -> Pro
                     proposal.init_rw_var[i_local, j_local]
                 )
         return cast(
-            ProposalT,
+            Proposal,
             MVNRWAdaptive(
                 init_rw_var=full_var,
                 param_names=names,

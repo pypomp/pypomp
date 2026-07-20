@@ -25,7 +25,7 @@ from .results import (
     build_pmcmc_result,
     build_abc_result,
 )
-from pypomp.proposals import _expand_proposal
+from pypomp.proposals import Proposal, _expand_proposal
 from .parameters import PompParameters
 
 from typing import TYPE_CHECKING
@@ -785,7 +785,7 @@ class PompEstimationMixin(Base):
         self,
         J: int,
         M: int,
-        proposal,
+        proposal: Proposal,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
@@ -907,7 +907,7 @@ class PompEstimationMixin(Base):
         probes: dict[str, Callable],
         scale: dict[str, float],
         epsilon: float,
-        proposal,
+        proposal: Proposal,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
@@ -928,9 +928,9 @@ class PompEstimationMixin(Base):
         probes : dict
             Mapping from probe name to pure-JAX summary statistic.
         scale : dict
-            Positive scaling factor for each probe.
+            Positive scaling factors to normalize probe differences in the squared scaled Euclidean distance.
         epsilon : float
-            ABC distance threshold.
+            ABC distance rejection threshold.
         proposal : Proposal
             Proposal object from :mod:`pypomp.proposals`.
         dprior : Callable, optional

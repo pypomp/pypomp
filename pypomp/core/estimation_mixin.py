@@ -1154,7 +1154,7 @@ class PompEstimationMixin(Base):
         def _to_long(
             arr: Union[jax.Array, np.ndarray],
             times_vec: Union[jax.Array, np.ndarray, pd.Index],
-            prefix: str,
+            column_names: list[str],
         ) -> pd.DataFrame:
             vals = np.asarray(arr)  # (n_theta, n_sim, n_time, n_feat)
             n_theta_l, n_sim_l, n_time_l, n_feat_l = vals.shape
@@ -1164,7 +1164,7 @@ class PompEstimationMixin(Base):
             time_vals_l = np.tile(
                 np.asarray(times_vec).reshape(1, -1), (n_theta_l * n_sim_l, 1)
             ).reshape(-1)
-            cols = pd.Index([f"{prefix}_{i}" for i in range(n_feat_l)])
+            cols = pd.Index(column_names)
             df = pd.DataFrame(flat, columns=cols)
             df.insert(0, "time", time_vals_l)
             df.insert(0, "sim", sim_idx_l)
@@ -1172,8 +1172,8 @@ class PompEstimationMixin(Base):
             return df
 
         times0 = np.concatenate([np.array([self.t0]), np.array(times_array)])
-        X_sims_long = _to_long(X_sims, times0, "state")
-        Y_sims_long = _to_long(Y_sims, np.array(times_array), "obs")
+        X_sims_long = _to_long(X_sims, times0, self.statenames)
+        Y_sims_long = _to_long(Y_sims, np.array(times_array), list(self.ys.columns))
 
         if as_pomp:
             simulated_ys_long = Y_sims_long[

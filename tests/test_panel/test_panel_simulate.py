@@ -3,8 +3,8 @@ import pandas as pd
 
 def test_simulate(lg_panel_setup_some_shared):
     panel, rw_sd, key = lg_panel_setup_some_shared
-    X_sim_order = ["unit", "theta_idx", "sim", "time"] + ["state_0", "state_1"]
-    Y_sim_order = ["unit", "theta_idx", "sim", "time", "obs_0", "obs_1"]
+    X_sim_order = ["unit", "theta_idx", "sim", "time"] + ["X1", "X2"]
+    Y_sim_order = ["unit", "theta_idx", "sim", "time", "Y1", "Y2"]
 
     X_sims, Y_sims = panel.simulate(key=key)
 

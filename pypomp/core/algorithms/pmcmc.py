@@ -13,49 +13,27 @@ XLA program.
 """
 
 from functools import partial
-from typing import Callable, cast
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
+from pypomp.proposals import Proposal
 from .pfilter import _pfilter_internal
-from .types import PfilterConfig, PfilterInputs
+from .types import PmcmcConfig, PmcmcInputs
 
 
 @partial(
     jit,
-    static_argnames=(
-        "Nmcmc",
-        "J",
-        "rinitializer",
-        "rprocess_interp",
-        "dmeasure",
-        "accumvars",
-        "dprior",
-        "should_trans",
-        "thresh",
-    ),
+    static_argnames=("config",),
 )
 def _pmcmc_internal(
     theta_arr: jax.Array,
-    proposal,
-    dprior: Callable,
-    dt_array_extended: jax.Array,
-    nstep_array: jax.Array,
-    t0: float,
-    times: jax.Array,
-    ys: jax.Array,
-    J: int,
-    rinitializer: Callable,
-    rprocess_interp: Callable,
-    dmeasure: Callable,
-    accumvars: tuple[int, ...] | None,
-    covars_extended: jax.Array | None,
-    thresh: float,
-    Nmcmc: int,
+    proposal: Proposal,
+    config: PmcmcConfig,
+    inputs: PmcmcInputs,
     key: jax.Array,
-    should_trans: bool = False,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Run a single PMCMC chain of length ``Nmcmc`` starting at ``theta_arr``.
 
@@ -63,19 +41,9 @@ def _pmcmc_internal(
         theta_arr: Starting parameter vector, shape ``(d,)``.
         proposal: Proposal object exposing ``init_state`` and ``step``.
             See :mod:`pypomp.proposals`.
-        dprior: Log-prior density.  Pure JAX function with signature
-            ``dprior(theta_arr) -> scalar``.
-        dt_array_extended, nstep_array, t0, times, ys: Particle-filter
-            inputs (see :func:`_pfilter_internal`).
-        J: Number of particles.
-        rinitializer, rprocess_interp, dmeasure: Particle-filter callbacks.
-        accumvars: Accumulator state indices.
-        covars_extended: Covariates, or ``None``.
-        thresh: Adaptive resampling threshold.
-        Nmcmc: Number of MCMC iterations (static).
+        config: PMCMC configuration.
+        inputs: PMCMC inputs.
         key: PRNG key.
-        should_trans: Whether parameter transformations are applied inside
-            the particle filter (static, default False).
 
     Returns:
         ``(loglik_trace, log_prior_trace, theta_trace, accepts)`` where:
@@ -86,35 +54,17 @@ def _pmcmc_internal(
         * ``theta_trace`` has shape ``(Nmcmc + 1, d)``.
         * ``accepts`` is a scalar count of accepted proposals.
     """
+    # 1. Prepare particle-filter evaluation function.
+    run_pfilter_fn = jax.tree_util.Partial(
+        _pmcmc_run_pfilter,
+        config=config,
+        inputs=inputs,
+    )
 
-    def _run_pfilter(theta: jax.Array, k: jax.Array) -> jax.Array:
-        out = _pfilter_internal(
-            theta,
-            k,
-            PfilterConfig(
-                J=J,
-                rinitializer=rinitializer,
-                rprocess_interp=rprocess_interp,
-                dmeasure=dmeasure,
-                accumvars=accumvars,
-                thresh=thresh,
-                should_trans=should_trans,
-            ),
-            PfilterInputs(
-                ys=ys,
-                dt_array_extended=dt_array_extended,
-                nstep_array=nstep_array,
-                t0=t0,
-                times=times,
-                covars_extended=covars_extended,
-            ),
-        )
-        return -out["neg_loglik"]
-
-    # ---- Initial evaluation at starting theta ----
+    # 2. Initial evaluation at starting theta.
     key, init_pf_key = jax.random.split(key)
-    loglik0 = _run_pfilter(theta_arr, init_pf_key)
-    log_prior0 = dprior(theta_arr)
+    loglik0 = run_pfilter_fn(theta_arr, init_pf_key)
+    log_prior0 = config.dprior(theta_arr)
     prop_state0 = proposal.init_state(theta_arr)
 
     init_carry = (
@@ -126,46 +76,19 @@ def _pmcmc_internal(
         key,  # PRNG key
     )
 
-    def step(carry, n):
-        theta_cur, ll_cur, lp_cur, prop_state, accepts, key = carry
-        key, prop_key, pf_key, accept_key = jax.random.split(key, 4)
-
-        # Propose (and update proposal state)
-        theta_prop, new_prop_state = proposal.step(
-            prop_state, theta_cur, prop_key, n, accepts
-        )
-
-        # Log prior at proposal
-        lp_prop = dprior(theta_prop)
-
-        # Particle-filter likelihood at proposal
-        ll_prop = _run_pfilter(theta_prop, pf_key)
-
-        # Acceptance probability (Metropolis with symmetric proposal)
-        log_alpha = ll_prop + lp_prop - ll_cur - lp_cur
-        u = jax.random.uniform(accept_key)
-        accept = (
-            jnp.isfinite(log_alpha) & jnp.isfinite(lp_prop) & (jnp.log(u) < log_alpha)
-        )
-
-        new_theta = jnp.where(accept, theta_prop, theta_cur)
-        new_ll = jnp.where(accept, ll_prop, ll_cur)
-        new_lp = jnp.where(accept, lp_prop, lp_cur)
-        new_accepts = accepts + accept.astype(jnp.int32)
-
-        out = (new_ll, new_lp, new_theta)
-        new_carry = (new_theta, new_ll, new_lp, new_prop_state, new_accepts, key)
-        return new_carry, out
-
-    final_carry, (ll_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step, init_carry, jnp.arange(1, Nmcmc + 1, dtype=jnp.int32)
+    # 3. Setup scan step function.
+    step_fn = jax.tree_util.Partial(
+        _pmcmc_step,
+        proposal,
+        config,
+        run_pfilter_fn,
     )
 
+    # 4. Run the scan loop.
+    final_carry, (ll_trace, lp_trace, theta_trace) = jax.lax.scan(
+        step_fn, init_carry, jnp.arange(1, config.Nmcmc + 1, dtype=jnp.int32)
+    )
     final_accepts = final_carry[4]
-
-    ll_trace = cast(jax.Array, ll_trace)
-    lp_trace = cast(jax.Array, lp_trace)
-    theta_trace = cast(jax.Array, theta_trace)
 
     # Prepend iteration-0 (the initial evaluation) to each trace.
     ll_trace = jnp.concatenate((jnp.asarray([loglik0]), ll_trace))
@@ -175,6 +98,61 @@ def _pmcmc_internal(
     return ll_trace, lp_trace, theta_trace, final_accepts
 
 
+def _pmcmc_step(
+    proposal: Proposal,
+    config: PmcmcConfig,
+    run_pfilter_fn: Callable,
+    carry: tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
+    n: int | jax.Array,
+) -> tuple[
+    tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
+    tuple[jax.Array, jax.Array, jax.Array],
+]:
+    """Run one step of the PMCMC chain."""
+    theta_cur, ll_cur, lp_cur, prop_state, accepts, key = carry
+    key, prop_key, pf_key, accept_key = jax.random.split(key, 4)
+
+    # 1. Propose (and update proposal state)
+    theta_prop, new_prop_state = proposal.step(
+        prop_state, theta_cur, prop_key, n, accepts
+    )
+
+    # 2. Evaluate prior and likelihood at proposed parameter.
+    lp_prop = config.dprior(theta_prop)
+    ll_prop = run_pfilter_fn(theta_prop, pf_key)
+
+    # 3. Accept or reject.
+    log_alpha = ll_prop + lp_prop - ll_cur - lp_cur
+    u = jax.random.uniform(accept_key)
+    accept = jnp.isfinite(log_alpha) & jnp.isfinite(lp_prop) & (jnp.log(u) < log_alpha)
+
+    # 4. Update.
+    new_theta = jax.lax.select(accept, theta_prop, theta_cur)
+    new_ll = jax.lax.select(accept, ll_prop, ll_cur)
+    new_lp = jax.lax.select(accept, lp_prop, lp_cur)
+    new_accepts = accepts + accept.astype(jnp.int32)
+
+    out = (new_ll, new_lp, new_theta)
+    new_carry = (new_theta, new_ll, new_lp, new_prop_state, new_accepts, key)
+    return new_carry, out
+
+
+def _pmcmc_run_pfilter(
+    theta: jax.Array,
+    k: jax.Array,
+    config: PmcmcConfig,
+    inputs: PmcmcInputs,
+) -> jax.Array:
+    """Run the particle filter to get the log-likelihood."""
+    out = _pfilter_internal(
+        theta,
+        k,
+        config.to_pfilter_config(),
+        inputs.to_pfilter_inputs(),
+    )
+    return -out["neg_loglik"]
+
+
 # vmap over the chain (replicate) dimension: theta_arr (0), key (0), everything else None.
 # proposal flows through unchanged (its leaves are not chain-dependent).
 _vmapped_pmcmc_internal = jax.vmap(
@@ -182,21 +160,8 @@ _vmapped_pmcmc_internal = jax.vmap(
     in_axes=(
         0,  # theta_arr per chain
         None,  # proposal
-        None,  # dprior
-        None,  # dt_array_extended
-        None,  # nstep_array
-        None,  # t0
-        None,  # times
-        None,  # ys
-        None,  # J
-        None,  # rinitializer
-        None,  # rprocess_interp
-        None,  # dmeasure
-        None,  # accumvars
-        None,  # covars_extended
-        None,  # thresh
-        None,  # Nmcmc
+        None,  # config
+        None,  # inputs
         0,  # key per chain
-        None,  # should_trans
     ),
 )

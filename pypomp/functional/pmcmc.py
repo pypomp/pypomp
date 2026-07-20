@@ -12,6 +12,7 @@ import jax
 
 from .structs import PompStruct
 from ..core.algorithms.pmcmc import _vmapped_pmcmc_internal
+from ..core.algorithms.types import PmcmcConfig, PmcmcInputs
 
 
 def pmcmc(
@@ -66,23 +67,19 @@ def pmcmc(
     """
     if struct.dmeas_pf is None:
         raise ValueError("PMCMC requires struct.dmeas_pf to be non-None.")
+    config = PmcmcConfig.from_pmcmc_struct(
+        struct=struct,
+        Nmcmc=Nmcmc,
+        J=J,
+        dprior=dprior,
+        thresh=thresh,
+        should_trans=False,
+    )
+    inputs = PmcmcInputs.from_pmcmc_struct(struct)
     return _vmapped_pmcmc_internal(
         thetas_array,
         proposal,
-        dprior,
-        struct.dt_array_extended,
-        struct.nstep_array,
-        struct.t0,
-        struct.times,
-        struct.ys,
-        J,
-        struct.rinit_pf,
-        struct.rproc_pf,
-        struct.dmeas_pf,
-        struct.accumvars,
-        struct.covars_extended,
-        thresh,
-        Nmcmc,
+        config,
+        inputs,
         keys,
-        False,  # should_trans
     )

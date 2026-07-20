@@ -724,6 +724,9 @@ class PerfilterStepInputs:
     step_key: jax.Array
 
 
+# ----ABC---------------------------------------
+
+
 @register_dataclass
 @dataclass(frozen=True)
 class AbcConfig:
@@ -788,4 +791,88 @@ class AbcInputs:
             t0=struct.t0,
             times=struct.times,
             covars_extended=struct.covars_extended,
+        )
+
+
+# ----PMCMC---------------------------------------
+
+
+@register_dataclass
+@dataclass(frozen=True)
+class PmcmcConfig:
+    Nmcmc: int
+    J: int
+    rinitializer: Callable
+    rprocess_interp: Callable
+    dmeasure: Callable
+    accumvars: tuple[int, ...] | None
+    dprior: Callable
+    thresh: float
+    should_trans: bool = False
+
+    @classmethod
+    def from_pmcmc_struct(
+        cls,
+        struct: PompStruct,
+        Nmcmc: int,
+        J: int,
+        dprior: Callable,
+        thresh: float = 0.0,
+        should_trans: bool = False,
+    ) -> PmcmcConfig:
+        if struct.dmeas_pf is None:
+            raise ValueError("dmeasure is required for PMCMC")
+        return cls(
+            Nmcmc=Nmcmc,
+            J=J,
+            rinitializer=struct.rinit_pf,
+            rprocess_interp=struct.rproc_pf,
+            dmeasure=struct.dmeas_pf,
+            accumvars=struct.accumvars,
+            dprior=dprior,
+            thresh=thresh,
+            should_trans=should_trans,
+        )
+
+    def to_pfilter_config(self) -> PfilterConfig:
+        return PfilterConfig(
+            J=self.J,
+            rinitializer=self.rinitializer,
+            rprocess_interp=self.rprocess_interp,
+            dmeasure=self.dmeasure,
+            accumvars=self.accumvars,
+            thresh=self.thresh,
+            should_trans=self.should_trans,
+        )
+
+
+@register_dataclass
+@dataclass(frozen=True)
+class PmcmcInputs:
+    ys: jax.Array
+    dt_array_extended: jax.Array
+    nstep_array: jax.Array
+    t0: float
+    times: jax.Array
+    covars_extended: jax.Array | None
+
+    @classmethod
+    def from_pmcmc_struct(cls, struct: PompStruct) -> PmcmcInputs:
+        return cls(
+            ys=struct.ys,
+            dt_array_extended=struct.dt_array_extended,
+            nstep_array=struct.nstep_array,
+            t0=struct.t0,
+            times=struct.times.astype(float),
+            covars_extended=struct.covars_extended,
+        )
+
+    def to_pfilter_inputs(self) -> PfilterInputs:
+        return PfilterInputs(
+            ys=self.ys,
+            dt_array_extended=self.dt_array_extended,
+            nstep_array=self.nstep_array,
+            t0=self.t0,
+            times=self.times,
+            covars_extended=self.covars_extended,
         )

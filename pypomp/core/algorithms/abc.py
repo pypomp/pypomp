@@ -22,12 +22,13 @@ operating on a ``(n_obs, ydim)`` JAX array, plus a matching
 """
 
 from functools import partial
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
+from pypomp.proposals import Proposal
 from .simulate import _simulate_internal
 from .types import AbcConfig, AbcInputs
 
@@ -38,7 +39,7 @@ from .types import AbcConfig, AbcInputs
 )
 def _abc_internal(
     theta_arr: jax.Array,
-    proposal: Any,
+    proposal: Proposal,
     config: AbcConfig,
     inputs: AbcInputs,
     key: jax.Array,
@@ -90,10 +91,6 @@ def _abc_internal(
 
     final_accepts = final_carry[4]
 
-    dist_trace = cast(jax.Array, dist_trace)
-    lp_trace = cast(jax.Array, lp_trace)
-    theta_trace = cast(jax.Array, theta_trace)
-
     # 5. Collect traces and prepend initial evaluation.
     dist_trace = jnp.concatenate((jnp.asarray([dist0]), dist_trace))
     lp_trace = jnp.concatenate((jnp.asarray([lp0]), lp_trace))
@@ -103,7 +100,7 @@ def _abc_internal(
 
 
 def _abc_step(
-    proposal: Any,
+    proposal: Proposal,
     config: AbcConfig,
     inputs: AbcInputs,
     sim_distance_fn: Callable,
@@ -137,10 +134,10 @@ def _abc_step(
     accept = prior_pass & dist_pass
 
     # 5. Update state variables based on acceptance.
-    new_theta = cast(jax.Array, jnp.where(accept, theta_prop, theta_cur))
-    new_dist = cast(jax.Array, jnp.where(accept, dist_prop, dist_cur))
-    new_lp = cast(jax.Array, jnp.where(accept, lp_prop, lp_cur))
-    new_accepts = cast(jax.Array, accepts + accept.astype(jnp.int32))
+    new_theta = jax.lax.select(accept, theta_prop, theta_cur)
+    new_dist = jax.lax.select(accept, dist_prop, dist_cur)
+    new_lp = jax.lax.select(accept, lp_prop, lp_cur)
+    new_accepts = jnp.add(accepts, accept.astype(jnp.int32))
 
     # 6. Return new carry and outputs.
     new_carry = (new_theta, new_dist, new_lp, new_prop_state, new_accepts, key)

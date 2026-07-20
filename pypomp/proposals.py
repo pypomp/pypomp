@@ -23,11 +23,26 @@ mirror the previous API and return the corresponding dataclass instance.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeVar, Sequence, cast
+from typing import TypeVar, Sequence, cast, Protocol, Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+
+class Proposal(Protocol):
+    """Protocol defining the interface for MCMC proposal distributions."""
+
+    def init_state(self, theta_arr: jax.Array) -> Any: ...
+
+    def step(
+        self,
+        state: Any,
+        theta_arr: jax.Array,
+        key: jax.Array,
+        n: jax.Array | int,
+        accepts: jax.Array | int,
+    ) -> tuple[jax.Array, Any]: ...
 
 
 # ---------------------------------------------------------------------------

@@ -883,7 +883,7 @@ def test_pomp_pmcmc_accuracy():
 
     fit_model.pmcmc(
         J=1000,
-        Nmcmc=250,
+        M=250,
         proposal=prop,
         dprior=dprior,
         key=key,
@@ -955,7 +955,7 @@ def test_pomp_abc_accuracy():
     prop = pp.proposals.mvn_diag_rw({"a": 0.05, "sigma_x": 0.05})
 
     fit_model.abc(
-        Nabc=30000,
+        M=30000,
         probes=probes,
         scale=scale,
         epsilon=0.5,

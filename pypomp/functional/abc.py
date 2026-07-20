@@ -25,7 +25,7 @@ def abc(
     scale_arr: jax.Array,
     epsilon: float,
     ydim: int,
-    Nabc: int,
+    M: int,
     keys: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Functional ABC-MCMC entry point.
@@ -52,7 +52,7 @@ def abc(
         ABC distance threshold (acceptance requires ``distance < epsilon**2``).
     ydim : int
         Observation dimensionality (static).
-    Nabc : int
+    M : int
         Number of MCMC iterations per chain.
     keys : jax.Array
         PRNG keys, shape ``(n_chains, ...)``.
@@ -61,15 +61,15 @@ def abc(
     -------
     tuple[jax.Array, jax.Array, jax.Array, jax.Array]
         ``(distance_traces, log_prior_traces, theta_traces, accepts)`` with
-        shapes ``(n_chains, Nabc + 1)``, ``(n_chains, Nabc + 1)``,
-        ``(n_chains, Nabc + 1, d)``, ``(n_chains,)`` respectively.
+        shapes ``(n_chains, M + 1)``, ``(n_chains, M + 1)``,
+        ``(n_chains, M + 1, d)``, ``(n_chains,)`` respectively.
     """
     if struct.rmeas_pf is None:
         raise ValueError("ABC requires struct.rmeas_pf to be non-None.")
 
     config = AbcConfig.from_abc_struct(
         struct,
-        Nabc=Nabc,
+        M=M,
         dprior=dprior,
         probe_fn=probe_fn,
         ydim=ydim,

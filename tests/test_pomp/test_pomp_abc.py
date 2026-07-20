@@ -52,7 +52,7 @@ class TestABC:
     def test_basic_run(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0, "gamma": 0.1})
         sir.abc(
-            Nabc=5,
+            M=5,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -62,7 +62,7 @@ class TestABC:
         res = _abc_res(sir.results_history[-1])
         assert isinstance(res, Result)
         assert res.method == "abc"
-        assert res.Nabc == 5
+        assert res.M == 5
         assert res.n_chains == 1
         var_list = list(res.traces_da.coords["variable"].values)
         assert var_list[0] == "distance"
@@ -71,7 +71,7 @@ class TestABC:
     def test_with_dprior(self, sir):
         prop = mvn_diag_rw({"gamma": 0.1})
         sir.abc(
-            Nabc=5,
+            M=5,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -86,7 +86,7 @@ class TestABC:
     def test_flat_prior_default(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -101,7 +101,7 @@ class TestABC:
     def test_acceptance_rate_in_range(self, sir):
         prop = mvn_diag_rw({"beta1": 0.01, "gamma": 0.001})
         sir.abc(
-            Nabc=10,
+            M=10,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -117,7 +117,7 @@ class TestABC:
         model_orig, theta = sir_module
         from copy import deepcopy
 
-        Nabc = 5
+        M = 5
         probes = _default_probes()
         scale = _default_scale()
         epsilon = 1e6
@@ -128,7 +128,7 @@ class TestABC:
         sir1.results_history.clear()
         sir1.theta = theta
         sir1.abc(
-            Nabc=Nabc,
+            M=M,
             probes=probes,
             scale=scale,
             epsilon=epsilon,
@@ -140,7 +140,7 @@ class TestABC:
         sir2.results_history.clear()
         sir2.theta = theta
         sir2.abc(
-            Nabc=Nabc,
+            M=M,
             probes=probes,
             scale=scale,
             epsilon=epsilon,
@@ -156,7 +156,7 @@ class TestABC:
     def test_to_dataframe(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -173,7 +173,7 @@ class TestABC:
     def test_traces_method(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -187,7 +187,7 @@ class TestABC:
     def test_print_summary(self, sir, capsys):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -201,7 +201,7 @@ class TestABC:
     def test_with_mvn_rw(self, sir):
         prop = mvn_rw(np.array([[1.0]]), ["beta1"])
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -217,7 +217,7 @@ class TestABC:
             shape_start=2,
         )
         sir.abc(
-            Nabc=6,
+            M=6,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -229,7 +229,7 @@ class TestABC:
     def test_tight_epsilon_low_acceptance(self, sir):
         prop = mvn_diag_rw({"beta1": 10.0})
         sir.abc(
-            Nabc=10,
+            M=10,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1.0,
@@ -243,7 +243,7 @@ class TestABC:
     def test_theta_updated_to_final_trace(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=5,
+            M=5,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -262,7 +262,7 @@ class TestABC:
         prop = mvn_diag_rw({"beta1": 1.0})
 
         sir.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -294,7 +294,7 @@ class TestABC:
 
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=5,
+            M=5,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e12,
@@ -315,7 +315,7 @@ class TestABC:
         scale = {"mean": 2.0}
 
         deterministic_meas_pomp.abc(
-            Nabc=1,
+            M=1,
             probes=probes,
             scale=scale,
             epsilon=1e6,
@@ -345,7 +345,7 @@ class TestABCMultiChain:
         t3["beta1"] = 420.0
         prop = mvn_diag_rw({"beta1": 1.0})
         sir.abc(
-            Nabc=5,
+            M=5,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -364,11 +364,11 @@ class TestABCMultiChain:
 
 
 class TestABCValidation:
-    def test_invalid_Nabc(self, sir):
+    def test_invalid_M(self, sir):
         prop = mvn_diag_rw({"beta1": 1.0})
-        with pytest.raises(ValueError, match="Nabc"):
+        with pytest.raises(ValueError, match="M"):
             sir.abc(
-                Nabc=0,
+                M=0,
                 probes=_default_probes(),
                 scale=_default_scale(),
                 epsilon=1e6,
@@ -380,7 +380,7 @@ class TestABCValidation:
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="epsilon"):
             sir.abc(
-                Nabc=5,
+                M=5,
                 probes=_default_probes(),
                 scale=_default_scale(),
                 epsilon=-1.0,
@@ -392,7 +392,7 @@ class TestABCValidation:
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="probes"):
             sir.abc(
-                Nabc=5,
+                M=5,
                 probes={},
                 scale={},
                 epsilon=1e6,
@@ -404,7 +404,7 @@ class TestABCValidation:
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="scale keys"):
             sir.abc(
-                Nabc=5,
+                M=5,
                 probes=_default_probes(),
                 scale={"mean": 1.0},  # missing keys
                 epsilon=1e6,
@@ -416,7 +416,7 @@ class TestABCValidation:
         prop = mvn_diag_rw({"beta1": 1.0})
         with pytest.raises(ValueError, match="must be positive"):
             sir.abc(
-                Nabc=5,
+                M=5,
                 probes={"mean": lambda y: jnp.mean(y)},
                 scale={"mean": -1.0},
                 epsilon=1e6,
@@ -442,7 +442,7 @@ class TestABCMerge:
         sir1.results_history.clear()
         sir1.theta = theta
         sir1.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -455,7 +455,7 @@ class TestABCMerge:
         sir2.results_history.clear()
         sir2.theta = theta
         sir2.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -466,7 +466,7 @@ class TestABCMerge:
 
         merged = Result.merge(res1, res2)
         assert merged.n_chains == res1.n_chains + res2.n_chains
-        assert merged.Nabc == 3
+        assert merged.M == 3
         assert merged.epsilon == 1e6
 
     def test_merge_different_epsilon_raises(self, sir_module):
@@ -480,7 +480,7 @@ class TestABCMerge:
         sir1.results_history.clear()
         sir1.theta = theta
         sir1.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=1e6,
@@ -493,7 +493,7 @@ class TestABCMerge:
         sir2.results_history.clear()
         sir2.theta = theta
         sir2.abc(
-            Nabc=3,
+            M=3,
             probes=_default_probes(),
             scale=_default_scale(),
             epsilon=2e6,

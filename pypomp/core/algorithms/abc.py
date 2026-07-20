@@ -44,13 +44,13 @@ def _abc_internal(
     inputs: AbcInputs,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Run one ABC-MCMC chain of length ``Nabc`` starting at ``theta_arr``.
+    """Run one ABC-MCMC chain of length ``M`` starting at ``theta_arr``.
 
     Returns ``(distance_trace, log_prior_trace, theta_trace, accepts)``:
 
-    * ``distance_trace``: shape ``(Nabc + 1,)``.
-    * ``log_prior_trace``: shape ``(Nabc + 1,)``.
-    * ``theta_trace``: shape ``(Nabc + 1, d)``.
+    * ``distance_trace``: shape ``(M + 1,)``.
+    * ``log_prior_trace``: shape ``(M + 1,)``.
+    * ``theta_trace``: shape ``(M + 1, d)``.
     * ``accepts``: scalar count of accepted proposals.
     """
     # 1. Prepare simulation distance function.
@@ -86,7 +86,7 @@ def _abc_internal(
 
     # 4. Run the scan loop.
     final_carry, (dist_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step_fn, init_carry, jnp.arange(1, config.Nabc + 1, dtype=jnp.int32)
+        step_fn, init_carry, jnp.arange(1, config.M + 1, dtype=jnp.int32)
     )
 
     final_accepts = final_carry[4]

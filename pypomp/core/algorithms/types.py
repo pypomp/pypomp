@@ -730,7 +730,7 @@ class PerfilterStepInputs:
 @register_dataclass
 @dataclass(frozen=True)
 class AbcConfig:
-    Nabc: int
+    M: int
     rinitializer: Callable
     rprocess_interp: Callable
     rmeasure: Callable
@@ -743,7 +743,7 @@ class AbcConfig:
     def from_abc_struct(
         cls,
         struct: PompStruct,
-        Nabc: int,
+        M: int,
         dprior: Callable,
         probe_fn: Callable,
         ydim: int,
@@ -751,7 +751,7 @@ class AbcConfig:
         if struct.rmeas_pf is None:
             raise ValueError("abc requires struct.rmeas_pf to be non-None.")
         return cls(
-            Nabc=Nabc,
+            M=M,
             rinitializer=struct.rinit_pf,
             rprocess_interp=struct.rproc_pf,
             rmeasure=struct.rmeas_pf,
@@ -800,7 +800,7 @@ class AbcInputs:
 @register_dataclass
 @dataclass(frozen=True)
 class PmcmcConfig:
-    Nmcmc: int
+    M: int
     J: int
     rinitializer: Callable
     rprocess_interp: Callable
@@ -814,7 +814,7 @@ class PmcmcConfig:
     def from_pmcmc_struct(
         cls,
         struct: PompStruct,
-        Nmcmc: int,
+        M: int,
         J: int,
         dprior: Callable,
         thresh: float = 0.0,
@@ -823,7 +823,7 @@ class PmcmcConfig:
         if struct.dmeas_pf is None:
             raise ValueError("dmeasure is required for PMCMC")
         return cls(
-            Nmcmc=Nmcmc,
+            M=M,
             J=J,
             rinitializer=struct.rinit_pf,
             rprocess_interp=struct.rproc_pf,

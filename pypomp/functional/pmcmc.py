@@ -20,7 +20,7 @@ def pmcmc(
     thetas_array: jax.Array,
     proposal,
     dprior: Callable,
-    Nmcmc: int,
+    M: int,
     J: int,
     thresh: float,
     keys: jax.Array,
@@ -46,7 +46,7 @@ def pmcmc(
     dprior : Callable
         Log-prior density.  Pure JAX function with signature
         ``dprior(theta_arr) -> scalar``.
-    Nmcmc : int
+    M : int
         Number of MCMC iterations per chain.
     J : int
         Number of particles per filter evaluation.
@@ -60,16 +60,16 @@ def pmcmc(
     tuple[jax.Array, jax.Array, jax.Array, jax.Array]
         Tuple ``(loglik_traces, log_prior_traces, theta_traces, accepts)``:
 
-        * ``loglik_traces``: shape ``(n_chains, Nmcmc + 1)``.
-        * ``log_prior_traces``: shape ``(n_chains, Nmcmc + 1)``.
-        * ``theta_traces``: shape ``(n_chains, Nmcmc + 1, d)``.
+        * ``loglik_traces``: shape ``(n_chains, M + 1)``.
+        * ``log_prior_traces``: shape ``(n_chains, M + 1)``.
+        * ``theta_traces``: shape ``(n_chains, M + 1, d)``.
         * ``accepts``: shape ``(n_chains,)`` -- count of accepted proposals per chain.
     """
     if struct.dmeas_pf is None:
         raise ValueError("PMCMC requires struct.dmeas_pf to be non-None.")
     config = PmcmcConfig.from_pmcmc_struct(
         struct=struct,
-        Nmcmc=Nmcmc,
+        M=M,
         J=J,
         dprior=dprior,
         thresh=thresh,

@@ -3,7 +3,7 @@ JIT-compiled PMCMC (particle Markov chain Monte Carlo).
 
 Implements the particle marginal Metropolis-Hastings sampler of
 Andrieu, Doucet & Holenstein (2010).  The outer MCMC loop runs inside
-``jax.lax.scan`` for a fixed number of iterations ``Nmcmc``, and a
+``jax.lax.scan`` for a fixed number of iterations ``M``, and a
 particle filter (``_pfilter_internal``) provides a noisy but unbiased
 estimate of the marginal log-likelihood at each proposed parameter.
 
@@ -35,7 +35,7 @@ def _pmcmc_internal(
     inputs: PmcmcInputs,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Run a single PMCMC chain of length ``Nmcmc`` starting at ``theta_arr``.
+    """Run a single PMCMC chain of length ``M`` starting at ``theta_arr``.
 
     Args:
         theta_arr: Starting parameter vector, shape ``(d,)``.
@@ -48,10 +48,10 @@ def _pmcmc_internal(
     Returns:
         ``(loglik_trace, log_prior_trace, theta_trace, accepts)`` where:
 
-        * ``loglik_trace`` has shape ``(Nmcmc + 1,)`` (iteration 0 is the
+        * ``loglik_trace`` has shape ``(M + 1,)`` (iteration 0 is the
           initial evaluation).
-        * ``log_prior_trace`` has shape ``(Nmcmc + 1,)``.
-        * ``theta_trace`` has shape ``(Nmcmc + 1, d)``.
+        * ``log_prior_trace`` has shape ``(M + 1,)``.
+        * ``theta_trace`` has shape ``(M + 1, d)``.
         * ``accepts`` is a scalar count of accepted proposals.
     """
     # 1. Prepare particle-filter evaluation function.
@@ -86,7 +86,7 @@ def _pmcmc_internal(
 
     # 4. Run the scan loop.
     final_carry, (ll_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step_fn, init_carry, jnp.arange(1, config.Nmcmc + 1, dtype=jnp.int32)
+        step_fn, init_carry, jnp.arange(1, config.M + 1, dtype=jnp.int32)
     )
     final_accepts = final_carry[4]
 

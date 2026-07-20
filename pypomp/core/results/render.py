@@ -449,9 +449,9 @@ def _print_mcmc_summary(result: "Result", n: int) -> None:
     print(f"Number of chains: {result.n_chains}")
     if result.method == "pmcmc":
         print(f"Number of particles (J): {result.config.get('J')}")
-        print(f"MCMC iterations (Nmcmc): {result.config.get('Nmcmc')}")
+        print(f"MCMC iterations (M): {result.config.get('M')}")
     else:
-        print(f"ABC iterations (Nabc): {result.config.get('Nabc')}")
+        print(f"ABC iterations (M): {result.config.get('M')}")
         print(f"Tolerance (epsilon): {result.config.get('epsilon')}")
 
     accepts = (

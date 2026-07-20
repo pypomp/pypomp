@@ -784,7 +784,7 @@ class PompEstimationMixin(Base):
     def pmcmc(
         self,
         J: int,
-        Nmcmc: int,
+        M: int,
         proposal,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
@@ -804,7 +804,7 @@ class PompEstimationMixin(Base):
         ----------
         J : int
             Number of particles per particle-filter likelihood evaluation.
-        Nmcmc : int
+        M : int
             Number of MCMC iterations per chain.
         proposal : Proposal
             Proposal object from :mod:`pypomp.proposals`.
@@ -833,8 +833,8 @@ class PompEstimationMixin(Base):
             raise ValueError("pmcmc requires self.dmeas to be not None.")
         if J < 1:
             raise ValueError("J must be >= 1.")
-        if Nmcmc < 1:
-            raise ValueError("Nmcmc must be >= 1.")
+        if M < 1:
+            raise ValueError("M must be >= 1.")
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
@@ -854,7 +854,7 @@ class PompEstimationMixin(Base):
             theta_array,
             proposal,
             log_prior,
-            Nmcmc,
+            M,
             J,
             thresh,
             keys,
@@ -874,7 +874,7 @@ class PompEstimationMixin(Base):
             dims=["theta_idx", "iteration", "variable"],
             coords={
                 "theta_idx": np.arange(n_chains),
-                "iteration": np.arange(Nmcmc + 1),
+                "iteration": np.arange(M + 1),
                 "variable": trace_vars,
             },
         )
@@ -895,7 +895,7 @@ class PompEstimationMixin(Base):
             key=old_key,
             theta=theta_obj_for_result,
             traces=traces_da,
-            Nmcmc=Nmcmc,
+            M=M,
             J=J,
             accepts=np.asarray(accepts, dtype=np.int32),
         )
@@ -903,7 +903,7 @@ class PompEstimationMixin(Base):
 
     def abc(
         self,
-        Nabc: int,
+        M: int,
         probes: dict[str, Callable],
         scale: dict[str, float],
         epsilon: float,
@@ -923,7 +923,7 @@ class PompEstimationMixin(Base):
 
         Parameters
         ----------
-        Nabc : int
+        M : int
             Number of ABC-MCMC iterations per chain.
         probes : dict
             Mapping from probe name to pure-JAX summary statistic.
@@ -953,8 +953,8 @@ class PompEstimationMixin(Base):
 
         if self.rmeas is None:
             raise ValueError("abc requires self.rmeas to be not None.")
-        if Nabc < 1:
-            raise ValueError("Nabc must be >= 1.")
+        if M < 1:
+            raise ValueError("M must be >= 1.")
         if epsilon <= 0:
             raise ValueError("epsilon must be positive.")
         if not probes:
@@ -999,7 +999,7 @@ class PompEstimationMixin(Base):
             scale_arr,
             float(epsilon),
             ydim,
-            Nabc,
+            M,
             keys,
         )
 
@@ -1021,7 +1021,7 @@ class PompEstimationMixin(Base):
             dims=["theta_idx", "iteration", "variable"],
             coords={
                 "theta_idx": np.arange(n_chains),
-                "iteration": np.arange(Nabc + 1),
+                "iteration": np.arange(M + 1),
                 "variable": trace_vars,
             },
         )
@@ -1042,7 +1042,7 @@ class PompEstimationMixin(Base):
             key=old_key,
             theta=theta_obj_for_result,
             traces=traces_da,
-            Nabc=Nabc,
+            M=M,
             epsilon=float(epsilon),
             accepts=np.asarray(accepts, dtype=np.int32),
         )

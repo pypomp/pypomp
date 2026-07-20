@@ -122,7 +122,7 @@ def build_pmcmc_result(
     execution_time: float | None,
     theta: Any,
     traces: xr.DataArray,
-    Nmcmc: int,
+    M: int,
     J: int,
     accepts: np.ndarray,
 ) -> Result:
@@ -133,7 +133,7 @@ def build_pmcmc_result(
         execution_time=execution_time,
         key=key,
         theta=theta,
-        config={"Nmcmc": Nmcmc, "J": J},
+        config={"M": M, "J": J},
         payload=_dataset(
             traces=traces,
             accepts=xr.DataArray(
@@ -149,7 +149,7 @@ def build_abc_result(
     execution_time: float | None,
     theta: Any,
     traces: xr.DataArray,
-    Nabc: int,
+    M: int,
     epsilon: float,
     accepts: np.ndarray,
 ) -> Result:
@@ -160,7 +160,7 @@ def build_abc_result(
         execution_time=execution_time,
         key=key,
         theta=theta,
-        config={"Nabc": Nabc, "epsilon": float(epsilon)},
+        config={"M": M, "epsilon": float(epsilon)},
         payload=_dataset(
             traces=traces,
             accepts=xr.DataArray(

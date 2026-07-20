@@ -123,7 +123,7 @@ class Result:
     @property
     def acceptance_rate(self) -> np.ndarray:
         """Per-chain acceptance rate for MCMC-family results."""
-        denom = self.config.get("Nmcmc") or self.config.get("Nabc")
+        denom = self.config.get("M")
         accepts = self.payload["accepts"].values if "accepts" in self.payload else None
         if accepts is None:
             return np.zeros(0, dtype=float)

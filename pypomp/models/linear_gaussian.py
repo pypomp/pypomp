@@ -98,7 +98,8 @@ def _rmeas(
 ):
     A, C, Q, R = _get_thetas(theta_)
     X_array = jnp.array([X_["X1"], X_["X2"]])
-    return jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
+    res = jax.random.multivariate_normal(key=key, mean=C @ X_array, cov=R)
+    return {"Y1": res[0], "Y2": res[1]}
 
 
 def _to_est(theta: ParamDict) -> ParamDict:

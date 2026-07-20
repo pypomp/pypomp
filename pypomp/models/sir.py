@@ -259,7 +259,7 @@ def rmeas(X_, theta_, key, covars=None, t=None):
 
     reports = fast_nbinomial(key, n=size, mu=mu)
 
-    return jnp.array([reports], dtype=float)
+    return {"reports": reports}
 
 
 def sir(

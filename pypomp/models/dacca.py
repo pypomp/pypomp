@@ -374,7 +374,7 @@ def _rmeas(
     deaths = X_["Mn"]
     tau = theta_["tau"]
     v = tau * deaths
-    return jax.random.normal(key) * v + deaths
+    return {"deaths": jax.random.normal(key) * v + deaths}
 
 
 def _to_est(theta: ParamDict) -> ParamDict:

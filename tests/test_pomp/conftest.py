@@ -8,7 +8,6 @@ the same two-level pattern used in test_pomp_mif.py / test_pomp_pfilter.py.
 from copy import deepcopy
 
 import jax
-import jax.numpy as jnp
 import pandas as pd
 import pytest
 
@@ -58,7 +57,7 @@ def _build_static_normal_pomp():
         )
 
     def rmeas(X_, theta_, key, covars, t):
-        return jnp.array([theta_["mu"] + theta_["sigma"] * jax.random.normal(key, ())])
+        return {"Y": theta_["mu"] + theta_["sigma"] * jax.random.normal(key, ())}
 
     return pp.Pomp(
         ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
@@ -106,7 +105,7 @@ def _build_deterministic_measurement_pomp():
         return {"X": X_["X"]}
 
     def rmeas(X_, theta_, key, covars, t):
-        return jnp.array([theta_["mu"]])
+        return {"Y": theta_["mu"]}
 
     return pp.Pomp(
         ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),

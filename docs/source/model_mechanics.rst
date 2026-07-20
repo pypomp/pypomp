@@ -127,8 +127,8 @@ You can define the function arguments in two ways:
 Measurement Simulator (rmeas)
 -----------------------------
 
-The ``rmeas`` function simulates a single observation vector from the current state.
-It must return a 1D **JAX Array** (not a dictionary).
+The ``rmeas`` function simulates a single observation from the current state.
+It must return a **dictionary** mapping observation names to their simulated values.
 
 **Argument Binding:**
 You can define the function arguments in two ways:
@@ -150,12 +150,12 @@ You can define the function arguments in two ways:
         key: RNGKey,
         covars: CovarDict,
         t: TimeFloat
-    ) -> jax.Array:
+    ) -> dict:
         """
-        Returns simulated data array of shape (ydim,).
+        Returns simulated observation dictionary.
         """
         mu = state['I'] * params['rho']
         sim_cases = fast_poisson(key, mu)
 
-        # Return array, e.g., [cases, deaths]
-        return jnp.array([sim_cases])
+        # Return dict mapping observation names to simulated values
+        return {'cases': sim_cases}

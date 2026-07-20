@@ -243,7 +243,7 @@ def make_lgm_pomp(ys, a, sigma_x, sigma_y):
 
     def rmeas(X_, theta_, key, covars, t):
         val = jax.random.normal(key) * theta_["sigma_y"] + X_["X"]
-        return jnp.array([val])
+        return {"Y": val}
 
     def to_est(theta: dict[str, float | jax.Array]) -> dict[str, float | jax.Array]:
         # Constrain a in (0, 1) using logit, and sigmas > 0 using log

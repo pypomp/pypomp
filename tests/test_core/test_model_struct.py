@@ -105,11 +105,11 @@ def test_DMeas_value_error():
 def test_RMeas_value_error():
     # Test that an error is thrown with incorrect arguments
     bad_lambdas = [
-        lambda foo, theta_, key, covars, t: jnp.array([0]),
-        lambda X_, foo, key, covars, t: jnp.array([0]),
-        lambda X_, theta_, foo, covars, t: jnp.array([0]),
-        lambda X_, theta_, key, foo, t: jnp.array([0]),
-        lambda X_, theta_, key, covars, foo: jnp.array([0]),
+        lambda foo, theta_, key, covars, t: {"y_0": 0},
+        lambda X_, foo, key, covars, t: {"y_0": 0},
+        lambda X_, theta_, foo, covars, t: {"y_0": 0},
+        lambda X_, theta_, key, foo, t: {"y_0": 0},
+        lambda X_, theta_, key, covars, foo: {"y_0": 0},
     ]
     for fn in bad_lambdas:
         with pytest.raises(ValueError):
@@ -123,7 +123,7 @@ def test_RMeas_value_error():
             )
     # Test that correct arguments run without error
     _RMeas(
-        lambda X_, theta_, key, covars, t: jnp.array([0]),
+        lambda X_, theta_, key, covars, t: {"y_0": 0},
         y_names=["y_0"],
         statenames=["state_0"],
         param_names=["param_0"],
@@ -226,7 +226,7 @@ def test_RMeas_type_annotations():
         env: CovarDict,
         t: TimeFloat,
     ):  # type: ignore
-        return jnp.array([pop["state_0"] * p["param_0"]])  # type: ignore
+        return {"y_0": pop["state_0"] * p["param_0"]}  # type: ignore
 
     rmeas = _RMeas(
         custom_rmeas,  # type: ignore
@@ -251,7 +251,7 @@ COMPONENT_SPECS = [
     (_RInit, lambda theta_, key, covars, t0: {"state_0": theta_["param_0"]}),
     (_RProc, lambda X_, theta_, key, covars, t, dt: {"state_0": X_["state_0"]}),
     (_DMeas, lambda Y_, X_, theta_, covars, t: 0.0),
-    (_RMeas, lambda X_, theta_, key, covars, t: jnp.array([0])),
+    (_RMeas, lambda X_, theta_, key, covars, t: {"y_0": 0}),
 ]
 
 
@@ -736,8 +736,8 @@ def test_validate_call_exception_wrapping():
         )
 
 
-def test_rmeas_validate_output_non_array():
-    with pytest.raises(TypeError, match="rmeas function must return a JAX array"):
+def test_rmeas_validate_output_non_dict():
+    with pytest.raises(TypeError, match="rmeas function must return a dict"):
         _RMeas(
             lambda X_, theta_, key, covars, t: [1.0],  # type: ignore
             y_names=["y_0"],
@@ -748,25 +748,12 @@ def test_rmeas_validate_output_non_array():
         )
 
 
-def test_rmeas_validate_output_scalar_jax_array():
-    # When ydim is 1, a 0-d array is acceptable
-    rmeas = _RMeas(
-        lambda X_, theta_, key, covars, t: jnp.array(1.0),
-        y_names=["y_0"],
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        par_trans=pp.ParTrans(),
-    )
-    assert rmeas is not None
-
-
-def test_rmeas_validate_output_mismatched_shape():
+def test_rmeas_validate_output_missing_keys():
     with pytest.raises(
-        ValueError, match="rmeas function output shape.*does not match ydim"
+        ValueError, match="rmeas function output missing observation keys"
     ):
         _RMeas(
-            lambda X_, theta_, key, covars, t: jnp.array([1.0, 2.0]),
+            lambda X_, theta_, key, covars, t: {"y_1": 1.0},
             y_names=["y_0"],
             statenames=["state_0"],
             param_names=["param_0"],

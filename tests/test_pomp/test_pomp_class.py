@@ -330,7 +330,7 @@ def dummy_dmeas(Y_, X_, theta_, covars, t):
 
 
 def dummy_rmeas(X_, theta_, key, covars, t):
-    return jnp.array([X_["X"] + 0.1 * jax.random.normal(key, ())], dtype=float)
+    return {"y": X_["X"] + 0.1 * jax.random.normal(key, ())}
 
 
 @pytest.fixture

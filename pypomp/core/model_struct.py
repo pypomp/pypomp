@@ -548,8 +548,8 @@ class _RMeas(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function simulates a single observation vector from the current state.
-    **Output:** Must return a 1D **JAX Array** (not a dictionary).
+    The `struct` function simulates observations from the current state.
+    **Output:** Must return a **dictionary** mapping observation names to their simulated values.
 
     **Argument Binding:** You can define the function arguments in two ways:
 
@@ -570,15 +570,15 @@ class _RMeas(_ModelComponent):
             key: RNGKey,
             covars: CovarDict,
             t: TimeFloat
-        ) -> jax.Array:
+        ) -> dict:
             \"\"\"
-            Returns simulated data array of shape (ydim,).
+            Returns simulated observation dictionary.
             \"\"\"
             mu = state['I'] * params['rho']
             sim_cases = fast_poisson(key, mu)
 
-            # Return array, e.g., [cases, deaths]
-            return jnp.array([sim_cases])
+            # Return dictionary of simulated observations
+            return {'cases': sim_cases}
     """
 
     internal_names = ["X_", "theta_", "key", "covars", "t"]
@@ -608,22 +608,21 @@ class _RMeas(_ModelComponent):
         )
 
     def _validate_output(self, result):
-        if not hasattr(result, "shape"):
-            raise TypeError(
-                f"rmeas function must return a JAX array, got {type(result)}"
-            )
-
-        if self.ydim == 1 and result.shape == ():
-            return
-
-        if result.shape != (self.ydim,):
+        if not isinstance(result, dict):
+            raise TypeError(f"rmeas function must return a dict, got {type(result)}")
+        missing = set(self.y_names) - set(result.keys())
+        if missing:
             raise ValueError(
-                f"rmeas function output shape {result.shape} does not match ydim {self.ydim} "
-                f"(derived from y_names={self.y_names})."
+                f"rmeas function output missing observation keys: {missing}"
             )
 
     def _make_wrapper(self, user_func):
-        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
+        pnames, snames, cnames, ynames = (
+            self.param_names,
+            self.statenames,
+            self.covar_names,
+            self.y_names,
+        )
         mapping, trans = self.name_mapping, self.par_trans
 
         def wrapped(X_arr, theta_arr, key, covars, t, should_trans):
@@ -633,7 +632,7 @@ class _RMeas(_ModelComponent):
                 theta_dict = trans.from_est(theta_dict)
             covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
 
-            return user_func(
+            res = user_func(
                 **{
                     mapping["X_"]: X_dict,
                     mapping["theta_"]: theta_dict,
@@ -642,6 +641,7 @@ class _RMeas(_ModelComponent):
                     mapping["t"]: t,
                 }
             )
+            return jnp.array([res[n] for n in ynames]).reshape(-1)
 
         return wrapped
 

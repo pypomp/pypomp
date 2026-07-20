@@ -277,7 +277,7 @@ def rmeas(
 
     cases = jax.random.normal(key) * (jnp.sqrt(softclamp(v)) + tol) + m
 
-    return softclamp(cases)
+    return {"cases": softclamp(cases)}
 
 
 def to_est(theta: ParamDict) -> ParamDict:

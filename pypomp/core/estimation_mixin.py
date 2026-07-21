@@ -25,7 +25,7 @@ from .results import (
     build_pmcmc_result,
     build_abc_result,
 )
-from pypomp.proposals import Proposal, _expand_proposal
+from pypomp.proposals import Proposal
 from .parameters import PompParameters
 
 from typing import TYPE_CHECKING
@@ -845,7 +845,7 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        proposal = _expand_proposal(proposal, canonical_names)
+        proposal = proposal.canonicalize(canonical_names)
         log_prior = dprior if dprior is not None else _flat_dprior
         keys = jax.random.split(new_key, n_chains)
 
@@ -974,7 +974,7 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        proposal = _expand_proposal(proposal, canonical_names)
+        proposal = proposal.canonicalize(canonical_names)
         log_prior = dprior if dprior is not None else _flat_dprior
 
         probe_names = sorted(probes.keys())

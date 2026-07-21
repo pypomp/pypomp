@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -5,8 +6,7 @@ from typing import Union, Mapping
 
 
 class LearningRate:
-    """
-    Represent the learning rate schedule for model parameters during training.
+    """Represent the learning rate schedule for model parameters during training.
 
     This class encapsulates learning rate values for each parameter, which can be
     either constant values or time-varying schedules (1D arrays of length M).
@@ -138,7 +138,7 @@ class LearningRate:
 
         return LearningRate(new_rates)
 
-    def geometric_decay(self, decay_rate: float, M: int) -> "LearningRate":
+    def geometric_decay(self, decay_rate: float, M: int) -> LearningRate:
         """Apply a geometric decay schedule.
 
         The rate at step ``t`` is ``eta_t = eta_0 * (decay_rate ^ t)``.
@@ -171,10 +171,9 @@ class LearningRate:
                         f"Cannot apply geometric decay of length {M} to schedule of length {val.size} for '{name}'"
                     )
                 new_rates[name] = val * factor
-
         return LearningRate(new_rates)
 
-    def linear_decay(self, final_factor: float, M: int) -> "LearningRate":
+    def linear_decay(self, final_factor: float, M: int) -> LearningRate:
         """Apply a linear decay schedule.
 
         Linearly interpolates learning rates from their initial values down to
@@ -208,7 +207,6 @@ class LearningRate:
                         f"Cannot apply linear decay of length {M} to schedule of length {val.size} for '{name}'"
                     )
                 new_rates[name] = val * factor
-
         return LearningRate(new_rates)
 
     def __eq__(self, other) -> bool:

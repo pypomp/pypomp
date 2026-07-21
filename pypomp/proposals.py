@@ -2,13 +2,15 @@
 JIT-compatible MCMC proposal distributions for use with PMCMC and ABC.
 
 Each proposal is a frozen dataclass registered as a JAX PyTree so it can flow
-through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose two methods:
+through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose three methods:
 
 * ``init_state(theta_arr)`` returns the initial scan-carried state (a PyTree).
   For stateless proposals this is an empty container.
 * ``step(state, theta_arr, key, n, accepts)`` is a pure JAX function that
   returns ``(theta_proposed, new_state)``.  All inputs/outputs are
   ``jax.Array``; no Python branching on traced values.
+* ``canonicalize(canonical_names)`` returns a new proposal instance expanded
+  and reordered to match the model's full canonical parameter vector.
 
 Three proposals are provided, following pomp (R):
 
@@ -23,7 +25,7 @@ mirror the previous API and return the corresponding dataclass instance.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, cast, Protocol, Any
+from typing import Sequence, Protocol, Any
 
 import jax
 import jax.numpy as jnp
@@ -33,7 +35,9 @@ import numpy as np
 class Proposal(Protocol):
     """Protocol defining the interface for MCMC proposal distributions."""
 
-    def init_state(self, theta_arr: jax.Array) -> Any: ...
+    def init_state(self, theta_arr: jax.Array) -> Any:
+        """Initialize carried state for MCMC scan loop."""
+        ...
 
     def step(
         self,
@@ -42,7 +46,13 @@ class Proposal(Protocol):
         key: jax.Array,
         n: jax.Array | int,
         accepts: jax.Array | int,
-    ) -> tuple[jax.Array, Any]: ...
+    ) -> tuple[jax.Array, Any]:
+        """Generate a proposed parameter vector and updated state."""
+        ...
+
+    def canonicalize(self, canonical_names: Sequence[str]) -> Proposal:
+        """Canonicalize proposal to match full model parameter vector."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -56,17 +66,36 @@ class MVNDiagRW:
 
     Attributes
     ----------
-    sd_arr : jax.Array
+    sd_arr : np.ndarray
         ``(d,)`` array of per-parameter random-walk standard
         deviations, in the order given by ``param_names``.
     param_names : tuple of str
         Tuple of parameter names corresponding to ``sd_arr``.
     """
 
-    sd_arr: jax.Array
+    sd_arr: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
 
+    @classmethod
+    def from_dict(cls, rw_sd: dict[str, float]) -> MVNDiagRW:
+        """Construct a diagonal multivariate normal random-walk proposal.
+
+        Args:
+            rw_sd: Dictionary mapping parameter names to random-walk standard
+                deviations.  Parameters with ``sd <= 0`` are silently dropped.
+
+        Returns:
+            :class:`MVNDiagRW` instance.
+        """
+        rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
+        if not rw_sd:
+            raise ValueError("rw_sd must contain at least one positive entry.")
+        param_names = tuple(rw_sd.keys())
+        sd_arr = np.asarray([rw_sd[p] for p in param_names])
+        return cls(sd_arr=sd_arr, param_names=param_names)
+
     def init_state(self, theta_arr: jax.Array) -> tuple:
+        """Initialize carried state (empty tuple for stateless proposal)."""
         return ()
 
     def step(
@@ -77,8 +106,21 @@ class MVNDiagRW:
         n: jax.Array | int,
         accepts: jax.Array | int,
     ) -> tuple[jax.Array, tuple]:
+        """Propose parameters via diagonal multivariate normal random walk."""
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + z * self.sd_arr, state
+
+    def canonicalize(self, canonical_names: Sequence[str]) -> MVNDiagRW:
+        """Expand and reorder standard deviations to match canonical parameter names."""
+        names = tuple(canonical_names)
+        d = len(names)
+        name_to_idx = {n: i for i, n in enumerate(names)}
+        full_sd = np.zeros(d)
+        for i_local, p in enumerate(self.param_names):
+            if p not in name_to_idx:
+                raise ValueError(f"Proposal parameter {p!r} not in model.")
+            full_sd[name_to_idx[p]] = self.sd_arr[i_local]
+        return MVNDiagRW(sd_arr=full_sd, param_names=names)
 
 
 jax.tree_util.register_pytree_node(
@@ -94,7 +136,7 @@ class MVNRWFull:
 
     Attributes
     ----------
-    chol : jax.Array
+    chol : np.ndarray
         ``(d, d)`` lower-triangular Cholesky factor of the proposal
         covariance.
     param_names : tuple of str
@@ -102,10 +144,32 @@ class MVNRWFull:
         of the covariance.
     """
 
-    chol: jax.Array
+    chol: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
 
+    @classmethod
+    def from_cov(cls, rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
+        """Construct a full-covariance multivariate normal random-walk proposal.
+
+        Args:
+            rw_var: Symmetric positive-definite covariance matrix of shape
+                ``(d, d)`` where ``d = len(param_names)``.
+            param_names: Parameter names corresponding to the rows/columns of
+                ``rw_var``.
+
+        Returns:
+            :class:`MVNRWFull` instance.
+        """
+        rw_var = np.asarray(rw_var, dtype=float)
+        if rw_var.ndim != 2 or rw_var.shape[0] != rw_var.shape[1]:
+            raise ValueError("rw_var must be a square matrix.")
+        if rw_var.shape[0] != len(param_names):
+            raise ValueError("rw_var dimensions must match len(param_names).")
+        chol = np.linalg.cholesky(rw_var)
+        return cls(chol=chol, param_names=tuple(param_names))
+
     def init_state(self, theta_arr: jax.Array) -> tuple:
+        """Initialize carried state (empty tuple for stateless proposal)."""
         return ()
 
     def step(
@@ -116,8 +180,26 @@ class MVNRWFull:
         n: jax.Array | int,
         accepts: jax.Array | int,
     ) -> tuple[jax.Array, tuple]:
+        """Propose parameters via full-covariance multivariate normal random walk."""
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + self.chol @ z, state
+
+    def canonicalize(self, canonical_names: Sequence[str]) -> MVNRWFull:
+        """Expand and reorder Cholesky factor to match canonical parameter names."""
+        names = tuple(canonical_names)
+        d = len(names)
+        name_to_idx = {n: i for i, n in enumerate(names)}
+        full_chol = np.zeros((d, d))
+        for i_local, p_i in enumerate(self.param_names):
+            if p_i not in name_to_idx:
+                raise ValueError(f"Proposal parameter {p_i!r} not in model.")
+            i_global = name_to_idx[p_i]
+            for j_local, p_j in enumerate(self.param_names):
+                if p_j not in name_to_idx:
+                    raise ValueError(f"Proposal parameter {p_j!r} not in model.")
+                j_global = name_to_idx[p_j]
+                full_chol[i_global, j_global] = self.chol[i_local, j_local]
+        return MVNRWFull(chol=full_chol, param_names=names)
 
 
 jax.tree_util.register_pytree_node(
@@ -197,7 +279,7 @@ class MVNRWAdaptive:
         Upper bound for the scaling factor.
     """
 
-    init_rw_var: jax.Array
+    init_rw_var: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
     scale_start: int = 200
     scale_cooling: float = 0.999
@@ -205,7 +287,82 @@ class MVNRWAdaptive:
     target: float = 0.234
     max_scaling: float = 50.0
 
+    @classmethod
+    def from_params(
+        cls,
+        rw_sd: dict[str, float] | None = None,
+        rw_var: np.ndarray | None = None,
+        param_names: list[str] | None = None,
+        scale_start: int = 200,
+        scale_cooling: float = 0.999,
+        shape_start: int = 200,
+        target: float = 0.234,
+        max_scaling: float = 50.0,
+    ) -> MVNRWAdaptive:
+        """Construct an adaptive MVN random-walk proposal (Roberts & Rosenthal 2009).
+
+        Provide exactly one of ``rw_sd`` (diagonal initialisation) or ``rw_var``
+        (full initial covariance).
+
+        Parameters
+        ----------
+        rw_sd : dict, optional
+            Named dict of per-parameter random-walk SDs.
+        rw_var : array_like, optional
+            Full initial covariance matrix.
+        param_names : list of str, optional
+            Required when ``rw_var`` is supplied.
+        scale_start : int, default 200
+            Iteration at which to begin scale adaptation.
+        scale_cooling : float, default 0.999
+            Cooling base for the scale update (in (0, 1]).
+        shape_start : int, default 200
+            Number of accepted proposals before switching to empirical covariance.
+        target : float, default 0.234
+            Target Metropolis acceptance ratio.
+        max_scaling : float, default 50.0
+            Upper bound for the scaling factor.
+
+        Returns
+        -------
+        MVNRWAdaptive
+            A :class:`MVNRWAdaptive` instance.
+        """
+        if (rw_sd is None) == (rw_var is None):
+            raise ValueError("Exactly one of rw_sd and rw_var must be given.")
+        if rw_sd is not None:
+            rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
+            names = tuple(rw_sd.keys())
+            init_var = np.diag([rw_sd[p] ** 2 for p in names])
+        else:
+            if param_names is None:
+                raise ValueError("param_names required when rw_var is given.")
+            init_var = np.asarray(rw_var, dtype=float)
+            if init_var.shape != (len(param_names), len(param_names)):
+                raise ValueError("rw_var shape must match param_names.")
+            names = tuple(param_names)
+
+        if scale_start < 1:
+            raise ValueError("scale_start must be a positive integer.")
+        if not (0 < scale_cooling <= 1):
+            raise ValueError("scale_cooling must be in (0, 1].")
+        if shape_start < 1:
+            raise ValueError("shape_start must be a positive integer.")
+        if not (0 < target < 1):
+            raise ValueError("target must be in (0, 1).")
+
+        return cls(
+            init_rw_var=np.asarray(init_var),
+            param_names=names,
+            scale_start=int(scale_start),
+            scale_cooling=float(scale_cooling),
+            shape_start=int(shape_start),
+            target=float(target),
+            max_scaling=float(max_scaling),
+        )
+
     def init_state(self, theta_arr: jax.Array) -> AdaptiveState:
+        """Initialize adaptive state tracking running mean, empirical covariance, and scale."""
         d = theta_arr.shape[-1]
         dt = theta_arr.dtype
         return AdaptiveState(
@@ -223,6 +380,7 @@ class MVNRWAdaptive:
         n: jax.Array | int,
         accepts: jax.Array | int,
     ) -> tuple[jax.Array, AdaptiveState]:
+        """Propose parameters and update adaptive state (Roberts & Rosenthal 2009)."""
         d = theta_arr.shape[-1]
         dt = theta_arr.dtype
         n_arr = jnp.asarray(n, dtype=dt)
@@ -276,6 +434,31 @@ class MVNRWAdaptive:
         )
         return theta_proposed, new_state
 
+    def canonicalize(self, canonical_names: Sequence[str]) -> MVNRWAdaptive:
+        """Expand and reorder initial covariance matrix to match canonical parameter names."""
+        names = tuple(canonical_names)
+        d = len(names)
+        name_to_idx = {n: i for i, n in enumerate(names)}
+        full_var = np.zeros((d, d))
+        for i_local, p_i in enumerate(self.param_names):
+            if p_i not in name_to_idx:
+                raise ValueError(f"Proposal parameter {p_i!r} not in model.")
+            i_global = name_to_idx[p_i]
+            for j_local, p_j in enumerate(self.param_names):
+                if p_j not in name_to_idx:
+                    raise ValueError(f"Proposal parameter {p_j!r} not in model.")
+                j_global = name_to_idx[p_j]
+                full_var[i_global, j_global] = self.init_rw_var[i_local, j_local]
+        return MVNRWAdaptive(
+            init_rw_var=full_var,
+            param_names=names,
+            scale_start=self.scale_start,
+            scale_cooling=self.scale_cooling,
+            shape_start=self.shape_start,
+            target=self.target,
+            max_scaling=self.max_scaling,
+        )
+
 
 jax.tree_util.register_pytree_node(
     MVNRWAdaptive,
@@ -300,186 +483,3 @@ jax.tree_util.register_pytree_node(
         max_scaling=aux[5],
     ),
 )
-
-
-# ---------------------------------------------------------------------------
-# Constructors (back-compat API)
-# ---------------------------------------------------------------------------
-
-
-def mvn_diag_rw(rw_sd: dict[str, float]) -> MVNDiagRW:
-    """Construct a diagonal multivariate normal random-walk proposal.
-
-    Args:
-        rw_sd: Dictionary mapping parameter names to random-walk standard
-            deviations.  Parameters with ``sd <= 0`` are silently dropped.
-
-    Returns:
-        :class:`MVNDiagRW` instance.
-    """
-    rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
-    if not rw_sd:
-        raise ValueError("rw_sd must contain at least one positive entry.")
-    param_names = tuple(rw_sd.keys())
-    sd_arr = jnp.asarray([rw_sd[p] for p in param_names])
-    return MVNDiagRW(sd_arr=sd_arr, param_names=param_names)
-
-
-def mvn_rw(rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
-    """Construct a full-covariance multivariate normal random-walk proposal.
-
-    Args:
-        rw_var: Symmetric positive-definite covariance matrix of shape
-            ``(d, d)`` where ``d = len(param_names)``.
-        param_names: Parameter names corresponding to the rows/columns of
-            ``rw_var``.
-
-    Returns:
-        :class:`MVNRWFull` instance.
-    """
-    rw_var = np.asarray(rw_var, dtype=float)
-    if rw_var.ndim != 2 or rw_var.shape[0] != rw_var.shape[1]:
-        raise ValueError("rw_var must be a square matrix.")
-    if rw_var.shape[0] != len(param_names):
-        raise ValueError("rw_var dimensions must match len(param_names).")
-    chol = jnp.asarray(np.linalg.cholesky(rw_var))
-    return MVNRWFull(chol=chol, param_names=tuple(param_names))
-
-
-def _expand_proposal(proposal: Proposal, canonical_names: Sequence[str]) -> Proposal:
-    """Expand a proposal that may cover only a subset of model parameters
-    so that it operates on the full canonical parameter vector.
-
-    Parameters of the original proposal are placed at their canonical indices;
-    parameters absent from the proposal receive zero variance.  The returned
-    proposal is of the same type as the input.
-    """
-    names = tuple(canonical_names)
-    d = len(names)
-    name_to_idx = {n: i for i, n in enumerate(names)}
-
-    if isinstance(proposal, MVNDiagRW):
-        full_sd = jnp.zeros(d)
-        for i_local, p in enumerate(proposal.param_names):
-            if p not in name_to_idx:
-                raise ValueError(f"Proposal parameter {p!r} not in model.")
-            full_sd = full_sd.at[name_to_idx[p]].set(proposal.sd_arr[i_local])
-        return cast(Proposal, MVNDiagRW(sd_arr=full_sd, param_names=names))
-
-    if isinstance(proposal, MVNRWFull):
-        # Embed the Cholesky factor directly so non-proposed parameters have
-        # exactly zero perturbation rather than tiny jitter-induced movement.
-        full_chol = jnp.zeros((d, d))
-        for i_local, p_i in enumerate(proposal.param_names):
-            if p_i not in name_to_idx:
-                raise ValueError(f"Proposal parameter {p_i!r} not in model.")
-            i_global = name_to_idx[p_i]
-            for j_local, p_j in enumerate(proposal.param_names):
-                if p_j not in name_to_idx:
-                    raise ValueError(f"Proposal parameter {p_j!r} not in model.")
-                j_global = name_to_idx[p_j]
-                full_chol = full_chol.at[i_global, j_global].set(
-                    proposal.chol[i_local, j_local]
-                )
-        return cast(Proposal, MVNRWFull(chol=full_chol, param_names=names))
-
-    if isinstance(proposal, MVNRWAdaptive):
-        full_var = jnp.zeros((d, d))
-        for i_local, p_i in enumerate(proposal.param_names):
-            if p_i not in name_to_idx:
-                raise ValueError(f"Proposal parameter {p_i!r} not in model.")
-            i_global = name_to_idx[p_i]
-            for j_local, p_j in enumerate(proposal.param_names):
-                if p_j not in name_to_idx:
-                    raise ValueError(f"Proposal parameter {p_j!r} not in model.")
-                j_global = name_to_idx[p_j]
-                full_var = full_var.at[i_global, j_global].set(
-                    proposal.init_rw_var[i_local, j_local]
-                )
-        return cast(
-            Proposal,
-            MVNRWAdaptive(
-                init_rw_var=full_var,
-                param_names=names,
-                scale_start=proposal.scale_start,
-                scale_cooling=proposal.scale_cooling,
-                shape_start=proposal.shape_start,
-                target=proposal.target,
-                max_scaling=proposal.max_scaling,
-            ),
-        )
-
-    raise TypeError(f"Unsupported proposal type: {type(proposal).__name__}")
-
-
-def mvn_rw_adaptive(
-    rw_sd: dict[str, float] | None = None,
-    rw_var: np.ndarray | None = None,
-    param_names: list[str] | None = None,
-    scale_start: int = 200,
-    scale_cooling: float = 0.999,
-    shape_start: int = 200,
-    target: float = 0.234,
-    max_scaling: float = 50.0,
-) -> MVNRWAdaptive:
-    """Construct an adaptive MVN random-walk proposal (Roberts & Rosenthal 2009).
-
-    Provide exactly one of ``rw_sd`` (diagonal initialisation) or ``rw_var``
-    (full initial covariance).
-
-    Parameters
-    ----------
-    rw_sd : dict, optional
-        Named dict of per-parameter random-walk SDs.
-    rw_var : array_like, optional
-        Full initial covariance matrix.
-    param_names : list of str, optional
-        Required when ``rw_var`` is supplied.
-    scale_start : int, default 200
-        Iteration at which to begin scale adaptation.
-    scale_cooling : float, default 0.999
-        Cooling base for the scale update (in (0, 1]).
-    shape_start : int, default 200
-        Number of accepted proposals before switching to empirical covariance.
-    target : float, default 0.234
-        Target Metropolis acceptance ratio.
-    max_scaling : float, default 50.0
-        Upper bound for the scaling factor.
-
-    Returns
-    -------
-    MVNRWAdaptive
-        A :class:`MVNRWAdaptive` instance.
-    """
-    if (rw_sd is None) == (rw_var is None):
-        raise ValueError("Exactly one of rw_sd and rw_var must be given.")
-    if rw_sd is not None:
-        rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
-        names = tuple(rw_sd.keys())
-        init_var = np.diag([rw_sd[p] ** 2 for p in names])
-    else:
-        if param_names is None:
-            raise ValueError("param_names required when rw_var is given.")
-        init_var = np.asarray(rw_var, dtype=float)
-        if init_var.shape != (len(param_names), len(param_names)):
-            raise ValueError("rw_var shape must match param_names.")
-        names = tuple(param_names)
-
-    if scale_start < 1:
-        raise ValueError("scale_start must be a positive integer.")
-    if not (0 < scale_cooling <= 1):
-        raise ValueError("scale_cooling must be in (0, 1].")
-    if shape_start < 1:
-        raise ValueError("shape_start must be a positive integer.")
-    if not (0 < target < 1):
-        raise ValueError("target must be in (0, 1).")
-
-    return MVNRWAdaptive(
-        init_rw_var=jnp.asarray(init_var),
-        param_names=names,
-        scale_start=int(scale_start),
-        scale_cooling=float(scale_cooling),
-        shape_start=int(shape_start),
-        target=float(target),
-        max_scaling=float(max_scaling),
-    )

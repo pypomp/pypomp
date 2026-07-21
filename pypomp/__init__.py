@@ -43,9 +43,6 @@ from .proposals import (
     MVNDiagRW,
     MVNRWFull,
     MVNRWAdaptive,
-    mvn_diag_rw,
-    mvn_rw,
-    mvn_rw_adaptive,
 )
 
 from . import random, models, benchmarks, types, maths, functional
@@ -84,9 +81,6 @@ __all__ = [
     "MVNDiagRW",
     "MVNRWFull",
     "MVNRWAdaptive",
-    "mvn_diag_rw",
-    "mvn_rw",
-    "mvn_rw_adaptive",
     # Submodules
     "benchmarks",
     "models",

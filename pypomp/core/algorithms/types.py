@@ -4,6 +4,7 @@ from typing import Callable, Any
 import jax
 from jax.tree_util import register_dataclass
 from ...functional.structs import PompStruct, PanelPompStruct
+from ..rw_sigma import RWSigma
 
 # ----MOP---------------------------------------
 
@@ -447,7 +448,6 @@ class MifConfig:
     rinitializer_pf: Callable
     rprocess_pf: Callable
     dmeasure_pf: Callable
-    cooling_fn: Callable
     accumvars: tuple[int, ...] | None
     thresh: float
     n_monitors: int
@@ -474,7 +474,6 @@ class MifConfig:
         struct: PompStruct,
         J: int,
         M: int,
-        cooling_fn: Callable,
         thresh: float = 0.0,
         n_monitors: int = 0,
         return_ancestry: bool = False,
@@ -492,7 +491,6 @@ class MifConfig:
             rinitializer_pf=struct.rinit_pf,
             rprocess_pf=struct.rproc_pf,
             dmeasure_pf=struct.dmeas_pf,
-            cooling_fn=cooling_fn,
             accumvars=struct.accumvars,
             thresh=thresh,
             n_monitors=n_monitors,
@@ -508,8 +506,7 @@ class MifInputs:
     nstep_array: jax.Array
     t0: float
     times: jax.Array
-    sigmas: float | jax.Array
-    sigmas_init: float | jax.Array
+    rw_sigma: RWSigma
     covars_extended: jax.Array | None
 
     def to_pfilter_inputs(self) -> PfilterInputs:
@@ -526,8 +523,7 @@ class MifInputs:
     def from_mif_struct(
         cls,
         struct: PompStruct,
-        sigmas: float | jax.Array,
-        sigmas_init: float | jax.Array,
+        rw_sigma: RWSigma,
     ) -> MifInputs:
         return cls(
             ys=struct.ys,
@@ -535,8 +531,7 @@ class MifInputs:
             nstep_array=struct.nstep_array,
             t0=struct.t0,
             times=struct.times.astype(float),
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
+            rw_sigma=rw_sigma,
             covars_extended=struct.covars_extended,
         )
 
@@ -553,7 +548,6 @@ class PanelMifConfig:
     rinitializer_pf: Callable
     rprocess_pf: Callable
     dmeasure_pf: Callable
-    cooling_fn: Callable
     accumvars: tuple[int, ...] | None
     thresh: float
     n_monitors: int
@@ -584,7 +578,6 @@ class PanelMifConfig:
             rinitializer_pf=self.rinitializer_pf,
             rprocess_pf=self.rprocess_pf,
             dmeasure_pf=self.dmeasure_pf,
-            cooling_fn=self.cooling_fn,
             accumvars=self.accumvars,
             thresh=self.thresh,
             n_monitors=self.n_monitors,
@@ -598,7 +591,6 @@ class PanelMifConfig:
         J: int,
         M: int,
         U: int,
-        cooling_fn: Callable,
         thresh: float = 0.0,
         n_monitors: int = 0,
         block: bool = True,
@@ -617,7 +609,6 @@ class PanelMifConfig:
             rinitializer_pf=struct.rinit_pf,
             rprocess_pf=struct.rproc_pf,
             dmeasure_pf=struct.dmeas_pf,
-            cooling_fn=cooling_fn,
             accumvars=struct.accumvars,
             thresh=thresh,
             n_monitors=n_monitors,
@@ -633,16 +624,14 @@ class PanelMifInputs:
     nstep_array: jax.Array
     t0: float
     times: jax.Array
-    sigmas: jax.Array
-    sigmas_init: jax.Array
+    rw_sigma: RWSigma
     covars_extended: jax.Array | None
     unit_param_permutations: jax.Array
 
     def to_mif_inputs(
         self,
         ys_u: jax.Array,
-        sigmas_u: jax.Array,
-        sigmas_init_u: jax.Array,
+        rw_sigma_u: RWSigma,
         covars_u: jax.Array | None,
     ) -> MifInputs:
         return MifInputs(
@@ -651,8 +640,7 @@ class PanelMifInputs:
             nstep_array=self.nstep_array,
             t0=self.t0,
             times=self.times,
-            sigmas=sigmas_u,
-            sigmas_init=sigmas_init_u,
+            rw_sigma=rw_sigma_u,
             covars_extended=covars_u,
         )
 
@@ -660,8 +648,7 @@ class PanelMifInputs:
     def from_panel_mif_struct(
         cls,
         struct: PanelPompStruct,
-        sigmas: jax.Array,
-        sigmas_init: jax.Array,
+        rw_sigma: RWSigma,
     ) -> PanelMifInputs:
         return cls(
             ys=struct.ys_per_unit,
@@ -669,8 +656,7 @@ class PanelMifInputs:
             nstep_array=struct.nstep_array,
             t0=struct.t0,
             times=struct.times.astype(float),
-            sigmas=sigmas,
-            sigmas_init=sigmas_init,
+            rw_sigma=rw_sigma,
             covars_extended=struct.covars_per_unit,
             unit_param_permutations=struct.unit_param_permutations,
         )

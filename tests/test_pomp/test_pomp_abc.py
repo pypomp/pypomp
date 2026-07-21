@@ -50,7 +50,7 @@ def _informative_dprior(theta_arr):
 
 class TestABC:
     def test_basic_run(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0, "gamma": 0.1})
+        prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
         sir.abc(
             M=5,
             probes=_default_probes(),
@@ -69,7 +69,7 @@ class TestABC:
         assert var_list[1] == "log_prior"
 
     def test_with_dprior(self, sir):
-        prop = MVNDiagRW.from_dict({"gamma": 0.1})
+        prop = MVNDiagRW({"gamma": 0.1})
         sir.abc(
             M=5,
             probes=_default_probes(),
@@ -84,7 +84,7 @@ class TestABC:
         assert not np.allclose(lps, 0.0)
 
     def test_flat_prior_default(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=3,
             probes=_default_probes(),
@@ -99,7 +99,7 @@ class TestABC:
         )
 
     def test_acceptance_rate_in_range(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 0.01, "gamma": 0.001})
+        prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
         sir.abc(
             M=10,
             probes=_default_probes(),
@@ -121,7 +121,7 @@ class TestABC:
         probes = _default_probes()
         scale = _default_scale()
         epsilon = 1e6
-        proposal = MVNDiagRW.from_dict({"beta1": 1.0})
+        proposal = MVNDiagRW({"beta1": 1.0})
         key = jax.random.key(99)
 
         sir1 = deepcopy(model_orig)
@@ -154,7 +154,7 @@ class TestABC:
         )
 
     def test_to_dataframe(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=3,
             probes=_default_probes(),
@@ -171,7 +171,7 @@ class TestABC:
         assert len(df) == 4
 
     def test_traces_method(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=3,
             probes=_default_probes(),
@@ -185,7 +185,7 @@ class TestABC:
         assert (df["method"] == "abc").all()
 
     def test_print_summary(self, sir, capsys):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=3,
             probes=_default_probes(),
@@ -199,7 +199,7 @@ class TestABC:
         assert "Method: abc" in out
 
     def test_with_mvn_rw(self, sir):
-        prop = MVNRWFull.from_cov(np.array([[1.0]]), ["beta1"])
+        prop = MVNRWFull(np.array([[1.0]]), ["beta1"])
         sir.abc(
             M=3,
             probes=_default_probes(),
@@ -211,7 +211,7 @@ class TestABC:
         assert isinstance(_abc_res(sir.results_history[-1]), Result)
 
     def test_with_adaptive_proposal(self, sir):
-        prop = MVNRWAdaptive.from_params(
+        prop = MVNRWAdaptive(
             rw_sd={"beta1": 1.0, "gamma": 0.1},
             scale_start=2,
             shape_start=2,
@@ -227,7 +227,7 @@ class TestABC:
         assert isinstance(_abc_res(sir.results_history[-1]), Result)
 
     def test_tight_epsilon_low_acceptance(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 10.0})
+        prop = MVNDiagRW({"beta1": 10.0})
         sir.abc(
             M=10,
             probes=_default_probes(),
@@ -241,7 +241,7 @@ class TestABC:
         assert int(res.accepts[0]) <= 10
 
     def test_theta_updated_to_final_trace(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=5,
             probes=_default_probes(),
@@ -259,7 +259,7 @@ class TestABC:
     def test_input_theta_is_deepcopied_and_unchanged(self, sir):
         theta_input = pp.PompParameters(sir.theta)
         theta_before = pp.PompParameters(theta_input)
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir.abc(
             M=3,
@@ -292,7 +292,7 @@ class TestABC:
                 -jnp.inf,
             )
 
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=5,
             probes=_default_probes(),
@@ -319,7 +319,7 @@ class TestABC:
             probes=probes,
             scale=scale,
             epsilon=1e6,
-            proposal=MVNDiagRW.from_dict({"mu": 0.01}),
+            proposal=MVNDiagRW({"mu": 0.01}),
             key=jax.random.key(74),
         )
         res = _abc_res(deterministic_meas_pomp.results_history[-1])
@@ -343,7 +343,7 @@ class TestABCMultiChain:
         t2["beta1"] = 380.0
         t3 = dict(sir.theta[0])
         t3["beta1"] = 420.0
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.abc(
             M=5,
             probes=_default_probes(),
@@ -365,7 +365,7 @@ class TestABCMultiChain:
 
 class TestABCValidation:
     def test_invalid_M(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M"):
             sir.abc(
                 M=0,
@@ -377,7 +377,7 @@ class TestABCValidation:
             )
 
     def test_invalid_epsilon(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="epsilon"):
             sir.abc(
                 M=5,
@@ -389,7 +389,7 @@ class TestABCValidation:
             )
 
     def test_empty_probes(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="probes"):
             sir.abc(
                 M=5,
@@ -401,7 +401,7 @@ class TestABCValidation:
             )
 
     def test_scale_keys_mismatch(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="scale keys"):
             sir.abc(
                 M=5,
@@ -413,7 +413,7 @@ class TestABCValidation:
             )
 
     def test_negative_scale(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="must be positive"):
             sir.abc(
                 M=5,
@@ -436,7 +436,7 @@ class TestABCMerge:
         from copy import deepcopy
 
         model_orig, theta = sir_module
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
@@ -474,7 +474,7 @@ class TestABCMerge:
         from copy import deepcopy
 
         model_orig, theta = sir_module
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()

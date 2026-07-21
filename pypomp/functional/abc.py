@@ -38,7 +38,8 @@ def abc(
     thetas_array : jax.Array
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
-        Proposal object (see :mod:`pypomp.proposals`).
+        Proposal object (see :mod:`pypomp.proposals`).  Reordered internally to
+        ``struct.param_names`` order, so any parameter order may be passed.
     dprior : Callable
         Pure-JAX log-prior, ``dprior(theta_arr) -> scalar``.
     probe_fn : Callable
@@ -66,6 +67,8 @@ def abc(
     """
     if struct.rmeas_pf is None:
         raise ValueError("ABC requires struct.rmeas_pf to be non-None.")
+
+    proposal = proposal.canonicalize(struct.param_names)
 
     config = AbcConfig.from_abc_struct(
         struct,

@@ -178,16 +178,14 @@ def _panel_mif_unit_scan_fn(
 
     # 2. Permute parameters and sigmas to match the unit's local model order
     thetas_unit_order = thetas_panel_order[:, unit.permutation]
-    sigmas_unit_order = inputs.sigmas[unit.permutation]
-    sigmas_init_unit_order = inputs.sigmas_init[unit.permutation]
+    rw_sigma_unit_order = inputs.rw_sigma._permuted(unit.permutation)
 
     # 3. Build sub-configurations and run the single-unit perfilter step
     mif_config = config.to_mif_config()
 
     mif_inputs = inputs.to_mif_inputs(
         ys_u=unit.ys,
-        sigmas_u=sigmas_unit_order,
-        sigmas_init_u=sigmas_init_unit_order,
+        rw_sigma_u=rw_sigma_unit_order,
         covars_u=covariates,
     )
 

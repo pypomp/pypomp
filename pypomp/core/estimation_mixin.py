@@ -362,9 +362,6 @@ class PompEstimationMixin(Base):
 
         new_key, old_key = self._update_fresh_key(key)
         n_reps = theta_obj_in.num_replicates()
-        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
-            param_names=self.canonical_param_names
-        )
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         if self.dmeas is None:
@@ -378,14 +375,12 @@ class PompEstimationMixin(Base):
 
         nLLs_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
-            {1: 0, 7: 0},
+            {1: 0, 5: 0},
             [0, 0, 0],
             self.to_struct(),
             theta_array_3d,
-            sigmas_array,
-            sigmas_init_array,
+            rw_sd,
             M,
-            rw_sd.cooling_fn,
             J,
             keys,
             thresh,
@@ -845,7 +840,7 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        proposal = proposal.canonicalize(canonical_names)
+        # Alignment to canonical order is handled inside F.pmcmc.
         log_prior = dprior if dprior is not None else _flat_dprior
         keys = jax.random.split(new_key, n_chains)
 
@@ -974,7 +969,7 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        proposal = proposal.canonicalize(canonical_names)
+        # Alignment to canonical order is handled inside F.abc.
         log_prior = dprior if dprior is not None else _flat_dprior
 
         probe_names = sorted(probes.keys())

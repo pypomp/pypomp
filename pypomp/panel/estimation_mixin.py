@@ -650,10 +650,6 @@ class PanelEstimationMixin(Base):
         U = len(unit_names)
         rep_unit = self.unit_objects[unit_names[0]]
 
-        sigmas_array, sigmas_init_array = rw_sd._return_arrays(
-            param_names=self.canonical_param_names
-        )
-
         if J < 1 or M < 1:
             raise ValueError("J and M must be greater than 0.")
         if rep_unit.dmeas is None:
@@ -686,15 +682,13 @@ class PanelEstimationMixin(Base):
             final_unit_swarm_jax,
         ) = run_jax_batch_sharded(
             F.panel_mif,
-            {1: 0, 2: 0, 8: 0},
+            {1: 0, 2: 0, 6: 0},
             [0, 0, 0, 0],
             struct,
             shared_array,
             unit_array,
-            sigmas_array,
-            sigmas_init_array,
+            rw_sd,
             M,
-            rw_sd.cooling_fn,
             J,
             keys,
             thresh,

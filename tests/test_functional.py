@@ -83,24 +83,16 @@ def test_mif_functional(model_setup):
     struct, thetas_array, key, J, n_reps, param_names = model_setup
     keys = jax.random.split(key, n_reps)
     M = 2
-    sigmas = jnp.ones(len(param_names)) * 0.02
+    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
 
     # thetas_array for mif needs to be (n_reps, J, n_params)
     thetas_mif = jnp.repeat(thetas_array[:, jnp.newaxis, :], J, axis=1)
 
-    a_val = 0.5
-    factor = a_val ** (1 / 50)
-
-    def cooling_fn(nt, m, ntimes):
-        return factor ** (nt / ntimes + m - 1)
-
     neg_logliks_M, thetas_traces_Md, final_theta_Jd = F.mif(
         struct,
         thetas_mif,
-        sigmas,
-        sigmas,
+        rw_sd,
         M=M,
-        cooling_fn=cooling_fn,
         J=J,
         thresh=0.0,
         keys=keys,
@@ -213,14 +205,8 @@ def test_panel_mif_functional(panel_setup):
     unit_mif = jnp.repeat(unit_array[:, jnp.newaxis, :, :], J, axis=1)
 
     all_param_names = struct.shared_param_names + struct.unit_param_names
-    sigmas = jnp.ones(len(all_param_names)) * 0.02
-
     M = 2
-    a_val = 0.5
-    factor = a_val ** (1 / 50)
-
-    def cooling_fn(nt, m, ntimes):
-        return factor ** (nt / ntimes + m - 1)
+    rw_sd = pp.RWSigma({name: 0.02 for name in all_param_names}).geometric_cooling(0.5)
 
     keys = jax.random.split(key, n_reps)
 
@@ -228,10 +214,8 @@ def test_panel_mif_functional(panel_setup):
         struct,
         shared_mif,
         unit_mif,
-        sigmas,
-        sigmas,
+        rw_sd,
         M=M,
-        cooling_fn=cooling_fn,
         J=J,
         thresh=0.0,
         keys=keys,

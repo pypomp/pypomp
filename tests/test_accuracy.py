@@ -879,7 +879,7 @@ def test_pomp_pmcmc_accuracy():
         in_bounds = (a_val > 0.0) & (a_val < 1.0) & (sx_val > 0.0) & (sy_val > 0.0)
         return jnp.where(in_bounds, 0.0, -jnp.inf)
 
-    prop = pp.MVNDiagRW.from_dict({"a": 0.05, "sigma_x": 0.05, "sigma_y": 0.05})
+    prop = pp.MVNDiagRW({"a": 0.05, "sigma_x": 0.05, "sigma_y": 0.05})
 
     fit_model.pmcmc(
         J=1000,
@@ -952,7 +952,7 @@ def test_pomp_abc_accuracy():
         "autocov": 0.1,
     }
 
-    prop = pp.MVNDiagRW.from_dict({"a": 0.05, "sigma_x": 0.05})
+    prop = pp.MVNDiagRW({"a": 0.05, "sigma_x": 0.05})
 
     fit_model.abc(
         M=30000,

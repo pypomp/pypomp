@@ -10,7 +10,9 @@ through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose three methods:
   returns ``(theta_proposed, new_state)``.  All inputs/outputs are
   ``jax.Array``; no Python branching on traced values.
 * ``canonicalize(canonical_names)`` returns a new proposal instance expanded
-  and reordered to match the model's full canonical parameter vector.
+  and reordered to match the model's full canonical parameter vector.  This is
+  applied automatically by the functional ``pmcmc`` / ``abc`` entry points, so
+  callers do not need to invoke it themselves.
 
 Three proposals are provided, following pomp (R):
 
@@ -18,8 +20,10 @@ Three proposals are provided, following pomp (R):
 * :class:`MVNRWFull`         -- full-covariance random walk
 * :class:`MVNRWAdaptive`     -- Roberts & Rosenthal 2009 adaptive scheme
 
-Convenience constructors ``mvn_diag_rw``, ``mvn_rw``, ``mvn_rw_adaptive``
-mirror the previous API and return the corresponding dataclass instance.
+Each is constructed directly via its ``__init__`` (e.g. ``MVNDiagRW({...})``)
+and validated host-side; the standard-deviation / covariance arrays are stored
+as ``numpy`` arrays (PyTree leaves) so instances pickle cheaply, while parameter
+names and scalar settings are static PyTree aux metadata.
 """
 
 from __future__ import annotations
@@ -60,9 +64,12 @@ class Proposal(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False, eq=False)
 class MVNDiagRW:
     """Diagonal multivariate normal random-walk proposal.
+
+    Construct from a dict of per-parameter random-walk standard deviations;
+    parameters with ``sd <= 0`` are silently dropped.
 
     Attributes
     ----------
@@ -76,23 +83,35 @@ class MVNDiagRW:
     sd_arr: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
 
-    @classmethod
-    def from_dict(cls, rw_sd: dict[str, float]) -> MVNDiagRW:
+    def __init__(self, rw_sd: dict[str, float]):
         """Construct a diagonal multivariate normal random-walk proposal.
 
         Args:
             rw_sd: Dictionary mapping parameter names to random-walk standard
                 deviations.  Parameters with ``sd <= 0`` are silently dropped.
-
-        Returns:
-            :class:`MVNDiagRW` instance.
         """
         rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
         if not rw_sd:
             raise ValueError("rw_sd must contain at least one positive entry.")
         param_names = tuple(rw_sd.keys())
         sd_arr = np.asarray([rw_sd[p] for p in param_names])
-        return cls(sd_arr=sd_arr, param_names=param_names)
+        object.__setattr__(self, "sd_arr", sd_arr)
+        object.__setattr__(self, "param_names", param_names)
+
+    @classmethod
+    def _from_leaves(cls, sd_arr: Any, param_names: tuple[str, ...]) -> MVNDiagRW:
+        """Rebuild from raw leaves + aux (for PyTree unflatten; skips validation)."""
+        obj = object.__new__(cls)
+        object.__setattr__(obj, "sd_arr", sd_arr)
+        object.__setattr__(obj, "param_names", tuple(param_names))
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MVNDiagRW):
+            return NotImplemented
+        return self.param_names == other.param_names and np.array_equal(
+            np.asarray(self.sd_arr), np.asarray(other.sd_arr)
+        )
 
     def init_state(self, theta_arr: jax.Array) -> tuple:
         """Initialize carried state (empty tuple for stateless proposal)."""
@@ -120,19 +139,22 @@ class MVNDiagRW:
             if p not in name_to_idx:
                 raise ValueError(f"Proposal parameter {p!r} not in model.")
             full_sd[name_to_idx[p]] = self.sd_arr[i_local]
-        return MVNDiagRW(sd_arr=full_sd, param_names=names)
+        return MVNDiagRW._from_leaves(full_sd, names)
 
 
 jax.tree_util.register_pytree_node(
     MVNDiagRW,
     lambda p: ((p.sd_arr,), p.param_names),
-    lambda aux, children: MVNDiagRW(sd_arr=children[0], param_names=aux),
+    lambda aux, children: MVNDiagRW._from_leaves(children[0], aux),
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False, eq=False)
 class MVNRWFull:
     """Full-covariance multivariate normal random-walk proposal.
+
+    Construct from a symmetric positive-definite covariance matrix and the
+    parameter names corresponding to its rows/columns.
 
     Attributes
     ----------
@@ -147,8 +169,7 @@ class MVNRWFull:
     chol: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
 
-    @classmethod
-    def from_cov(cls, rw_var: np.ndarray, param_names: list[str]) -> MVNRWFull:
+    def __init__(self, rw_var: np.ndarray, param_names: list[str]):
         """Construct a full-covariance multivariate normal random-walk proposal.
 
         Args:
@@ -156,9 +177,6 @@ class MVNRWFull:
                 ``(d, d)`` where ``d = len(param_names)``.
             param_names: Parameter names corresponding to the rows/columns of
                 ``rw_var``.
-
-        Returns:
-            :class:`MVNRWFull` instance.
         """
         rw_var = np.asarray(rw_var, dtype=float)
         if rw_var.ndim != 2 or rw_var.shape[0] != rw_var.shape[1]:
@@ -166,7 +184,23 @@ class MVNRWFull:
         if rw_var.shape[0] != len(param_names):
             raise ValueError("rw_var dimensions must match len(param_names).")
         chol = np.linalg.cholesky(rw_var)
-        return cls(chol=chol, param_names=tuple(param_names))
+        object.__setattr__(self, "chol", chol)
+        object.__setattr__(self, "param_names", tuple(param_names))
+
+    @classmethod
+    def _from_leaves(cls, chol: Any, param_names: tuple[str, ...]) -> MVNRWFull:
+        """Rebuild from raw leaves + aux (for PyTree unflatten; skips validation)."""
+        obj = object.__new__(cls)
+        object.__setattr__(obj, "chol", chol)
+        object.__setattr__(obj, "param_names", tuple(param_names))
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MVNRWFull):
+            return NotImplemented
+        return self.param_names == other.param_names and np.array_equal(
+            np.asarray(self.chol), np.asarray(other.chol)
+        )
 
     def init_state(self, theta_arr: jax.Array) -> tuple:
         """Initialize carried state (empty tuple for stateless proposal)."""
@@ -199,13 +233,13 @@ class MVNRWFull:
                     raise ValueError(f"Proposal parameter {p_j!r} not in model.")
                 j_global = name_to_idx[p_j]
                 full_chol[i_global, j_global] = self.chol[i_local, j_local]
-        return MVNRWFull(chol=full_chol, param_names=names)
+        return MVNRWFull._from_leaves(full_chol, names)
 
 
 jax.tree_util.register_pytree_node(
     MVNRWFull,
     lambda p: ((p.chol,), p.param_names),
-    lambda aux, children: MVNRWFull(chol=children[0], param_names=aux),
+    lambda aux, children: MVNRWFull._from_leaves(children[0], aux),
 )
 
 
@@ -245,7 +279,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False, eq=False)
 class MVNRWAdaptive:
     """Adaptive multivariate normal random-walk proposal (Roberts & Rosenthal 2009).
 
@@ -281,15 +315,14 @@ class MVNRWAdaptive:
 
     init_rw_var: np.ndarray  # stored as numpy array so class can be pickled efficiently
     param_names: tuple[str, ...]
-    scale_start: int = 200
-    scale_cooling: float = 0.999
-    shape_start: int = 200
-    target: float = 0.234
-    max_scaling: float = 50.0
+    scale_start: int
+    scale_cooling: float
+    shape_start: int
+    target: float
+    max_scaling: float
 
-    @classmethod
-    def from_params(
-        cls,
+    def __init__(
+        self,
         rw_sd: dict[str, float] | None = None,
         rw_var: np.ndarray | None = None,
         param_names: list[str] | None = None,
@@ -298,7 +331,7 @@ class MVNRWAdaptive:
         shape_start: int = 200,
         target: float = 0.234,
         max_scaling: float = 50.0,
-    ) -> MVNRWAdaptive:
+    ):
         """Construct an adaptive MVN random-walk proposal (Roberts & Rosenthal 2009).
 
         Provide exactly one of ``rw_sd`` (diagonal initialisation) or ``rw_var``
@@ -322,11 +355,6 @@ class MVNRWAdaptive:
             Target Metropolis acceptance ratio.
         max_scaling : float, default 50.0
             Upper bound for the scaling factor.
-
-        Returns
-        -------
-        MVNRWAdaptive
-            A :class:`MVNRWAdaptive` instance.
         """
         if (rw_sd is None) == (rw_var is None):
             raise ValueError("Exactly one of rw_sd and rw_var must be given.")
@@ -351,14 +379,49 @@ class MVNRWAdaptive:
         if not (0 < target < 1):
             raise ValueError("target must be in (0, 1).")
 
-        return cls(
-            init_rw_var=np.asarray(init_var),
-            param_names=names,
-            scale_start=int(scale_start),
-            scale_cooling=float(scale_cooling),
-            shape_start=int(shape_start),
-            target=float(target),
-            max_scaling=float(max_scaling),
+        object.__setattr__(self, "init_rw_var", np.asarray(init_var))
+        object.__setattr__(self, "param_names", names)
+        object.__setattr__(self, "scale_start", int(scale_start))
+        object.__setattr__(self, "scale_cooling", float(scale_cooling))
+        object.__setattr__(self, "shape_start", int(shape_start))
+        object.__setattr__(self, "target", float(target))
+        object.__setattr__(self, "max_scaling", float(max_scaling))
+
+    @classmethod
+    def _from_leaves(
+        cls,
+        init_rw_var: Any,
+        param_names: tuple[str, ...],
+        scale_start: int,
+        scale_cooling: float,
+        shape_start: int,
+        target: float,
+        max_scaling: float,
+    ) -> MVNRWAdaptive:
+        """Rebuild from raw leaves + aux (for PyTree unflatten; skips validation)."""
+        obj = object.__new__(cls)
+        object.__setattr__(obj, "init_rw_var", init_rw_var)
+        object.__setattr__(obj, "param_names", tuple(param_names))
+        object.__setattr__(obj, "scale_start", scale_start)
+        object.__setattr__(obj, "scale_cooling", scale_cooling)
+        object.__setattr__(obj, "shape_start", shape_start)
+        object.__setattr__(obj, "target", target)
+        object.__setattr__(obj, "max_scaling", max_scaling)
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MVNRWAdaptive):
+            return NotImplemented
+        return (
+            self.param_names == other.param_names
+            and self.scale_start == other.scale_start
+            and self.scale_cooling == other.scale_cooling
+            and self.shape_start == other.shape_start
+            and self.target == other.target
+            and self.max_scaling == other.max_scaling
+            and np.array_equal(
+                np.asarray(self.init_rw_var), np.asarray(other.init_rw_var)
+            )
         )
 
     def init_state(self, theta_arr: jax.Array) -> AdaptiveState:
@@ -449,7 +512,7 @@ class MVNRWAdaptive:
                     raise ValueError(f"Proposal parameter {p_j!r} not in model.")
                 j_global = name_to_idx[p_j]
                 full_var[i_global, j_global] = self.init_rw_var[i_local, j_local]
-        return MVNRWAdaptive(
+        return MVNRWAdaptive._from_leaves(
             init_rw_var=full_var,
             param_names=names,
             scale_start=self.scale_start,
@@ -473,7 +536,7 @@ jax.tree_util.register_pytree_node(
             p.max_scaling,
         ),
     ),
-    lambda aux, children: MVNRWAdaptive(
+    lambda aux, children: MVNRWAdaptive._from_leaves(
         init_rw_var=children[0],
         param_names=aux[0],
         scale_start=aux[1],

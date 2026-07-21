@@ -120,8 +120,7 @@ def print_summary(result: "Result", n: int = 5) -> None:
 
     rw_sd = result.config.get("rw_sd")
     if rw_sd is not None:
-        info = getattr(rw_sd, "_cooling_info", ("none",))
-        ctype = info[0]
+        ctype = getattr(rw_sd, "cooling_type", "none")
         if ctype == "geometric":
             print(f"Cooling fraction (a): {rw_sd.a}")
         elif ctype == "hyperbolic":

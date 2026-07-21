@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
-from typing import Callable
 from .structs import PompStruct, PanelPompStruct
+from ..core.rw_sigma import RWSigma
 from ..core.algorithms.mif import (
     _jv_mif_internal,
 )
@@ -16,27 +16,11 @@ from ..core.algorithms.types import (
 )
 
 
-def _wrap_cooling_fn(cooling_fn: Callable | float) -> Callable:
-    if not callable(cooling_fn):
-        a = float(cooling_fn)
-        if not (0 <= a <= 1):
-            raise ValueError("a should be between 0 and 1")
-        factor = a ** (1 / 50)
-
-        def fn(nt, m, ntimes):
-            return factor ** (nt / ntimes + m)
-
-        return fn
-    return cooling_fn
-
-
 def mif(
     struct: PompStruct,
     thetas_array: jax.Array,
-    sigmas_array: jax.Array,
-    sigmas_init_array: jax.Array,
+    rw_sd: RWSigma,
     M: int,
-    cooling_fn: Callable | float,
     J: int,
     keys: jax.Array,
     thresh: float = 0.0,
@@ -60,16 +44,12 @@ def mif(
     thetas_array : jax.Array
         Initial parameter array of shape ``(n_reps, J, n_params)`` on the
         natural scale.  Must be aligned with ``struct.param_names``.
-    sigmas_array : jax.Array
-        Per-parameter random walk standard deviations.  Shape
-        ``(n_params,)``.
-    sigmas_init_array : jax.Array
-        Initial random walk standard deviations.  Shape ``(n_params,)``.
+    rw_sd : RWSigma
+        Random-walk standard deviations and cooling schedule.  Reordered
+        internally to ``struct.param_names`` order via
+        :meth:`RWSigma.canonicalize`, so any parameter order may be passed.
     M : int
         Number of IF2 iterations.
-    cooling_fn : callable or float
-        Cooling schedule.  Pass a callable ``(nt, m, ntimes) -> float``
-        for custom schedules, or a single float for geometric cooling.
     J : int
         Number of particles.
     keys : jax.Array
@@ -119,21 +99,19 @@ def mif(
     if struct.dmeas_pf is None:
         raise ValueError("dmeasure_pf is required for MIF")
 
-    cooling_callable = _wrap_cooling_fn(cooling_fn)
+    rw_sd = rw_sd.canonicalize(struct.param_names)
 
     config = MifConfig.from_mif_struct(
         struct=struct,
         J=J,
         M=M,
-        cooling_fn=cooling_callable,
         thresh=thresh,
         n_monitors=n_monitors,
         return_ancestry=False,
     )
     inputs = MifInputs.from_mif_struct(
         struct=struct,
-        sigmas=sigmas_array,
-        sigmas_init=sigmas_init_array,
+        rw_sigma=rw_sd,
     )
     res = _jv_mif_internal(
         thetas_est,
@@ -158,10 +136,8 @@ def panel_mif(
     struct: PanelPompStruct,
     shared_array: jax.Array,  # (n_reps, J, n_shared) on natural scale
     unit_array: jax.Array,  # (n_reps, J, U, n_spec) on natural scale
-    sigmas_array: jax.Array,  # (n_params,)
-    sigmas_init_array: jax.Array,  # (n_params,)
+    rw_sd: RWSigma,
     M: int,
-    cooling_fn: Callable | float,
     J: int,
     keys: jax.Array,
     thresh: float = 0.0,
@@ -189,14 +165,11 @@ def panel_mif(
     unit_array : jax.Array
         Swarm of initial unit-specific parameters of shape
         ``(n_reps, J, U, n_spec)`` on the natural scale.
-    sigmas_array : jax.Array
-        Random walk standard deviations of shape ``(n_params,)``.
-    sigmas_init_array : jax.Array
-        Initial random walk standard deviations of shape ``(n_params,)``.
+    rw_sd : RWSigma
+        Random-walk standard deviations and cooling schedule.  Reordered
+        internally to ``struct.param_names`` order, so any order may be passed.
     M : int
         Number of iterated filtering iterations.
-    cooling_fn : callable or float
-        Cooling schedule function or constant decay factor.
     J : int
         Number of particles.
     keys : jax.Array
@@ -257,22 +230,20 @@ def panel_mif(
     if struct.dmeas_pf is None:
         raise ValueError("dmeasure_pf is required for Panel MIF")
 
-    cooling_callable = _wrap_cooling_fn(cooling_fn)
+    rw_sd = rw_sd.canonicalize(struct.param_names)
 
     config = PanelMifConfig.from_panel_mif_struct(
         struct=struct,
         J=J,
         M=M,
         U=U,
-        cooling_fn=cooling_callable,
         thresh=thresh,
         n_monitors=n_monitors,
         block=block,
     )
     inputs = PanelMifInputs.from_panel_mif_struct(
         struct=struct,
-        sigmas=sigmas_array,
-        sigmas_init=sigmas_init_array,
+        rw_sigma=rw_sd,
     )
     shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
         shared_est,

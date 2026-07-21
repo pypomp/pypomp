@@ -113,7 +113,7 @@ def _perfilter_internal(
     counts = jnp.ones(J, dtype=int)
     time_indices = jnp.arange(len(inputs.ys))
     cooling_factors = jax.vmap(
-        lambda i: config.cooling_fn(i, m_current, len(inputs.times))
+        lambda i: inputs.rw_sigma.cooling_factor(i, m_current, len(inputs.times))
     )(time_indices)
     # Ancestry tracking is for PIF (Panel.mif with block=False).
     if config.return_ancestry:
@@ -124,7 +124,8 @@ def _perfilter_internal(
     # 2. Perturb the parameters for t0
     key, subkey = jax.random.split(key)
     sigmas_init_cooled = (
-        config.cooling_fn(0, m_current, len(inputs.times)) * inputs.sigmas_init
+        inputs.rw_sigma.cooling_factor(0, m_current, len(inputs.times))
+        * inputs.rw_sigma.sigmas_init_array
     )
     thetas_Jd = thetas_Jd + sigmas_init_cooled * jax.random.normal(
         shape=thetas_Jd.shape, key=subkey
@@ -187,7 +188,7 @@ def _perfilter_scan_body(
     nstep_int = jnp.asarray(xs.nstep).astype(int)
 
     # 2. Perturb the parameters.
-    sigmas_cooled = xs.cooling_factor * inputs.sigmas
+    sigmas_cooled = xs.cooling_factor * inputs.rw_sigma.sigmas_array
     perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
         shape=carry.thetas.shape, key=key_perturb
     )

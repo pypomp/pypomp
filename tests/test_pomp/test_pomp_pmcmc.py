@@ -38,6 +38,10 @@ class _FixedShiftProposal:
     ) -> tuple[jax.Array, tuple]:
         return theta_arr + self.shift, state
 
+    def canonicalize(self, canonical_names):
+        # Fixed shift is already aligned to the model's parameter vector.
+        return self
+
 
 jax.tree_util.register_pytree_node(
     _FixedShiftProposal,
@@ -69,7 +73,7 @@ def _informative_dprior(theta_arr):
 
 class TestProposals:
     def test_mvn_diag_rw_basic(self):
-        prop = MVNDiagRW.from_dict({"beta1": 0.1, "gamma": 0.1})
+        prop = MVNDiagRW({"beta1": 0.1, "gamma": 0.1})
         assert isinstance(prop, MVNDiagRW)
         assert prop.param_names == ("beta1", "gamma")
         theta = jnp.array([400.0, 26.0])
@@ -81,16 +85,16 @@ class TestProposals:
         assert not jnp.array_equal(new_theta, theta)
 
     def test_mvn_diag_rw_zero_sd_dropped(self):
-        prop = MVNDiagRW.from_dict({"beta1": 0.1, "gamma": 0.0})
+        prop = MVNDiagRW({"beta1": 0.1, "gamma": 0.0})
         assert prop.param_names == ("beta1",)
 
     def test_mvn_diag_rw_empty_raises(self):
         with pytest.raises(ValueError, match="at least one positive"):
-            MVNDiagRW.from_dict({"a": 0.0, "b": -1.0})
+            MVNDiagRW({"a": 0.0, "b": -1.0})
 
     def test_mvn_rw_basic(self):
         rw_var = np.array([[1.0, 0.0], [0.0, 0.1]])
-        prop = MVNRWFull.from_cov(rw_var, param_names=["beta1", "gamma"])
+        prop = MVNRWFull(rw_var, param_names=["beta1", "gamma"])
         assert isinstance(prop, MVNRWFull)
         theta = jnp.array([400.0, 26.0])
         state = prop.init_state(theta)
@@ -101,16 +105,14 @@ class TestProposals:
 
     def test_mvn_rw_nonsquare_raises(self):
         with pytest.raises(ValueError, match="square matrix"):
-            MVNRWFull.from_cov(np.ones((2, 3)), ["a", "b"])
+            MVNRWFull(np.ones((2, 3)), ["a", "b"])
 
     def test_mvn_rw_size_mismatch_raises(self):
         with pytest.raises(ValueError, match="dimensions must match"):
-            MVNRWFull.from_cov(np.eye(2), ["a", "b", "c"])
+            MVNRWFull(np.eye(2), ["a", "b", "c"])
 
     def test_canonicalize_mvn_rw_freezes_missing_parameters(self):
-        prop = MVNRWFull.from_cov(np.array([[1.0]]), ["beta1"]).canonicalize(
-            ["beta1", "gamma"]
-        )
+        prop = MVNRWFull(np.array([[1.0]]), ["beta1"]).canonicalize(["beta1", "gamma"])
         theta = jnp.array([400.0, 26.0])
         state = prop.init_state(theta)
         new_theta, _ = prop.step(
@@ -120,7 +122,7 @@ class TestProposals:
         assert new_theta[1] == theta[1]
 
     def test_mvn_rw_adaptive_basic(self):
-        prop = MVNRWAdaptive.from_params(rw_sd={"beta1": 1.0, "gamma": 0.1})
+        prop = MVNRWAdaptive(rw_sd={"beta1": 1.0, "gamma": 0.1})
         assert isinstance(prop, MVNRWAdaptive)
         theta = jnp.array([400.0, 26.0])
         state = prop.init_state(theta)
@@ -132,7 +134,7 @@ class TestProposals:
 
     def test_mvn_rw_adaptive_with_rw_var(self):
         rw_var = np.array([[1.0]])
-        prop = MVNRWAdaptive.from_params(rw_var=rw_var, param_names=["beta1"])
+        prop = MVNRWAdaptive(rw_var=rw_var, param_names=["beta1"])
         theta = jnp.array([400.0])
         state = prop.init_state(theta)
         new_theta, _ = prop.step(
@@ -141,9 +143,7 @@ class TestProposals:
         assert new_theta[0] != theta[0]
 
     def test_canonicalize_mvn_rw_adaptive_freezes_missing_parameters(self):
-        prop = MVNRWAdaptive.from_params(rw_sd={"beta1": 1.0}).canonicalize(
-            ["beta1", "gamma"]
-        )
+        prop = MVNRWAdaptive(rw_sd={"beta1": 1.0}).canonicalize(["beta1", "gamma"])
         theta = jnp.array([400.0, 26.0])
         state = prop.init_state(theta)
         new_theta, _ = prop.step(
@@ -154,13 +154,11 @@ class TestProposals:
 
     def test_mvn_rw_adaptive_both_raises(self):
         with pytest.raises(ValueError, match="Exactly one"):
-            MVNRWAdaptive.from_params(
-                rw_sd={"a": 1.0}, rw_var=np.eye(1), param_names=["a"]
-            )
+            MVNRWAdaptive(rw_sd={"a": 1.0}, rw_var=np.eye(1), param_names=["a"])
 
     def test_proposal_jit_scan_compatible(self):
         """All proposals must work inside jax.lax.scan."""
-        prop = MVNRWAdaptive.from_params(rw_sd={"beta1": 0.5, "gamma": 0.05})
+        prop = MVNRWAdaptive(rw_sd={"beta1": 0.5, "gamma": 0.05})
         theta = jnp.array([400.0, 26.0])
         state = prop.init_state(theta)
 
@@ -183,7 +181,7 @@ class TestProposals:
 class TestPMCMC:
     def test_basic_run(self, sir):
         """PMCMC should run and produce a Result."""
-        prop = MVNDiagRW.from_dict({"beta1": 1.0, "gamma": 0.1})
+        prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
         sir.pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(0))
         res = sir.results_history[-1]
         assert isinstance(res, Result)
@@ -201,7 +199,7 @@ class TestPMCMC:
         assert var_list[1] == "log_prior"
 
     def test_with_dprior(self, sir):
-        prop = MVNDiagRW.from_dict({"gamma": 0.1})
+        prop = MVNDiagRW({"gamma": 0.1})
         sir.pmcmc(
             J=20,
             M=3,
@@ -215,14 +213,14 @@ class TestPMCMC:
         assert not np.allclose(log_priors, 0.0)
 
     def test_flat_prior_default(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(2))
         res = _pmcmc_res(sir.results_history[-1])
         log_priors = res.traces_da.sel(variable="log_prior").values
         np.testing.assert_array_equal(log_priors, 0.0)
 
     def test_acceptance_rate_in_range(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 0.01, "gamma": 0.001})
+        prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
         sir.pmcmc(J=20, M=10, proposal=prop, key=jax.random.key(3))
         res = _pmcmc_res(sir.results_history[-1])
         for r in res.acceptance_rate:
@@ -231,7 +229,7 @@ class TestPMCMC:
     def test_reproducibility(self, sir_module):
         """Needs two independent runs; uses sir_module directly."""
         model_orig, theta = sir_module
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
@@ -252,7 +250,7 @@ class TestPMCMC:
         np.testing.assert_array_equal(res1.accepts, res2.accepts)
 
     def test_to_dataframe(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(4))
         df = _pmcmc_res(sir.results_history[-1]).to_dataframe()
         assert "logLik" in df.columns
@@ -262,7 +260,7 @@ class TestPMCMC:
         assert len(df) == 4  # M + 1
 
     def test_traces_method(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(5))
         df = _pmcmc_res(sir.results_history[-1]).traces()
         assert "method" in df.columns
@@ -270,7 +268,7 @@ class TestPMCMC:
         assert (df["method"] == "pmcmc").all()
 
     def test_print_summary(self, sir, capsys):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(6))
         _pmcmc_res(sir.results_history[-1]).print_summary()
         out = capsys.readouterr().out
@@ -278,7 +276,7 @@ class TestPMCMC:
         assert "Number of chains: 1" in out
 
     def test_theta_updated(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 50.0})  # large jumps -> some acceptance
+        prop = MVNDiagRW({"beta1": 50.0})  # large jumps -> some acceptance
         sir.pmcmc(J=20, M=8, proposal=prop, key=jax.random.key(7))
         res = _pmcmc_res(sir.results_history[-1])
 
@@ -297,7 +295,7 @@ class TestPMCMC:
     def test_input_theta_is_deepcopied_and_unchanged(self, sir):
         theta_input = pp.PompParameters(sir.theta)
         theta_before = pp.PompParameters(theta_input)
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir.pmcmc(
             J=20,
@@ -319,7 +317,7 @@ class TestPMCMC:
 
     def test_initial_loglik_matches_independent_pfilter(self, sir):
         run_key = jax.random.key(72)
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         J = 20
 
         sir.pmcmc(J=J, M=2, proposal=prop, key=run_key)
@@ -358,7 +356,7 @@ class TestPMCMC:
                 -jnp.inf,
             )
 
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(
             J=20,
             M=5,
@@ -403,7 +401,7 @@ class TestPMCMC:
         assert np.asarray(logliks)[0, 1] > np.asarray(logliks)[0, 0]
 
     def test_pmcmc_loglik_matches_analytic_static_normal(self, static_normal_pomp):
-        prop = MVNDiagRW.from_dict({"mu": 0.01})
+        prop = MVNDiagRW({"mu": 0.01})
         static_normal_pomp.pmcmc(J=3, M=1, proposal=prop, key=jax.random.key(75))
         res = _pmcmc_res(static_normal_pomp.results_history[-1])
 
@@ -414,13 +412,13 @@ class TestPMCMC:
         np.testing.assert_allclose(recorded, expected, rtol=1e-6, atol=1e-6)
 
     def test_with_mvn_rw(self, sir):
-        prop = MVNRWFull.from_cov(np.array([[1.0]]), ["beta1"])
+        prop = MVNRWFull(np.array([[1.0]]), ["beta1"])
         sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(8))
         res = _pmcmc_res(sir.results_history[-1])
         assert isinstance(res, Result)
 
     def test_with_adaptive_proposal(self, sir):
-        prop = MVNRWAdaptive.from_params(
+        prop = MVNRWAdaptive(
             rw_sd={"beta1": 1.0, "gamma": 0.1},
             scale_start=2,
             shape_start=2,
@@ -442,7 +440,7 @@ class TestPMCMCMultiChain:
         t2["beta1"] = 380.0
         t3 = dict(sir.theta[0])
         t3["beta1"] = 420.0
-        prop = MVNDiagRW.from_dict({"beta1": 1.0, "gamma": 0.1})
+        prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
         sir.pmcmc(
             J=20,
             M=5,
@@ -460,7 +458,7 @@ class TestPMCMCMultiChain:
         t1 = dict(sir.theta[0])
         t2 = dict(sir.theta[0])
         t2["beta1"] = 380.0
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         sir.pmcmc(
             J=20,
             M=3,
@@ -482,12 +480,12 @@ class TestPMCMCMultiChain:
 
 class TestPMCMCValidation:
     def test_invalid_J(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="J must be"):
             sir.pmcmc(J=0, M=3, proposal=prop, key=jax.random.key(0))
 
     def test_invalid_M(self, sir):
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M must be"):
             sir.pmcmc(J=20, M=0, proposal=prop, key=jax.random.key(0))
 
@@ -501,7 +499,7 @@ class TestPMCMCMerge:
     def test_merge_two_chains(self, sir_module):
         """Needs two independent runs; uses sir_module directly."""
         model_orig, theta = sir_module
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
@@ -527,7 +525,7 @@ class TestPMCMCMerge:
     def test_merge_different_M_raises(self, sir_module):
         """Needs two runs with different M."""
         model_orig, theta = sir_module
-        prop = MVNDiagRW.from_dict({"beta1": 1.0})
+        prop = MVNDiagRW({"beta1": 1.0})
 
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()

@@ -42,7 +42,9 @@ def pmcmc(
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
         Proposal object (see :mod:`pypomp.proposals`).  Shared across
-        chains; per-chain state is initialised internally.
+        chains; per-chain state is initialised internally.  Reordered
+        internally to ``struct.param_names`` order via
+        ``proposal.canonicalize``, so any parameter order may be passed.
     dprior : Callable
         Log-prior density.  Pure JAX function with signature
         ``dprior(theta_arr) -> scalar``.
@@ -67,6 +69,7 @@ def pmcmc(
     """
     if struct.dmeas_pf is None:
         raise ValueError("PMCMC requires struct.dmeas_pf to be non-None.")
+    proposal = proposal.canonicalize(struct.param_names)
     config = PmcmcConfig.from_pmcmc_struct(
         struct=struct,
         M=M,

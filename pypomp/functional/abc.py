@@ -38,8 +38,7 @@ def abc(
     thetas_array : jax.Array
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
-        Proposal object (see :mod:`pypomp.proposals`).  Reordered internally to
-        ``struct.param_names`` order, so any parameter order may be passed.
+        Proposal object (see :mod:`pypomp.proposals`).
     dprior : Callable
         Pure-JAX log-prior, ``dprior(theta_arr) -> scalar``.
     probe_fn : Callable

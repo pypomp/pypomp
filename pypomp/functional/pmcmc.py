@@ -41,10 +41,7 @@ def pmcmc(
     thetas_array : jax.Array
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
-        Proposal object (see :mod:`pypomp.proposals`).  Shared across
-        chains; per-chain state is initialised internally.  Reordered
-        internally to ``struct.param_names`` order via
-        ``proposal.canonicalize``, so any parameter order may be passed.
+        Proposal object (see :mod:`pypomp.proposals`).
     dprior : Callable
         Log-prior density.  Pure JAX function with signature
         ``dprior(theta_arr) -> scalar``.

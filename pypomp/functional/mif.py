@@ -45,9 +45,7 @@ def mif(
         Initial parameter array of shape ``(n_reps, J, n_params)`` on the
         natural scale.  Must be aligned with ``struct.param_names``.
     rw_sd : RWSigma
-        Random-walk standard deviations and cooling schedule.  Reordered
-        internally to ``struct.param_names`` order via
-        :meth:`RWSigma.canonicalize`, so any parameter order may be passed.
+        Random-walk standard deviations and cooling schedule.
     M : int
         Number of IF2 iterations.
     J : int
@@ -99,7 +97,7 @@ def mif(
     if struct.dmeas_pf is None:
         raise ValueError("dmeasure_pf is required for MIF")
 
-    rw_sd = rw_sd.canonicalize(struct.param_names)
+    rw_sd = rw_sd._canonicalize(struct.param_names)
 
     config = MifConfig.from_mif_struct(
         struct=struct,
@@ -230,7 +228,7 @@ def panel_mif(
     if struct.dmeas_pf is None:
         raise ValueError("dmeasure_pf is required for Panel MIF")
 
-    rw_sd = rw_sd.canonicalize(struct.param_names)
+    rw_sd = rw_sd._canonicalize(struct.param_names)
 
     config = PanelMifConfig.from_panel_mif_struct(
         struct=struct,

@@ -129,7 +129,7 @@ def print_summary(result: "Result", n: int = 5) -> None:
             print(f"Cosine min cooling (c): {rw_sd.c}")
             print(f"Cosine duration (M): {rw_sd.M}")
         elif ctype == "custom":
-            fn = rw_sd.cooling_fn
+            fn = rw_sd._custom_fn
             print(f"Cooling function: {getattr(fn, '__name__', str(fn))}")
 
     print(f"Execution time: {result.execution_time} seconds")

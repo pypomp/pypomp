@@ -9,10 +9,11 @@ Random Walk Standard Deviation
 .. rubric:: Attributes
 
 .. autoattribute:: RWSigma.sigmas
+.. autoattribute:: RWSigma.param_names
 .. autoattribute:: RWSigma.init_names
-.. autoattribute:: RWSigma.not_init_names
-.. autoattribute:: RWSigma.all_names
-.. autoattribute:: RWSigma.cooling_fn
+.. autoattribute:: RWSigma.sigmas_array
+.. autoattribute:: RWSigma.sigmas_init_array
+.. autoattribute:: RWSigma.cooling_type
 .. autoattribute:: RWSigma.a
 .. autoattribute:: RWSigma.s
 .. autoattribute:: RWSigma.c

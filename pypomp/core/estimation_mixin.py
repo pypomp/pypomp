@@ -350,7 +350,7 @@ class PompEstimationMixin(Base):
         start_time = time.time()
         thresh = float(max(0.0, thresh))
 
-        rw_param_names = list(rw_sd.all_names)
+        rw_param_names = list(rw_sd.param_names)
         if set(rw_param_names) != set(self.canonical_param_names):
             raise ValueError(
                 "rw_sd.sigmas keys must match canonical_param_names up to reordering. "
@@ -840,7 +840,6 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        # Alignment to canonical order is handled inside F.pmcmc.
         log_prior = dprior if dprior is not None else _flat_dprior
         keys = jax.random.split(new_key, n_chains)
 
@@ -969,7 +968,6 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        # Alignment to canonical order is handled inside F.abc.
         log_prior = dprior if dprior is not None else _flat_dprior
 
         probe_names = sorted(probes.keys())

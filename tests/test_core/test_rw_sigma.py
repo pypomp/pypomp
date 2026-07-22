@@ -18,38 +18,31 @@ def dummy_cooling_global(nt, m, ntimes):
 
 
 @pytest.mark.parametrize(
-    "sigmas,init_names,expected_not_init,expected_all",
+    "sigmas,init_names,expected_all",
     [
-        # param_names / all_names now follow insertion order; the init/non-init
-        # split is carried by init_mask rather than by reordering.
         (
             {"param1": 0.1, "param2": 0.2, "param3": 0.3},
             ["param1"],
-            ["param2", "param3"],
             ["param1", "param2", "param3"],
         ),
         (
             {"param1": 0.1, "param2": 0.2},
             [],
             ["param1", "param2"],
-            ["param1", "param2"],
         ),
         (
             {"param1": 0.1, "param2": 0.2},
             ["param1", "param2"],
-            [],
             ["param1", "param2"],
         ),
     ],
 )
-def test_init_valid_cases(sigmas, init_names, expected_not_init, expected_all):
+def test_init_valid_cases(sigmas, init_names, expected_all):
     """Test initialization with valid inputs."""
     rw_sigma = pp.RWSigma(sigmas, init_names)
 
     assert rw_sigma.sigmas == sigmas
     assert rw_sigma.init_names == tuple(init_names)
-    assert rw_sigma.not_init_names == tuple(expected_not_init)
-    assert rw_sigma.all_names == tuple(expected_all)
     assert rw_sigma.param_names == tuple(expected_all)
 
 
@@ -126,37 +119,20 @@ def test_init_invalid_cases(sigmas, init_names, expected_error):
         ({"param1": 0.5}, ["param1"], None, jnp.array([0.0]), jnp.array([0.5])),
     ],
 )
-def test_return_arrays_valid_cases(
+def test_sigmas_arrays_valid_cases(
     sigmas, init_names, param_names, expected_sigmas, expected_sigmas_init
 ):
-    """Test _return_arrays (backward-compat shim) with valid inputs."""
+    """Test sigmas_array and sigmas_init_array with valid inputs."""
     rw_sigma = pp.RWSigma(sigmas, init_names)
-    sigmas_array, sigmas_init_array = rw_sigma._return_arrays(param_names)
+    if param_names is not None:
+        rw_sigma = rw_sigma._canonicalize(param_names)
+    sigmas_array, sigmas_init_array = (
+        rw_sigma.sigmas_array,
+        rw_sigma.sigmas_init_array,
+    )
 
     assert jnp.allclose(sigmas_array, expected_sigmas)
     assert jnp.allclose(sigmas_init_array, expected_sigmas_init)
-
-
-@pytest.mark.parametrize(
-    "sigmas,init_names,param_names",
-    [
-        (
-            {"param1": 0.1, "param2": 0.2},
-            ["param1"],
-            ["param1"],
-        ),
-        (
-            {"param1": 0.1, "param2": 0.2},
-            ["param1"],
-            ["param1", "param2", "param3"],
-        ),
-    ],
-)
-def test_return_arrays_invalid_param_names(sigmas, init_names, param_names):
-    """Test _return_arrays with param_names that do not match the model."""
-    rw_sigma = pp.RWSigma(sigmas, init_names)
-    with pytest.raises(ValueError, match="must match canonical_param_names"):
-        rw_sigma._return_arrays(param_names)
 
 
 @pytest.mark.parametrize(
@@ -178,12 +154,15 @@ def test_return_arrays_invalid_param_names(sigmas, init_names, param_names):
         ),
     ],
 )
-def test_return_arrays_edge_cases(
+def test_sigmas_arrays_edge_cases(
     sigmas, init_names, expected_sigmas, expected_sigmas_init
 ):
-    """Test _return_arrays with edge case values."""
+    """Test sigmas_array and sigmas_init_array with edge case values."""
     rw_sigma = pp.RWSigma(sigmas, init_names)
-    sigmas_array, sigmas_init_array = rw_sigma._return_arrays()
+    sigmas_array, sigmas_init_array = (
+        rw_sigma.sigmas_array,
+        rw_sigma.sigmas_init_array,
+    )
 
     assert jnp.allclose(sigmas_array, expected_sigmas)
     assert jnp.allclose(sigmas_init_array, expected_sigmas_init)
@@ -194,8 +173,7 @@ def test_validation_via_constructor_valid():
     rw_sigma = pp.RWSigma({"a": 1.0, "b": 2.0}, ["a"])
     assert rw_sigma.sigmas == {"a": 1.0, "b": 2.0}
     assert rw_sigma.init_names == ("a",)
-    assert rw_sigma.not_init_names == ("b",)
-    assert rw_sigma.all_names == ("a", "b")
+    assert rw_sigma.param_names == ("a", "b")
 
 
 @pytest.mark.parametrize(
@@ -255,27 +233,25 @@ def test_cooling_schedules():
     rw = pp.RWSigma(sigmas)
     assert rw.a == 0.5
     factor = 0.5 ** (1 / 50)
-    assert np.isclose(rw.cooling_fn(10, 5, 20), factor ** (10 / 20 + 5))
-    # cooling_factor is the device-side method used inside JIT.
     assert np.isclose(rw.cooling_factor(10, 5, 20), factor ** (10 / 20 + 5))
 
     # 2. geometric_cooling
     rw_geom = rw.geometric_cooling(0.3)
     assert rw_geom.a == 0.3
-    f_geom = rw_geom.cooling_fn(0, 0, 50)
+    f_geom = rw_geom.cooling_factor(0, 0, 50)
     assert np.isclose(f_geom, 1.0)
 
     # 3. cosine_cooling
     rw_cos = rw.cosine_cooling(0.1, 10)
     assert rw_cos.a is None
-    f_cos = rw_cos.cooling_fn(5, 2, 10)
+    f_cos = rw_cos.cooling_factor(5, 2, 10)
     expected_cos = 0.1 + 0.9 * 0.5 * (1.0 + np.cos(np.pi * 0.25))
     assert np.isclose(f_cos, expected_cos)
 
     # 4. hyperbolic_cooling
     rw_hyper = rw.hyperbolic_cooling(0.2)
     assert rw_hyper.a is None
-    f_hyper = rw_hyper.cooling_fn(5, 2, 10)
+    f_hyper = rw_hyper.cooling_factor(5, 2, 10)
     assert np.isclose(f_hyper, 1.0 / 1.5)
 
     # 5. custom_cooling
@@ -284,7 +260,6 @@ def test_cooling_schedules():
 
     rw_custom = rw.custom_cooling(custom_fn)
     assert rw_custom.a is None
-    assert rw_custom.cooling_fn(5, 2, 10) == 17.0
     assert rw_custom.cooling_factor(5, 2, 10) == 17.0
 
 
@@ -384,7 +359,9 @@ def test_pickle():
         unpickled = pickle.loads(pickled)
         assert unpickled == rw_obj
         # Verify the reconstructed cooling schedule still works.
-        assert np.isclose(unpickled.cooling_fn(5, 2, 10), rw_obj.cooling_fn(5, 2, 10))
+        assert np.isclose(
+            unpickled.cooling_factor(5, 2, 10), rw_obj.cooling_factor(5, 2, 10)
+        )
 
 
 def test_container_methods():
@@ -467,21 +444,23 @@ def test_init_names_type():
 
 
 def test_canonicalize_reorders():
-    """canonicalize reorders arrays to match the requested parameter order."""
+    """_canonicalize reorders arrays to match the requested parameter order."""
     rw = pp.RWSigma({"p1": 0.1, "p2": 0.2, "p3": 0.3}, ["p1"])
-    rw_c = rw.canonicalize(["p3", "p1", "p2"])
+    rw_c = rw._canonicalize(["p3", "p1", "p2"])
     assert rw_c.param_names == ("p3", "p1", "p2")
     assert np.allclose(np.asarray(rw_c.sigmas_all_arr), [0.3, 0.1, 0.2])
     # init flag follows the parameter through the reorder.
     assert np.allclose(np.asarray(rw_c.sigmas_init_array), [0.0, 0.1, 0.0])
     # Content is preserved (equal up to reordering back).
-    assert rw_c.canonicalize(["p1", "p2", "p3"]) == rw.canonicalize(["p1", "p2", "p3"])
+    assert rw_c._canonicalize(["p1", "p2", "p3"]) == rw._canonicalize(
+        ["p1", "p2", "p3"]
+    )
 
 
 def test_canonicalize_mismatch():
     rw = pp.RWSigma({"p1": 0.1, "p2": 0.2})
     with pytest.raises(ValueError, match="must match canonical_param_names"):
-        rw.canonicalize(["p1", "p3"])
+        rw._canonicalize(["p1", "p3"])
 
 
 def test_invalid_cooling_parameters():
@@ -596,7 +575,7 @@ def test_pickle_custom_cooling():
     unpickled = pickle.loads(pickled)
     assert unpickled == rw_custom
     assert unpickled.cooling_type == "custom"
-    assert unpickled.cooling_fn(1, 2, 3) == 1.0
+    assert unpickled.cooling_factor(1, 2, 3) == 1.0
 
 
 def test_pickle_custom_cooling_closure():
@@ -611,17 +590,16 @@ def test_pickle_custom_cooling_closure():
 
     rw = pp.RWSigma({"p1": 0.1}).custom_cooling(make(0.5))
     unpickled = cloudpickle.loads(cloudpickle.dumps(rw))
-    assert np.isclose(unpickled.cooling_fn(0, 3, 10), rw.cooling_fn(0, 3, 10))
+    assert np.isclose(unpickled.cooling_factor(0, 3, 10), rw.cooling_factor(0, 3, 10))
 
 
 def test_flat_cooling_factor():
     """An unrecognized/flat cooling type evaluates to a constant factor of 1.0."""
     rw = pp.RWSigma({"p1": 0.1})
     rw._set_cooling("none")
-    assert rw.cooling_fn(10, 5, 20) == 1.0
     assert rw.cooling_factor(10, 5, 20) == 1.0
     assert rw.a is None and rw.s is None and rw.c is None and rw.M is None
     # Round-trips through pickle.
     rw2 = pickle.loads(pickle.dumps(rw))
     assert rw2.cooling_type == "none"
-    assert rw2.cooling_fn(10, 5, 20) == 1.0
+    assert rw2.cooling_factor(10, 5, 20) == 1.0

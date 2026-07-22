@@ -15,16 +15,9 @@ class RWSigma:
     """Random walk standard deviation configuration for IF2 parameter perturbation.
 
     Stores per-parameter random walk standard deviations and a cooling
-    schedule used by the Iterated Filtering 2 (IF2) algorithm.  The
+    schedule used by the iterated filtering algorithms (IF2, MPIF, PIF).  The
     cooling schedule reduces the perturbation magnitude over iterations
     so parameters converge to their maximum likelihood estimates.
-
-    The class is registered as a JAX PyTree: the standard-deviation arrays
-    are leaves (stored as ``numpy`` arrays so the object pickles cheaply),
-    while parameter names and the cooling specification are static auxiliary
-    metadata.  Construct instances host-side via the ``RWSigma({...})``
-    constructor; evaluate the cooling schedule device-side via
-    :meth:`cooling_factor`.
 
     Parameters
     ----------
@@ -111,7 +104,7 @@ class RWSigma:
         """Rebuild an instance directly from leaves + aux (bypasses validation).
 
         Used by PyTree unflattening (where leaves may be tracers) and by the
-        array-transforming helpers (:meth:`canonicalize`, :meth:`_permuted`).
+        array-transforming helpers (:meth:`_canonicalize`, :meth:`_permuted`).
         """
         obj = object.__new__(cls)
         object.__setattr__(obj, "param_names", tuple(param_names))
@@ -172,9 +165,6 @@ class RWSigma:
         if not all(n in clean for n in init_names):
             raise ValueError("All init_names names must be in sigmas dictionary")
 
-        # Keep parameters in insertion order; the init/non-init split is carried
-        # by ``init_mask`` rather than by reordering, and device arrays are
-        # canonicalized to the model order via :meth:`canonicalize` regardless.
         param_names = tuple(clean.keys())
         sigmas_arr = np.asarray([clean[n] for n in param_names], dtype=float)
         init_set = set(init_names)
@@ -235,7 +225,7 @@ class RWSigma:
     # Host-side transforms (return new instances)
     # ------------------------------------------------------------------
 
-    def canonicalize(self, canonical_names: Sequence[str]) -> RWSigma:
+    def _canonicalize(self, canonical_names: Sequence[str]) -> RWSigma:
         """Reorder the sigmas to match the model's canonical parameter vector.
 
         Parameters
@@ -257,9 +247,6 @@ class RWSigma:
             )
         idx = {n: i for i, n in enumerate(self.param_names)}
         order = np.asarray([idx[n] for n in names])
-        # Index the leaves directly (not via np.asarray) so this is safe when
-        # the leaves are JAX tracers, i.e. when canonicalize runs inside a
-        # jitted functional call. ``order`` is built from static aux metadata.
         return RWSigma._from_leaves(
             param_names=names,
             init_names=self.init_names,
@@ -351,47 +338,6 @@ class RWSigma:
         )
 
     # ------------------------------------------------------------------
-    # Backward-compatibility helpers
-    # ------------------------------------------------------------------
-
-    @property
-    def all_names(self) -> tuple[str, ...]:
-        return self.param_names
-
-    @property
-    def not_init_names(self) -> tuple[str, ...]:
-        init_set = set(self.init_names)
-        return tuple(n for n in self.param_names if n not in init_set)
-
-    @property
-    def sigmas(self) -> dict[str, float]:
-        """Read-only dict view of ``{param_name: sigma}`` (host-side only)."""
-        return {
-            n: float(v)
-            for n, v in zip(self.param_names, np.asarray(self.sigmas_all_arr))
-        }
-
-    def _return_arrays(
-        self, param_names: Sequence[str] | None = None
-    ) -> tuple[Any, Any]:
-        """Return ``(sigmas_array, sigmas_init_array)`` in ``param_names`` order.
-
-        Retained for callers that have not yet migrated to passing the
-        :class:`RWSigma` PyTree directly.
-        """
-        obj = self if param_names is None else self.canonicalize(param_names)
-        return jnp.asarray(obj.sigmas_array), jnp.asarray(obj.sigmas_init_array)
-
-    @property
-    def cooling_fn(self) -> Callable:
-        """A plain ``(nt, m, ntimes) -> float`` callable for the configured schedule."""
-        if self.cooling_type == "custom":
-            assert self._custom_fn is not None
-            return self._custom_fn
-        # Bind the current schedule spec into a standalone closure.
-        return lambda nt, m, ntimes: self.cooling_factor(nt, m, ntimes)
-
-    # ------------------------------------------------------------------
     # Pickling: only the (optional) custom cooling function needs cloudpickle;
     # numpy arrays, tuples, and floats pickle natively.
     # ------------------------------------------------------------------
@@ -415,6 +361,14 @@ class RWSigma:
     # ------------------------------------------------------------------
     # Dict-like ergonomics (read-only views)
     # ------------------------------------------------------------------
+
+    @property
+    def sigmas(self) -> dict[str, float]:
+        """Read-only dict view of ``{param_name: sigma}`` (host-side only)."""
+        return {
+            n: float(v)
+            for n, v in zip(self.param_names, np.asarray(self.sigmas_all_arr))
+        }
 
     def __getitem__(self, param_name: str) -> float:
         if param_name not in self.param_names:

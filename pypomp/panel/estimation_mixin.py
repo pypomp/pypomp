@@ -870,9 +870,6 @@ class PanelEstimationMixin(Base):
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
 
-        eta_shared = eta.to_array(shared_index, M)
-        eta_spec = eta.to_array(spec_index, M)
-
         keys = jax.random.split(key, n_reps * M * U).reshape(
             (n_reps, M, U) + key.shape[1:]
         )
@@ -884,7 +881,7 @@ class PanelEstimationMixin(Base):
             unit_history_natural,
         ) = run_jax_batch_sharded(
             F.panel_train,
-            {1: 0, 2: 0, 9: 0},
+            {1: 0, 2: 0, 8: 0},
             [0, 0, 0],
             struct,
             shared_array,
@@ -892,8 +889,7 @@ class PanelEstimationMixin(Base):
             J,
             optimizer,
             M,
-            eta_shared,
-            eta_spec,
+            eta,
             alpha,
             keys,
             alpha_cooling,

@@ -552,9 +552,6 @@ class PompEstimationMixin(Base):
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
 
-        # Convert eta to JAX array in canonical order
-        eta_array = eta.to_array(self.canonical_param_names, M)
-
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
 
@@ -569,7 +566,7 @@ class PompEstimationMixin(Base):
             J,
             optimizer,
             M,
-            eta_array,
+            eta,
             alpha,
             keys,
             alpha_cooling,

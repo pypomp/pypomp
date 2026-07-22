@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 from .structs import PompStruct, PanelPompStruct
 from ..core.algorithms.train import (
     _vmapped_train_internal,
@@ -10,6 +11,7 @@ from ..core.algorithms.types import (
     TrainConfig,
     TrainInputs,
 )
+from ..core.learning_rate import LearningRate
 from ..core.optimizer import Optimizer
 
 
@@ -19,7 +21,7 @@ def train(
     J: int,
     optimizer: Optimizer,
     M: int,
-    eta: jax.Array,
+    eta: LearningRate,
     alpha: float | jax.Array,
     keys: jax.Array,
     alpha_cooling: float = 1.0,
@@ -55,9 +57,8 @@ def train(
         :class:`~pypomp.SGD`).
     M : int
         Maximum number of gradient steps.
-    eta : jax.Array
-        Per-parameter learning rate array of shape ``(M, n_params)``.
-        Must be aligned with ``struct.param_names`` along the last axis.
+    eta : LearningRate
+        Per-parameter learning rates as a :class:`~pypomp.LearningRate` instance.
     alpha : float or jax.Array
         MOP discount factor.
     keys : jax.Array
@@ -92,11 +93,12 @@ def train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    eta_array = eta.to_array(struct.param_names, M)
 
     config = TrainConfig.from_train_struct(
         struct, J, M, alpha_cooling, thresh, n_monitors
     )
-    inputs = TrainInputs.from_train_struct(struct, eta, alpha)
+    inputs = TrainInputs.from_train_struct(struct, eta_array, alpha)
 
     return _vmapped_train_internal(
         thetas_array,
@@ -114,8 +116,7 @@ def panel_train(
     J: int,
     optimizer: Optimizer,
     M: int,
-    eta_shared: jax.Array,  # (M, n_shared)
-    eta_spec: jax.Array,  # (M, n_spec)
+    eta: LearningRate,
     alpha: float,
     keys: jax.Array,
     alpha_cooling: float,
@@ -148,14 +149,8 @@ def panel_train(
         :class:`~pypomp.SGD`, :class:`~pypomp.Newton`).
     M : int
         Number of iterations.
-    eta_shared : jax.Array
-        Learning rates array for shared parameters of shape ``(M, n_shared)``,
-        aligned with the canonical order of ``struct.shared_param_names`` along
-        the last axis.
-    eta_spec : jax.Array
-        Learning rates array for unit-specific parameters of shape ``(M, n_spec)``,
-        aligned with the canonical order of ``struct.unit_param_names`` along
-        the last axis.
+    eta : LearningRate
+        Learning rates object containing rates for shared and unit-specific parameters.
     alpha : float
         Discount factor for MOP updates.
     keys : jax.Array
@@ -193,6 +188,16 @@ def panel_train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    eta_shared = (
+        eta.to_array(struct.shared_param_names, M)
+        if struct.shared_param_names
+        else jnp.zeros((M, 0))
+    )
+    eta_spec = (
+        eta.to_array(struct.unit_param_names, M)
+        if struct.unit_param_names
+        else jnp.zeros((M, 0))
+    )
 
     shared_est, unit_est = struct.par_trans._transform_panel_array(
         shared_array,

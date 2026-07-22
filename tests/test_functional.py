@@ -57,7 +57,7 @@ def test_train_functional(model_setup):
     struct, thetas_array, key, J, n_reps, param_names = model_setup
     keys = jax.random.split(key, n_reps)
     M = 2
-    eta = jnp.ones(len(param_names)) * 0.01
+    eta = pp.LearningRate({name: 0.01 for name in param_names})
 
     neg_logliks, theta_traces = F.train(
         struct,
@@ -233,8 +233,8 @@ def test_panel_train_functional(panel_setup):
 
     # train takes parameters without J dimension: (n_reps, n_shared) and (n_reps, U, n_spec)
     M = 2
-    eta_shared = jnp.ones((M, n_shared)) * 0.01
-    eta_spec = jnp.ones((M, n_spec)) * 0.01
+    all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
+    eta = pp.LearningRate({name: 0.01 for name in all_param_names})
 
     keys = jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U)
 
@@ -245,8 +245,7 @@ def test_panel_train_functional(panel_setup):
         J=J,
         optimizer=pp.Adam(),
         M=M,
-        eta_shared=eta_shared,
-        eta_spec=eta_spec,
+        eta=eta,
         alpha=0.97,
         keys=keys,
         alpha_cooling=1.0,

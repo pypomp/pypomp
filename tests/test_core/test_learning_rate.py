@@ -192,6 +192,41 @@ def test_equality():
     assert lr1 != "not a LearningRate"
 
 
+def test_pytree_registration():
+    """Test JAX PyTree flattening and unflattening."""
+    lr = pp.LearningRate({"beta": 0.1, "rho": np.array([0.01, 0.02])})
+    leaves, treedef = jax.tree_util.tree_flatten(lr)
+    assert len(leaves) == 1
+    assert np.allclose(leaves[0], np.array([[0.1, 0.01], [0.1, 0.02]]))
+
+    # Unflatten PyTree
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert isinstance(rebuilt, LearningRate)
+    assert rebuilt == lr
+
+
+def test_canonicalize():
+    """Test reordering parameters with _canonicalize."""
+    lr = pp.LearningRate({"beta": 0.1, "rho": 0.02})
+    canonicalized = lr._canonicalize(["rho", "beta"])
+    assert canonicalized.param_names == ("rho", "beta")
+    assert np.allclose(canonicalized.rates_all_arr, np.array([0.02, 0.1]))
+
+    # Test error case with missing/extra names
+    with pytest.raises(
+        ValueError, match="Parameter 'gamma' not found in learning rates"
+    ):
+        lr._canonicalize(["beta", "gamma"])
+
+
+def test_mismatched_schedule_lengths():
+    """Test error when schedules have conflicting lengths."""
+    with pytest.raises(
+        ValueError, match="All 1D learning rate schedules must have the same length"
+    ):
+        pp.LearningRate({"beta": [0.1, 0.2], "rho": [0.01, 0.02, 0.03]})
+
+
 def test_str_repr():
     """Test __str__ and __repr__ formatting."""
     # 1. Scalar values
@@ -216,8 +251,3 @@ def test_str_repr():
     )
     expected_str_long = "LearningRate(\n    'beta': [1.111 ... 10] (len=6)\n)"
     assert str(lr_long) == expected_str_long
-
-    # Let's bypass validation to cover the else block in __str__ just in case
-    lr_hack = pp.LearningRate({"beta": 0.1})
-    lr_hack.rates["beta"] = "unsupported_type"  # type: ignore
-    assert "beta': unsupported_type" in str(lr_hack)

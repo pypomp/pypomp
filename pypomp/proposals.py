@@ -10,9 +10,7 @@ through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose three methods:
   returns ``(theta_proposed, new_state)``.  All inputs/outputs are
   ``jax.Array``; no Python branching on traced values.
 * ``canonicalize(canonical_names)`` returns a new proposal instance expanded
-  and reordered to match the model's full canonical parameter vector.  This is
-  applied automatically by the functional ``pmcmc`` / ``abc`` entry points, so
-  callers do not need to invoke it themselves.
+  and reordered to match the model's full canonical parameter vector.
 
 Three proposals are provided, following pomp (R):
 
@@ -71,25 +69,19 @@ class MVNDiagRW:
     Construct from a dict of per-parameter random-walk standard deviations;
     parameters with ``sd <= 0`` are silently dropped.
 
-    Attributes
+    Parameters
     ----------
-    sd_arr : np.ndarray
-        ``(d,)`` array of per-parameter random-walk standard
-        deviations, in the order given by ``param_names``.
-    param_names : tuple of str
-        Tuple of parameter names corresponding to ``sd_arr``.
+    rw_sd : dict of str to float
+        Dictionary mapping parameter names to random-walk standard
+        deviations. Parameters with ``sd <= 0`` are silently dropped.
     """
 
     sd_arr: np.ndarray  # stored as numpy array so class can be pickled efficiently
+    """(d,) array of per-parameter random-walk standard deviations."""
     param_names: tuple[str, ...]
+    """Tuple of parameter names corresponding to sd_arr."""
 
     def __init__(self, rw_sd: dict[str, float]):
-        """Construct a diagonal multivariate normal random-walk proposal.
-
-        Args:
-            rw_sd: Dictionary mapping parameter names to random-walk standard
-                deviations.  Parameters with ``sd <= 0`` are silently dropped.
-        """
         rw_sd = {k: float(v) for k, v in rw_sd.items() if v > 0}
         if not rw_sd:
             raise ValueError("rw_sd must contain at least one positive entry.")
@@ -156,28 +148,21 @@ class MVNRWFull:
     Construct from a symmetric positive-definite covariance matrix and the
     parameter names corresponding to its rows/columns.
 
-    Attributes
+    Parameters
     ----------
-    chol : np.ndarray
-        ``(d, d)`` lower-triangular Cholesky factor of the proposal
-        covariance.
-    param_names : tuple of str
-        Tuple of parameter names corresponding to the rows/columns
-        of the covariance.
+    rw_var : np.ndarray
+        Symmetric positive-definite covariance matrix of shape
+        ``(d, d)`` where ``d = len(param_names)``.
+    param_names : list of str
+        Parameter names corresponding to the rows/columns of ``rw_var``.
     """
 
     chol: np.ndarray  # stored as numpy array so class can be pickled efficiently
+    """(d, d) lower-triangular Cholesky factor of the proposal covariance."""
     param_names: tuple[str, ...]
+    """Tuple of parameter names corresponding to the rows/columns of the covariance."""
 
     def __init__(self, rw_var: np.ndarray, param_names: list[str]):
-        """Construct a full-covariance multivariate normal random-walk proposal.
-
-        Args:
-            rw_var: Symmetric positive-definite covariance matrix of shape
-                ``(d, d)`` where ``d = len(param_names)``.
-            param_names: Parameter names corresponding to the rows/columns of
-                ``rw_var``.
-        """
         rw_var = np.asarray(rw_var, dtype=float)
         if rw_var.ndim != 2 or rw_var.shape[0] != rw_var.shape[1]:
             raise ValueError("rw_var must be a square matrix.")
@@ -250,21 +235,16 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True)
 class AdaptiveState:
-    """Mutable per-iteration state carried by :class:`MVNRWAdaptive` through scan.
-
-    Attributes:
-        scaling: Scalar scaling factor (Phase 1 scale adaptation).
-        theta_mean: ``(d,)`` running mean of theta values (Welford).
-        covmat_emp: ``(d, d)`` running empirical covariance accumulator
-            (Welford).
-        initialized: ``()`` flag (0/1) indicating whether ``theta_mean`` was
-            seeded by the first call.
-    """
+    """Mutable per-iteration state carried by :class:`MVNRWAdaptive` through scan."""
 
     scaling: jax.Array
+    """Scalar scaling factor (Phase 1 scale adaptation)."""
     theta_mean: jax.Array
+    """(d,) running mean of theta values (Welford)."""
     covmat_emp: jax.Array
+    """(d, d) running empirical covariance accumulator (Welford)."""
     initialized: jax.Array
+    """() flag (0/1) indicating whether theta_mean was seeded by the first call."""
 
 
 jax.tree_util.register_pytree_node(
@@ -294,32 +274,43 @@ class MVNRWAdaptive:
     Cholesky is computed each step with a small jitter (``1e-10 * I``) for
     JIT-friendly numerical robustness.
 
-    Attributes
+    Parameters
     ----------
-    init_rw_var : jax.Array
-        ``(d, d)`` initial covariance matrix.
-    param_names : tuple of str
-        Tuple of parameter names corresponding to rows/columns
-        of ``init_rw_var``.
-    scale_start : int
+    rw_sd : dict of str to float, optional
+        Named dict of per-parameter random-walk standard deviations.
+        Provide exactly one of ``rw_sd`` or ``rw_var``.
+    rw_var : array_like, optional
+        Full initial covariance matrix of shape ``(d, d)``.
+        Provide exactly one of ``rw_sd`` or ``rw_var``.
+    param_names : list of str, optional
+        Parameter names corresponding to the rows/columns of ``rw_var``.
+        Required when ``rw_var`` is supplied.
+    scale_start : int, default 200
         Iteration index at which Phase 1 begins.
-    scale_cooling : float
-        Cooling base for the scale update.
-    shape_start : int
+    scale_cooling : float, default 0.999
+        Cooling base for the scale update (in (0, 1]).
+    shape_start : int, default 200
         Accepted-proposal count at which to switch to Phase 2.
-    target : float
+    target : float, default 0.234
         Target Metropolis acceptance ratio.
-    max_scaling : float
+    max_scaling : float, default 50.0
         Upper bound for the scaling factor.
     """
 
     init_rw_var: np.ndarray  # stored as numpy array so class can be pickled efficiently
+    """(d, d) initial covariance matrix."""
     param_names: tuple[str, ...]
+    """Tuple of parameter names corresponding to rows/columns of init_rw_var."""
     scale_start: int
+    """Iteration index at which Phase 1 scale adaptation begins."""
     scale_cooling: float
+    """Cooling base for the scale update (in (0, 1])."""
     shape_start: int
+    """Accepted-proposal count at which to switch to Phase 2 empirical covariance."""
     target: float
+    """Target Metropolis acceptance ratio."""
     max_scaling: float
+    """Upper bound for the scaling factor."""
 
     def __init__(
         self,
@@ -332,30 +323,6 @@ class MVNRWAdaptive:
         target: float = 0.234,
         max_scaling: float = 50.0,
     ):
-        """Construct an adaptive MVN random-walk proposal (Roberts & Rosenthal 2009).
-
-        Provide exactly one of ``rw_sd`` (diagonal initialisation) or ``rw_var``
-        (full initial covariance).
-
-        Parameters
-        ----------
-        rw_sd : dict, optional
-            Named dict of per-parameter random-walk SDs.
-        rw_var : array_like, optional
-            Full initial covariance matrix.
-        param_names : list of str, optional
-            Required when ``rw_var`` is supplied.
-        scale_start : int, default 200
-            Iteration at which to begin scale adaptation.
-        scale_cooling : float, default 0.999
-            Cooling base for the scale update (in (0, 1]).
-        shape_start : int, default 200
-            Number of accepted proposals before switching to empirical covariance.
-        target : float, default 0.234
-            Target Metropolis acceptance ratio.
-        max_scaling : float, default 50.0
-            Upper bound for the scaling factor.
-        """
         if (rw_sd is None) == (rw_var is None):
             raise ValueError("Exactly one of rw_sd and rw_var must be given.")
         if rw_sd is not None:

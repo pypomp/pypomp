@@ -40,6 +40,7 @@ from .panel.panel import PanelPomp
 
 from .mcap import mcap
 from .proposals import (
+    Proposal,
     MVNDiagRW,
     MVNRWFull,
     MVNRWAdaptive,
@@ -78,6 +79,7 @@ __all__ = [
     "WeightedNewton",
     # Inference / Algorithms
     "mcap",
+    "Proposal",
     "MVNDiagRW",
     "MVNRWFull",
     "MVNRWAdaptive",

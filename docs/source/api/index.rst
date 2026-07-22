@@ -31,6 +31,7 @@ Configuration & Tuning
    par_trans
    rw_sigma
    learning_rate
+   proposals
    optimizers
 
 Utilities
@@ -41,7 +42,6 @@ Utilities
 
    maths
    random
-   proposals
    mcap
    types
 

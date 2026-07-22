@@ -246,7 +246,7 @@ class RWSigma:
                 f"reordering. Got {sorted(self.param_names)}, expected {sorted(names)}."
             )
         idx = {n: i for i, n in enumerate(self.param_names)}
-        order = np.asarray([idx[n] for n in names])
+        order = np.asarray([idx[n] for n in names], dtype=int)
         return RWSigma._from_leaves(
             param_names=names,
             init_names=self.init_names,

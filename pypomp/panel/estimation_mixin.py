@@ -7,7 +7,7 @@ import numpy as np
 import time
 import pypomp.functional as F
 from copy import deepcopy
-from typing import TYPE_CHECKING, Union, cast, Callable, overload, Literal
+from typing import TYPE_CHECKING, cast, Callable, overload, Literal
 import warnings
 
 
@@ -988,7 +988,7 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         eta: "LearningRate | dict[str, float] | float",
-        chunk_size: Union[int, str] = 1,
+        chunk_size: int = 1,
         optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
@@ -1011,7 +1011,7 @@ class PanelEstimationMixin(Base):
             Number of training iterations.
         eta : LearningRate or dict or float
             Learning rate(s).
-        chunk_size : int or str, optional
+        chunk_size : int, optional
             Number of units to process per gradient step.  Defaults to ``1``.
         optimizer : Optimizer, optional
             Optimizer configuration object.  Defaults to ``Adam()``.
@@ -1054,34 +1054,7 @@ class PanelEstimationMixin(Base):
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
         # Determine chunk size
-        if chunk_size == "auto":
-            try:
-                import psutil
-
-                bytes_per_unit = (
-                    J * len(rep_unit.statenames) * len(rep_unit.ys.index) * 200
-                )
-                mem = psutil.virtual_memory()
-                avail = mem.available * 0.4
-                max_units = max(1, int(avail / bytes_per_unit))
-                chunk_size_value = min(U, max_units)
-                try:
-                    device = jax.devices()[0]
-                    if device.platform == "gpu":
-                        memory_stats = device.memory_stats()
-                        if memory_stats is not None:
-                            avail = (
-                                memory_stats["bytes_limit"]
-                                - memory_stats["bytes_in_use"]
-                            )
-                            max_units = max(1, int(avail * 0.4 / bytes_per_unit))
-                            chunk_size_value = min(U, max_units)
-                except Exception:
-                    pass
-            except Exception:
-                chunk_size_value = max(1, U // 4)
-        else:
-            chunk_size_value = int(chunk_size)
+        chunk_size_value = int(chunk_size)
 
         if chunk_size_value < 1:
             chunk_size_value = 1

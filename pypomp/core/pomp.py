@@ -19,7 +19,7 @@ import pandas as pd
 import warnings
 
 from .metadata import ModelMetadata
-from .model_struct import _RInit, _RProc, _DMeas, _RMeas
+from .model_struct import _RInit, _RProc, _DMeas, _RMeas, _DPrior
 from .algorithms.helpers import _calc_ys_covars
 from .par_trans import ParTrans
 from .results import ResultsHistory
@@ -53,6 +53,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         - **rproc**: See :ref:`rproc-tutorial`.
         - **dmeas**: See :ref:`dmeas-tutorial`.
         - **rmeas**: See :ref:`rmeas-tutorial`.
+        - **dprior**: See :ref:`dprior-tutorial`.
 
     Parameters
     ----------
@@ -80,6 +81,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     rmeas : callable or None, optional
         Measurement simulator.  Required for :meth:`simulate`.  See
         :ref:`rmeas-tutorial`.
+    dprior : callable or None, optional
+        Prior log-density function.  See :ref:`dprior-tutorial`.
     par_trans : ParTrans or None, optional
         Parameter transformation object mapping between the natural
         parameter space and the estimation space.  Defaults to the
@@ -161,6 +164,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     rmeas: _RMeas | None
     """Measurement simulator used to generate synthetic observations."""
 
+    dprior: _DPrior | None
+    """Prior log-density model."""
+
     par_trans: ParTrans
     """Parameter transformation object mapping between natural and estimation spaces."""
 
@@ -204,6 +210,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         rproc: Callable,
         dmeas: Callable | None = None,
         rmeas: Callable | None = None,
+        dprior: Callable | None = None,
         par_trans: ParTrans | None = None,
         nstep: int | None = None,
         dt: float | None = None,
@@ -295,6 +302,18 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             )
         else:
             self.rmeas = None
+
+        if dprior is not None:
+            self.dprior = _DPrior(
+                struct=dprior,
+                statenames=self.statenames,
+                param_names=self.canonical_param_names,
+                covar_names=self.covar_names,
+                par_trans=self.par_trans,
+                validate_logic=validate_logic,
+            )
+        else:
+            self.dprior = None
 
         if self.dmeas is None and self.rmeas is None:
             raise ValueError("You must supply at least one of dmeas or rmeas")
@@ -422,6 +441,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             rproc_per=self.rproc.struct_per_interp,
             dmeas_per=self.dmeas.struct_per if self.dmeas is not None else None,
             rmeas_pf=self.rmeas.struct_pf if self.rmeas is not None else None,
+            dprior_pf=self.dprior.struct if self.dprior is not None else None,
             par_trans=self.par_trans,
             param_names=self.canonical_param_names,
         )
@@ -619,6 +639,10 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             original_func = self.rmeas.original_func
             state["_rmeas_func_bytes"] = cloudpickle.dumps(original_func)
 
+        if self.dprior is not None and hasattr(self.dprior, "struct"):
+            original_func = self.dprior.original_func
+            state["_dprior_func_bytes"] = cloudpickle.dumps(original_func)
+
         # Store JAX key as raw bits (key is not picklable directly)
         if self.fresh_key is not None:
             state["_fresh_key_data"] = jax.random.key_data(self.fresh_key)
@@ -628,6 +652,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         state.pop("rproc", None)
         state.pop("dmeas", None)
         state.pop("rmeas", None)
+        state.pop("dprior", None)
         state.pop("fresh_key", None)
 
         return state
@@ -748,6 +773,22 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                     y_names=list(self.ys.columns) if hasattr(self, "ys") else None,
                 )
 
+        # Reconstruct dprior
+        obj_dprior = _load_func("dprior")
+        if obj_dprior is not None:
+            if isinstance(obj_dprior, _DPrior):
+                self.dprior = obj_dprior
+            else:
+                self.dprior = _DPrior(
+                    struct=obj_dprior,
+                    statenames=self.statenames,
+                    param_names=self.canonical_param_names,
+                    covar_names=self.covar_names,
+                    par_trans=self.par_trans,
+                )
+        else:
+            self.dprior = None
+
         # Set defaults if reconstruction failed or was missing
         if not hasattr(self, "rinit"):
             self.rinit = None  # type: ignore
@@ -757,6 +798,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             self.rmeas = None
         if not hasattr(self, "dmeas"):
             self.dmeas = None
+        if not hasattr(self, "dprior"):
+            self.dprior = None
 
         # Clean up temporary state variables
         for key in [

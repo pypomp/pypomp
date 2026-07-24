@@ -13,7 +13,14 @@ from pypomp.types import (
     ObservationDict,
     InitialTimeFloat,
 )
-from pypomp.core.model_struct import _RInit, _RProc, _DMeas, _RMeas, _ModelComponent
+from pypomp.core.model_struct import (
+    _RInit,
+    _RProc,
+    _DMeas,
+    _RMeas,
+    _DPrior,
+    _ModelComponent,
+)
 
 
 def test_RInit_value_error():
@@ -800,3 +807,69 @@ def test_base_model_component_make_wrapper_not_implemented():
             par_trans=pp.ParTrans(),
             validate_logic=False,
         )
+
+
+def test_DPrior_basic():
+    def dprior(params: ParamDict) -> float:
+        return float(-0.5 * (params["beta"] - 1.0) ** 2)
+
+    dprior_obj = _DPrior(
+        dprior,
+        statenames=["S"],
+        param_names=["beta"],
+        covar_names=[],
+        par_trans=pp.ParTrans(),
+    )
+    val = dprior_obj.struct(jnp.array([1.0]), should_trans=False)
+    assert float(val) == 0.0
+
+    val_off = dprior_obj.struct(jnp.array([2.0]), should_trans=False)
+    assert float(val_off) == -0.5
+
+
+def test_DPrior_value_error():
+    def bad_fn(foo):
+        return 0.0
+
+    with pytest.raises(ValueError):
+        _DPrior(
+            bad_fn,
+            statenames=["S"],
+            param_names=["beta"],
+            covar_names=[],
+            par_trans=pp.ParTrans(),
+        )
+
+
+def test_DPrior_output_validation():
+    def bad_out_fn(theta_):
+        return "invalid"
+
+    with pytest.raises(TypeError, match="dprior function must return a scalar"):
+        _DPrior(
+            bad_out_fn,
+            statenames=["S"],
+            param_names=["beta"],
+            covar_names=[],
+            par_trans=pp.ParTrans(),
+        )
+
+
+def test_DPrior_par_trans():
+    def dprior(params: ParamDict) -> float:
+        return float(params["beta"])
+
+    par_trans = pp.ParTrans(
+        to_est=lambda p: {"beta": jnp.log(p["beta"])},
+        from_est=lambda p: {"beta": jnp.exp(p["beta"])},
+    )
+    dprior_obj = _DPrior(
+        dprior,
+        statenames=["S"],
+        param_names=["beta"],
+        covar_names=[],
+        par_trans=par_trans,
+    )
+    # in estimation space log(beta)=0.0 -> beta=1.0
+    val_trans = dprior_obj.struct(jnp.array([0.0]), should_trans=True)
+    assert np.isclose(float(val_trans), 1.0)

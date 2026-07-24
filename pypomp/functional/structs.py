@@ -43,6 +43,8 @@ class PompStruct(NamedTuple):
         Compiled measurement log-density for the IF2 perturbation loop.
     rmeas_pf : callable or None
         Compiled measurement simulator for :func:`simulate`.
+    dprior_pf : callable or None
+        Compiled prior log-density simulator.
     par_trans : ParTrans
         Parameter transformation object.
     param_names : list of str
@@ -67,6 +69,7 @@ class PompStruct(NamedTuple):
     rproc_per: Callable
     dmeas_per: Callable | None
     rmeas_pf: Callable | None
+    dprior_pf: Callable | None
     par_trans: ParTrans
     param_names: list[str]
 
@@ -91,6 +94,7 @@ def pomp_struct_flatten(struct: PompStruct):
         struct.rproc_per,
         struct.dmeas_per,
         struct.rmeas_pf,
+        struct.dprior_pf,
         struct.par_trans,
         struct.param_names,
     )
@@ -109,6 +113,7 @@ def pomp_struct_unflatten(aux_data, children):
         rproc_per,
         dmeas_per,
         rmeas_pf,
+        dprior_pf,
         par_trans,
         param_names,
     ) = aux_data
@@ -127,6 +132,7 @@ def pomp_struct_unflatten(aux_data, children):
         rproc_per=rproc_per,
         dmeas_per=dmeas_per,
         rmeas_pf=rmeas_pf,
+        dprior_pf=dprior_pf,
         par_trans=par_trans,
         param_names=param_names,
     )
@@ -250,3 +256,21 @@ def panel_pomp_struct_unflatten(aux_data, children):
 jax.tree_util.register_pytree_node(
     PanelPompStruct, panel_pomp_struct_flatten, panel_pomp_struct_unflatten
 )
+
+
+def resolve_dprior(dprior: Callable | None, struct: PompStruct) -> Callable:
+    """Resolve prior Callable at functional entry points."""
+    if dprior is not None:
+        return dprior
+    if struct.dprior_pf is not None:
+        return struct.dprior_pf
+    from ..core.model_struct import _DPrior, _flat_dprior
+
+    return _DPrior(
+        struct=_flat_dprior,
+        statenames=[],
+        param_names=struct.param_names,
+        covar_names=[],
+        par_trans=struct.par_trans,
+        validate_logic=False,
+    ).struct

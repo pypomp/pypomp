@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 import jax
 
-from .structs import PompStruct
+from .structs import PompStruct, resolve_dprior
 from ..core.algorithms.abc import _vmapped_abc_internal
 from ..core.algorithms.types import AbcConfig, AbcInputs
 
@@ -19,14 +19,13 @@ def abc(
     struct: PompStruct,
     thetas_array: jax.Array,
     proposal: Any,
-    dprior: Callable,
     probe_fn: Callable,
     obs_probes: jax.Array,
     scale_arr: jax.Array,
     epsilon: float,
-    ydim: int,
     M: int,
     keys: jax.Array,
+    dprior: Callable | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Functional ABC-MCMC entry point.
 
@@ -39,8 +38,6 @@ def abc(
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
         Proposal object (see :mod:`pypomp.proposals`).
-    dprior : Callable
-        Pure-JAX log-prior, ``dprior(theta_arr) -> scalar``.
     probe_fn : Callable
         Pure-JAX probe function, ``probe_fn(y_arr) -> (n_probes,)``
         where ``y_arr`` has shape ``(n_obs, ydim)``.
@@ -50,12 +47,17 @@ def abc(
         Per-probe scale, shape ``(n_probes,)``.
     epsilon : float
         ABC distance threshold (acceptance requires ``distance < epsilon**2``).
-    ydim : int
-        Observation dimensionality (static).
     M : int
         Number of MCMC iterations per chain.
     keys : jax.Array
         PRNG keys, shape ``(n_chains, ...)``.
+    dprior : Callable or None, optional
+        Pure-JAX log-prior function or ``None`` to use ``struct.dprior_pf``
+        (or, if that is absent too, a flat prior on the natural parameter
+        scale). Sampling is performed on the estimation scale, so the
+        change-of-variables log-Jacobian is added to the est-scale acceptance
+        ratio internally; this term is *not* included in the recorded
+        ``log_prior_traces`` (see Returns). See :ref:`dprior-tutorial`.
 
     Returns
     -------
@@ -63,19 +65,31 @@ def abc(
         ``(distance_traces, log_prior_traces, theta_traces, accepts)`` with
         shapes ``(n_chains, M + 1)``, ``(n_chains, M + 1)``,
         ``(n_chains, M + 1, d)``, ``(n_chains,)`` respectively.
+        ``log_prior_traces`` is evaluated on the **natural** parameter scale
+        (no Jacobian), consistent with ``theta_traces``; a flat prior records
+        0.0.
     """
     if struct.rmeas_pf is None:
         raise ValueError("ABC requires struct.rmeas_pf to be non-None.")
 
+    thetas_est = struct.par_trans._transform_array(
+        thetas_array,
+        struct.param_names,
+        direction="to_est",
+    )
+
     proposal = proposal.canonicalize(struct.param_names)
 
+    dprior_fn = resolve_dprior(dprior, struct)
+    ydim = int(struct.ys.shape[1])
     config = AbcConfig.from_abc_struct(
         struct,
         M=M,
-        dprior=dprior,
+        dprior=dprior_fn,
         probe_fn=probe_fn,
         ydim=ydim,
     )
+
     inputs = AbcInputs.from_abc_struct(
         struct,
         obs_probes=obs_probes,
@@ -83,10 +97,24 @@ def abc(
         epsilon=epsilon,
     )
 
-    return _vmapped_abc_internal(
-        thetas_array,
+    dist_traces, _lp_est_traces, theta_est_traces, accepts = _vmapped_abc_internal(
+        thetas_est,
         proposal,
         config,
         inputs,
         keys,
     )
+    theta_natural_traces = struct.par_trans._transform_array(
+        theta_est_traces,
+        struct.param_names,
+        direction="from_est",
+    )
+    # The scan uses est-scale priors (natural prior + change-of-variables
+    # Jacobian) for the acceptance ratio, but the recorded traces live on the
+    # natural scale. Recompute the log-prior at the natural-scale parameters
+    # (``should_trans=False`` -> no Jacobian) so the reported ``log_prior`` is
+    # consistent with ``theta`` and can be recomputed independently by the user.
+    lp_traces = jax.vmap(jax.vmap(lambda th: dprior_fn(th, False)))(
+        theta_natural_traces
+    )
+    return dist_traces, lp_traces, theta_natural_traces, accepts

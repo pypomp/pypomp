@@ -5,6 +5,7 @@ This file contains the internal simulation functions for POMP models.
 from functools import partial
 import jax
 import jax.numpy as jnp
+from jax import jit
 from typing import Callable
 
 
@@ -25,6 +26,7 @@ def _simulate_internal(
     accumvars: tuple[int, ...] | None,
     nsim: int,  # static
     key: jax.Array,
+    should_trans: bool = SHOULD_TRANS,  # argument allows abc, pmcmc to transform
 ) -> tuple[jax.Array, jax.Array]:
     times = times.astype(float)
     times0 = jnp.concatenate([jnp.array([t0]), times])
@@ -33,7 +35,7 @@ def _simulate_internal(
     split_keys = jax.random.split(key, num=nsim + 1)
     key = split_keys[0]
     keys = split_keys[1:]
-    X_sims = rinitializer(theta, keys, covars0, t0, SHOULD_TRANS)
+    X_sims = rinitializer(theta, keys, covars0, t0, should_trans)
 
     n_obs = times.shape[0]
     X_array = jnp.zeros((n_obs + 1, X_sims.shape[1], nsim))
@@ -51,6 +53,7 @@ def _simulate_internal(
         covars_extended=covars_extended,
         nsim=nsim,
         accumvars=accumvars,
+        should_trans=should_trans,
     )
 
     t, t_idx, X_sims, X_array, Y_array, key = jax.lax.fori_loop(
@@ -63,7 +66,12 @@ def _simulate_internal(
     return X_array, Y_array
 
 
-_jit_simulate_internal = jax.jit(
+_vmapped_simulate_internal = jax.vmap(
+    _simulate_internal,
+    in_axes=(None,) * 3 + (0,) + (None,) * 8 + (0,),
+)
+
+_jit_simulate_internal = jit(
     _simulate_internal,
     static_argnames=(
         "rinitializer",
@@ -71,20 +79,19 @@ _jit_simulate_internal = jax.jit(
         "rmeasure",
         "ydim",
         "nsim",
+        "should_trans",
     ),
 )
 
-_jv_simulate_internal = jax.jit(
-    jax.vmap(
-        _simulate_internal,
-        (None,) * 3 + (0,) + (None,) * 8 + (0,),
-    ),
+_jv_simulate_internal = jit(
+    _vmapped_simulate_internal,
     static_argnames=(
         "rinitializer",
         "rprocess_interp",
         "rmeasure",
         "ydim",
         "nsim",
+        "should_trans",
     ),
 )
 
@@ -101,6 +108,7 @@ def _simulate_helper(
     covars_extended: jax.Array | None,
     accumvars: tuple[int, ...] | None,
     nsim: int,
+    should_trans: bool = SHOULD_TRANS,
 ) -> tuple[jax.Array, int, jax.Array, jax.Array, jax.Array, jax.Array]:
     (t, t_idx, X_sims, X_array, Y_array, key) = inputs
 
@@ -120,7 +128,7 @@ def _simulate_helper(
         t_idx,
         nstep,
         accumvars,
-        SHOULD_TRANS,
+        should_trans,
     )
     t = times0[i]
 
@@ -128,7 +136,7 @@ def _simulate_helper(
     split_keys = jax.random.split(key, num=nsim + 1)
     key = split_keys[0]
     keys = split_keys[1:]
-    Y_sims = rmeasure(X_sims, theta, keys, covars_t, t, SHOULD_TRANS)
+    Y_sims = rmeasure(X_sims, theta, keys, covars_t, t, should_trans)
 
     X_array = X_array.at[i + 1].set(X_sims.T)
     Y_array = Y_array.at[i].set(Y_sims.T)

@@ -32,6 +32,8 @@ from pypomp.proposals import Proposal
 from .simulate import _simulate_internal
 from .types import AbcConfig, AbcInputs
 
+SHOULD_TRANS = True  # Should transformations be applied to the parameters?
+
 
 @partial(
     jit,
@@ -63,7 +65,8 @@ def _abc_internal(
     # 2. Initial evaluation.
     key, init_sim_key = jax.random.split(key)
     dist0 = sim_distance_fn(theta_arr, init_sim_key)
-    lp0 = config.dprior(theta_arr)
+    lp0 = config.dprior(theta_arr, SHOULD_TRANS)
+
     prop_state0 = proposal.init_state(theta_arr)
 
     init_carry = (
@@ -119,7 +122,7 @@ def _abc_step(
     theta_prop, new_prop_state = proposal.step(
         prop_state, theta_cur, prop_key, n, accepts
     )
-    lp_prop = config.dprior(theta_prop)
+    lp_prop = config.dprior(theta_prop, SHOULD_TRANS)
 
     # 3. Simulate and compute distance for the proposed theta.
     dist_prop = sim_distance_fn(theta_prop, sim_key)
@@ -169,7 +172,9 @@ def _abc_sim_distance(
         config.accumvars,
         1,  # nsim
         sim_key,
+        SHOULD_TRANS,
     )
+
     # Y shape: (n_obs, ydim, 1) -> (n_obs, ydim)
     y_arr = Y[..., 0]
 

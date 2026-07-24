@@ -61,7 +61,7 @@ def mif(
     Returns
     -------
     tuple of (jax.Array, jax.Array, jax.Array)
-        - Negative log-likelihood history of shape ``(n_reps, M)``.
+        - Log-likelihood history of shape ``(n_reps, M)``.
         - Parameter trace history of shape ``(n_reps, M+1, n_params)``
           on the natural scale.
         - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
@@ -127,7 +127,7 @@ def mif(
         struct.param_names,
         direction="from_est",
     )
-    return res[0], traces_natural, final_thetas_natural
+    return -res[0], traces_natural, final_thetas_natural
 
 
 def panel_mif(

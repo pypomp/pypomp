@@ -23,6 +23,8 @@ from pypomp.proposals import Proposal
 from .pfilter import _pfilter_internal
 from .types import PmcmcConfig, PmcmcInputs
 
+SHOULD_TRANS = True  # Should transformations be applied to the parameters?
+
 
 @partial(
     jit,
@@ -64,7 +66,8 @@ def _pmcmc_internal(
     # 2. Initial evaluation at starting theta.
     key, init_pf_key = jax.random.split(key)
     loglik0 = run_pfilter_fn(theta_arr, init_pf_key)
-    log_prior0 = config.dprior(theta_arr)
+    log_prior0 = config.dprior(theta_arr, SHOULD_TRANS)
+
     prop_state0 = proposal.init_state(theta_arr)
 
     init_carry = (
@@ -118,7 +121,8 @@ def _pmcmc_step(
     )
 
     # 2. Evaluate prior and likelihood at proposed parameter.
-    lp_prop = config.dprior(theta_prop)
+    lp_prop = config.dprior(theta_prop, SHOULD_TRANS)
+
     ll_prop = run_pfilter_fn(theta_prop, pf_key)
 
     # 3. Accept or reject.

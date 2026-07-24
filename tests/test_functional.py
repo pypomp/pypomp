@@ -88,7 +88,7 @@ def test_mif_functional(model_setup):
     # thetas_array for mif needs to be (n_reps, J, n_params)
     thetas_mif = jnp.repeat(thetas_array[:, jnp.newaxis, :], J, axis=1)
 
-    neg_logliks_M, thetas_traces_Md, final_theta_Jd = F.mif(
+    logliks_M, thetas_traces_Md, final_theta_Jd = F.mif(
         struct,
         thetas_mif,
         rw_sd,
@@ -99,7 +99,7 @@ def test_mif_functional(model_setup):
         n_monitors=0,
     )
 
-    assert neg_logliks_M.shape == (n_reps, M)
+    assert logliks_M.shape == (n_reps, M)
     assert thetas_traces_Md.shape == (n_reps, M + 1, len(param_names))
     assert final_theta_Jd.shape == (n_reps, J, len(param_names))
 
@@ -316,3 +316,108 @@ def test_panel_pfilter_functional(panel_setup):
     assert "logLik" in results
     assert results["logLik"].shape == (n_reps, U)
     assert jnp.all(jnp.isfinite(results["logLik"]))
+
+
+def test_pmcmc_functional(model_setup):
+    struct, thetas_array, key, J, n_reps, param_names = model_setup
+    keys = jax.random.split(key, n_reps)
+    M = 2
+    prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
+
+    ll_traces, lp_traces, theta_traces, accepts = F.pmcmc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        M=M,
+        J=J,
+        thresh=0.0,
+        keys=keys,
+    )
+
+    assert ll_traces.shape == (n_reps, M + 1)
+    assert lp_traces.shape == (n_reps, M + 1)
+    assert theta_traces.shape == (n_reps, M + 1, len(param_names))
+    assert accepts.shape == (n_reps,)
+    assert jnp.all(jnp.isfinite(theta_traces))
+
+
+def test_abc_functional(model_setup):
+    struct, thetas_array, key, J, n_reps, param_names = model_setup
+    keys = jax.random.split(key, n_reps)
+    M = 2
+    prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
+
+    def probe_fn(y):
+        return jnp.array([jnp.mean(y), jnp.std(y)])
+
+    obs_probes = probe_fn(struct.ys)
+    scale_arr = jnp.array([10.0, 10.0])
+
+    dist_traces, lp_traces, theta_traces, accepts = F.abc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        probe_fn=probe_fn,
+        obs_probes=obs_probes,
+        scale_arr=scale_arr,
+        epsilon=1e6,
+        M=M,
+        keys=keys,
+    )
+
+    assert dist_traces.shape == (n_reps, M + 1)
+    assert lp_traces.shape == (n_reps, M + 1)
+    assert theta_traces.shape == (n_reps, M + 1, len(param_names))
+    assert accepts.shape == (n_reps,)
+    assert jnp.all(jnp.isfinite(theta_traces))
+
+
+def test_pmcmc_and_abc_functional_par_trans():
+    model = pp.models.LG()
+    param_names = model.canonical_param_names
+    first_param = param_names[0]
+
+    def to_est(p: pp.types.ParamDict) -> pp.types.ParamDict:
+        res = dict(p)
+        res[first_param] = jnp.log(p[first_param])
+        return res
+
+    def from_est(p: pp.types.ParamDict) -> pp.types.ParamDict:
+        res = dict(p)
+        res[first_param] = jnp.exp(p[first_param])
+        return res
+
+    par_trans = pp.ParTrans(to_est=to_est, from_est=from_est)
+    model.par_trans = par_trans
+    struct = model.to_struct()
+
+    n_reps = 1
+    theta_val = model.theta.to_jax_array(param_names)
+    thetas_array = jnp.repeat(theta_val, n_reps, axis=0)
+    key = jax.random.key(123)
+    keys = jax.random.split(key, n_reps)
+    prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
+
+    _, _, theta_traces_pmcmc, _ = F.pmcmc(
+        struct, thetas_array, proposal=prop, M=1, J=5, keys=keys
+    )
+    assert jnp.allclose(theta_traces_pmcmc[0, 0, :], theta_val[0])
+
+    def probe_fn(y):
+        return jnp.array([jnp.mean(y)])
+
+    obs_probes = probe_fn(struct.ys)
+    scale_arr = jnp.array([1.0])
+
+    _, _, theta_traces_abc, _ = F.abc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        probe_fn=probe_fn,
+        obs_probes=obs_probes,
+        scale_arr=scale_arr,
+        epsilon=1e6,
+        M=1,
+        keys=keys,
+    )
+    assert jnp.allclose(theta_traces_abc[0, 0, :], theta_val[0])

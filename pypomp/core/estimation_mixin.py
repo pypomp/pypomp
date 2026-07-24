@@ -27,6 +27,8 @@ from .results import (
 )
 from pypomp.proposals import Proposal
 from .parameters import PompParameters
+from .model_struct import _DPrior
+
 
 from typing import TYPE_CHECKING
 
@@ -35,11 +37,6 @@ if TYPE_CHECKING:
     from .pomp import Pomp
 else:
     Base = object
-
-
-def _flat_dprior(theta_arr: jax.Array) -> jax.Array:
-    """Default flat improper log-prior."""
-    return jnp.zeros((), dtype=theta_arr.dtype)
 
 
 class PompEstimationMixin(Base):
@@ -373,7 +370,7 @@ class PompEstimationMixin(Base):
 
         theta_array_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
 
-        nLLs_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
+        logliks_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
             {1: 0, 5: 0},
             [0, 0, 0],
@@ -387,17 +384,19 @@ class PompEstimationMixin(Base):
             n_monitors,
         )
 
-        nLLs = jax.device_get(nLLs_jax)
+        logliks = jax.device_get(logliks_jax)
         theta_traces = jax.device_get(theta_traces_jax)
 
-        del nLLs_jax, theta_traces_jax, final_swarm_jax
+        del logliks_jax, theta_traces_jax, final_swarm_jax
 
         param_names = self.canonical_param_names
         trace_vars = ["logLik"] + param_names
 
         # Prepend nan for the log-likelihood of the initial parameters (at iteration 0)
         nans = np.full((n_reps, 1), np.nan)
-        logliks_with_nan = np.concatenate([nans, -nLLs], axis=1)  # shape: (n_reps, M+1)
+        logliks_with_nan = np.concatenate(
+            [nans, logliks], axis=1
+        )  # shape: (n_reps, M+1)
 
         trace_data = np.concatenate(
             [logliks_with_nan[:, :, np.newaxis], theta_traces], axis=-1
@@ -423,7 +422,7 @@ class PompEstimationMixin(Base):
                 "parameter": param_names,
             },
         )
-        self.theta = PompParameters(final_theta_da, logLik=-nLLs)
+        self.theta = PompParameters(final_theta_da, logLik=logliks)
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -801,9 +800,8 @@ class PompEstimationMixin(Base):
         proposal : Proposal
             Proposal object from :mod:`pypomp.proposals`.
         dprior : Callable, optional
-            Pure-JAX log-prior function with signature
-            ``dprior(theta_arr) -> scalar``. If ``None``, a flat improper prior
-            is used.
+            Pure-JAX log-prior function. If ``None``, uses the model's prior or a
+            flat improper prior. See :ref:`dprior-tutorial`.
         key : jax.Array, optional
             JAX PRNG key. Defaults to :attr:`fresh_key`.
         theta : PompParameters, optional
@@ -837,18 +835,30 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        log_prior = dprior if dprior is not None else _flat_dprior
+
+        log_prior = (
+            _DPrior(
+                struct=dprior,
+                statenames=self.statenames,
+                param_names=self.canonical_param_names,
+                covar_names=self.covar_names,
+                par_trans=self.par_trans,
+            ).struct
+            if dprior is not None
+            else None
+        )
+
         keys = jax.random.split(new_key, n_chains)
 
         ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
-            self.to_struct(),
-            theta_array,
-            proposal,
-            log_prior,
-            M,
-            J,
-            thresh,
-            keys,
+            struct=self.to_struct(),
+            thetas_array=theta_array,
+            proposal=proposal,
+            M=M,
+            J=J,
+            thresh=thresh,
+            keys=keys,
+            dprior=log_prior,
         )
 
         ll_traces, lp_traces, theta_traces, accepts = jax.device_get(
@@ -857,7 +867,11 @@ class PompEstimationMixin(Base):
 
         trace_vars = ["logLik", "log_prior"] + list(canonical_names)
         trace_data = np.concatenate(
-            [ll_traces[..., np.newaxis], lp_traces[..., np.newaxis], theta_traces],
+            [
+                ll_traces[..., np.newaxis],
+                lp_traces[..., np.newaxis],
+                theta_traces,
+            ],
             axis=-1,
         )
         traces_da = xr.DataArray(
@@ -904,7 +918,7 @@ class PompEstimationMixin(Base):
         theta: PompParameters | None = None,
         track_time: bool = True,
     ) -> None:
-        """
+        r"""
         Approximate Bayesian Computation with a Metropolis-Hastings outer loop.
 
         The probe functions must be pure JAX callables accepting a simulated
@@ -919,14 +933,17 @@ class PompEstimationMixin(Base):
         probes : dict
             Mapping from probe name to pure-JAX summary statistic.
         scale : dict
-            Positive scaling factors to normalize probe differences in the squared scaled Euclidean distance.
+            Positive scaling factors to normalize probe differences in the
+            squared scaled Euclidean distance, e.g.,
+            :math:`d = \sum_i \left( \frac{s_i(y^*) - s_i(y)}{w_i} \right)^2`
+            where :math:`w_i` is ``scale[i]``.
         epsilon : float
             ABC distance rejection threshold.
         proposal : Proposal
             Proposal object from :mod:`pypomp.proposals`.
         dprior : Callable, optional
-            Pure-JAX log-prior function. If ``None``, a flat improper prior is
-            used.
+            Pure-JAX log-prior function. If ``None``, uses the model's prior if given,
+            otherwise a flat improper prior. See :ref:`dprior-tutorial`.
         key : jax.Array, optional
             JAX PRNG key. Defaults to :attr:`fresh_key`.
         theta : PompParameters, optional
@@ -965,7 +982,18 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
-        log_prior = dprior if dprior is not None else _flat_dprior
+
+        log_prior = (
+            _DPrior(
+                struct=dprior,
+                statenames=self.statenames,
+                param_names=self.canonical_param_names,
+                covar_names=self.covar_names,
+                par_trans=self.par_trans,
+            ).struct
+            if dprior is not None
+            else None
+        )
 
         probe_names = sorted(probes.keys())
         scale_arr = jnp.asarray([float(scale[name]) for name in probe_names])
@@ -977,20 +1005,18 @@ class PompEstimationMixin(Base):
 
         obs_probes = probe_fn(jnp.asarray(self.ys.values))
         keys = jax.random.split(new_key, n_chains)
-        ydim = int(self.ys.shape[1])
 
         dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
-            self.to_struct(),
-            theta_array,
-            proposal,
-            log_prior,
-            probe_fn,
-            obs_probes,
-            scale_arr,
-            float(epsilon),
-            ydim,
-            M,
-            keys,
+            struct=self.to_struct(),
+            thetas_array=theta_array,
+            proposal=proposal,
+            probe_fn=probe_fn,
+            obs_probes=obs_probes,
+            scale_arr=scale_arr,
+            epsilon=float(epsilon),
+            M=M,
+            keys=keys,
+            dprior=log_prior,
         )
 
         dist_traces, lp_traces, theta_traces, accepts = jax.device_get(

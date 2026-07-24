@@ -159,3 +159,30 @@ You can define the function arguments in two ways:
 
         # Return dict mapping observation names to simulated values
         return {'cases': sim_cases}
+
+.. _dprior-tutorial:
+
+Prior Log-Density (dprior)
+--------------------------
+
+The ``dprior`` function evaluates the log-prior density given parameter values.
+It must return a **scalar** (float or 0-d JAX array).
+
+**Argument Binding:**
+You can define the function arguments in two ways:
+
+1. **By Name:** Use the exact parameter name ``theta_``.
+2. **By Type:** Label the argument with the type :data:`~pypomp.types.ParamDict`.
+
+**Template:**
+
+.. code-block:: python
+
+    import jax.scipy.stats as stats
+    from pypomp.types import ParamDict
+
+    def dprior(params: ParamDict) -> float:
+        """
+        Returns scalar log-prior density.
+        """
+        return stats.norm.logpdf(params['beta'], loc=1.0, scale=0.5)

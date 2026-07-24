@@ -646,6 +646,83 @@ class _RMeas(_ModelComponent):
         return wrapped
 
 
+class _DPrior(_ModelComponent):
+    """
+    Defines the prior log-density model for parameter values.
+
+    Args:
+        struct (Callable): The user-defined prior function.
+        statenames (list[str]): List of state variable names.
+        param_names (list[str]): List of parameter names.
+        covar_names (list[str]): List of covariate names.
+        par_trans (ParTrans): Parameter transformation object.
+
+    User Function Structure
+    -----------------------
+    The `struct` function calculates the log-prior density given parameter values.
+    **Output:** Must return a **scalar** (float or 0-d JAX array).
+
+    **Argument Binding:** You can define the function arguments in two ways:
+
+    1. **By Name:** Use the exact parameter name `theta_`.
+    2. **By Type:** Label the argument with `ParamDict` from `pypomp.types`.
+
+    **Template:**
+
+    .. code-block:: python
+
+        import jax.scipy.stats as stats
+        from pypomp.types import ParamDict
+
+        def dprior(params: ParamDict) -> float:
+            \"\"\"
+            Returns scalar log-prior density.
+            \"\"\"
+            return stats.norm.logpdf(params['beta'], loc=1.0, scale=0.5)
+    """
+
+    internal_names = ["theta_"]
+    vmap_axes_pf = (None, None)
+    vmap_axes_per = (0, None)
+
+    def _validate_output(self, result):
+        is_jax_scalar = (
+            hasattr(result, "shape") or hasattr(result, "__jax_array__")
+        ) and jnp.ndim(result) == 0
+        if not (isinstance(result, (int, float, np.number)) or is_jax_scalar):
+            raise TypeError(
+                f"dprior function must return a scalar (float or 0-d array). Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
+            )
+
+    def _make_wrapper(self, user_func):
+        pnames = self.param_names
+        mapping, trans = self.name_mapping, self.par_trans
+
+        def _from_est_array(arr):
+            d_in = {n: arr[i] for i, n in enumerate(pnames)}
+            d_out = trans.from_est(d_in)
+            return jnp.stack([d_out[n] for n in pnames])
+
+        def wrapped(theta_arr, should_trans=False):
+            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
+            if should_trans and len(pnames) > 0:
+                theta_dict = trans.from_est(theta_dict)
+                J = jax.jacobian(_from_est_array)(theta_arr)
+                log_det_J = jnp.linalg.slogdet(J)[1]
+            else:
+                log_det_J = 0.0
+
+            log_p = user_func(**{mapping["theta_"]: theta_dict})
+            return log_p + log_det_J
+
+        return wrapped
+
+
+def _flat_dprior(params: ParamDict) -> float:
+    """Flat improper prior -- always returns 0.0."""
+    return 0.0
+
+
 # --- Interpolation Helper
 def _time_interp(rproc, nstep_fixed, max_steps_bound):
     vsplit = jax.vmap(jax.random.split, (0, None))

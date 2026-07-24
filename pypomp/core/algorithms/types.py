@@ -6,6 +6,7 @@ from jax.tree_util import register_dataclass
 from ...functional.structs import PompStruct, PanelPompStruct
 from ..rw_sigma import RWSigma
 
+
 # ----MOP---------------------------------------
 
 
@@ -730,19 +731,23 @@ class AbcConfig:
         cls,
         struct: PompStruct,
         M: int,
-        dprior: Callable,
-        probe_fn: Callable,
-        ydim: int,
+        dprior: Callable | None = None,
+        probe_fn: Callable = lambda y: y,
+        ydim: int = 1,
     ) -> AbcConfig:
         if struct.rmeas_pf is None:
             raise ValueError("abc requires struct.rmeas_pf to be non-None.")
+        dprior_fn = dprior if dprior is not None else struct.dprior_pf
+        if dprior_fn is None:
+            raise ValueError("dprior is required for ABC")
+
         return cls(
             M=M,
             rinitializer=struct.rinit_pf,
             rprocess_interp=struct.rproc_pf,
             rmeasure=struct.rmeas_pf,
             accumvars=struct.accumvars,
-            dprior=dprior,
+            dprior=dprior_fn,
             probe_fn=probe_fn,
             ydim=ydim,
         )
@@ -794,7 +799,6 @@ class PmcmcConfig:
     accumvars: tuple[int, ...] | None
     dprior: Callable
     thresh: float
-    should_trans: bool = False
 
     @classmethod
     def from_pmcmc_struct(
@@ -802,12 +806,15 @@ class PmcmcConfig:
         struct: PompStruct,
         M: int,
         J: int,
-        dprior: Callable,
+        dprior: Callable | None = None,
         thresh: float = 0.0,
-        should_trans: bool = False,
     ) -> PmcmcConfig:
         if struct.dmeas_pf is None:
             raise ValueError("dmeasure is required for PMCMC")
+        dprior_fn = dprior if dprior is not None else struct.dprior_pf
+        if dprior_fn is None:
+            raise ValueError("dprior is required for PMCMC")
+
         return cls(
             M=M,
             J=J,
@@ -815,9 +822,8 @@ class PmcmcConfig:
             rprocess_interp=struct.rproc_pf,
             dmeasure=struct.dmeas_pf,
             accumvars=struct.accumvars,
-            dprior=dprior,
+            dprior=dprior_fn,
             thresh=thresh,
-            should_trans=should_trans,
         )
 
     def to_pfilter_config(self) -> PfilterConfig:
@@ -828,7 +834,7 @@ class PmcmcConfig:
             dmeasure=self.dmeasure,
             accumvars=self.accumvars,
             thresh=self.thresh,
-            should_trans=self.should_trans,
+            should_trans=True,
         )
 
 

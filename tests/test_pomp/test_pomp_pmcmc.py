@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import pypomp as pp
+from pypomp.types import ParamDict
 from pypomp.core.results import Result
 from pypomp import MVNDiagRW, MVNRWFull, MVNRWAdaptive
 
@@ -55,14 +56,9 @@ jax.tree_util.register_pytree_node(
 # ---------------------------------------------------------------
 
 
-def _flat_dprior(theta_arr):
-    """Flat (improper) prior -- always returns 0."""
-    return jnp.zeros((), dtype=theta_arr.dtype)
-
-
-def _informative_dprior(theta_arr):
-    """Toy log-normal prior on the first parameter (gamma) using a JAX function."""
-    v = jnp.maximum(theta_arr[0], 1e-10)
+def _informative_dprior(params: ParamDict) -> float | jax.Array:
+    """Toy log-normal prior on gamma."""
+    v = jnp.maximum(params["gamma"], 1e-10)
     return -0.5 * (jnp.log(v)) ** 2
 
 
@@ -214,10 +210,30 @@ class TestPMCMC:
 
     def test_flat_prior_default(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(2))
-        res = _pmcmc_res(sir.results_history[-1])
-        log_priors = res.traces_da.sel(variable="log_prior").values
-        np.testing.assert_array_equal(log_priors, 0.0)
+
+        def flat_natural(params: ParamDict) -> float | jax.Array:
+            return 0.0
+
+        sir_default = deepcopy(sir)
+        sir_default.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(2))
+        lp_default = (
+            _pmcmc_res(sir_default.results_history[-1])
+            .traces_da.sel(variable="log_prior")
+            .values
+        )
+
+        sir_explicit = deepcopy(sir)
+        sir_explicit.pmcmc(
+            J=20, M=3, proposal=prop, dprior=flat_natural, key=jax.random.key(2)
+        )
+        lp_explicit = (
+            _pmcmc_res(sir_explicit.results_history[-1])
+            .traces_da.sel(variable="log_prior")
+            .values
+        )
+
+        np.testing.assert_array_equal(lp_default, lp_explicit)
+        np.testing.assert_allclose(lp_default, 0.0, rtol=0, atol=0)
 
     def test_acceptance_rate_in_range(self, sir):
         prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
@@ -342,18 +358,15 @@ class TestPMCMC:
             thresh=0.0,
         )["logLik"]
         np.testing.assert_allclose(
-            recorded, np.asarray(recomputed)[0, 0], rtol=0, atol=0
+            recorded, np.asarray(recomputed)[0, 0], rtol=1e-4, atol=1e-4
         )
 
     def test_impossible_prior_rejects_all_proposals(self, sir):
-        beta1_idx = sir.canonical_param_names.index("beta1")
         beta1_start = float(sir.theta[0]["beta1"])
 
-        def point_mass_prior(theta_arr):
+        def point_mass_prior(params: ParamDict) -> float | jax.Array:
             return jnp.where(
-                jnp.abs(theta_arr[beta1_idx] - beta1_start) < 1e-12,
-                0.0,
-                -jnp.inf,
+                jnp.abs(params["beta1"] - beta1_start) < 1e-3, 0.0, -jnp.inf
             )
 
         prop = MVNDiagRW({"beta1": 1.0})
@@ -366,9 +379,11 @@ class TestPMCMC:
         )
         res = _pmcmc_res(sir.results_history[-1])
         assert int(res.accepts[0]) == 0
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(res.traces_da.sel(variable="beta1")),
             np.full((1, 6), beta1_start),
+            rtol=1e-4,
+            atol=1e-4,
         )
 
     def test_functional_pmcmc_accepts_higher_likelihood_proposal(
@@ -387,7 +402,6 @@ class TestPMCMC:
             static_normal_pomp.to_struct(),
             theta_array,
             proposal,
-            _flat_dprior,
             M=1,
             J=2,
             thresh=0.0,

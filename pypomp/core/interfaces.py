@@ -6,7 +6,7 @@ import pandas as pd
 from pypomp.functional.structs import PompStruct
 from .parameters import PompParameters
 from .results import ResultsHistory
-from .model_struct import _RInit, _RProc, _DMeas, _RMeas
+from .model_struct import _RInit, _RProc, _DMeas, _RMeas, _DPrior
 from .par_trans import ParTrans
 from .metadata import ModelMetadata
 
@@ -20,12 +20,16 @@ class PompInterface(Protocol):
     ys: pd.DataFrame
     _theta: PompParameters | None
     canonical_param_names: list[str]
+    covar_names: list[str]
     statenames: list[str]
+
     t0: float
     rinit: _RInit
     rproc: _RProc
     dmeas: _DMeas | None
     rmeas: _RMeas | None
+    dprior: _DPrior | None
+
     par_trans: ParTrans
     covars: pd.DataFrame | None
     _covars_extended: np.ndarray | None

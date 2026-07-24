@@ -186,8 +186,7 @@ def _rproc(
     beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
     omega = jnp.exp(jnp.dot(omegas, seas))
 
-    subkey, key = jax.random.split(key)
-    dw = jax.random.normal(subkey) * std
+    dw = jax.random.normal(key) * std
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
@@ -271,9 +270,6 @@ def _rproc_gamma(
     beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
     omega = jnp.exp(jnp.dot(omegas, seas))
 
-    subkey, key = jax.random.split(key)
-    # dw = jax.random.normal(subkey) * std
-
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
     passages = passages.at[0].set(gamma * I)
@@ -295,7 +291,7 @@ def _rproc_gamma(
             before dividing by dt to yield multiplicative noise by 1
     """
 
-    perturb = jax.random.gamma(subkey, dt / sd_beta**2) * sd_beta**2 / dt
+    perturb = jax.random.gamma(key, dt / sd_beta**2) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
 
     sdeaths = delta * S

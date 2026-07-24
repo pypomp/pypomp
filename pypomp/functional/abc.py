@@ -2,13 +2,16 @@
 Pure-functional ABC-MCMC entry point.
 
 Thin wrapper over :func:`pypomp.core.algorithms.abc._vmapped_abc_internal`
-that takes a :class:`pypomp.functional.structs.PompStruct` plus pre-computed
-``obs_probes`` and ``scale_arr`` and runs ``n_chains`` chains in parallel.
+that takes a :class:`pypomp.functional.structs.PompStruct` plus a ``probes``
+dict and runs ``n_chains`` chains in parallel.
 """
 
-from typing import Any, Callable
+from typing import Callable
 
 import jax
+import jax.numpy as jnp
+
+from pypomp.proposals import Proposal
 
 from .structs import PompStruct, resolve_dprior
 from ..core.algorithms.abc import _vmapped_abc_internal
@@ -18,16 +21,15 @@ from ..core.algorithms.types import AbcConfig, AbcInputs
 def abc(
     struct: PompStruct,
     thetas_array: jax.Array,
-    proposal: Any,
-    probe_fn: Callable,
-    obs_probes: jax.Array,
-    scale_arr: jax.Array,
+    proposal: Proposal,
+    probes: dict[str, Callable],
     epsilon: float,
     M: int,
     keys: jax.Array,
+    scale: dict[str, float] | None = None,
     dprior: Callable | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Functional ABC-MCMC entry point.
+    r"""Functional ABC-MCMC entry point.
 
     Parameters
     ----------
@@ -38,19 +40,23 @@ def abc(
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
         Proposal object (see :mod:`pypomp.proposals`).
-    probe_fn : Callable
-        Pure-JAX probe function, ``probe_fn(y_arr) -> (n_probes,)``
-        where ``y_arr`` has shape ``(n_obs, ydim)``.
-    obs_probes : jax.Array
-        Observed probes, shape ``(n_probes,)``.
-    scale_arr : jax.Array
-        Per-probe scale, shape ``(n_probes,)``.
+    probes : dict
+        Mapping from probe name (``str``) to a pure-JAX summary-statistic
+        callable ``probe_fn(y_arr) -> scalar``, where ``y_arr`` is a
+        simulated observation array with shape ``(n_obs, ydim)``.
     epsilon : float
         ABC distance threshold (acceptance requires ``distance < epsilon**2``).
     M : int
         Number of MCMC iterations per chain.
     keys : jax.Array
         PRNG keys, shape ``(n_chains, ...)``.
+    scale : dict, optional
+        Mapping from probe name (``str``, matching the keys of ``probes``)
+        to a positive scaling factor (``float``) used to normalize probe
+        differences in the squared scaled Euclidean distance, e.g.,
+        :math:`d = \sum_i \left( \frac{s_i(y^*) - s_i(y)}{w_i} \right)^2`
+        where :math:`w_i` is ``scale[i]``. If ``None``, a scale of ``1.0``
+        is used for every probe.
     dprior : Callable or None, optional
         Pure-JAX log-prior function or ``None`` to use ``struct.dprior_pf``
         (or, if that is absent too, a flat prior on the natural parameter
@@ -71,6 +77,25 @@ def abc(
     """
     if struct.rmeas_pf is None:
         raise ValueError("ABC requires struct.rmeas_pf to be non-None.")
+    if not probes:
+        raise ValueError("probes must be a non-empty dict.")
+    if scale is None:
+        scale = {name: 1.0 for name in probes}
+    if set(scale.keys()) != set(probes.keys()):
+        raise ValueError("scale keys must match probes keys.")
+    for name, value in scale.items():
+        if value <= 0:
+            raise ValueError(f"scale['{name}'] must be positive.")
+
+    probe_names = sorted(probes.keys())
+    scale_arr = jnp.asarray([float(scale[name]) for name in probe_names])
+
+    def probe_fn(y_arr: jax.Array) -> jax.Array:
+        return jnp.stack(
+            [jnp.asarray(probes[name](y_arr)).reshape(()) for name in probe_names]
+        )
+
+    obs_probes = probe_fn(jnp.asarray(struct.ys))
 
     thetas_est = struct.par_trans._transform_array(
         thetas_array,

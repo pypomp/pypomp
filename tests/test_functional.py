@@ -347,19 +347,15 @@ def test_abc_functional(model_setup):
     M = 2
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
-    def probe_fn(y):
-        return jnp.array([jnp.mean(y), jnp.std(y)])
-
-    obs_probes = probe_fn(struct.ys)
-    scale_arr = jnp.array([10.0, 10.0])
+    probes = {"mean": jnp.mean, "std": jnp.std}
+    scale = {"mean": 10.0, "std": 10.0}
 
     dist_traces, lp_traces, theta_traces, accepts = F.abc(
         struct,
         thetas_array,
         proposal=prop,
-        probe_fn=probe_fn,
-        obs_probes=obs_probes,
-        scale_arr=scale_arr,
+        probes=probes,
+        scale=scale,
         epsilon=1e6,
         M=M,
         keys=keys,
@@ -370,6 +366,38 @@ def test_abc_functional(model_setup):
     assert theta_traces.shape == (n_reps, M + 1, len(param_names))
     assert accepts.shape == (n_reps,)
     assert jnp.all(jnp.isfinite(theta_traces))
+
+
+def test_abc_functional_scale_defaults_to_one(model_setup):
+    struct, thetas_array, key, J, n_reps, param_names = model_setup
+    keys = jax.random.split(key, n_reps)
+    M = 2
+    prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
+    probes = {"mean": jnp.mean, "std": jnp.std}
+
+    default_traces = F.abc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        probes=probes,
+        epsilon=1e6,
+        M=M,
+        keys=keys,
+    )
+
+    explicit_traces = F.abc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        probes=probes,
+        scale={"mean": 1.0, "std": 1.0},
+        epsilon=1e6,
+        M=M,
+        keys=keys,
+    )
+
+    for default_arr, explicit_arr in zip(default_traces, explicit_traces):
+        assert jnp.array_equal(default_arr, explicit_arr)
 
 
 def test_pmcmc_and_abc_functional_par_trans():
@@ -403,19 +431,13 @@ def test_pmcmc_and_abc_functional_par_trans():
     )
     assert jnp.allclose(theta_traces_pmcmc[0, 0, :], theta_val[0])
 
-    def probe_fn(y):
-        return jnp.array([jnp.mean(y)])
-
-    obs_probes = probe_fn(struct.ys)
-    scale_arr = jnp.array([1.0])
+    probes = {"mean": jnp.mean}
 
     _, _, theta_traces_abc, _ = F.abc(
         struct,
         thetas_array,
         proposal=prop,
-        probe_fn=probe_fn,
-        obs_probes=obs_probes,
-        scale_arr=scale_arr,
+        probes=probes,
         epsilon=1e6,
         M=1,
         keys=keys,

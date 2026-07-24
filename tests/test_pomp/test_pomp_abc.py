@@ -122,6 +122,35 @@ class TestABC:
         np.testing.assert_array_equal(lp_default, lp_explicit)
         np.testing.assert_allclose(lp_default, 0.0, rtol=0, atol=0)
 
+    def test_scale_defaults_to_one(self, sir):
+        from copy import deepcopy
+
+        prop = MVNDiagRW({"beta1": 1.0})
+        probes = _default_probes()
+
+        sir_default = deepcopy(sir)
+        sir_default.abc(
+            M=3,
+            probes=probes,
+            epsilon=1e6,
+            proposal=prop,
+            key=jax.random.key(2),
+        )
+        traces_default = _abc_res(sir_default.results_history[-1]).traces_da.values
+
+        sir_explicit = deepcopy(sir)
+        sir_explicit.abc(
+            M=3,
+            probes=probes,
+            scale={name: 1.0 for name in probes},
+            epsilon=1e6,
+            proposal=prop,
+            key=jax.random.key(2),
+        )
+        traces_explicit = _abc_res(sir_explicit.results_history[-1]).traces_da.values
+
+        np.testing.assert_array_equal(traces_default, traces_explicit)
+
     def test_acceptance_rate_in_range(self, sir):
         prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
         sir.abc(

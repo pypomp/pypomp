@@ -910,9 +910,9 @@ class PompEstimationMixin(Base):
         self,
         M: int,
         probes: dict[str, Callable],
-        scale: dict[str, float],
         epsilon: float,
         proposal: Proposal,
+        scale: dict[str, float] | None = None,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
@@ -931,16 +931,20 @@ class PompEstimationMixin(Base):
         M : int
             Number of ABC-MCMC iterations per chain.
         probes : dict
-            Mapping from probe name to pure-JAX summary statistic.
-        scale : dict
-            Positive scaling factors to normalize probe differences in the
-            squared scaled Euclidean distance, e.g.,
-            :math:`d = \sum_i \left( \frac{s_i(y^*) - s_i(y)}{w_i} \right)^2`
-            where :math:`w_i` is ``scale[i]``.
+            Mapping from probe name (``str``) to a pure-JAX summary-statistic
+            callable ``probe_fn(y_arr) -> scalar``, where ``y_arr`` is a
+            simulated observation array with shape ``(n_obs, ydim)``.
         epsilon : float
             ABC distance rejection threshold.
         proposal : Proposal
             Proposal object from :mod:`pypomp.proposals`.
+        scale : dict, optional
+            Mapping from probe name (``str``, matching the keys of ``probes``)
+            to a positive scaling factor (``float``) used to normalize probe
+            differences in the squared scaled Euclidean distance, e.g.,
+            :math:`d = \sum_i \left( \frac{s_i(y^*) - s_i(y)}{w_i} \right)^2`
+            where :math:`w_i` is ``scale[i]``. If ``None``, a scale of ``1.0``
+            is used for every probe.
         dprior : Callable, optional
             Pure-JAX log-prior function. If ``None``, uses the model's prior if given,
             otherwise a flat improper prior. See :ref:`dprior-tutorial`.
@@ -965,13 +969,6 @@ class PompEstimationMixin(Base):
             raise ValueError("M must be >= 1.")
         if epsilon <= 0:
             raise ValueError("epsilon must be positive.")
-        if not probes:
-            raise ValueError("probes must be a non-empty dict.")
-        if set(scale.keys()) != set(probes.keys()):
-            raise ValueError("scale keys must match probes keys.")
-        for name, value in scale.items():
-            if value <= 0:
-                raise ValueError(f"scale['{name}'] must be positive.")
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
@@ -995,24 +992,14 @@ class PompEstimationMixin(Base):
             else None
         )
 
-        probe_names = sorted(probes.keys())
-        scale_arr = jnp.asarray([float(scale[name]) for name in probe_names])
-
-        def probe_fn(y_arr: jax.Array) -> jax.Array:
-            return jnp.stack(
-                [jnp.asarray(probes[name](y_arr)).reshape(()) for name in probe_names]
-            )
-
-        obs_probes = probe_fn(jnp.asarray(self.ys.values))
         keys = jax.random.split(new_key, n_chains)
 
         dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
             struct=self.to_struct(),
             thetas_array=theta_array,
             proposal=proposal,
-            probe_fn=probe_fn,
-            obs_probes=obs_probes,
-            scale_arr=scale_arr,
+            probes=probes,
+            scale=scale,
             epsilon=float(epsilon),
             M=M,
             keys=keys,

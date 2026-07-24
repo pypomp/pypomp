@@ -42,8 +42,10 @@ def abc(
         Proposal object (see :mod:`pypomp.proposals`).
     probes : dict
         Mapping from probe name (``str``) to a pure-JAX summary-statistic
-        callable ``probe_fn(y_arr) -> scalar``, where ``y_arr`` is a
-        simulated observation array with shape ``(n_obs, ydim)``.
+        callable ``probe_fn(y) -> scalar``, where ``y`` is a dict mapping
+        each observation name (``struct.y_names``) to a ``(n_obs,)`` JAX
+        array of simulated values for that variable, e.g.
+        ``lambda y: jnp.mean(y["cases"])``.
     epsilon : float
         ABC distance threshold (acceptance requires ``distance < epsilon**2``).
     M : int
@@ -91,8 +93,9 @@ def abc(
     scale_arr = jnp.asarray([float(scale[name]) for name in probe_names])
 
     def probe_fn(y_arr: jax.Array) -> jax.Array:
+        y_dict = {name: y_arr[:, i] for i, name in enumerate(struct.y_names)}
         return jnp.stack(
-            [jnp.asarray(probes[name](y_arr)).reshape(()) for name in probe_names]
+            [jnp.asarray(probes[name](y_dict)).reshape(()) for name in probe_names]
         )
 
     obs_probes = probe_fn(jnp.asarray(struct.ys))

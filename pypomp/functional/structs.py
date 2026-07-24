@@ -49,6 +49,9 @@ class PompStruct(NamedTuple):
         Parameter transformation object.
     param_names : list of str
         Canonical parameter name ordering.
+    y_names : list of str
+        Observation column names, in the order matching the columns of
+        ``ys`` (i.e. ``ys[:, i]`` corresponds to ``y_names[i]``).
 
     See Also
     --------
@@ -72,6 +75,7 @@ class PompStruct(NamedTuple):
     dprior_pf: Callable | None
     par_trans: ParTrans
     param_names: list[str]
+    y_names: list[str]
 
 
 def pomp_struct_flatten(struct: PompStruct):
@@ -97,6 +101,7 @@ def pomp_struct_flatten(struct: PompStruct):
         struct.dprior_pf,
         struct.par_trans,
         struct.param_names,
+        struct.y_names,
     )
     return children, aux_data
 
@@ -116,6 +121,7 @@ def pomp_struct_unflatten(aux_data, children):
         dprior_pf,
         par_trans,
         param_names,
+        y_names,
     ) = aux_data
     return PompStruct(
         ys=ys,
@@ -135,6 +141,7 @@ def pomp_struct_unflatten(aux_data, children):
         dprior_pf=dprior_pf,
         par_trans=par_trans,
         param_names=param_names,
+        y_names=y_names,
     )
 
 

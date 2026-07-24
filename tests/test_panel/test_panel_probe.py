@@ -1,11 +1,12 @@
 import pandas as pd
 import numpy as np
+import jax.numpy as jnp
 
 
 def test_panel_pomp_probe(lg_panel_setup_some_shared):
     panel, rw_sd, key = lg_panel_setup_some_shared
 
-    probes = {"mean_first_col": lambda df: df.iloc[:, 0].mean()}
+    probes = {"mean_y1": lambda y: jnp.mean(y["Y1"])}
 
     nsim = 3
     probe_df = panel.probe(probes=probes, nsim=nsim, key=key)
@@ -38,7 +39,7 @@ def test_panel_pomp_probe_with_subset_theta(lg_panel_setup_some_shared):
 
     panel.theta = panel.theta.subset([0])
 
-    probes = {"max_first_col": lambda df: df.iloc[:, 0].max()}
+    probes = {"max_y1": lambda y: jnp.max(y["Y1"])}
 
     nsim = 2
     probe_df = panel.probe(probes=probes, nsim=nsim, key=key)

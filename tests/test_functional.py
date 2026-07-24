@@ -347,7 +347,10 @@ def test_abc_functional(model_setup):
     M = 2
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
-    probes = {"mean": jnp.mean, "std": jnp.std}
+    probes = {
+        "mean": lambda y: jnp.mean(y["Y1"]),
+        "std": lambda y: jnp.std(y["Y1"]),
+    }
     scale = {"mean": 10.0, "std": 10.0}
 
     dist_traces, lp_traces, theta_traces, accepts = F.abc(
@@ -373,7 +376,10 @@ def test_abc_functional_scale_defaults_to_one(model_setup):
     keys = jax.random.split(key, n_reps)
     M = 2
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
-    probes = {"mean": jnp.mean, "std": jnp.std}
+    probes = {
+        "mean": lambda y: jnp.mean(y["Y1"]),
+        "std": lambda y: jnp.std(y["Y1"]),
+    }
 
     default_traces = F.abc(
         struct,
@@ -431,7 +437,7 @@ def test_pmcmc_and_abc_functional_par_trans():
     )
     assert jnp.allclose(theta_traces_pmcmc[0, 0, :], theta_val[0])
 
-    probes = {"mean": jnp.mean}
+    probes = {"mean": lambda y: jnp.mean(y["Y1"])}
 
     _, _, theta_traces_abc, _ = F.abc(
         struct,

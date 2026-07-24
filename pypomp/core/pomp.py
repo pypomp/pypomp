@@ -444,6 +444,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             dprior_pf=self.dprior.struct if self.dprior is not None else None,
             par_trans=self.par_trans,
             param_names=self.canonical_param_names,
+            y_names=list(self.ys.columns),
         )
 
     def print_metadata(self) -> None:

@@ -22,11 +22,11 @@ def _abc_res(res) -> Result:
 
 
 def _default_probes():
-    """Three simple summary stats taking (n_obs, ydim) jax array."""
+    """Three simple summary stats on the sir model's "reports" observation."""
     return {
-        "mean": lambda y: jnp.mean(y),
-        "var": lambda y: jnp.var(y),
-        "max": lambda y: jnp.max(y),
+        "mean": lambda y: jnp.mean(y["reports"]),
+        "var": lambda y: jnp.var(y["reports"]),
+        "max": lambda y: jnp.max(y["reports"]),
     }
 
 
@@ -366,7 +366,7 @@ class TestABC:
         )
 
     def test_abc_distance_matches_manual_probe_distance(self, deterministic_meas_pomp):
-        probes = {"mean": lambda y: jnp.mean(y)}
+        probes = {"mean": lambda y: jnp.mean(y["Y"])}
         scale = {"mean": 2.0}
 
         deterministic_meas_pomp.abc(
@@ -472,7 +472,7 @@ class TestABCValidation:
         with pytest.raises(ValueError, match="must be positive"):
             sir.abc(
                 M=5,
-                probes={"mean": lambda y: jnp.mean(y)},
+                probes={"mean": lambda y: jnp.mean(y["reports"])},
                 scale={"mean": -1.0},
                 epsilon=1e6,
                 proposal=prop,

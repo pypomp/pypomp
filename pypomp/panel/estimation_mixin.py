@@ -310,7 +310,7 @@ class PanelEstimationMixin(Base):
 
     def probe(
         self,
-        probes: dict[str, Callable[[pd.DataFrame], float]],
+        probes: dict[str, Callable[[dict[str, jax.Array]], float]],
         key: jax.Array,
         nsim: int = 100,
         theta: PanelParameters | None = None,
@@ -321,8 +321,9 @@ class PanelEstimationMixin(Base):
         ----------
         probes : dict of str to callable
             Dictionary mapping probe names to functions.  Each function must
-            take a dataframe of observations for a single unit and return a
-            scalar float.
+            take a dict mapping each observation name to a ``(n_obs,)`` JAX
+            array of observations for a single unit and return a scalar
+            float, e.g. ``{"mean": lambda y: jnp.mean(y["cases"])}``.
         key : jax.Array
             JAX random key.
         nsim : int, optional
@@ -343,11 +344,14 @@ class PanelEstimationMixin(Base):
         results = []
 
         for unit, obj in self.unit_objects.items():
+            real_dict = {
+                col: jnp.asarray(obj.ys[col].to_numpy()) for col in obj.ys.columns
+            }
             for name, func in probes.items():
                 results.append(
                     {
                         "probe": name,
-                        "value": float(func(obj.ys)),
+                        "value": float(func(real_dict)),
                         "is_real_data": True,
                         "theta_idx": pd.NA,
                         "sim": pd.NA,
@@ -359,13 +363,13 @@ class PanelEstimationMixin(Base):
             unit_name, replicate_id, sim_id = grp_key
             obj = self.unit_objects[str(unit_name)]
             df = pd.DataFrame(group.drop(columns=["unit", "theta_idx", "sim", "time"]))
-            df.index = pd.Index(group["time"])
             df.columns = obj.ys.columns
+            y_dict = {col: jnp.asarray(df[col].to_numpy()) for col in df.columns}
             for name, func in probes.items():
                 results.append(
                     {
                         "probe": name,
-                        "value": float(func(df)),
+                        "value": float(func(y_dict)),
                         "is_real_data": False,
                         "theta_idx": replicate_id,
                         "sim": sim_id,

@@ -921,10 +921,11 @@ class PompEstimationMixin(Base):
         r"""
         Approximate Bayesian Computation with a Metropolis-Hastings outer loop.
 
-        The probe functions must be pure JAX callables accepting a simulated
-        observation array with shape ``(n_obs, ydim)`` and returning a scalar.
-        One independent ABC-MCMC chain is run for each parameter replicate in
-        ``theta``. Results are stored in :attr:`Pomp.results_history`.
+        The probe functions must be pure JAX callables accepting a dict that
+        maps each observation name to a simulated ``(n_obs,)`` JAX array and
+        returning a scalar. One independent ABC-MCMC chain is run for each
+        parameter replicate in ``theta``. Results are stored in
+        :attr:`Pomp.results_history`.
 
         Parameters
         ----------
@@ -932,8 +933,9 @@ class PompEstimationMixin(Base):
             Number of ABC-MCMC iterations per chain.
         probes : dict
             Mapping from probe name (``str``) to a pure-JAX summary-statistic
-            callable ``probe_fn(y_arr) -> scalar``, where ``y_arr`` is a
-            simulated observation array with shape ``(n_obs, ydim)``.
+            callable ``probe_fn(y) -> scalar``, where ``y`` is a dict mapping
+            each observation name to a ``(n_obs,)`` JAX array of simulated
+            values for that variable, e.g. ``lambda y: jnp.mean(y["cases"])``.
         epsilon : float
             ABC distance rejection threshold.
         proposal : Proposal
@@ -1197,7 +1199,7 @@ class PompEstimationMixin(Base):
 
     def probe(
         self,
-        probes: dict[str, Callable[[pd.DataFrame], float]],
+        probes: dict[str, Callable[[dict[str, jax.Array]], float]],
         nsim: int = 100,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
@@ -1213,9 +1215,9 @@ class PompEstimationMixin(Base):
         ----------
         probes : dict of str to callable
             Dictionary mapping probe names to functions.  Each function
-            receives a :class:`~pandas.DataFrame` of observations (with
-            time as the index) and returns a scalar, e.g.
-            ``{"mean": lambda df: df["cases"].mean()}``.
+            receives a dict mapping each observation name to a ``(n_obs,)``
+            JAX array (with time ordered as in :attr:`Pomp.ys`) and returns
+            a scalar, e.g. ``{"mean": lambda y: jnp.mean(y["cases"])}``.
         nsim : int, optional
             Number of simulation replicates.  Defaults to ``100``.
         key : jax.Array or None, optional
@@ -1235,11 +1237,14 @@ class PompEstimationMixin(Base):
 
         results = []
 
+        real_dict = {
+            col: jnp.asarray(self.ys[col].to_numpy()) for col in self.ys.columns
+        }
         for name, func in probes.items():
             results.append(
                 {
                     "probe": name,
-                    "value": float(func(self.ys)),
+                    "value": float(func(real_dict)),
                     "is_real_data": True,
                     "theta_idx": pd.NA,
                     "sim": pd.NA,
@@ -1249,13 +1254,13 @@ class PompEstimationMixin(Base):
         def apply_probes(group):
             theta_idx, sim_id = group.name
             df = pd.DataFrame(group.drop(columns=["time"]))
-            df.index = pd.Index(group["time"])
             df.columns = self.ys.columns
+            y_dict = {col: jnp.asarray(df[col].to_numpy()) for col in df.columns}
             for name, func in probes.items():
                 results.append(
                     {
                         "probe": name,
-                        "value": float(func(df)),
+                        "value": float(func(y_dict)),
                         "is_real_data": False,
                         "theta_idx": theta_idx,
                         "sim": sim_id,

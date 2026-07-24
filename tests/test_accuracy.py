@@ -1181,9 +1181,9 @@ def test_pomp_abc_accuracy():
         return jnp.where(in_bounds, 0.0, -jnp.inf)
 
     probes = {
-        "var": lambda y: jnp.var(y[:, 0]),
-        "autocov": lambda y: jnp.mean(y[1:, 0] * y[:-1, 0]),
-        "autocov2": lambda y: jnp.mean(y[2:, 0] * y[:-2, 0]),
+        "var": lambda y: jnp.var(y["Y"]),
+        "autocov": lambda y: jnp.mean(y["Y"][1:] * y["Y"][:-1]),
+        "autocov2": lambda y: jnp.mean(y["Y"][2:] * y["Y"][:-2]),
     }
 
     prop = pp.MVNDiagRW({"a": 0.16, "sigma_x": 0.16, "sigma_y": 0.16})

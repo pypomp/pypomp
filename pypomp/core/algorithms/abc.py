@@ -16,9 +16,10 @@ outer loop.  At each iteration the algorithm:
 The outer loop is a single ``jax.lax.scan``; ``jax.vmap`` over the
 chain dimension runs ``n_chains`` chains in parallel.
 
-The user provides a probe function ``probe_fn(y_arr) -> (n_probes,)``
-operating on a ``(n_obs, ydim)`` JAX array, plus a matching
-``(n_probes,)`` ``scale_arr`` for normalising distances.
+The user provides a probe function ``probe_fn(y) -> (n_probes,)``
+operating on a dict mapping observation names to ``(n_obs,)`` JAX
+arrays, plus a matching ``(n_probes,)`` ``scale_arr`` for normalising
+distances.
 """
 
 from functools import partial

@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 import pytest
 import pypomp as pp
 import pandas as pd
@@ -15,8 +16,8 @@ def test_pomp_probe_structure(simple_pomp):
     key = jax.random.key(1)
 
     probes = {
-        "mean_y1": lambda df: df["Y1"].mean(),
-        "max_y2": lambda df: df["Y2"].max(),
+        "mean_y1": lambda y: jnp.mean(y["Y1"]),
+        "max_y2": lambda y: jnp.max(y["Y2"]),
     }
 
     nsim = 5
@@ -36,7 +37,7 @@ def test_pomp_probe_values(simple_pomp):
     pomp = simple_pomp
     key = jax.random.key(1)
 
-    probes = {"sum_y1": lambda df: df["Y1"].sum()}
+    probes = {"sum_y1": lambda y: jnp.sum(y["Y1"])}
 
     probe_df = pomp.probe(probes=probes, nsim=2, key=key)
 
@@ -55,7 +56,7 @@ def test_pomp_probe_with_list_theta(simple_pomp):
 
     theta_list = pomp.theta * 3
 
-    probes = {"mean_y1": lambda df: df["Y1"].mean()}
+    probes = {"mean_y1": lambda y: jnp.mean(y["Y1"])}
 
     nsim = 2
     probe_df = pomp.probe(probes=probes, nsim=nsim, key=key, theta=theta_list)

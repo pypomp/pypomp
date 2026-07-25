@@ -1336,6 +1336,9 @@ class PanelEstimationMixin(Base):
         if suppress_warnings:
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
+                # Ignore internal library deprecations (e.g. NumPy 2.5 shape assignment deprecations in statsmodels)
+                # so they are not misclassified as model fit/convergence warnings across units.
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
                 for name, unit in self.unit_objects.items():
                     llf = benchmarks.arma(
                         unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
@@ -1391,6 +1394,9 @@ class PanelEstimationMixin(Base):
         if suppress_warnings:
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
+                # Ignore internal library deprecations (e.g. NumPy 2.5 shape assignment deprecations in statsmodels)
+                # so they are not misclassified as model fit/convergence warnings across units.
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
                 for name, unit in self.unit_objects.items():
                     llf = benchmarks.negbin(
                         unit.ys, autoregressive=autoregressive, suppress_warnings=False

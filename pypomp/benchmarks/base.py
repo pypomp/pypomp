@@ -57,6 +57,9 @@ def arma(
     else:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
+            # Ignore internal library deprecations (e.g. NumPy 2.5 shape assignment deprecations in statsmodels)
+            # so they are not misclassified as model fit/convergence warnings.
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
             fit_all()
 
         if len(w) > 0:
@@ -146,6 +149,9 @@ def negbin(
     else:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
+            # Ignore internal library deprecations (e.g. NumPy 2.5 shape assignment deprecations in statsmodels)
+            # so they are not misclassified as model fit/convergence warnings.
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
             fit_all()
 
         if len(w) > 0:

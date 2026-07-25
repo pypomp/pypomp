@@ -25,7 +25,7 @@ try:
         # the same cache entry at once with no locking and corrupt it,
         # producing spurious "Error reading persistent compilation cache
         # entry ... ZstdError" warnings.
-        jax.config.update("jax_compilation_cache_max_size", 2 * 1024**3)
+        jax.config.update("jax_compilation_cache_max_size", 5 * 1024**3)
 except Exception:
     # If cache directory is not writeable (e.g. in sandbox environment), JAX caching is disabled.
     pass

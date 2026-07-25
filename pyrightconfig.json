@@ -1,10 +1,14 @@
 {
+  "include": ["."],
   "exclude": [
     "**/.venv",
     "**/.claude",
+    "**/.agents",
     "scratch",
     "dist"
   ],
+  "venvPath": ".",
+  "venv": ".venv",
   "typeCheckingMode": "standard",
-  "pythonVersion": "3.12"
+  "pythonVersion": "3.14"
 }

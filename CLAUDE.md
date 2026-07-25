@@ -31,6 +31,11 @@ pip install -e .[tests,benchmarks,viz]
 
 # `statsmodels` (pulled in by the [benchmarks] extra) is needed for some tests
 # under tests/test_models/.
+
+# `plotnine` (pulled in by the [tests] extra) is needed for tests/test_accuracy.py,
+# which uses it to plot parameter/log-likelihood traces. It is test-only and not
+# a package dependency (the package's own plotting, in pypomp/core/viz.py, uses
+# plotly via the [viz] extra).
 ```
 
 ### Testing

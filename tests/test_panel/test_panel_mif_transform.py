@@ -42,7 +42,7 @@ def panel_pomp_with_transform():
     theta_base = LG1.theta.params(as_list=True)[0]
 
     shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
-    unit_param_names = ["Q11", "Q12", "Q22", "R11", "R12", "R22"]
+    unit_param_names = ["Q11", "Q21", "Q22", "R11", "R21", "R22", "X0_1", "X0_2"]
 
     shared_params = pd.DataFrame(
         index=pd.Index(shared_param_names),

@@ -10,25 +10,11 @@ def simple_setup():
     # Set default values for tests
     LG = pp.models.LG()
     a = 0.5
-    rw_sd = pp.RWSigma(
-        sigmas={
-            "A11": 0.02,
-            "A12": 0.02,
-            "A21": 0.02,
-            "A22": 0.02,
-            "C11": 0.02,
-            "C12": 0.02,
-            "C21": 0.02,
-            "C22": 0.02,
-            "Q11": 0.02,
-            "Q12": 0.02,
-            "Q22": 0.02,
-            "R11": 0.02,
-            "R12": 0.02,
-            "R22": 0.0,
-        },
-        init_names=[],
-    ).geometric_cooling(a)
+    sigmas = {name: 0.02 for name in LG.canonical_param_names}
+    # The last parameter is deliberately left unperturbed;
+    # test_mif_zero_sigma_no_perturbation relies on it.
+    sigmas[list(LG.canonical_param_names)[-1]] = 0.0
+    rw_sd = pp.RWSigma(sigmas=sigmas, init_names=[]).geometric_cooling(a)
     J = 2
     key = jax.random.key(111)
     M = 2
@@ -79,9 +65,9 @@ def test_mif_zero_sigma_no_perturbation(simple):
     )
     mif_out2 = LG.results_history[-1]
     traces2 = mif_out2.traces_da
-    # Check that the last parameter (R22) is never perturbed because its sigma is 0.0
+    # Check that the last parameter is never perturbed because its sigma is 0.0
     param_names = list(LG.theta[0].keys())
-    last_param = param_names[15] if len(param_names) > 15 else param_names[-1]
+    last_param = param_names[-1]
     last_param_trace = traces2.sel(theta_idx=0, variable=last_param).values
     assert (last_param_trace == last_param_trace[0]).all()
     # Check that some other parameter is perturbed (first param, which has sigma > 0.0)

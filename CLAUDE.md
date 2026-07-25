@@ -262,6 +262,11 @@ JAX is deeply integrated throughout the codebase:
 The package includes several example models for testing and demonstration:
 
 - **`models/linear_gaussian.py`**: Linear Gaussian model (simple test case).
+  State and observation dimensions are inferred from the shapes of the `A`, `C`,
+  `Q`, `R`, and `X0` arrays passed to `LG()` (defaults reproduce the 2-D model);
+  `X0` sets the initial state mean and is estimable. `Q` and `R` are stored in
+  `theta` as lower-triangular Cholesky factors, so `Q11` is `L[0, 0]`, not
+  `Q[0, 0]`.
 - **`models/dacca.py`**: Cholera data from Dacca, Bangladesh.
 - **`models/spx.py`**: S&P 500 stochastic volatility.
 - **`models/sir.py`**: SIR with seasonal forcing.

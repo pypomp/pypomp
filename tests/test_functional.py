@@ -126,7 +126,7 @@ def panel_setup():
     LG2 = pp.models.LG()
 
     shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
-    unit_param_names = ["Q11", "Q12", "Q22", "R11", "R12", "R22"]
+    unit_param_names = ["Q11", "Q21", "Q22", "R11", "R21", "R22", "X0_1", "X0_2"]
 
     # Simple ParTrans (identity)
     LG1.par_trans = pp.ParTrans()

@@ -15,7 +15,7 @@ def simple_panel():
         n for n in unit_theta.keys() if n.startswith("A") or n.startswith("C")
     ]
     unit_specific_names = [
-        n for n in unit_theta.keys() if n.startswith("Q") or n.startswith("R")
+        n for n in unit_theta.keys() if n.startswith(("Q", "R", "X0"))
     ]
 
     theta = pp.PanelParameters(

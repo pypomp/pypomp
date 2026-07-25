@@ -390,6 +390,40 @@ class TestABCMultiChain:
 
 
 class TestABCValidation:
+    def test_requires_rmeas(self):
+        """abc needs a simulation-based measurement model; dmeas alone isn't enough."""
+        import pandas as pd
+
+        def rinit(theta_, key, covars, t0):
+            return {"X": 0.0}
+
+        def rproc(X_, theta_, key, covars, t, dt):
+            return {"X": X_["X"]}
+
+        def dmeas(Y_, X_, theta_, covars, t):
+            return jax.scipy.stats.norm.logpdf(Y_["Y"], loc=theta_["mu"], scale=0.1)
+
+        dmeas_only_pomp = pp.Pomp(
+            ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
+            theta=pp.PompParameters({"mu": 0.0}),
+            statenames=["X"],
+            t0=0.0,
+            rinit=rinit,
+            rproc=rproc,
+            dmeas=dmeas,
+            nstep=1,
+        )
+        prop = MVNDiagRW({"mu": 1.0})
+        with pytest.raises(ValueError, match="abc requires self.rmeas"):
+            dmeas_only_pomp.abc(
+                M=5,
+                probes=_default_probes(),
+                scale=_default_scale(),
+                epsilon=1e6,
+                proposal=prop,
+                key=jax.random.key(0),
+            )
+
     def test_invalid_M(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M"):

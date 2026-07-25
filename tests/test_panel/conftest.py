@@ -207,6 +207,47 @@ def lg_panel_setup_some_shared(lg_panel_setup_some_shared_module):
 
 
 @pytest.fixture(scope="module")
+def lg_panel_setup_shared_only_module():
+    lg1 = pp.models.LG()
+    lg2 = pp.models.LG()
+    # Create PanelParameters with only shared params (no unit-specific ones)
+    p1 = lg1.theta[0]
+    shared_df = pd.DataFrame(
+        {"shared": [p1[n] for n in lg1.canonical_param_names]},
+        index=pd.Index(lg1.canonical_param_names),
+    )
+    empty_unit_specific = pd.DataFrame(
+        index=pd.Index([], name=None), columns=["unit1", "unit2"], dtype=float
+    )
+
+    theta = pp.PanelParameters(
+        theta=[{"shared": shared_df, "unit_specific": empty_unit_specific}]
+    )
+    panel = pp.PanelPomp(
+        Pomp_dict={"unit1": lg1, "unit2": lg2},
+        theta=theta,
+    )
+    key = jax.random.key(0)
+    fresh_key = panel.fresh_key
+
+    rw_sd = pp.RWSigma(
+        sigmas={n: 0.02 for n in lg1.canonical_param_names}, init_names=[]
+    )
+
+    return panel, rw_sd, theta, key, fresh_key
+
+
+@pytest.fixture(scope="function")
+def lg_panel_setup_shared_only(lg_panel_setup_shared_only_module):
+    panel_orig, rw_sd, theta, key, fresh_key = lg_panel_setup_shared_only_module
+    panel = deepcopy(panel_orig)
+    panel.results_history.clear()
+    panel.theta = deepcopy(theta)
+    panel.fresh_key = fresh_key
+    return panel, rw_sd, key
+
+
+@pytest.fixture(scope="module")
 def lg_panel_setup_specific_only_module():
     lg1 = pp.models.LG()
     lg2 = pp.models.LG()

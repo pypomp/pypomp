@@ -4,6 +4,8 @@ import pandas as pd
 import pytest
 import pypomp as pp
 import pypomp.functional as F
+from pypomp.core.algorithms.mop import _chunked_panel_mop_internal
+from pypomp.core.algorithms.types import MopConfig, MopInputs
 
 
 @pytest.fixture(scope="function")
@@ -421,3 +423,149 @@ def test_pmcmc_and_abc_functional_par_trans():
         keys=keys,
     )
     assert jnp.allclose(theta_traces_abc[0, 0, :], theta_val[0])
+
+
+def _build_dmeas_less_pomp():
+    def rinit(theta_, key, covars, t0):
+        return {"X": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"] + theta_["sigma"] * jax.random.normal(key, ())}
+
+    def rmeas(X_, theta_, key, covars, t):
+        return {"Y": X_["X"] + 0.1 * jax.random.normal(key, ())}
+
+    return pp.Pomp(
+        ys=pd.DataFrame({"Y": [1.0, 2.0]}, index=[1.0, 2.0]),
+        theta=pp.PompParameters({"sigma": 0.1}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        rmeas=rmeas,
+        nstep=1,
+    )
+
+
+def test_pfilter_requires_dmeas():
+    struct = _build_dmeas_less_pomp().to_struct()
+    with pytest.raises(ValueError, match="dmeasure is required for particle filtering"):
+        F.pfilter(
+            struct, jnp.array([[0.1]]), J=2, keys=jax.random.split(jax.random.key(0), 1)
+        )
+
+
+def test_mop_requires_dmeas():
+    struct = _build_dmeas_less_pomp().to_struct()
+    with pytest.raises(ValueError, match="dmeasure is required for MOP"):
+        F.mop(
+            struct,
+            jnp.array([[0.1]]),
+            J=2,
+            alpha=0.97,
+            keys=jax.random.split(jax.random.key(0), 1),
+        )
+
+
+def test_train_requires_dmeas():
+    struct = _build_dmeas_less_pomp().to_struct()
+    eta = pp.LearningRate({"sigma": 0.1})
+    with pytest.raises(ValueError, match="dmeasure is required for training"):
+        F.train(
+            struct,
+            jnp.array([[0.1]]),
+            J=2,
+            optimizer=pp.Adam(),
+            M=2,
+            eta=eta,
+            alpha=0.97,
+            keys=jax.random.split(jax.random.key(0), 1),
+        )
+
+
+def test_abc_requires_rmeas():
+    def rinit(theta_, key, covars, t0):
+        return {"X": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"]}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        return jax.scipy.stats.norm.logpdf(Y_["Y"], loc=theta_["mu"], scale=0.1)
+
+    dmeas_only_pomp = pp.Pomp(
+        ys=pd.DataFrame({"Y": [1.0]}, index=[1.0]),
+        theta=pp.PompParameters({"mu": 0.0}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        nstep=1,
+    )
+    struct = dmeas_only_pomp.to_struct()
+
+    def probe_fn(y):
+        return jnp.array([jnp.mean(y)])
+
+    with pytest.raises(ValueError, match="ABC requires struct.rmeas_pf"):
+        F.abc(
+            struct,
+            dmeas_only_pomp.theta.to_jax_array(["mu"]),
+            proposal=pp.MVNDiagRW({"mu": 0.1}),
+            probe_fn=probe_fn,
+            obs_probes=jnp.array([1.0]),
+            scale_arr=jnp.array([1.0]),
+            epsilon=1e6,
+            M=1,
+            keys=jax.random.split(jax.random.key(0), 1),
+        )
+
+
+def test_chunked_panel_mop_internal(model_setup):
+    """Direct unit test of the panel-chunked MOP kernel (not yet wired up to any
+    public Pomp/PanelPomp method, but exercised here to verify its I/O contract)."""
+    struct, _, key, J, _, param_names = model_setup
+    n_params = len(param_names)
+    U = 2
+    chunk_size = 2
+
+    config = MopConfig.from_mop_struct(struct, J=J)
+
+    theta_val = pp.models.LG().theta.to_jax_array(param_names)[0]  # (n_params,)
+    unit_array = jnp.tile(theta_val[None, :], (U, 1))  # (U, n_params)
+    shared_array = jnp.zeros((0,))
+    unit_param_permutations = jnp.tile(jnp.arange(n_params)[None, :], (U, 1))
+
+    ys_stacked = jnp.stack([struct.ys] * U, axis=0)
+    inputs = MopInputs(
+        ys=ys_stacked,
+        dt_array_extended=struct.dt_array_extended,
+        nstep_array=struct.nstep_array,
+        t0=struct.t0,
+        times=struct.times,
+        covars_extended=None,
+        alpha=0.97,
+    )
+
+    keys = jax.random.split(key, U)
+
+    result = _chunked_panel_mop_internal(
+        shared_array,
+        unit_array,
+        unit_param_permutations,
+        config,
+        inputs,
+        keys,
+        chunk_size,
+    )
+    assert jnp.isfinite(result)
+
+    grad_shared, grad_unit = jax.grad(
+        lambda s, u: _chunked_panel_mop_internal(
+            s, u, unit_param_permutations, config, inputs, keys, chunk_size
+        ),
+        argnums=(0, 1),
+    )(shared_array, unit_array)
+    assert jnp.all(jnp.isfinite(grad_unit))
+    assert grad_shared.shape == (0,)

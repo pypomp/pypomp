@@ -1,7 +1,11 @@
 import pytest
 import pypomp as pp
 import jax
+import jax.numpy as jnp
 import numpy as np
+from pypomp.models.measles import model_001 as m001
+from pypomp.models.measles import model_002 as m002
+from pypomp.models.measles import model_003 as m003
 
 # import matplotlib.pyplot as plt
 
@@ -272,6 +276,109 @@ def test_measles_panel_pomp():
     )
 
 
+def test_measles_panel_pomp_shared_params():
+    """PanelPomp with some parameters marked shared (rather than all unit-specific)."""
+    AK_mles = pp.models.UKMeasles.AK_mles()
+    unit_specific = AK_mles[["London", "Hastings"]].drop(index=["gamma", "cohort"])
+    shared = (
+        AK_mles[["London", "Hastings"]]
+        .loc[["gamma", "cohort"], :]
+        .mean(axis=1)
+        .to_frame(name="shared")
+    )
+    theta = pp.PanelParameters(
+        theta=[{"shared": shared, "unit_specific": unit_specific}]
+    )
+
+    panel = pp.models.UKMeasles.PanelPomp(
+        units=["London", "Hastings"],
+        theta=theta,
+        clean=True,
+    )
+    assert isinstance(panel, pp.PanelPomp)
+
+
+def test_measles_panel_pomp_single_unit():
+    """A single-unit panel has an undefined sample std, so sd_log_pop defaults to 1.0."""
+    AK_mles = pp.models.UKMeasles.AK_mles()
+    unit_specific = AK_mles[["London"]]
+    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
+
+    panel = pp.models.UKMeasles.PanelPomp(
+        units=["London"],
+        theta=theta,
+        clean=True,
+    )
+    assert "London" in panel.unit_objects
+
+
+def test_measles_panel_pomp_bad_theta_type():
+    with pytest.raises(TypeError, match="theta must be a PanelParameters instance"):
+        pp.models.UKMeasles.PanelPomp(
+            units=["London"],
+            theta={"not": "a PanelParameters"},  # type: ignore
+            clean=True,
+        )
+
+
+def test_measles_panel_pomp_missing_params():
+    AK_mles = pp.models.UKMeasles.AK_mles()
+    unit_specific = AK_mles[["London", "Hastings"]].drop(index=["rho"])
+    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
+
+    with pytest.raises(ValueError, match="Missing required parameters for unit"):
+        pp.models.UKMeasles.PanelPomp(
+            units=["London", "Hastings"],
+            theta=theta,
+            clean=True,
+        )
+
+
+def test_measles_pomp_missing_params():
+    theta = pp.PompParameters({"R0": 1.0})
+    with pytest.raises(ValueError, match="Missing required parameters for model"):
+        pp.models.UKMeasles.Pomp(
+            unit="London",
+            theta=theta,
+            model="001b",
+            clean=True,
+        )
+
+
+def test_measles_pomp_linear_interp():
+    theta = pp.PompParameters(BASE_THETA.copy())
+    measles = pp.models.UKMeasles.Pomp(
+        unit="London",
+        theta=theta,
+        model="001",
+        interp_method="linear",
+        clean=True,
+    )
+    assert measles.covars is not None
+
+
+def test_evaluate_spline_extrapolation_right_mask():
+    """Direct unit test of the linear-extrapolation helper's right-side branch."""
+    from pypomp.models.measles.uk_measles import (
+        evaluate_spline_with_linear_extrapolation,
+    )
+    from scipy.interpolate import make_smoothing_spline
+
+    x_train = np.linspace(0.0, 10.0, 20)
+    y_train = 2.0 * x_train + 1.0
+    spline = make_smoothing_spline(x_train, y_train)
+
+    x_query = np.array([15.0, 20.0])
+    y = evaluate_spline_with_linear_extrapolation(
+        spline, x_query, x_min=0.0, x_max=10.0
+    )
+
+    y_max = float(spline(10.0))
+    dy_max = float(spline.derivative()(10.0))
+    expected = y_max + dy_max * (x_query - 10.0)
+    np.testing.assert_allclose(y, expected)
+
+
 def test_uk_measles_units():
     units = pp.models.UKMeasles.units()
     assert isinstance(units, list)
@@ -280,3 +387,94 @@ def test_uk_measles_units():
     assert "London" in units
     assert "Liverpool" in units
     assert units == sorted(units)
+
+
+def test_model_001_to_est_from_est_roundtrip():
+    theta = BASE_THETA.copy()
+    est = m001.to_est(theta)  # type: ignore
+    natural = m001.from_est(est)
+
+    compositional = ["S_0", "E_0", "I_0", "R_0"]
+    orig_total = sum(theta[k] for k in compositional)
+    for k in compositional:
+        assert float(natural[k]) == pytest.approx(theta[k] / orig_total, rel=1e-4)
+
+    for k in theta:
+        if k not in compositional:
+            assert float(natural[k]) == pytest.approx(theta[k], rel=1e-4)
+
+
+def test_model_002_to_est_from_est_roundtrip():
+    theta = {
+        "R0": BASE_THETA["R0"],
+        "sigma": BASE_THETA["sigma"],
+        "gamma": BASE_THETA["gamma"],
+        "iota1": np.log(BASE_THETA["iota"]),
+        "iota2": 0.1,
+        "rho": BASE_THETA["rho"],
+        "sigmaSE": BASE_THETA["sigmaSE"],
+        "psi": BASE_THETA["psi"],
+        "cohort": BASE_THETA["cohort"],
+        "amplitude": BASE_THETA["amplitude"],
+        "S_0": BASE_THETA["S_0"],
+        "E_0": BASE_THETA["E_0"],
+        "I_0": BASE_THETA["I_0"],
+        "R_0": BASE_THETA["R_0"],
+    }
+    est = m002.to_est(theta)  # type: ignore
+    natural = m002.from_est(est)
+
+    compositional = ["S_0", "E_0", "I_0", "R_0"]
+    orig_total = sum(theta[k] for k in compositional)
+    for k in compositional:
+        assert float(natural[k]) == pytest.approx(theta[k] / orig_total, rel=1e-4)
+
+    for k in theta:
+        if k not in compositional:
+            assert float(natural[k]) == pytest.approx(theta[k], rel=1e-4)
+
+
+def test_model_003_to_est_from_est_roundtrip():
+    theta = BASE_THETA.copy()
+    del theta["mu"]
+    del theta["alpha"]
+    est = m003.to_est(theta)  # type: ignore
+    natural = m003.from_est(est)
+
+    # S_0/E_0/I_0/R_0 are a log-ratio (compositional) transform, so from_est
+    # renormalizes them to sum to 1 rather than preserving absolute values.
+    compositional = ["S_0", "E_0", "I_0", "R_0"]
+    orig_total = sum(theta[k] for k in compositional)
+    for k in compositional:
+        assert float(natural[k]) == pytest.approx(theta[k] / orig_total, rel=1e-4)
+
+    for k in theta:
+        if k not in compositional:
+            assert float(natural[k]) == pytest.approx(theta[k], rel=1e-4)
+
+
+def test_model_003_dmeas_continuous():
+    theta = {"rho": 0.5, "psi": 0.1}
+    X_ = {"C": jnp.array(10.0)}
+
+    ll_observed = m003.dmeas_continuous({"cases": jnp.array(5.0)}, X_, theta)
+    assert jnp.isfinite(ll_observed)
+
+    ll_nan = m003.dmeas_continuous({"cases": jnp.array(jnp.nan)}, X_, theta)
+    assert ll_nan == 0.0
+
+    ll_negative_C = m003.dmeas_continuous(
+        {"cases": jnp.array(5.0)}, {"C": jnp.array(-1.0)}, theta
+    )
+    assert ll_negative_C == -jnp.inf
+
+
+def test_model_003_log_cdf_diff_gradient():
+    """The custom_jvp rule on log_cdf_diff is only exercised under differentiation."""
+    grad_fn = jax.grad(lambda zh, zl: m003.log_cdf_diff(zh, zl))
+    g = grad_fn(jnp.array(0.5), jnp.array(-0.3))
+    assert jnp.isfinite(g)
+
+    # Also exercise the branch where diff_h/diff_l are non-finite (clipped to -LOG_MAX).
+    g_extreme = grad_fn(jnp.array(40.0), jnp.array(-40.0))
+    assert jnp.isfinite(g_extreme)

@@ -153,6 +153,110 @@ def test_panel_dpop_train_adjusts_nondividing_chunk_size(sir_panel_dpop, chunk_s
     assert res.unit_traces.shape[2] == 2
 
 
+def test_panel_dpop_train_all_shared_params():
+    """With no unit-specific parameters at all, unit_traces falls back to a
+    zero-filled array (there's nothing per-unit to report but the logLik)."""
+    import pandas as pd
+
+    sir1 = pp.models.sir(seed=100, times=_test_times)
+    sir2 = pp.models.sir(seed=200, times=_test_times)
+    param_names = sir1.canonical_param_names
+    theta1 = sir1.theta[0]
+
+    shared = pd.DataFrame(
+        {"shared": [theta1[p] for p in param_names]},
+        index=pd.Index(param_names),
+    )
+    empty_unit_specific = pd.DataFrame(
+        index=pd.Index([], name=None), columns=["unit1", "unit2"], dtype=float
+    )
+    theta = pp.PanelParameters(
+        theta=[{"shared": shared, "unit_specific": empty_unit_specific}]
+    )
+    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
+
+    panel.dpop_train(
+        J=2,
+        M=2,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+    assert (np.asarray(res.unit_traces) == 0).all()
+
+
+def test_panel_dpop_train_chunk_size_does_not_divide_units():
+    """With U=4 and chunk_size=3, chunk_size doesn't evenly divide U, so it
+    should be adjusted down to the largest divisor of U that fits (2), with
+    a UserWarning."""
+    panel = _get_sir_panel_n_units(4)
+    with pytest.warns(UserWarning, match="chunk_size does not divide"):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            chunk_size=3,
+            optimizer=pp.Adam(),
+            alpha=0.8,
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+    assert res.unit_traces.shape[2] == 4
+
+
+def test_panel_dpop_train_learning_rate_eta(sir_panel_dpop):
+    """eta as a LearningRate schedule (rather than a constant float/dict)."""
+    panel = sir_panel_dpop
+    J, M = 2, 2
+    eta = pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}).cosine_decay(
+        0.1, M
+    )
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=eta,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+
+
+def test_panel_dpop_train_chunk_size_below_one(sir_panel_dpop):
+    """chunk_size <= 0 should be clamped up to 1."""
+    panel = sir_panel_dpop
+    panel.dpop_train(
+        J=2,
+        M=2,
+        eta=0.01,
+        theta=deepcopy(panel.theta),
+        chunk_size=0,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+
+
 def test_panel_dpop_train_multi_replicate(sir_panel_dpop):
     """Multiple replicates should produce independent traces."""
     panel = sir_panel_dpop

@@ -113,6 +113,86 @@ def test_merge_outputs_unsupported_type():
         )
 
 
+def test_merge_outputs_int_and_none_axes():
+    import jax.numpy as jnp
+
+    scanned_out = jnp.array([1.0, 2.0, 3.0, 4.0])
+
+    merged_int = ifunc.merge_outputs(
+        scanned_out, shard_output_axes=0, size=4, num_batches=1, batch_size=4
+    )
+    assert jnp.array_equal(merged_int, scanned_out)
+
+    merged_none = ifunc.merge_outputs(
+        scanned_out, shard_output_axes=None, size=4, num_batches=1, batch_size=4
+    )
+    assert jnp.array_equal(merged_none, scanned_out)
+
+
+def test_run_jax_batch_sharded_with_kwargs():
+    """Keyword arguments should be split into dynamic/static just like positional
+    args (only exercised on the CPU sequential-batching path, i.e. when the
+    sharded size exceeds the number of available devices)."""
+    import jax.numpy as jnp
+
+    def add_const(x, c):
+        return x + c
+
+    x = jnp.arange(4.0)
+    result = ifunc.run_jax_batch_sharded(
+        add_const,
+        {0: 0},
+        0,
+        x,
+        c=jnp.asarray(5.0),
+    )
+    assert jnp.allclose(result, x + 5.0)
+
+    result_static = ifunc.run_jax_batch_sharded(
+        add_const,
+        {0: 0},
+        0,
+        x,
+        c=5.0,
+    )
+    assert jnp.allclose(result_static, x + 5.0)
+
+
+def test_num_fixedstep_steps_requires_nstep():
+    import pytest
+
+    with pytest.raises(ValueError, match="nstep must be provided"):
+        ifunc._num_fixedstep_steps(0.0, 1.0, None, None)
+
+
+def test_num_euler_steps_requires_dt():
+    import pytest
+
+    with pytest.raises(ValueError, match="dt must be provided"):
+        ifunc._num_euler_steps(0.0, 1.0, None, None)
+
+
+def test_num_euler_steps_nonpositive_interval():
+    """When t1 >= t2, there's nothing to step over."""
+    assert ifunc._num_euler_steps(1.0, 1.0, 0.5, None) == (0, 0.0)
+    assert ifunc._num_euler_steps(2.0, 1.0, 0.5, None) == (0, 0.0)
+
+
+def test_calc_steps_validation():
+    import pytest
+
+    times0 = np.array([0.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="Only nstep or dt can be provided"):
+        ifunc._calc_steps(times0, dt=0.5, nstep=2)
+    with pytest.raises(ValueError, match="Either dt or nstep must be provided"):
+        ifunc._calc_steps(times0, dt=None, nstep=None)
+
+
+def test_interp_covars_none_covars():
+    assert ifunc._interp_covars(0.5, None, np.array([1.0, 2.0])) is None
+    assert ifunc._interp_covars(0.5, np.array([0.0, 1.0]), None) is None
+
+
 def test_interp_covars_linear_and_constant():
     # 1. Direct test of _interp_covars with linear interpolation
     ctimes = np.array([0.0, 1.0, 2.0])

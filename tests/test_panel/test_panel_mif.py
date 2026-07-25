@@ -57,6 +57,29 @@ def test_mif(lg_panel_setup_some_shared):
     )
 
 
+def test_mif_unit_specific_only(lg_panel_setup_specific_only):
+    """With no shared parameters, mif's trace-building falls back to
+    deriving shared_traces from unit_traces (there's no genuine shared axis)."""
+    panel, rw_sd, key = lg_panel_setup_specific_only
+    J, M, a = 2, 2, 0.5
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
+
+    result = panel.results_history[-1]
+    assert isinstance(result.shared_traces, xr.DataArray)
+    assert isinstance(result.unit_traces, xr.DataArray)
+
+
+def test_mif_shared_only(lg_panel_setup_shared_only):
+    """Exercise mif() with no unit-specific parameters at all (only shared)."""
+    panel, rw_sd, key = lg_panel_setup_shared_only
+    J, M, a = 2, 2, 0.5
+    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
+
+    result = panel.results_history[-1]
+    assert isinstance(result.shared_traces, xr.DataArray)
+    assert isinstance(result.unit_traces, xr.DataArray)
+
+
 def test_mif_parameter_order_consistency(lg_panel_setup_some_shared):
     """
     Test that MIF produces consistent results regardless of parameter order in parameter dataframes.

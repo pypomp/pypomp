@@ -219,6 +219,61 @@ def test_canonicalize():
         lr._canonicalize(["beta", "gamma"])
 
 
+def test_empty_rates():
+    """An empty rates mapping is valid and produces an empty schedule."""
+    lr = pp.LearningRate({})
+    assert lr.param_names == ()
+    assert lr.rates_all_arr.shape == (0,)
+
+
+def test_mapping_protocol():
+    """LearningRate supports a read-only Mapping-like interface."""
+    lr = pp.LearningRate({"beta": 0.1, "rho": np.array([0.01, 0.02])})
+
+    assert lr["beta"] == 0.1
+    assert np.array_equal(lr["rho"], np.array([0.01, 0.02]))
+    with pytest.raises(KeyError, match="Parameter 'gamma' not found"):
+        lr["gamma"]
+
+    # All-scalar rates keep rates_all_arr 1D, exercising __getitem__'s 1D branch.
+    lr_all_scalar = pp.LearningRate({"beta": 0.1, "rho": 0.2})
+    assert lr_all_scalar["beta"] == 0.1
+
+    assert "beta" in lr
+    assert "gamma" not in lr
+    assert len(lr) == 2
+    assert set(iter(lr)) == {"beta", "rho"}
+    assert set(lr.keys()) == {"beta", "rho"}
+    assert lr.get("beta") == 0.1
+    assert lr.get("gamma") is None
+    assert lr.get("gamma", default=0.5) == 0.5
+
+    values = list(lr.values())
+    items = dict(lr.items())
+    assert len(values) == 2
+    assert items["beta"] == 0.1
+    assert np.array_equal(items["rho"], np.array([0.01, 0.02]))
+
+    # Column that's constant across all rows collapses to a scalar in __getitem__.
+    lr_constant_col = pp.LearningRate(
+        {"beta": np.array([0.1, 0.1]), "rho": np.array([0.01, 0.02])}
+    )
+    assert lr_constant_col["beta"] == 0.1
+
+
+def test_mismatched_param_fallback_no_names():
+    """_mismatched_param falls back to the literal 'parameter' when there are
+    no parameter names to report (only reachable via a raw _from_leaves
+    construction, since normal __init__ always ties names to entries)."""
+    from pypomp.core.learning_rate import LearningRate as LR
+
+    lr = LR._from_leaves((), np.empty((3, 0), dtype=float))
+    with pytest.raises(
+        ValueError, match="Learning rate schedule for 'parameter' has length 3"
+    ):
+        lr.to_array([], M=5)
+
+
 def test_mismatched_schedule_lengths():
     """Test error when schedules have conflicting lengths."""
     with pytest.raises(

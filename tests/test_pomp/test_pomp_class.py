@@ -674,6 +674,79 @@ def test_merge_validation(base_pomp):
     ):
         pp.Pomp.merge(base_pomp, p2_no_theta)
 
+    # 9. Mismatched rinit/rproc (same statenames)
+    p2_diff_rinit = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"] + 1.0},
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    with pytest.raises(ValueError, match="same rinit and rproc"):
+        pp.Pomp.merge(base_pomp, p2_diff_rinit)
+
+    # 10. Mismatched dmeas value (both not None)
+    p2_diff_dmeas = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=lambda Y_, X_, theta_, covars, t: jax.scipy.stats.norm.logpdf(
+            Y_["y"], loc=X_["X"], scale=0.2
+        ),
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    with pytest.raises(
+        ValueError, match="^All Pomp objects must have the same dmeas\\.$"
+    ):
+        pp.Pomp.merge(base_pomp, p2_diff_dmeas)
+
+    # 11. Mismatched rmeas None vs not None
+    pomp_no_rmeas = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    with pytest.raises(ValueError, match="same rmeas \\(both None"):
+        pp.Pomp.merge(base_pomp, pomp_no_rmeas)
+
+    # 12. Mismatched rmeas value (both not None)
+    p2_diff_rmeas = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        rmeas=lambda X_, theta_, key, covars, t: {
+            "y": X_["X"] + 0.2 * jax.random.normal(key, ())
+        },
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    with pytest.raises(
+        ValueError, match="^All Pomp objects must have the same rmeas\\.$"
+    ):
+        pp.Pomp.merge(base_pomp, p2_diff_rmeas)
+
+    # 13. Mismatched par_trans
+    p2_diff_par_trans = pickle.loads(pickle.dumps(base_pomp))
+    p2_diff_par_trans.par_trans = pp.ParTrans(
+        to_est=lambda theta_: theta_, from_est=lambda theta_: theta_
+    )
+    with pytest.raises(ValueError, match="same par_trans"):
+        pp.Pomp.merge(base_pomp, p2_diff_par_trans)
+
 
 def test_eq_comparisons(base_pomp):
     """Test all inequality paths in __eq__."""
@@ -730,6 +803,150 @@ def test_eq_comparisons(base_pomp):
     p7.fresh_key = jax.random.key(99)
     assert base_pomp != p7
 
+    # 8. one fresh_key is None
+    p8 = pickle.loads(pickle.dumps(base_pomp))
+    p8.fresh_key = None
+    assert base_pomp != p8
+
+    # 9. covars: one None, one set
+    p9 = pickle.loads(pickle.dumps(base_pomp))
+    p9.covars = pd.DataFrame({"c": [1.0, 2.0]}, index=[1.0, 2.0])
+    assert base_pomp != p9
+
+    # 10. covars: both set but different values
+    p10a = pickle.loads(pickle.dumps(base_pomp))
+    p10a.covars = pd.DataFrame({"c": [1.0, 2.0]}, index=[1.0, 2.0])
+    p10b = pickle.loads(pickle.dumps(base_pomp))
+    p10b.covars = pd.DataFrame({"c": [3.0, 4.0]}, index=[1.0, 2.0])
+    assert p10a != p10b
+
+    # 11. _covars_extended: one None, one set
+    p11 = pickle.loads(pickle.dumps(base_pomp))
+    p11._covars_extended = np.array([1.0, 2.0])
+    assert base_pomp != p11
+
+    # 12. _covars_extended: both set but different values
+    p12a = pickle.loads(pickle.dumps(base_pomp))
+    p12a._covars_extended = np.array([1.0, 2.0])
+    p12b = pickle.loads(pickle.dumps(base_pomp))
+    p12b._covars_extended = np.array([3.0, 4.0])
+    assert p12a != p12b
+
+    # 13. different _nstep_array
+    p13 = pickle.loads(pickle.dumps(base_pomp))
+    p13._nstep_array = p13._nstep_array + 1
+    assert base_pomp != p13
+
+    # 14. different _dt_array_extended
+    p14 = pickle.loads(pickle.dumps(base_pomp))
+    p14._dt_array_extended = p14._dt_array_extended + 1.0
+    assert base_pomp != p14
+
+    # 15. different _max_steps_per_interval
+    p15 = pickle.loads(pickle.dumps(base_pomp))
+    p15._max_steps_per_interval = p15._max_steps_per_interval + 1
+    assert base_pomp != p15
+
+    # 16. different rinit (same statenames)
+    p16 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"] + 1.0},
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        rmeas=dummy_rmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p16
+
+    # 17. different rproc
+    p17 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=lambda X_, theta_, key, covars, t, dt: {
+            "X": X_["X"] + theta_["sigma"] * jax.random.normal(key, ()) * 2.0
+        },
+        dmeas=dummy_dmeas,
+        rmeas=dummy_rmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p17
+
+    # 18. dmeas: one None, one set
+    p18 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        rmeas=dummy_rmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p18
+
+    # 19. dmeas: both set but different
+    p19 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=lambda Y_, X_, theta_, covars, t: jax.scipy.stats.norm.logpdf(
+            Y_["y"], loc=X_["X"], scale=0.2
+        ),
+        rmeas=dummy_rmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p19
+
+    # 20. rmeas: one None, one set
+    p20 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p20
+
+    # 21. rmeas: both set but different
+    p21 = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        rmeas=lambda X_, theta_, key, covars, t: {
+            "y": X_["X"] + 0.3 * jax.random.normal(key, ())
+        },
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert base_pomp != p21
+
+    # 22. different results_history
+    p22 = pickle.loads(pickle.dumps(base_pomp))
+    p22.results_history._entries.append(p22.results_history)
+    assert base_pomp != p22
+
+    # 23. different par_trans
+    p23 = pickle.loads(pickle.dumps(base_pomp))
+    p23.par_trans = pp.ParTrans(
+        to_est=lambda theta_: theta_, from_est=lambda theta_: theta_
+    )
+    assert base_pomp != p23
+
 
 def test_pickle_setstate_fallback_warning(base_pomp):
     """Test that unpickling issues a UserWarning when a function fails to reconstruct."""
@@ -745,3 +962,164 @@ def test_pickle_setstate_fallback_warning(base_pomp):
         pomp_unpickled.__setstate__(state)
 
     assert pomp_unpickled.rinit is None
+
+
+def test_pickle_setstate_fallback_warning_rproc(base_pomp):
+    """Same fallback path as rinit, but for rproc (a separate branch in __setstate__)."""
+    state = base_pomp.__getstate__()
+    state["_rproc_func_bytes"] = b"invalid_pickle_bytes"
+
+    with pytest.warns(UserWarning, match="Failed to reconstruct rproc function"):
+        pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+        del pomp_unpickled.rproc
+        pomp_unpickled.__setstate__(state)
+
+    assert pomp_unpickled.rproc is None
+
+
+def test_pickle_setstate_bad_fresh_key(base_pomp):
+    """A corrupted _fresh_key_data should warn and fall back to fresh_key=None."""
+    state = base_pomp.__getstate__()
+    state["_fresh_key_data"] = "not-a-valid-key-array"
+
+    with pytest.warns(UserWarning, match="Failed to reconstruct JAX fresh_key"):
+        pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+        pomp_unpickled.__setstate__(state)
+
+    assert pomp_unpickled.fresh_key is None
+
+
+def dummy_dprior(theta_):
+    return jax.scipy.stats.norm.logpdf(theta_["X0"], loc=0.0, scale=1.0)
+
+
+def test_dprior_construction_and_pickle(base_pomp):
+    """dprior can be supplied at construction time and survives a pickle round-trip."""
+    pomp_dprior = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        dprior=dummy_dprior,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert pomp_dprior.dprior is not None
+
+    pomp_roundtrip = pickle.loads(pickle.dumps(pomp_dprior))
+    assert pomp_roundtrip.dprior is not None
+    assert pomp_roundtrip.dprior.original_func is not None
+
+
+def test_pickle_dt_based_rproc(base_pomp):
+    """A Pomp built with dt= (instead of nstep=) reconstructs rproc's dt/nstep on unpickling."""
+    pomp_dt = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        dmeas=dummy_dmeas,
+        statenames=["X"],
+        t0=0.0,
+        dt=0.5,
+        accumvars=["X"],
+    )
+    assert pomp_dt.rproc.dt == 0.5
+
+    pomp_roundtrip = pickle.loads(pickle.dumps(pomp_dt))
+    assert pomp_roundtrip.rproc.dt == 0.5
+    assert pomp_roundtrip.rproc.nstep == pomp_dt.rproc.nstep
+    assert pomp_roundtrip.rproc.accumvars == pomp_dt.rproc.accumvars
+
+
+def test_pickle_no_dmeas(base_pomp):
+    """A Pomp built without dmeas (rmeas-only) keeps dmeas=None through a pickle round-trip."""
+    pomp_no_dmeas = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=dummy_rinit,
+        rproc=dummy_rproc,
+        rmeas=dummy_rmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    assert pomp_no_dmeas.dmeas is None
+
+    pomp_roundtrip = pickle.loads(pickle.dumps(pomp_no_dmeas))
+    assert pomp_roundtrip.dmeas is None
+    assert pomp_roundtrip.rmeas is not None
+
+
+def test_pickle_setstate_legacy_by_reference(base_pomp):
+    """Cover the legacy (by-reference) unpickling path and its isinstance short-circuits.
+
+    Older pickles stored a module path + attribute name instead of cloudpickled
+    bytes. If that attribute already happens to be a wrapped _RInit/_RProc/etc.
+    instance (rather than a raw user function), __setstate__ should use it
+    directly instead of re-wrapping it.
+    """
+    from pypomp.core.model_struct import _DPrior, _DMeas, _RInit, _RMeas, _RProc
+
+    par_trans = base_pomp.par_trans
+    param_names = base_pomp.canonical_param_names
+
+    wrapped = {
+        "rinit": _RInit(
+            struct=dummy_rinit,
+            statenames=["X"],
+            param_names=param_names,
+            covar_names=[],
+            par_trans=par_trans,
+        ),
+        "rproc": _RProc(
+            struct=dummy_rproc,
+            statenames=["X"],
+            param_names=param_names,
+            covar_names=[],
+            par_trans=par_trans,
+            nstep=1,
+        ),
+        "dmeas": _DMeas(
+            struct=dummy_dmeas,
+            statenames=["X"],
+            param_names=param_names,
+            covar_names=[],
+            par_trans=par_trans,
+            y_names=["y"],
+        ),
+        "rmeas": _RMeas(
+            struct=dummy_rmeas,
+            statenames=["X"],
+            param_names=param_names,
+            covar_names=[],
+            par_trans=par_trans,
+            y_names=["y"],
+        ),
+        "dprior": _DPrior(
+            struct=dummy_dprior,
+            statenames=["X"],
+            param_names=param_names,
+            covar_names=[],
+            par_trans=par_trans,
+        ),
+    }
+
+    state = base_pomp.__getstate__()
+    for prefix, instance in wrapped.items():
+        attr_name = f"_legacy_wrapped_{prefix}_for_test"
+        globals()[attr_name] = instance
+        state.pop(f"_{prefix}_func_bytes", None)
+        state[f"_{prefix}_func_name"] = attr_name
+        state[f"_{prefix}_module"] = __name__
+
+    pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+    pomp_unpickled.__setstate__(state)
+
+    assert pomp_unpickled.rinit is wrapped["rinit"]
+    assert pomp_unpickled.rproc is wrapped["rproc"]
+    assert pomp_unpickled.dmeas is wrapped["dmeas"]
+    assert pomp_unpickled.rmeas is wrapped["rmeas"]
+    assert pomp_unpickled.dprior is wrapped["dprior"]

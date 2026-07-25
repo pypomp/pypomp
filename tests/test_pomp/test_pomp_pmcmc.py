@@ -88,6 +88,21 @@ class TestProposals:
         with pytest.raises(ValueError, match="at least one positive"):
             MVNDiagRW({"a": 0.0, "b": -1.0})
 
+    def test_mvn_diag_rw_eq_other_type(self):
+        prop = MVNDiagRW({"beta1": 0.1})
+        assert prop.__eq__("not a proposal") is NotImplemented
+        assert prop != "not a proposal"
+
+    def test_mvn_diag_rw_canonicalize_unknown_param(self):
+        prop = MVNDiagRW({"nonexistent": 0.1})
+        with pytest.raises(ValueError, match="not in model"):
+            prop.canonicalize(["beta1", "gamma"])
+
+    def test_mvn_diag_rw_canonicalize_success(self):
+        prop = MVNDiagRW({"beta1": 0.1}).canonicalize(["beta1", "gamma"])
+        assert prop.param_names == ("beta1", "gamma")
+        assert prop == MVNDiagRW({"beta1": 0.1}).canonicalize(["beta1", "gamma"])
+
     def test_mvn_rw_basic(self):
         rw_var = np.array([[1.0, 0.0], [0.0, 0.1]])
         prop = MVNRWFull(rw_var, param_names=["beta1", "gamma"])
@@ -106,6 +121,22 @@ class TestProposals:
     def test_mvn_rw_size_mismatch_raises(self):
         with pytest.raises(ValueError, match="dimensions must match"):
             MVNRWFull(np.eye(2), ["a", "b", "c"])
+
+    def test_mvn_rw_full_eq_other_type(self):
+        prop = MVNRWFull(np.eye(1), ["beta1"])
+        assert prop.__eq__("not a proposal") is NotImplemented
+        assert prop != "not a proposal"
+        assert prop == MVNRWFull(np.eye(1), ["beta1"])
+
+    def test_mvn_rw_full_canonicalize_unknown_outer_param(self):
+        prop = MVNRWFull(np.eye(2), ["nonexistent", "beta1"])
+        with pytest.raises(ValueError, match="not in model"):
+            prop.canonicalize(["beta1", "gamma"])
+
+    def test_mvn_rw_full_canonicalize_unknown_inner_param(self):
+        prop = MVNRWFull(np.eye(2), ["beta1", "nonexistent"])
+        with pytest.raises(ValueError, match="not in model"):
+            prop.canonicalize(["beta1", "gamma"])
 
     def test_canonicalize_mvn_rw_freezes_missing_parameters(self):
         prop = MVNRWFull(np.array([[1.0]]), ["beta1"]).canonicalize(["beta1", "gamma"])
@@ -151,6 +182,43 @@ class TestProposals:
     def test_mvn_rw_adaptive_both_raises(self):
         with pytest.raises(ValueError, match="Exactly one"):
             MVNRWAdaptive(rw_sd={"a": 1.0}, rw_var=np.eye(1), param_names=["a"])
+
+    def test_mvn_rw_adaptive_rw_var_requires_param_names(self):
+        with pytest.raises(ValueError, match="param_names required"):
+            MVNRWAdaptive(rw_var=np.eye(1))
+
+    def test_mvn_rw_adaptive_rw_var_shape_mismatch(self):
+        with pytest.raises(ValueError, match="rw_var shape must match"):
+            MVNRWAdaptive(rw_var=np.eye(2), param_names=["a"])
+
+    @pytest.mark.parametrize(
+        "kwargs,match",
+        [
+            ({"scale_start": 0}, "scale_start must be"),
+            ({"scale_cooling": 1.5}, "scale_cooling must be"),
+            ({"shape_start": 0}, "shape_start must be"),
+            ({"target": 1.5}, "target must be"),
+        ],
+    )
+    def test_mvn_rw_adaptive_hyperparam_validation(self, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            MVNRWAdaptive(rw_sd={"a": 1.0}, **kwargs)
+
+    def test_mvn_rw_adaptive_eq_other_type(self):
+        prop = MVNRWAdaptive(rw_sd={"beta1": 1.0})
+        assert prop.__eq__("not a proposal") is NotImplemented
+        assert prop != "not a proposal"
+        assert prop == MVNRWAdaptive(rw_sd={"beta1": 1.0})
+
+    def test_mvn_rw_adaptive_canonicalize_unknown_outer_param(self):
+        prop = MVNRWAdaptive(rw_var=np.eye(2), param_names=["nonexistent", "beta1"])
+        with pytest.raises(ValueError, match="not in model"):
+            prop.canonicalize(["beta1", "gamma"])
+
+    def test_mvn_rw_adaptive_canonicalize_unknown_inner_param(self):
+        prop = MVNRWAdaptive(rw_var=np.eye(2), param_names=["beta1", "nonexistent"])
+        with pytest.raises(ValueError, match="not in model"):
+            prop.canonicalize(["beta1", "gamma"])
 
     def test_proposal_jit_scan_compatible(self):
         """All proposals must work inside jax.lax.scan."""
@@ -502,6 +570,14 @@ class TestPMCMCValidation:
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M must be"):
             sir.pmcmc(J=20, M=0, proposal=prop, key=jax.random.key(0))
+
+    def test_requires_dmeas(self, deterministic_meas_pomp):
+        """pmcmc needs a density measurement model; rmeas alone isn't enough."""
+        prop = MVNDiagRW({"mu": 1.0})
+        with pytest.raises(ValueError, match="pmcmc requires self.dmeas"):
+            deterministic_meas_pomp.pmcmc(
+                J=5, M=3, proposal=prop, key=jax.random.key(0)
+            )
 
 
 # ---------------------------------------------------------------

@@ -32,6 +32,12 @@ def test_class_basic_default(simple):
     assert LG.results_history[-1].CLL_da is None
 
 
+def test_pfilter_no_track_time(simple):
+    LG, key, J = simple
+    LG.pfilter(J=J, key=key, track_time=False)
+    assert LG.results_history[-1].execution_time is None
+
+
 def test_reps_default(simple):
     LG, key, J = simple
     theta = LG.theta.params(as_list=True)

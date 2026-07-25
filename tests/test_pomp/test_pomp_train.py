@@ -60,6 +60,13 @@ def test_train_basic(opt_instance, simple):
     assert GD_out.optimizer.__class__.__name__ == opt_instance.__class__.__name__
 
 
+def test_train_no_track_time(simple):
+    LG, ys, covars, theta, J, key, M = simple
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.Adam(), key=key, track_time=False)
+    assert LG.results_history[-1].execution_time is None
+
+
 def test_train_with_line_search(simple):
     """Test train with line search enabled."""
     LG, ys, covars, theta, J, key, M = simple

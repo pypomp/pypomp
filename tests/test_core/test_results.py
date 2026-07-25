@@ -161,6 +161,228 @@ def test_result_equality_and_pickle():
     assert type(unpickled) is type(r1)
 
 
+def test_n_chains_no_payload():
+    r = Result(
+        method="pmcmc",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        payload=None,  # type: ignore
+    )
+    assert r.n_chains == 0
+
+
+def test_acceptance_rate_edge_cases():
+    # 1. No "accepts" variable at all (e.g. a plain pfilter result).
+    r_pfilter = _pomp_pfilter()
+    assert r_pfilter.acceptance_rate.shape == (0,)
+
+    # 2. "accepts" present but config lacks a (truthy) "M" to divide by.
+    r_no_M = Result(
+        method="pmcmc",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        config={},
+        payload=xr.Dataset({"accepts": (["theta_idx"], np.array([3, 5]))}),
+    )
+    rate = r_no_M.acceptance_rate
+    assert np.array_equal(rate, np.zeros(2))
+
+    # 3. Normal success path: accepts present and M > 0.
+    r_with_M = Result(
+        method="pmcmc",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        config={"M": 10},
+        payload=xr.Dataset({"accepts": (["theta_idx"], np.array([3, 5]))}),
+    )
+    assert np.allclose(r_with_M.acceptance_rate, np.array([0.3, 0.5]))
+
+
+def test_eq_theta_mismatch():
+    r1 = _pomp_pfilter()
+    r2 = _pomp_pfilter()
+    r2.theta = PompParameters({"param1": 99.0, "param2": 2.0})
+    assert r1 != r2
+
+
+def test_eq_method_kind_panel_mismatch():
+    r_pfilter = _pomp_pfilter()
+    r_mif = _pomp_mif()
+    assert r_pfilter != r_mif
+
+
+def test_eq_config_mismatch():
+    r1 = _pomp_pfilter()
+    r2 = build_pfilter_result(
+        key=KEY,
+        execution_time=1.5,
+        theta=PompParameters({"param1": 1.0, "param2": 2.0}),
+        logLiks=xr.DataArray([[1.5, 2.5]], dims=["theta_idx", "rep"]),
+        J=999,  # different J -> config mismatch
+        reps=2,
+        thresh=0.5,
+    )
+    assert r1 != r2
+
+
+def test_n_chains_and_attribute_errors_positive_paths():
+    r = _pomp_pfilter()
+    assert r.n_chains == 1
+
+    with pytest.raises(AttributeError):
+        r.__some_nonexistent_dunder__
+    with pytest.raises(AttributeError):
+        r.totally_made_up_attribute
+
+
+def test_merge_method_kind_panel_mismatch():
+    r_pfilter = _pomp_pfilter()
+    r_mif = _pomp_mif()
+    assert type(r_pfilter) is type(r_mif)
+    with pytest.raises(ValueError, match="share method/kind/panel"):
+        type(r_pfilter).merge(r_pfilter, r_mif)
+
+
+def test_merge_all_empty_payloads():
+    empty1 = Result(
+        method="pfilter",
+        kind="table",
+        panel=False,
+        execution_time=1.0,
+        key=KEY,
+        config={"J": 10, "reps": 1, "thresh": 0.0},
+        payload=xr.Dataset(),
+    )
+    empty2 = Result(
+        method="pfilter",
+        kind="table",
+        panel=False,
+        execution_time=1.0,
+        key=KEY,
+        config={"J": 10, "reps": 1, "thresh": 0.0},
+        payload=xr.Dataset(),
+    )
+    merged = Result.merge(empty1, empty2)
+    assert merged.payload.equals(empty1.payload)
+
+
+def test_values_equal_and_config_mismatch_helpers():
+    from pypomp.core.results.result import (
+        _values_equal,
+        _first_config_mismatch,
+        _merge_theta,
+    )
+
+    assert _values_equal(np.array([1.0, 2.0]), np.array([1.0, 2.0]))
+    assert not _values_equal(np.array([1.0, 2.0]), np.array([1.0, 3.0]))
+
+    assert _first_config_mismatch({"a": 1}, {"a": 1, "b": 2}) == "b"
+
+    assert _merge_theta([None, None]) is None
+    assert _merge_theta([[1, 2], [3]]) == [1, 2, 3]
+    assert _merge_theta([5, 5]) == 5
+
+
+def test_print_summary_skips_unlabeled_config_key():
+    res = _pomp_pfilter()
+    res.config["some_unrecognized_key"] = 123
+    res.print_summary()  # should not raise, and should just skip the unknown key
+
+
+def test_empty_table_result_pomp():
+    """A table-kind pomp result with no theta yields empty to_dataframe()/traces()."""
+    res = Result(
+        method="pfilter",
+        kind="table",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        theta=None,
+        payload=xr.Dataset(
+            {"logLiks": xr.DataArray([[1.0]], dims=["theta_idx", "rep"])}
+        ),
+    )
+    assert res.to_dataframe().empty
+    assert res.traces().empty
+
+
+def test_empty_trace_result_pomp():
+    """A trace-kind pomp result with no 'traces' variable yields empty output."""
+    res = Result(
+        method="mif",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        payload=xr.Dataset(),
+    )
+    assert res.to_dataframe().empty
+    assert res.traces().empty
+
+
+def test_empty_trace_result_panel():
+    """A trace-kind panel result with no shared/unit traces yields empty output."""
+    res = Result(
+        method="mif",
+        kind="trace",
+        panel=True,
+        execution_time=None,
+        key=KEY,
+        payload=xr.Dataset(),
+    )
+    assert res.to_dataframe().empty
+    assert res.traces().empty
+
+
+def test_empty_mcmc_result():
+    """An MCMC-family result with no 'traces' variable yields empty output."""
+    res = Result(
+        method="pmcmc",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        payload=xr.Dataset(),
+    )
+    assert res.to_dataframe().empty
+    assert res.traces().empty
+
+
+def test_mcmc_to_dataframe_ignore_nan():
+    traces = xr.DataArray(
+        [[[1.0, np.nan], [2.0, 0.5]]],
+        dims=["theta_idx", "iteration", "variable"],
+        coords={
+            "theta_idx": [0],
+            "iteration": [0, 1],
+            "variable": ["logLik", "beta"],
+        },
+    )
+    res = Result(
+        method="pmcmc",
+        kind="trace",
+        panel=False,
+        execution_time=None,
+        key=KEY,
+        payload=xr.Dataset({"traces": traces}),
+    )
+    df_with_nan = res.to_dataframe(ignore_nan=False)
+    df_no_nan = res.to_dataframe(ignore_nan=True)
+    assert len(df_no_nan) < len(df_with_nan)
+
+
+def test_theta_count_list():
+    from pypomp.core.results.render import _theta_count
+
+    assert _theta_count([1, 2, 3]) == 3
+
+
 def test_trace_result_has_empty_cll_ess():
     res = _pomp_mif()
     assert res.CLL().empty

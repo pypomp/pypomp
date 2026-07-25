@@ -68,6 +68,12 @@ def test_class_mif_basic(simple, test_J, test_M):
     assert all(isinstance(v, float) for v in LG.theta[0].values())
 
 
+def test_mif_no_track_time(simple):
+    LG, rw_sd, J, key, M = simple
+    LG.mif(J=J, rw_sd=rw_sd, M=M, key=key, track_time=False)
+    assert LG.results_history[-1].execution_time is None
+
+
 def test_mif_zero_sigma_no_perturbation(simple):
     # Verify that parameters with a standard deviation of 0.0 are not perturbed.
     LG, rw_sd, J, key, M = simple

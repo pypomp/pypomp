@@ -262,3 +262,27 @@ def test_panel_benchmark_warning_suppression(dummy_data):
                 warn for warn in w_list if summary_pattern in str(warn.message)
             ]
             assert len(summary_warnings) == 1
+
+
+@pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
+def test_panel_benchmark_no_warning_suppression(dummy_data):
+    """With suppress_warnings=False, per-unit warnings pass through unsummarized."""
+    from unittest.mock import MagicMock
+
+    unit1 = MagicMock()
+    unit1.ys = dummy_data[["y1"]]
+    unit2 = MagicMock()
+    unit2.ys = dummy_data[["y2"]]
+
+    panel = MagicMock(spec=PanelEstimationMixin)
+    panel.unit_objects = {"u1": unit1, "u2": unit2}
+    panel.arma = PanelEstimationMixin.arma.__get__(panel)
+    panel.negbin = PanelEstimationMixin.negbin.__get__(panel)
+
+    df_arma = panel.arma(order=(1, 0, 0), suppress_warnings=False)
+    assert list(df_arma["unit"])[0] == "[[TOTAL]]"
+    assert set(df_arma["unit"]) == {"[[TOTAL]]", "u1", "u2"}
+
+    df_nb = panel.negbin(suppress_warnings=False)
+    assert list(df_nb["unit"])[0] == "[[TOTAL]]"
+    assert set(df_nb["unit"]) == {"[[TOTAL]]", "u1", "u2"}

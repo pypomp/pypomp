@@ -191,6 +191,15 @@ def test_performance_comprehensive():
     units = [f"unit_{i}" for i in range(40)]  # 40 units
     pomp_objects = {}
 
+    def rinit_fn(theta_, key, covars, t0):
+        return {"S": 1000, "I": 1}
+
+    def rproc_fn(X_, theta_, key, covars, t, dt):
+        return X_
+
+    def dmeas_fn(Y_, X_, theta_, covars, t):
+        return 0.0
+
     # Create minimal pomp objects
     for unit in units:
         times = np.linspace(0, 90, 10)  # Use numeric times with larger spacing
@@ -207,9 +216,9 @@ def test_performance_comprehensive():
             ),
             statenames=["S", "I"],
             t0=float(times[0]),
-            rinit=lambda theta_, key, covars, t0: {"S": 1000, "I": 1},
-            rproc=lambda X_, theta_, key, covars, t, dt: X_,
-            dmeas=lambda Y_, X_, theta_, covars, t: 0.0,
+            rinit=rinit_fn,
+            rproc=rproc_fn,
+            dmeas=dmeas_fn,
             nstep=1,
         )
         pomp_objects[unit] = pomp_obj

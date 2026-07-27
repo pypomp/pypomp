@@ -69,6 +69,89 @@ def test_validate_unit_objects_mismatched_ys_columns(lg_panel_setup_some_shared)
         panel._validate_unit_objects()
 
 
+def test_validate_unit_objects_mismatched_statenames(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+    panel.unit_objects["unit2"].statenames = ["S", "I", "R_other"]
+    with pytest.raises(ValueError, match="All units must have the same statenames"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_accumvars(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+    panel.unit_objects["unit2"].accumvars = ["extra_accumvar"]
+    with pytest.raises(ValueError, match="All units must have the same accumvars"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_covar_names(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+    panel.unit_objects["unit2"].covar_names = ["dummy_covar"]
+    with pytest.raises(ValueError, match="All units must have the same covar_names"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_par_trans(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+    panel.unit_objects["unit2"].par_trans = pp.ParTrans(to_est=lambda theta_: theta_)
+    with pytest.raises(ValueError, match="All units must have the same par_trans"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_rinit(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+
+    def dummy_rinit(theta_, t0, key):
+        return {}
+
+    panel.unit_objects["unit2"].rinit = dummy_rinit  # type: ignore
+    with pytest.raises(ValueError, match="All units must have the same rinit"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_rproc(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+
+    def dummy_rproc(X_, theta_, t, dt, key):
+        return X_
+
+    panel.unit_objects["unit2"].rproc = dummy_rproc  # type: ignore
+    with pytest.raises(ValueError, match="All units must have the same rproc"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_dmeas(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+
+    def dummy_dmeas(Y_, X_, theta_, t):
+        return 0.0
+
+    panel.unit_objects["unit2"].dmeas = dummy_dmeas  # type: ignore
+    with pytest.raises(ValueError, match="All units must have the same dmeas"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_rmeas(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+
+    def dummy_rmeas(X_, theta_, t, key):
+        return {}
+
+    panel.unit_objects["unit2"].rmeas = dummy_rmeas  # type: ignore
+    with pytest.raises(ValueError, match="All units must have the same rmeas"):
+        panel._validate_unit_objects()
+
+
+def test_validate_unit_objects_mismatched_dprior(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+
+    def dummy_dprior(theta_):
+        return 0.0
+
+    panel.unit_objects["unit2"].dprior = dummy_dprior  # type: ignore
+    with pytest.raises(ValueError, match="All units must have the same dprior"):
+        panel._validate_unit_objects()
+
+
 def test_validate_params_and_units_mismatched_unit_names(
     lg_panel_setup_some_shared,
 ):

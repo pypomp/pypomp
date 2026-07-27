@@ -32,6 +32,34 @@ class PanelValidationMixin(Base):
                 raise ValueError("All units must have the same ys index")
             if any(unit_obj.ys.columns != unit_objs[0].ys.columns):
                 raise ValueError("All units must have the same ys columns")
+            if unit_obj.statenames != unit_objs[0].statenames:
+                raise ValueError("All units must have the same statenames")
+            if unit_obj.accumvars != unit_objs[0].accumvars:
+                raise ValueError("All units must have the same accumvars")
+            if unit_obj.covar_names != unit_objs[0].covar_names:
+                raise ValueError("All units must have the same covar_names")
+            if unit_obj.par_trans != unit_objs[0].par_trans:
+                raise ValueError("All units must have the same par_trans")
+            if getattr(unit_obj.rinit, "original_func", unit_obj.rinit) != getattr(
+                unit_objs[0].rinit, "original_func", unit_objs[0].rinit
+            ):
+                raise ValueError("All units must have the same rinit")
+            if getattr(unit_obj.rproc, "original_func", unit_obj.rproc) != getattr(
+                unit_objs[0].rproc, "original_func", unit_objs[0].rproc
+            ):
+                raise ValueError("All units must have the same rproc")
+            if getattr(unit_obj.dmeas, "original_func", unit_obj.dmeas) != getattr(
+                unit_objs[0].dmeas, "original_func", unit_objs[0].dmeas
+            ):
+                raise ValueError("All units must have the same dmeas")
+            if getattr(unit_obj.rmeas, "original_func", unit_obj.rmeas) != getattr(
+                unit_objs[0].rmeas, "original_func", unit_objs[0].rmeas
+            ):
+                raise ValueError("All units must have the same rmeas")
+            if getattr(unit_obj.dprior, "original_func", unit_obj.dprior) != getattr(
+                unit_objs[0].dprior, "original_func", unit_objs[0].dprior
+            ):
+                raise ValueError("All units must have the same dprior")
 
     def _validate_params_and_units(self) -> None:
         """

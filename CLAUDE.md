@@ -158,6 +158,15 @@ Note: `pypomp/panelPomp/` exists in the tree but currently contains only stale
 - User writes functions with dict arguments; wrappers handle array conversion via
   type-hint-based alignment.
 - Features: time interpolation, covariate handling, parameter transformation.
+- **Manually vectorized `rproc`** (opt-in, CPU optimization): decorating `rproc`
+  with `@pypomp.vectorized` sets `_pypomp_vectorized` on the function, which
+  `_RProc` auto-detects. In that mode no `vmap` is applied — the user function
+  receives `(J,)` state arrays and a single key, and `_time_interp` carries the
+  state through the sub-step loop as a dict of columns (packing to
+  `(J, n_states)` only once per observation interval; per-substep repacking was
+  measured as the dominant cost otherwise). Worth ~5x on `dacca` on CPU. This is
+  a CPU-only win — on GPU the default `vmap` path already maps particles onto
+  threads. Only `rproc` supports this; other components are always vmapped.
 
 #### 3. Parameter management
 - **`PompParameters`** (`core/parameters.py`): Single-unit parameter sets as

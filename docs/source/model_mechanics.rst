@@ -83,6 +83,76 @@ You can define the function arguments in two ways:
 
         return {'S': new_S, 'I': new_I}
 
+.. _vectorized-rproc:
+
+Manually Vectorized rproc (CPU optimization)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default pypomp applies :func:`jax.vmap` to ``rproc``, so the function above is
+written for a *single* particle. Decorating ``rproc`` with
+:func:`~pypomp.vectorized` disables that vmap: the function is then called once
+per Euler step with every state entry as a ``(J,)`` array, and is responsible for
+all ``J`` particles itself.
+
+This is purely a **CPU** performance escape hatch, and it is entirely optional.
+XLA's CPU backend does not vectorize per-particle random number generation across
+the particle batch, so on models with many Euler sub-steps per observation
+(``dacca``, ``measles``) nearly all of the runtime is spent drawing scalar
+variates one particle at a time. Writing ``rproc`` against the whole batch lets
+XLA emit a single batched draw instead. On the ``dacca`` model this is roughly a
+**5x** speedup on CPU. On GPU the default vmapped path already maps particles
+onto threads, so the decorator is not expected to help there.
+
+**Contract:**
+
+- Each value in the state dict is a ``(J,)`` array, and the returned dict must
+  hold ``(J,)`` arrays (scalars are broadcast).
+- Parameters and covariates are shared across particles and stay scalar --
+  except under :meth:`~pypomp.Pomp.mif`, where parameters are perturbed per
+  particle and arrive as ``(J,)`` arrays. Writing elementwise code (rather than
+  e.g. ``jnp.dot`` over parameter vectors) handles both cases.
+- ``key`` is a **single** PRNG key for the whole step, not one key per particle.
+  Draw for all particles at once with an explicit shape.
+- Infer ``J`` from the state rather than hardcoding it, so the function still
+  composes when pypomp maps over replicates.
+
+**Template:**
+
+.. code-block:: python
+
+    import jax
+    import jax.numpy as jnp
+    from pypomp import vectorized
+    from pypomp.types import StateDict, ParamDict, RNGKey, CovarDict, TimeFloat, StepSizeFloat
+
+    @vectorized
+    def rproc(
+        state: StateDict,
+        params: ParamDict,
+        key: RNGKey,
+        covars: CovarDict,
+        t: TimeFloat,
+        dt: StepSizeFloat
+    ) -> dict:
+        """
+        Returns the new state after time step `dt`, for all J particles.
+        """
+        S, I = state['S'], state['I']
+        J = S.shape[0]
+
+        # One batched draw for every particle, rather than J scalar draws.
+        dw = jax.random.normal(key, (J,)) * jnp.sqrt(dt)
+        infections = params['beta'] * S * I * dt + dw
+
+        return {'S': S - infections, 'I': I + infections}
+
+.. note::
+
+   A vectorized ``rproc`` consumes randomness differently from its scalar
+   counterpart, so log-likelihoods will not match a scalar implementation
+   draw-for-draw even with the same seed. They agree in distribution, and
+   deterministic dynamics agree exactly.
+
 .. _dmeas-tutorial:
 
 Measurement Density (dmeas)

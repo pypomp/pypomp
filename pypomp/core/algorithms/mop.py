@@ -2,40 +2,47 @@
 This module implements the MOP algorithm for POMP models.
 """
 
+from dataclasses import replace
 from functools import partial
-from typing import cast
+
 import jax
 import jax.numpy as jnp
 from jax import jit
-from .helpers import _normalize_weights
-from .helpers import _resampler
-from .types import MopConfig, MopInputs, MopState
+
+from .carries import MopState
+from .contexts import MopContext, SeriesData
+from .helpers import _normalize_weights, _resampler
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
-@partial(jit, static_argnames=("config",))
+@jit
 def _mop_internal(
     theta: jax.Array,
     key: jax.Array,
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
 ) -> jax.Array | float:
     """
     Internal function for the MOP algorithm, which calls function '_mop_step'
     iteratively.
     """
-    split_keys = jax.random.split(key, num=config.J + 1)
+    split_keys = jax.random.split(key, num=context.J + 1)
     key = split_keys[0]
     keys = split_keys[1:]
-    covars0 = None if inputs.covars_extended is None else inputs.covars_extended[0]
-    particlesF = config.rinitializer(theta, keys, covars0, inputs.t0, SHOULD_TRANS)
-    weightsF = jnp.log(jnp.ones(config.J) / config.J)
-    counts = jnp.ones(config.J).astype(int)
+    covars0 = (
+        None
+        if context.series.covars_extended is None
+        else context.series.covars_extended[0]
+    )
+    particlesF = context.fns.rinitializer(
+        theta, keys, covars0, context.series.t0, SHOULD_TRANS
+    )
+    weightsF = jnp.log(jnp.ones(context.J) / context.J)
+    counts = jnp.ones(context.J).astype(int)
     loglik = 0.0
 
     initial_state = MopState(
-        t=inputs.t0,
+        t=context.series.t0,
         particlesF=particlesF,
         loglik=loglik,
         weightsF=weightsF,
@@ -44,21 +51,14 @@ def _mop_internal(
         t_idx=0,
     )
 
-    mop_step_checkpointed = jax.checkpoint(
-        partial(
-            _mop_step,
-            config,
-            inputs,
-            theta,
-        )
-    )
+    mop_step_checkpointed = jax.checkpoint(partial(_mop_step, context, theta))
 
     def body_fun(i, state):
         return mop_step_checkpointed(i, state)
 
     final_state = jax.lax.fori_loop(
         lower=0,
-        upper=len(inputs.ys),
+        upper=len(context.series.ys),
         body_fun=body_fun,
         init_val=initial_state,
     )
@@ -67,8 +67,7 @@ def _mop_internal(
 
 
 def _mop_step(
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
     theta: jax.Array,
     i: int,
     state: MopState,
@@ -85,30 +84,34 @@ def _mop_step(
     key = state.key
     t_idx = state.t_idx
 
-    J = config.J
-    weightsP = inputs.alpha * weightsF
+    J = context.J
+    weightsP = context.alpha * weightsF
 
     split_keys = jax.random.split(key, num=J + 1)
     key = split_keys[0]
     keys = split_keys[1:]
-    nstep = inputs.nstep_array[i].astype(int)
-    particlesP, t_idx = config.rprocess_interp(
+    nstep = context.series.nstep_array[i].astype(int)
+    particlesP, t_idx = context.fns.rprocess_interp(
         particlesF,
         theta,
         keys,
-        inputs.covars_extended,
-        inputs.dt_array_extended,
+        context.series.covars_extended,
+        context.series.dt_array_extended,
         t,
         t_idx,
         nstep,
-        config.accumvars,
+        context.fns.accumvars,
         SHOULD_TRANS,
     )
-    t = inputs.times[i]
+    t = context.series.times[i]
 
-    covars_t = None if inputs.covars_extended is None else inputs.covars_extended[t_idx]
-    measurements = config.dmeasure(
-        inputs.ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS
+    covars_t = (
+        None
+        if context.series.covars_extended is None
+        else context.series.covars_extended[t_idx]
+    )
+    measurements = context.fns.dmeasure(
+        context.series.ys[i], particlesP, theta, covars_t, t, SHOULD_TRANS
     )
 
     loglik = (
@@ -140,66 +143,51 @@ _vmapped_mop_internal = jax.vmap(
     in_axes=(
         0,  # theta
         0,  # key
-        None,  # config
-        None,  # inputs
+        None,  # context
     ),
 )
 
 
-@partial(jit, static_argnames=("config",))
+@jit
 def _mop_internal_mean(
     theta: jax.Array,
     key: jax.Array,
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
 ) -> jax.Array | float:
     """
     Internal function for calculating the MOP estimate of the log likelihood divided by
     the length of the observations. This is used in internal pypomp.train functions.
     """
-    return _mop_internal(
-        theta=theta,
-        key=key,
-        config=config,
-        inputs=inputs,
-    ) / len(inputs.ys)
+    return _mop_internal(theta=theta, key=key, context=context) / len(context.series.ys)
 
 
-inputs_in_axes = MopInputs(
-    ys=cast(jax.Array, 0),
-    dt_array_extended=cast(jax.Array, None),
-    nstep_array=cast(jax.Array, None),
-    t0=cast(float, None),
-    times=cast(jax.Array, None),
-    covars_extended=cast(jax.Array, 0),
-    alpha=cast(float, None),
-)
+def _panel_mop_internal_vmap(
+    thetas: jax.Array,
+    keys: jax.Array,
+    context: MopContext,
+) -> jax.Array | float:
+    """vmap ``_mop_internal`` over units, mapping ys/covars per unit.
+
+    The ``in_axes`` prototype is derived from ``context`` so its static fields
+    match the value's treedef exactly.
+    """
+    axes = replace(context, series=SeriesData.axes(ys=0, covars_extended=0), alpha=None)
+    return jax.vmap(
+        _mop_internal,
+        in_axes=(
+            0,  # theta
+            0,  # key
+            axes,  # context (only ys/covars are mapped)
+        ),
+    )(thetas, keys, context)
 
 
-_panel_mop_internal_vmap = jax.vmap(
-    _mop_internal,
-    in_axes=(
-        0,  # theta
-        0,  # key
-        None,  # config
-        inputs_in_axes,  # inputs
-    ),
-)
-
-
-@partial(
-    jit,
-    static_argnames=(
-        "config",
-        "chunk_size",
-    ),
-)
+@partial(jit, static_argnames=("chunk_size",))
 def _chunked_panel_mop_internal(
     shared_array: jax.Array,  # (n_shared,)
     unit_array: jax.Array,  # (U, n_spec)
     unit_param_permutations: jax.Array,  # (U, n_params)
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
     keys: jax.Array,
     chunk_size: int,
 ) -> jax.Array | float:
@@ -207,12 +195,14 @@ def _chunked_panel_mop_internal(
     n_params = unit_param_permutations.shape[1]
     n_chunks = U // chunk_size
 
-    ys_c = inputs.ys.reshape((n_chunks, chunk_size) + inputs.ys.shape[1:])
+    ys_c = context.series.ys.reshape(
+        (n_chunks, chunk_size) + context.series.ys.shape[1:]
+    )
     covars_c = (
         None
-        if inputs.covars_extended is None
-        else inputs.covars_extended.reshape(
-            (n_chunks, chunk_size) + inputs.covars_extended.shape[1:]
+        if context.series.covars_extended is None
+        else context.series.covars_extended.reshape(
+            (n_chunks, chunk_size) + context.series.covars_extended.shape[1:]
         )
     )
     keys_c = keys.reshape((n_chunks, chunk_size) + keys.shape[1:])
@@ -229,8 +219,7 @@ def _chunked_panel_mop_internal(
 
     scan_fn = jax.tree_util.Partial(
         _panel_mop_scan_step,
-        config,
-        inputs,
+        context,
         ys_c,
         covars_c,
         keys_c,
@@ -241,12 +230,11 @@ def _chunked_panel_mop_internal(
 
     total_neg_loglik, _ = jax.lax.scan(scan_fn, 0.0, jnp.arange(n_chunks))
 
-    return total_neg_loglik / (U * inputs.ys.shape[1])
+    return total_neg_loglik / (U * context.series.ys.shape[1])
 
 
 def _panel_mop_scan_step(
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
     ys_c: jax.Array,
     covars_c: jax.Array | None,
     keys_c: jax.Array,
@@ -272,21 +260,15 @@ def _panel_mop_scan_step(
     covars_chunk = None if covars_c is None else covars_c[chunk_idx]
     key_chunk = keys_c[chunk_idx]
 
-    inputs_chunk = MopInputs(
-        ys=ys_chunk,
-        dt_array_extended=inputs.dt_array_extended,
-        nstep_array=inputs.nstep_array,
-        t0=inputs.t0,
-        times=inputs.times,
-        covars_extended=covars_chunk,
-        alpha=inputs.alpha,
+    context_chunk = replace(
+        context,
+        series=replace(context.series, ys=ys_chunk, covars_extended=covars_chunk),
     )
 
     res = _panel_mop_internal_vmap(
         theta_chunk,
         key_chunk,
-        config,
-        inputs_chunk,
+        context_chunk,
     )
     return carry + jnp.sum(res), None
 

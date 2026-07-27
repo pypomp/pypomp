@@ -1,25 +1,24 @@
+from dataclasses import replace
+
 import jax
 import jax.numpy as jnp
 from jax import jit
-from .pfilter import _vmapped_pfilter_internal
-from .types import (
-    PanelMifConfig,
-    PanelMifInputs,
+
+from .carries import (
     PanelMifIterInputs,
     PanelMifState,
-    PfilterConfig,
-    PfilterInputs,
     UnitStepInputs,
 )
+from .contexts import PanelMifContext, PfilterContext
 from .mif import _perfilter_internal
+from .pfilter import _vmapped_pfilter_internal
 
 
 def _panel_mif_internal(
     shared_array: jax.Array,
     unit_array: jax.Array,
     key: jax.Array,
-    config: PanelMifConfig,
-    inputs: PanelMifInputs,
+    context: PanelMifContext,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Fully JIT-compatible panel iterated filtering across M iterations and U units.
@@ -33,32 +32,31 @@ def _panel_mif_internal(
     # 1. Setup metadata and initial traces.
     n_shared = shared_array.shape[1]
     n_spec = unit_array.shape[2]
-    inv_perms = jax.vmap(jnp.argsort)(inputs.unit_param_permutations)
+    inv_perms = jax.vmap(jnp.argsort)(context.unit_param_permutations)
 
     shared_means0 = jnp.mean(shared_array, axis=0) if n_shared > 0 else jnp.zeros((0,))
     unit_means0 = (
-        jnp.mean(unit_array, axis=0) if n_spec > 0 else jnp.zeros((config.U, 0))
+        jnp.mean(unit_array, axis=0) if n_spec > 0 else jnp.zeros((context.U, 0))
     )
 
     shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
     unit_trace_0 = jnp.concatenate(
-        [jnp.full((config.U, 1), jnp.nan), unit_means0], axis=-1
+        [jnp.full((context.U, 1), jnp.nan), unit_means0], axis=-1
     )[None, :, :]
 
     # 2. Prepare scan input.
-    all_keys = jax.random.split(key, num=config.M + 1)
+    all_keys = jax.random.split(key, num=context.M + 1)
     m_keys = all_keys[1:]
 
-    config_pf = config.to_pfilter_config()
+    context_pf = context.to_pfilter_context()
 
     initial_iter_carry = PanelMifState(shared=shared_array, unit_specific=unit_array)
-    iter_scan_xs = PanelMifIterInputs(m=jnp.arange(config.M), key=m_keys)
+    iter_scan_xs = PanelMifIterInputs(m=jnp.arange(context.M), key=m_keys)
 
     iter_body_fn = jax.tree_util.Partial(
         _panel_mif_iter_body,
-        config,
-        inputs,
-        config_pf,
+        context,
+        context_pf,
         inv_perms,
     )
 
@@ -80,9 +78,8 @@ def _panel_mif_internal(
 
 
 def _panel_mif_iter_body(
-    config: PanelMifConfig,
-    inputs: PanelMifInputs,
-    config_pf: PfilterConfig,
+    context: PanelMifContext,
+    context_pf: PfilterContext,
     inv_perms: jax.Array,
     carry: PanelMifState,
     scan_inputs: PanelMifIterInputs,
@@ -94,14 +91,14 @@ def _panel_mif_iter_body(
     iter_key = scan_inputs.key
 
     # 1. Prepare scan inputs for each unit.
-    unit_keys = jax.random.split(iter_key, num=config.U)
+    unit_keys = jax.random.split(iter_key, num=context.U)
     unit_scan_seq = UnitStepInputs(
-        permutation=inputs.unit_param_permutations,
-        ys=inputs.ys,
-        covariates_dummy=inputs.covars_extended
-        if inputs.covars_extended is not None
-        else jnp.zeros((config.U, 0)),
-        unit_idx=jnp.arange(config.U),
+        permutation=context.unit_param_permutations,
+        ys=context.series.ys,
+        covariates_dummy=context.series.covars_extended
+        if context.series.covars_extended is not None
+        else jnp.zeros((context.U, 0)),
+        unit_idx=jnp.arange(context.U),
         key=unit_keys,
         inverse_permutation=inv_perms,
     )
@@ -113,9 +110,8 @@ def _panel_mif_iter_body(
 
     unit_scan_fn_partial = jax.tree_util.Partial(
         _panel_mif_unit_scan_fn,
-        config,
-        inputs,
-        config_pf,
+        context,
+        context_pf,
         m,
     )
 
@@ -150,9 +146,8 @@ def _panel_mif_iter_body(
 
 
 def _panel_mif_unit_scan_fn(
-    config: PanelMifConfig,
-    inputs: PanelMifInputs,
-    config_pf: PfilterConfig,
+    context: PanelMifContext,
+    context_pf: PfilterContext,
     m: int | jax.Array,
     state: PanelMifState,
     unit: UnitStepInputs,
@@ -161,29 +156,29 @@ def _panel_mif_unit_scan_fn(
     n_shared = state.shared.shape[1]
     n_spec = state.unit_specific.shape[2]
 
-    covariates = None if inputs.covars_extended is None else unit.covariates_dummy
+    covariates = (
+        None if context.series.covars_extended is None else unit.covariates_dummy
+    )
 
     # 1. Reconstruct parameters for current unit into the canonical panel order
     if n_spec > 0:
         current_unit_thetas = state.unit_specific[:, unit.unit_idx, :]
     else:
-        current_unit_thetas = jnp.zeros((config.J, 0))
+        current_unit_thetas = jnp.zeros((context.J, 0))
 
     if (n_shared + n_spec) > 0:
         thetas_panel_order = jnp.concatenate(
             [state.shared, current_unit_thetas], axis=1
         )
     else:
-        thetas_panel_order = jnp.zeros((config.J, 0))
+        thetas_panel_order = jnp.zeros((context.J, 0))
 
     # 2. Permute parameters and sigmas to match the unit's local model order
     thetas_unit_order = thetas_panel_order[:, unit.permutation]
-    rw_sigma_unit_order = inputs.rw_sigma._permuted(unit.permutation)
+    rw_sigma_unit_order = context.rw_sigma._permuted(unit.permutation)
 
-    # 3. Build sub-configurations and run the single-unit perfilter step
-    mif_config = config.to_mif_config()
-
-    mif_inputs = inputs.to_mif_inputs(
+    # 3. Narrow to the single-unit context and run the perfilter step
+    mif_context = context.to_mif_context(
         ys_u=unit.ys,
         rw_sigma_u=rw_sigma_unit_order,
         covars_u=covariates,
@@ -193,28 +188,22 @@ def _panel_mif_unit_scan_fn(
         m_current=m,
         thetas_Jd=thetas_unit_order,
         key=unit.key,
-        config=mif_config,
-        inputs=mif_inputs,
+        context=mif_context,
     )
 
     # 4. Compute monitored log-likelihood (optional)
-    if config.n_monitors >= 1:
+    if context.n_monitors >= 1:
         current_theta_mean = jnp.mean(thetas_unit_order, axis=0)
-        mon_keys = jax.random.split(unit.key, config.n_monitors)
-        inputs_pf = PfilterInputs(
-            ys=unit.ys,
-            dt_array_extended=inputs.dt_array_extended,
-            nstep_array=inputs.nstep_array,
-            t0=inputs.t0,
-            times=inputs.times,
-            covars_extended=covariates,
+        mon_keys = jax.random.split(unit.key, context.n_monitors)
+        unit_context_pf = replace(
+            context_pf,
+            series=replace(context_pf.series, ys=unit.ys, covars_extended=covariates),
         )
         neg_loglik_m = jnp.mean(
             _vmapped_pfilter_internal(
                 current_theta_mean,
                 mon_keys,
-                config_pf,
-                inputs_pf,
+                unit_context_pf,
             )["neg_loglik"]
         )
     else:
@@ -235,7 +224,7 @@ def _panel_mif_unit_scan_fn(
         # If not blocking, we must align the particle histories across units
         # based on the current unit's resampling ancestry.
         unit_specific_carry = state.unit_specific
-        if not config.block:
+        if not context.block:
             unit_specific_carry = unit_specific_carry[ancestry, :, :]
 
         new_unit_specific = unit_specific_carry.at[:, unit.unit_idx, :].set(
@@ -264,12 +253,8 @@ _vmapped_panel_mif_internal = jax.vmap(
         0,  # shared_array
         0,  # unit_array
         0,  # key
-        None,  # config
-        None,  # inputs
+        None,  # context
     ),
 )
 
-_jv_panel_mif_internal = jit(
-    _vmapped_panel_mif_internal,
-    static_argnames=("config",),
-)
+_jv_panel_mif_internal = jit(_vmapped_panel_mif_internal)

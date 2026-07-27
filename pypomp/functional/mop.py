@@ -1,7 +1,8 @@
 import jax
-from .structs import PompStruct
+
+from ..core.algorithms.contexts import MopContext
 from ..core.algorithms.mop import _vmapped_mop_internal
-from ..core.algorithms.types import MopConfig, MopInputs
+from .structs import PompStruct
 
 
 def mop(
@@ -52,12 +53,10 @@ def mop(
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
 
-    config = MopConfig.from_mop_struct(struct, J)
-    inputs = MopInputs.from_mop_struct(struct, alpha)
+    context = MopContext.from_struct(struct, J=J, alpha=alpha)
 
     return _vmapped_mop_internal(
         thetas_array,
         keys,
-        config,
-        inputs,
+        context,
     )

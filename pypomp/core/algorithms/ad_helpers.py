@@ -1,6 +1,7 @@
 import jax
+
+from .contexts import MopContext
 from .mop import _mop_internal_mean
-from .types import MopConfig, MopInputs
 
 _grad_mop_internal_mean = jax.grad(_mop_internal_mean)
 _vg_mop_internal_mean = jax.value_and_grad(_mop_internal_mean)
@@ -10,8 +11,7 @@ _hess_mop_internal_mean = jax.hessian(_mop_internal_mean)
 def _jgrad_mop(
     theta_ests: jax.Array,
     key: jax.Array,
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
 ):
     """
     Calculates the gradient of a mean MOP objective (function
@@ -25,16 +25,14 @@ def _jgrad_mop(
     return _grad_mop_internal_mean(
         theta_ests,
         key,
-        config,
-        inputs,
+        context,
     )
 
 
 def _jvg_mop(
     theta_ests: jax.Array,
     key: jax.Array,
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
 ) -> tuple:
     """
     Calculates the both the value and gradient of a mean MOP objective (function
@@ -51,8 +49,7 @@ def _jvg_mop(
     return _vg_mop_internal_mean(
         theta_ests,
         key,
-        config,
-        inputs,
+        context,
     )
 
 
@@ -60,8 +57,7 @@ def _jvg_mop(
 def _jhess_mop(
     theta_ests: jax.Array,
     key: jax.Array,
-    config: MopConfig,
-    inputs: MopInputs,
+    context: MopContext,
 ):
     """
     calculates the Hessian matrix of a mean MOP objective (function
@@ -75,6 +71,5 @@ def _jhess_mop(
     return _hess_mop_internal_mean(
         theta_ests,
         key,
-        config,
-        inputs,
+        context,
     )

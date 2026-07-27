@@ -1,10 +1,11 @@
 import jax
-from .structs import PompStruct, PanelPompStruct
+
+from ..core.algorithms.contexts import PfilterContext
 from ..core.algorithms.pfilter import (
-    _vmapped_pfilter_internal2,
     _chunked_panel_pfilter_internal,
+    _vmapped_pfilter_internal2,
 )
-from ..core.algorithms.types import PfilterConfig, PfilterInputs
+from .structs import PanelPompStruct, PompStruct
 
 
 def pfilter(
@@ -70,7 +71,7 @@ def pfilter(
     """
 
     thresh = float(max(0.0, thresh))
-    config = PfilterConfig.from_pfilter_struct(
+    context = PfilterContext.from_struct(
         struct,
         J=J,
         thresh=thresh,
@@ -80,13 +81,10 @@ def pfilter(
         prediction_mean=prediction_mean,
         should_trans=False,
     )
-    inputs = PfilterInputs.from_pfilter_struct(struct)
-
     results = _vmapped_pfilter_internal2(
         thetas_array,
         keys,
-        config,
-        inputs,
+        context,
     )
     results["logLik"] = -results.pop("neg_loglik")
     return results
@@ -153,7 +151,7 @@ def panel_pfilter(
     align_params : Parameter alignment utility.
     """
     thresh = float(max(0.0, thresh))
-    config = PfilterConfig.from_panel_pfilter_struct(
+    context = PfilterContext.from_panel_struct(
         struct,
         J=J,
         thresh=thresh,
@@ -163,14 +161,14 @@ def panel_pfilter(
         prediction_mean=prediction_mean,
         should_trans=False,
     )
-    inputs = PfilterInputs.from_panel_pfilter_struct(struct)
-
     results = _chunked_panel_pfilter_internal(
         thetas_array,
         keys,
-        config,
-        inputs,
+        context,
         chunk_size,
     )
+    results["logLik"] = -results.pop("neg_loglik")
+    return results
+
     results["logLik"] = -results.pop("neg_loglik")
     return results

@@ -12,29 +12,26 @@ expressed in pure JAX so the entire chain compiles into a single
 XLA program.
 """
 
-from functools import partial
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
 from pypomp.proposals import Proposal
+
+from .contexts import PmcmcContext
 from .pfilter import _pfilter_internal
-from .types import PmcmcConfig, PmcmcInputs
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
-@partial(
-    jit,
-    static_argnames=("config",),
-)
+@jit
 def _pmcmc_internal(
     theta_arr: jax.Array,
     proposal: Proposal,
-    config: PmcmcConfig,
-    inputs: PmcmcInputs,
+    context: PmcmcContext,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Run a single PMCMC chain of length ``M`` starting at ``theta_arr``.
@@ -43,8 +40,7 @@ def _pmcmc_internal(
         theta_arr: Starting parameter vector, shape ``(d,)``.
         proposal: Proposal object exposing ``init_state`` and ``step``.
             See :mod:`pypomp.proposals`.
-        config: PMCMC configuration.
-        inputs: PMCMC inputs.
+        context: PMCMC context (model callables, grid, and settings).
         key: PRNG key.
 
     Returns:
@@ -59,14 +55,13 @@ def _pmcmc_internal(
     # 1. Prepare particle-filter evaluation function.
     run_pfilter_fn = jax.tree_util.Partial(
         _pmcmc_run_pfilter,
-        config=config,
-        inputs=inputs,
+        context=context,
     )
 
     # 2. Initial evaluation at starting theta.
     key, init_pf_key = jax.random.split(key)
     loglik0 = run_pfilter_fn(theta_arr, init_pf_key)
-    log_prior0 = config.dprior(theta_arr, SHOULD_TRANS)
+    log_prior0 = context.dprior(theta_arr, SHOULD_TRANS)
 
     prop_state0 = proposal.init_state(theta_arr)
 
@@ -83,13 +78,13 @@ def _pmcmc_internal(
     step_fn = jax.tree_util.Partial(
         _pmcmc_step,
         proposal,
-        config,
+        context,
         run_pfilter_fn,
     )
 
     # 4. Run the scan loop.
     final_carry, (ll_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step_fn, init_carry, jnp.arange(1, config.M + 1, dtype=jnp.int32)
+        step_fn, init_carry, jnp.arange(1, context.M + 1, dtype=jnp.int32)
     )
     final_accepts = final_carry[4]
 
@@ -103,7 +98,7 @@ def _pmcmc_internal(
 
 def _pmcmc_step(
     proposal: Proposal,
-    config: PmcmcConfig,
+    context: PmcmcContext,
     run_pfilter_fn: Callable,
     carry: tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
     n: int | jax.Array,
@@ -121,7 +116,7 @@ def _pmcmc_step(
     )
 
     # 2. Evaluate prior and likelihood at proposed parameter.
-    lp_prop = config.dprior(theta_prop, SHOULD_TRANS)
+    lp_prop = context.dprior(theta_prop, SHOULD_TRANS)
 
     ll_prop = run_pfilter_fn(theta_prop, pf_key)
 
@@ -144,15 +139,13 @@ def _pmcmc_step(
 def _pmcmc_run_pfilter(
     theta: jax.Array,
     k: jax.Array,
-    config: PmcmcConfig,
-    inputs: PmcmcInputs,
+    context: PmcmcContext,
 ) -> jax.Array:
     """Run the particle filter to get the log-likelihood."""
     out = _pfilter_internal(
         theta,
         k,
-        config.to_pfilter_config(),
-        inputs.to_pfilter_inputs(),
+        context.to_pfilter_context(),
     )
     return -out["neg_loglik"]
 
@@ -164,8 +157,7 @@ _vmapped_pmcmc_internal = jax.vmap(
     in_axes=(
         0,  # theta_arr per chain
         None,  # proposal
-        None,  # config
-        None,  # inputs
+        None,  # context
         0,  # key per chain
     ),
 )

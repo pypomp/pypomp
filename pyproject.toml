@@ -54,7 +54,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.ruff.lint]
-ignore = ["E741"]
+# RUF009: false positive on helper functions that wrap dataclasses.field() (e.g.
+# core/algorithms/contexts.py's `static()`) -- ruff only special-cases direct
+# field() calls in dataclass defaults, not wrappers around one.
+ignore = ["E741", "RUF009"]
 
 [tool.pyright]
 include = ["."]

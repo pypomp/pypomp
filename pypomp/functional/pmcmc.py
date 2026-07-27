@@ -6,13 +6,13 @@ that takes a compiled :class:`pypomp.functional.structs.PompStruct` and runs
 ``n_chains`` independent PMCMC chains in parallel via ``jax.vmap``.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax
 
-from .structs import PompStruct, resolve_dprior
+from ..core.algorithms.contexts import PmcmcContext
 from ..core.algorithms.pmcmc import _vmapped_pmcmc_internal
-from ..core.algorithms.types import PmcmcConfig, PmcmcInputs
+from .structs import PompStruct, resolve_dprior
 
 
 def pmcmc(
@@ -80,7 +80,7 @@ def pmcmc(
     )
     proposal = proposal.canonicalize(struct.param_names)
     dprior_fn = resolve_dprior(dprior, struct)
-    config = PmcmcConfig.from_pmcmc_struct(
+    context = PmcmcContext.from_struct(
         struct=struct,
         M=M,
         J=J,
@@ -88,14 +88,13 @@ def pmcmc(
         thresh=thresh,
     )
 
-    inputs = PmcmcInputs.from_pmcmc_struct(struct)
     ll_traces, _lp_est_traces, theta_est_traces, accepts = _vmapped_pmcmc_internal(
         thetas_est,
         proposal,
-        config,
-        inputs,
+        context,
         keys,
     )
+
     theta_natural_traces = struct.par_trans._transform_array(
         theta_est_traces,
         struct.param_names,

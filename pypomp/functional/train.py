@@ -1,18 +1,14 @@
 import jax
 import jax.numpy as jnp
-from .structs import PompStruct, PanelPompStruct
+
+from ..core.algorithms.contexts import PanelTrainContext, TrainContext
 from ..core.algorithms.train import (
-    _vmapped_train_internal,
     _vmapped_panel_train_internal,
-)
-from ..core.algorithms.types import (
-    PanelTrainConfig,
-    PanelTrainInputs,
-    TrainConfig,
-    TrainInputs,
+    _vmapped_train_internal,
 )
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Optimizer
+from .structs import PanelPompStruct, PompStruct
 
 
 def train(
@@ -95,16 +91,14 @@ def train(
     """
     eta_array = eta.to_array(struct.param_names, M)
 
-    config = TrainConfig.from_train_struct(
-        struct, J, M, alpha_cooling, thresh, n_monitors
+    context = TrainContext.from_train_struct(
+        struct, J, M, alpha_cooling, thresh, n_monitors, eta_array, alpha
     )
-    inputs = TrainInputs.from_train_struct(struct, eta_array, alpha)
 
     return _vmapped_train_internal(
         thetas_array,
         keys,
-        config,
-        inputs,
+        context,
         optimizer,
     )
 
@@ -207,11 +201,8 @@ def panel_train(
         direction="to_est",
     )
 
-    config = PanelTrainConfig.from_panel_train_struct(
-        struct, J, chunk_size, M, alpha_cooling
-    )
-    inputs = PanelTrainInputs.from_panel_train_struct(
-        struct, keys, eta_shared, eta_spec, alpha
+    context = PanelTrainContext.from_panel_train_struct(
+        struct, J, chunk_size, M, alpha_cooling, keys, eta_shared, eta_spec, alpha
     )
 
     (
@@ -221,8 +212,7 @@ def panel_train(
     ) = _vmapped_panel_train_internal(
         shared_est,
         unit_est,
-        config,
-        inputs,
+        context,
         optimizer,
     )
 

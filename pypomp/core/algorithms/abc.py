@@ -22,29 +22,26 @@ arrays, plus a matching ``(n_probes,)`` ``scale_arr`` for normalising
 distances.
 """
 
-from functools import partial
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from jax import jit
 
 from pypomp.proposals import Proposal
+
+from .contexts import AbcContext
 from .simulate import _simulate_internal
-from .types import AbcConfig, AbcInputs
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
-@partial(
-    jit,
-    static_argnames=("config",),
-)
+@jit
 def _abc_internal(
     theta_arr: jax.Array,
     proposal: Proposal,
-    config: AbcConfig,
-    inputs: AbcInputs,
+    context: AbcContext,
     key: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Run one ABC-MCMC chain of length ``M`` starting at ``theta_arr``.
@@ -59,14 +56,13 @@ def _abc_internal(
     # 1. Prepare simulation distance function.
     sim_distance_fn = jax.tree_util.Partial(
         _abc_sim_distance,
-        config=config,
-        inputs=inputs,
+        context=context,
     )
 
     # 2. Initial evaluation.
     key, init_sim_key = jax.random.split(key)
     dist0 = sim_distance_fn(theta_arr, init_sim_key)
-    lp0 = config.dprior(theta_arr, SHOULD_TRANS)
+    lp0 = context.dprior(theta_arr, SHOULD_TRANS)
 
     prop_state0 = proposal.init_state(theta_arr)
 
@@ -83,14 +79,13 @@ def _abc_internal(
     step_fn = jax.tree_util.Partial(
         _abc_step,
         proposal,
-        config,
-        inputs,
+        context,
         sim_distance_fn,
     )
 
     # 4. Run the scan loop.
     final_carry, (dist_trace, lp_trace, theta_trace) = jax.lax.scan(
-        step_fn, init_carry, jnp.arange(1, config.M + 1, dtype=jnp.int32)
+        step_fn, init_carry, jnp.arange(1, context.M + 1, dtype=jnp.int32)
     )
 
     final_accepts = final_carry[4]
@@ -105,8 +100,7 @@ def _abc_internal(
 
 def _abc_step(
     proposal: Proposal,
-    config: AbcConfig,
-    inputs: AbcInputs,
+    context: AbcContext,
     sim_distance_fn: Callable,
     carry: tuple[jax.Array, jax.Array, jax.Array, Any, jax.Array, jax.Array],
     n: int | jax.Array,
@@ -123,7 +117,7 @@ def _abc_step(
     theta_prop, new_prop_state = proposal.step(
         prop_state, theta_cur, prop_key, n, accepts
     )
-    lp_prop = config.dprior(theta_prop, SHOULD_TRANS)
+    lp_prop = context.dprior(theta_prop, SHOULD_TRANS)
 
     # 3. Simulate and compute distance for the proposed theta.
     dist_prop = sim_distance_fn(theta_prop, sim_key)
@@ -133,7 +127,7 @@ def _abc_step(
     log_alpha_prior = lp_prop - lp_cur
     u = jax.random.uniform(accept_key)
     prior_pass = jnp.isfinite(lp_prop) & (jnp.log(u) < log_alpha_prior)
-    eps2 = jnp.asarray(inputs.epsilon, dtype=theta_cur.dtype) ** 2
+    eps2 = jnp.asarray(context.epsilon, dtype=theta_cur.dtype) ** 2
     dist_pass = dist_prop < eps2
     accept = prior_pass & dist_pass
 
@@ -151,8 +145,7 @@ def _abc_step(
 def _abc_sim_distance(
     theta: jax.Array,
     sim_key: jax.Array,
-    config: AbcConfig,
-    inputs: AbcInputs,
+    context: AbcContext,
 ) -> jax.Array:
     """Simulate a dataset under ``theta`` and compute the probe distance.
 
@@ -160,17 +153,17 @@ def _abc_sim_distance(
     """
     # 1. Simulate a single synthetic dataset under theta.
     _, Y = _simulate_internal(
-        config.rinitializer,
-        config.rprocess_interp,
-        config.rmeasure,
+        context.fns.rinitializer,
+        context.fns.rprocess_interp,
+        context.rmeasure,
         theta,
-        inputs.t0,
-        inputs.times,
-        inputs.dt_array_extended,
-        inputs.nstep_array,
-        config.ydim,
-        inputs.covars_extended,
-        config.accumvars,
+        context.series.t0,
+        context.series.times,
+        context.series.dt_array_extended,
+        context.series.nstep_array,
+        context.ydim,
+        context.series.covars_extended,
+        context.fns.accumvars,
         1,  # nsim
         sim_key,
         SHOULD_TRANS,
@@ -180,10 +173,10 @@ def _abc_sim_distance(
     y_arr = Y[..., 0]
 
     # 2. Compute probe values.
-    sim_p = config.probe_fn(y_arr)
+    sim_p = context.probe_fn(y_arr)
 
     # 3. Return the squared scaled Euclidean distance.
-    return jnp.sum(((inputs.obs_probes - sim_p) / inputs.scale_arr) ** 2)
+    return jnp.sum(((context.obs_probes - sim_p) / context.scale_arr) ** 2)
 
 
 _vmapped_abc_internal = jax.vmap(
@@ -191,8 +184,7 @@ _vmapped_abc_internal = jax.vmap(
     in_axes=(
         0,  # theta_arr per chain
         None,  # proposal
-        None,  # config
-        None,  # inputs
+        None,  # context
         0,  # key per chain
     ),
 )

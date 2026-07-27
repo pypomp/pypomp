@@ -1,19 +1,15 @@
 import jax
 import jax.numpy as jnp
-from .structs import PompStruct, PanelPompStruct
-from ..core.rw_sigma import RWSigma
+
+from ..core.algorithms.contexts import MifContext, PanelMifContext
 from ..core.algorithms.mif import (
     _jv_mif_internal,
 )
 from ..core.algorithms.panel_mif import (
     _jv_panel_mif_internal,
 )
-from ..core.algorithms.types import (
-    MifConfig,
-    MifInputs,
-    PanelMifConfig,
-    PanelMifInputs,
-)
+from ..core.rw_sigma import RWSigma
+from .structs import PanelPompStruct, PompStruct
 
 
 def mif(
@@ -99,23 +95,19 @@ def mif(
 
     rw_sd = rw_sd._canonicalize(struct.param_names)
 
-    config = MifConfig.from_mif_struct(
+    context = MifContext.from_struct(
         struct=struct,
+        rw_sigma=rw_sd,
         J=J,
         M=M,
         thresh=thresh,
         n_monitors=n_monitors,
         return_ancestry=False,
     )
-    inputs = MifInputs.from_mif_struct(
-        struct=struct,
-        rw_sigma=rw_sd,
-    )
     res = _jv_mif_internal(
         thetas_est,
         keys,
-        config,
-        inputs,
+        context,
     )
     traces_natural = struct.par_trans._transform_array(
         res[1],
@@ -230,8 +222,9 @@ def panel_mif(
 
     rw_sd = rw_sd._canonicalize(struct.param_names)
 
-    config = PanelMifConfig.from_panel_mif_struct(
+    context = PanelMifContext.from_struct(
         struct=struct,
+        rw_sigma=rw_sd,
         J=J,
         M=M,
         U=U,
@@ -239,16 +232,11 @@ def panel_mif(
         n_monitors=n_monitors,
         block=block,
     )
-    inputs = PanelMifInputs.from_panel_mif_struct(
-        struct=struct,
-        rw_sigma=rw_sd,
-    )
     shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
         shared_est,
         unit_est,
         keys,
-        config,
-        inputs,
+        context,
     )
 
     n_shared = len(struct.shared_param_names)

@@ -6,16 +6,16 @@ that takes a :class:`pypomp.functional.structs.PompStruct` plus a ``probes``
 dict and runs ``n_chains`` chains in parallel.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
 
 from pypomp.proposals import Proposal
 
-from .structs import PompStruct, resolve_dprior
 from ..core.algorithms.abc import _vmapped_abc_internal
-from ..core.algorithms.types import AbcConfig, AbcInputs
+from ..core.algorithms.contexts import AbcContext
+from .structs import PompStruct, resolve_dprior
 
 
 def abc(
@@ -110,28 +110,24 @@ def abc(
 
     dprior_fn = resolve_dprior(dprior, struct)
     ydim = int(struct.ys.shape[1])
-    config = AbcConfig.from_abc_struct(
+    context = AbcContext.from_struct(
         struct,
         M=M,
+        obs_probes=obs_probes,
+        scale_arr=scale_arr,
+        epsilon=epsilon,
         dprior=dprior_fn,
         probe_fn=probe_fn,
         ydim=ydim,
     )
 
-    inputs = AbcInputs.from_abc_struct(
-        struct,
-        obs_probes=obs_probes,
-        scale_arr=scale_arr,
-        epsilon=epsilon,
-    )
-
     dist_traces, _lp_est_traces, theta_est_traces, accepts = _vmapped_abc_internal(
         thetas_est,
         proposal,
-        config,
-        inputs,
+        context,
         keys,
     )
+
     theta_natural_traces = struct.par_trans._transform_array(
         theta_est_traces,
         struct.param_names,

@@ -1,0 +1,93 @@
+name: Release
+
+# Manually triggered "tentative version bump":
+#   1. Bumps the hardcoded version in pyproject.toml/CITATION.bib/README.md and
+#      pushes that single commit directly to main (no tag yet).
+#   2. Runs the full heavy test matrix against that commit.
+#   3. If it passes, waits for approval on the `release-approval` environment
+#      (configure required reviewers for it in Settings > Environments; GitHub
+#      notifies them so approving from that email/notification is the "accept
+#      the bump" step). On approval, tags the exact tested commit.
+#   4. Builds and publishes that tag to PyPI.
+#
+# If a specific platform/Python combo fails, nothing gets tagged or published;
+# main just has a version-bumped commit sitting on it that's cheap to fix and
+# re-run, with no tag to delete.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.5.0 (no "v" prefix)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bump-version:
+    name: Bump version and commit to main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Bump version strings
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+        run: python3 .github/scripts/bump_version.py "$NEW_VERSION"
+
+      - name: Commit and push version bump
+        id: commit
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: bump version to v${NEW_VERSION}"
+          git push origin main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Run full test suite
+    needs: bump-version
+    uses: ./.github/workflows/test-package.yml
+    with:
+      run-heavy: true
+      ref: ${{ needs.bump-version.outputs.sha }}
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  approve-and-tag:
+    name: Await approval and tag
+    needs: [bump-version, test]
+    runs-on: ubuntu-latest
+    environment: release-approval
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
+
+      - name: Create and push release tag
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+          git push origin "v${NEW_VERSION}"
+
+  build-and-publish:
+    name: Build and publish to PyPI
+    needs: [bump-version, approve-and-tag]
+    uses: ./.github/workflows/publish.yml
+    with:
+      ref: v${{ inputs.version }}

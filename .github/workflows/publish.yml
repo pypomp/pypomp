@@ -1,21 +1,18 @@
 name: Publish to PyPI
 
+# Invoked only by release.yml, after the release-approval gate. Keep this
+# filename stable: PyPI's trusted-publisher config is registered against it,
+# and renaming would break publishing until that's updated on pypi.org.
 on:
-  push:
-    tags:
-      - 'v[0-9]*'
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref (tag) to build and publish'
+        required: true
+        type: string
 
 jobs:
-  test:
-    name: Run tests
-    uses: ./.github/workflows/test-package.yml
-    with:
-      run-heavy: true
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
   build-and-publish:
-    needs: test
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
     environment:
@@ -29,6 +26,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
 
     - name: Set up Python
       uses: actions/setup-python@v5

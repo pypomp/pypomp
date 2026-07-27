@@ -23,6 +23,7 @@ types
     Annotated type aliases used in user-defined model component functions.
 """
 
+from .core.model_struct import vectorized
 from .core.parameters import PanelParameters, PompParameters
 from .core.par_trans import ParTrans
 from .core.pomp import Pomp
@@ -71,6 +72,7 @@ __all__ = [
     "PompParameters",
     "RWSigma",
     "LearningRate",
+    "vectorized",
     "SGD",
     "Adam",
     "FullMatrixAdam",

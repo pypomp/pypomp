@@ -68,3 +68,7 @@ Pomp Class
 
    ~Pomp.plot_traces
    ~Pomp.plot_simulations
+
+.. rubric:: Model Component Decorators
+
+.. autofunction:: vectorized

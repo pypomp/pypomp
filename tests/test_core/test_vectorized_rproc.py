@@ -178,7 +178,7 @@ def test_train_differentiates_through_vectorized_rproc():
     logliks = traces["logLik"].dropna()
     params = traces[["growth", "sigma"]].dropna()
     assert np.isfinite(logliks.iloc[-1])
-    assert not np.allclose(params.iloc[0].values, params.iloc[-1].values)
+    assert not np.allclose(params.iloc[0].to_numpy(), params.iloc[-1].to_numpy())
 
 
 def test_vectorized_rproc_receives_batched_state_and_single_key():

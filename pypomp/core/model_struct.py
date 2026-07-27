@@ -524,17 +524,7 @@ class _RProc(_ModelComponent):
         return wrapped
 
     def _make_wrapper_vectorized(self, user_func, theta_batched: bool):
-        """Wrapper for an rproc that already handles the particle axis itself.
-
-        This variant takes *and returns* a dict of ``(J,)`` state arrays rather
-        than a ``(J, n_states)`` matrix. Keeping the state unpacked lets
-        :func:`_time_interp` carry it across Euler sub-steps without slicing and
-        restacking on every step, which dominates the runtime otherwise.
-
-        Covariates stay scalar because they are shared across particles.
-        ``theta_batched`` selects whether the parameters carry a particle axis,
-        which they do for the perturbed filter used by ``mif``.
-        """
+        """Wrapper for an rproc that already handles the particle axis itself."""
         pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
         mapping, trans = self.name_mapping, self.par_trans
 

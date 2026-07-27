@@ -31,6 +31,12 @@ def train(
     optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
     automatic differentiation.
 
+    .. note::
+
+        Training requires the number of integration steps between
+        consecutive observations to be constant across all intervals.
+        Setting `nstep` ensures this, but `dt` can also yield constant steps.
+
     Pure-functional implementation intended for users who need to compose
     the algorithm within custom JAX loops or higher-order functions.
     For the standard interface, see :meth:`pypomp.Pomp.train`.
@@ -122,6 +128,12 @@ def panel_train(
     models by treating the particle filter as a differentiable computational
     graph (Tan et al. 2024 [1]_).  It computes gradients of the log-likelihood
     with respect to parameters across units, and updates them using an optimizer (e.g. Adam, SGD).
+
+    .. note::
+
+        Training requires the number of integration steps between
+        consecutive observations to be constant across all intervals.
+        Setting `nstep` ensures this, but `dt` can also yield constant steps.
 
     A pure functional implementation of the optimization (gradient-descent)
     algorithm, intended for composition within custom JAX code.

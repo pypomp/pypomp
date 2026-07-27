@@ -470,6 +470,12 @@ class PompEstimationMixin(Base):
             models.  For discrete-state models, use :meth:`mif` or
             :meth:`dpop_train` instead.
 
+        .. note::
+
+            Training requires the number of integration steps between
+            consecutive observations to be constant across all intervals.
+            Setting `nstep` ensures this, but `dt` can also yield constant steps.
+
         JAX vectorises the computation across all starting parameter sets
         in ``theta`` simultaneously.  Results are appended to
         :attr:`results_history`.
@@ -645,6 +651,12 @@ class PompEstimationMixin(Base):
 
         .. warning::
             This method is experimental. Its API and behavior are subject to change in future releases.
+
+        .. note::
+
+            Training requires the number of integration steps between
+            consecutive observations to be constant across all intervals.
+            Setting `nstep` ensures this, but `dt` can also yield constant steps.
 
         This method trains the model parameters to maximize the DPOP objective function using
         first-order optimizers like Adam or SGD, with optional learning rate decay. Gradients

@@ -7,6 +7,7 @@ from pypomp.core.pomp import Pomp
 import jax.scipy.special as jspecial
 import numpy as np
 from pypomp.core.par_trans import ParTrans
+from pypomp.core.model_struct import vectorized
 from pypomp.types import (
     StateDict,
     ParamDict,
@@ -146,6 +147,7 @@ def _rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFlo
     }
 
 
+@vectorized
 def _rproc(
     X_: StateDict,
     theta_: ParamDict,
@@ -158,12 +160,16 @@ def _rproc(
     I = X_["I"]
     Y = X_["Y"]
     deaths = X_["Mn"]
-    pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
+    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
     count = X_["count"]
+
+    J = jnp.asarray(S).shape[0]
+
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
     seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
+
     gamma = theta_["gamma"]
     deltaI = theta_["m"]
     rho = theta_["rho"]
@@ -173,20 +179,20 @@ def _rproc(
     sd_beta = theta_["sigma"]
     alpha = theta_["alpha"]
     delta = theta_["delta"]
-    omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
-    bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
+    omegas = jnp.stack([theta_[f"omegas{i}"] for i in range(1, 7)], axis=0)
+    bs = jnp.stack([theta_[f"bs{i}"] for i in range(1, 7)], axis=0)
 
     nrstage = 3
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros(nrstage + 1)
+    passages = jnp.zeros((nrstage + 1, J))
 
     # Get current time step values
-    beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
-    omega = jnp.exp(jnp.dot(omegas, seas))
+    beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
+    omega = jnp.exp(jnp.dot(seas, omegas))
 
-    dw = jax.random.normal(key) * std
+    dw = jax.random.normal(key, (J,)) * std
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
@@ -202,15 +208,16 @@ def _rproc(
     infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
     sdeaths = delta * S
 
-    S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-    I += (clin * infections - disease - ideaths - passages[0]) * dt
-    Y += ((1 - clin) * infections - ydeaths - wanings) * dt
+    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
 
     pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
 
     deaths = deaths + disease * dt
 
-    count = count + jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
+    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
+    count = count + jnp.any(stack_states < 0, axis=0)
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
@@ -230,6 +237,7 @@ def _rproc(
     }
 
 
+@vectorized
 def _rproc_gamma(
     X_: StateDict,
     theta_: ParamDict,
@@ -242,12 +250,16 @@ def _rproc_gamma(
     I = X_["I"]
     Y = X_["Y"]
     deaths = X_["Mn"]
-    pts = jnp.array([X_["R1"], X_["R2"], X_["R3"]])
+    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
     count = X_["count"]
+
+    J = jnp.asarray(S).shape[0]
+
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
     pop = covars["pop"]
     seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
+
     gamma = theta_["gamma"]
     deltaI = theta_["m"]
     rho = theta_["rho"]
@@ -257,18 +269,17 @@ def _rproc_gamma(
     sd_beta = theta_["sigma"]
     alpha = theta_["alpha"]
     delta = theta_["delta"]
-    omegas = jnp.array([theta_[f"omegas{i}"] for i in range(1, 7)])
-    bs = jnp.array([theta_[f"bs{i}"] for i in range(1, 7)])
+    omegas = jnp.stack([theta_[f"omegas{i}"] for i in range(1, 7)], axis=0)
+    bs = jnp.stack([theta_[f"bs{i}"] for i in range(1, 7)], axis=0)
 
     nrstage = 3
-    # std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros(nrstage + 1)
+    passages = jnp.zeros((nrstage + 1, J))
 
     # Get current time step values
-    beta = jnp.exp(beta_trend * trend + jnp.dot(bs, seas))
-    omega = jnp.exp(jnp.dot(omegas, seas))
+    beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
+    omega = jnp.exp(jnp.dot(seas, omegas))
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
@@ -291,20 +302,21 @@ def _rproc_gamma(
             before dividing by dt to yield multiplicative noise by 1
     """
 
-    perturb = jax.random.gamma(key, dt / sd_beta**2) * sd_beta**2 / dt
+    perturb = jax.random.gamma(key, dt / sd_beta**2, shape=(J,)) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
 
     sdeaths = delta * S
 
-    S += (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-    I += (clin * infections - disease - ideaths - passages[0]) * dt
-    Y += ((1 - clin) * infections - ydeaths - wanings) * dt
+    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
 
     pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
 
     deaths = deaths + disease * dt
 
-    count = count + jnp.any(jnp.hstack([jnp.array([S, I, Y, deaths]), pts]) < 0)
+    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
+    count = count + jnp.any(stack_states < 0, axis=0)
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)

@@ -269,6 +269,47 @@ def save_traces_plotnine(
 # =====================================================================
 
 
+def _lgm_rinit(theta_, key, covars, t0):
+    return {"X": 0.0}
+
+
+def _lgm_rproc(X_, theta_, key, covars, t, dt):
+    noise = jax.random.normal(key) * theta_["sigma_x"]
+    return {"X": theta_["a"] * X_["X"] + noise}
+
+
+def _lgm_dmeas(Y_, X_, theta_, covars, t):
+    return jax.scipy.stats.norm.logpdf(Y_["Y"], loc=X_["X"], scale=theta_["sigma_y"])
+
+
+def _lgm_rmeas(X_, theta_, key, covars, t):
+    val = jax.random.normal(key) * theta_["sigma_y"] + X_["X"]
+    return {"Y": val}
+
+
+def _lgm_to_est(theta: dict[str, float | jax.Array]) -> dict[str, float | jax.Array]:
+    # Constrain a in (0, 1) using logit, and sigmas > 0 using log
+    a_clip = jnp.clip(theta["a"], 1e-6, 1.0 - 1e-6)
+    res: dict[str, float | jax.Array] = {
+        "a": jnp.log(a_clip / (1.0 - a_clip)),
+        "sigma_x": jnp.log(jnp.maximum(theta["sigma_x"], 1e-6)),
+        "sigma_y": jnp.log(jnp.maximum(theta["sigma_y"], 1e-6)),
+    }
+    return res
+
+
+def _lgm_from_est(theta: dict[str, float | jax.Array]) -> dict[str, float | jax.Array]:
+    res: dict[str, float | jax.Array] = {
+        "a": 1.0 / (1.0 + jnp.exp(-theta["a"])),
+        "sigma_x": jnp.exp(theta["sigma_x"]),
+        "sigma_y": jnp.exp(theta["sigma_y"]),
+    }
+    return res
+
+
+_LGM_PAR_TRANS = pp.ParTrans(to_est=_lgm_to_est, from_est=_lgm_from_est)
+
+
 def make_lgm_pomp(ys, a, sigma_x, sigma_y):
     """
     Constructs a 1D Linear Gaussian Model as a pp.Pomp object.
@@ -280,50 +321,16 @@ def make_lgm_pomp(ys, a, sigma_x, sigma_y):
     """
     theta_dict = {"a": float(a), "sigma_x": float(sigma_x), "sigma_y": float(sigma_y)}
 
-    def rinit(theta_, key, covars, t0):
-        return {"X": 0.0}
-
-    def rproc(X_, theta_, key, covars, t, dt):
-        noise = jax.random.normal(key) * theta_["sigma_x"]
-        return {"X": theta_["a"] * X_["X"] + noise}
-
-    def dmeas(Y_, X_, theta_, covars, t):
-        return jax.scipy.stats.norm.logpdf(
-            Y_["Y"], loc=X_["X"], scale=theta_["sigma_y"]
-        )
-
-    def rmeas(X_, theta_, key, covars, t):
-        val = jax.random.normal(key) * theta_["sigma_y"] + X_["X"]
-        return {"Y": val}
-
-    def to_est(theta: dict[str, float | jax.Array]) -> dict[str, float | jax.Array]:
-        # Constrain a in (0, 1) using logit, and sigmas > 0 using log
-        a_clip = jnp.clip(theta["a"], 1e-6, 1.0 - 1e-6)
-        res: dict[str, float | jax.Array] = {
-            "a": jnp.log(a_clip / (1.0 - a_clip)),
-            "sigma_x": jnp.log(jnp.maximum(theta["sigma_x"], 1e-6)),
-            "sigma_y": jnp.log(jnp.maximum(theta["sigma_y"], 1e-6)),
-        }
-        return res
-
-    def from_est(theta: dict[str, float | jax.Array]) -> dict[str, float | jax.Array]:
-        res: dict[str, float | jax.Array] = {
-            "a": 1.0 / (1.0 + jnp.exp(-theta["a"])),
-            "sigma_x": jnp.exp(theta["sigma_x"]),
-            "sigma_y": jnp.exp(theta["sigma_y"]),
-        }
-        return res
-
     return pp.Pomp(
         ys=ys,
         theta=pp.PompParameters(theta_dict),
         statenames=["X"],
         t0=0.0,
-        rinit=rinit,
-        rproc=rproc,
-        dmeas=dmeas,
-        rmeas=rmeas,
-        par_trans=pp.ParTrans(to_est=to_est, from_est=from_est),
+        rinit=_lgm_rinit,
+        rproc=_lgm_rproc,
+        dmeas=_lgm_dmeas,
+        rmeas=_lgm_rmeas,
+        par_trans=_LGM_PAR_TRANS,
         nstep=1,
     )
 

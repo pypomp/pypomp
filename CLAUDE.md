@@ -396,3 +396,8 @@ When modifying inference algorithms or core functionality:
 - Multi-device sharding kicks in automatically in `Pomp.pfilter` / `Pomp.mif`
   when more than one device is available.
 - Consider memory usage with large particle counts or long time series.
+
+## Additional instructions from the user
+
+1. Do not push to origin. When finished with changes, you can commit them and request that the user merge them into main locally.
+2. Unless instructed otherwise, only run the light unit tests (.venv/bin/pytest -m "not heavy") instead of the entire test suite, as the full test suite can take a very long time to run.

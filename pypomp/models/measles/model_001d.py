@@ -7,16 +7,16 @@ Gradient stability fixes:
 4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
 """
 
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
+
 from pypomp.models.ctmc_multinom import _euler_multinomial_probs
 from pypomp.random.binom import fast_multinomial
-from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
+from pypomp.random.poisson import fast_poisson
 from pypomp.types import ParamDict
-
 
 # =========================================================================
 # Custom JVP log_cdf_diff for gradient stability

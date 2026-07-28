@@ -30,14 +30,14 @@ Parameters:
 
 from typing import cast
 
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
-from pypomp.models.ctmc_multinom import sample_and_log_prob
-from pypomp.random.poisson import fast_poisson
-from pypomp.random.gamma import fast_gamma
 
+from pypomp.models.ctmc_multinom import sample_and_log_prob
+from pypomp.random.gamma import fast_gamma
+from pypomp.random.poisson import fast_poisson
 
 # =========================================================================
 # Custom JVP log_cdf_diff for gradient stability (from model_001d)

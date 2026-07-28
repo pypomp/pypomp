@@ -2,11 +2,13 @@
 This module implements helper functions for POMP algorithms.
 """
 
+from collections.abc import Callable
+from functools import partial
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from typing import Any, Callable
-from functools import partial
 
 
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:

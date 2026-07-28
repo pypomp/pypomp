@@ -1,7 +1,9 @@
 import warnings
+
 import jax
-from .structs import PompStruct
+
 from ..core.algorithms.dpop import _vmapped_dpop_internal
+from .structs import PompStruct
 
 
 def dpop(

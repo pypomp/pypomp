@@ -9,30 +9,30 @@ For the standard object-oriented interface, use the :class:`~pypomp.Pomp`
 and :class:`~pypomp.PanelPomp` classes instead.
 """
 
-from .structs import PompStruct, PanelPompStruct
-from .utils import align_params
-from .mif import mif, panel_mif
-from .pfilter import pfilter, panel_pfilter
-from .mop import mop
-from .dpop import dpop
-from .simulate import simulate
-from .train import train, panel_train
-from .pmcmc import pmcmc
 from .abc import abc
+from .dpop import dpop
+from .mif import mif, panel_mif
+from .mop import mop
+from .pfilter import panel_pfilter, pfilter
+from .pmcmc import pmcmc
+from .simulate import simulate
+from .structs import PanelPompStruct, PompStruct
+from .train import panel_train, train
+from .utils import align_params
 
 __all__ = [
-    "PompStruct",
     "PanelPompStruct",
+    "PompStruct",
+    "abc",
     "align_params",
-    "mif",
-    "panel_mif",
-    "pfilter",
-    "panel_pfilter",
-    "mop",
     "dpop",
+    "mif",
+    "mop",
+    "panel_mif",
+    "panel_pfilter",
+    "panel_train",
+    "pfilter",
+    "pmcmc",
     "simulate",
     "train",
-    "panel_train",
-    "pmcmc",
-    "abc",
 ]

@@ -1,8 +1,10 @@
-import pytest
-import pypomp as pp
+from typing import cast
+
 import jax
 import jax.numpy as jnp
-from typing import cast
+import pytest
+
+import pypomp as pp
 from pypomp.types import ParamDict
 
 BASE_THETA_001D = {
@@ -63,7 +65,7 @@ def test_001d_dpop_train(london_001d):
 
 def test_001d_par_trans_roundtrip(london_001d):
     """Parameter transform round-trip: natural -> est -> natural."""
-    from pypomp.models.measles.model_001d import to_est, from_est
+    from pypomp.models.measles.model_001d import from_est, to_est
 
     theta = BASE_THETA_001D.copy()
     theta_jax = cast(ParamDict, {k: jnp.array(v) for k, v in theta.items()})
@@ -79,6 +81,7 @@ def test_001d_par_trans_roundtrip(london_001d):
 
 def test_001d_process_score_surrogate_matches_fixed_logpmf_gradient():
     from jax.scipy.special import gammaln
+
     from pypomp.models.ctmc_multinom import _euler_multinomial_probs
     from pypomp.models.measles.model_001d import _sample_and_score_log_prob
 
@@ -123,6 +126,7 @@ def test_001d_process_score_surrogate_matches_fixed_logpmf_gradient():
 
 def test_001d_birth_score_surrogate_matches_fixed_logpmf_gradient():
     from jax.scipy.special import gammaln
+
     from pypomp.models.measles.model_001d import _sample_poisson_and_score_log_prob
 
     key = jax.random.key(23)

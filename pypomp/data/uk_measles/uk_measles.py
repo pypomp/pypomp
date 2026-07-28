@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
 import os
 import pickle
+
+import numpy as np
+import pandas as pd
 
 current_dir = os.path.dirname(__file__)
 raw_location = os.path.join(current_dir, "raw")

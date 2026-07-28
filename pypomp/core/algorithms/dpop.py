@@ -7,8 +7,8 @@ transition log-weight is assumed to be accumulated inside the latent
 state by the user-defined process model.
 """
 
+from collections.abc import Callable
 from functools import partial
-from typing import Callable
 
 import jax
 import jax.numpy as jnp

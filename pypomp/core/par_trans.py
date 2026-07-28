@@ -1,9 +1,12 @@
-from typing import Any, Callable, Literal, Mapping, cast, TypeVar
-from ..types import ParamDict
 import importlib
+from collections.abc import Callable, Mapping
+from typing import Any, Literal, TypeVar, cast
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+from ..types import ParamDict
 
 TArray = TypeVar("TArray", bound=np.ndarray | jax.Array)
 TShared = TypeVar("TShared", bound=np.ndarray | jax.Array | None)

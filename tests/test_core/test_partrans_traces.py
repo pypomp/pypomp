@@ -2,12 +2,13 @@
 Tests for parameter transformation applied to traces and arrays in mif and train methods.
 """
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
+
 import pypomp as pp
 from pypomp.types import ParamDict
-import pytest
 
 
 def test_transform_array_single_param_set():

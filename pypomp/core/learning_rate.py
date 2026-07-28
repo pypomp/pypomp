@@ -1,8 +1,11 @@
 from __future__ import annotations
-import numpy as np
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import jax
 import jax.numpy as jnp
-from typing import Union, Mapping, Sequence, Any
+import numpy as np
 
 
 class LearningRate:
@@ -32,7 +35,7 @@ class LearningRate:
     rates_all_arr: np.ndarray
     """Array of learning rate values or schedules (a PyTree leaf)."""
 
-    def __init__(self, rates: Mapping[str, Union[float, list[float], np.ndarray]]):
+    def __init__(self, rates: Mapping[str, float | list[float] | np.ndarray]):
         param_names, rates_arr = self._validate_rates(rates)
         object.__setattr__(self, "param_names", param_names)
         object.__setattr__(self, "rates_all_arr", rates_arr)
@@ -52,7 +55,7 @@ class LearningRate:
 
     @staticmethod
     def _validate_rates(
-        rates: Mapping[str, Union[float, list[float], np.ndarray]],
+        rates: Mapping[str, float | list[float] | np.ndarray],
     ) -> tuple[tuple[str, ...], np.ndarray]:
         """Validates the learning rates and returns prepared parameter names and array."""
         if not isinstance(rates, Mapping):
@@ -244,7 +247,7 @@ class LearningRate:
         return self._apply_decay(np.linspace(1.0, final_factor, M), M, "linear")
 
     @property
-    def rates(self) -> dict[str, Union[float, np.ndarray]]:
+    def rates(self) -> dict[str, float | np.ndarray]:
         """Dictionary mapping parameter names to learning rate values or schedules."""
         arr = np.asarray(self.rates_all_arr)
         if arr.ndim == 1:
@@ -258,7 +261,7 @@ class LearningRate:
             for i, n in enumerate(self.param_names)
         }
 
-    def __getitem__(self, param_name: str) -> Union[float, np.ndarray]:
+    def __getitem__(self, param_name: str) -> float | np.ndarray:
         if param_name not in self.param_names:
             raise KeyError(f"Parameter '{param_name}' not found in learning rates.")
         idx = self.param_names.index(param_name)
@@ -290,8 +293,8 @@ class LearningRate:
         return self.rates.items()
 
     def get(
-        self, param_name: str, default: Union[float, np.ndarray, None] = None
-    ) -> Union[float, np.ndarray, None]:
+        self, param_name: str, default: float | np.ndarray | None = None
+    ) -> float | np.ndarray | None:
         if param_name in self.param_names:
             return self[param_name]
         return default

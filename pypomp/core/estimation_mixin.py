@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import time
 import warnings
-from typing import Callable, Any, cast, overload, Union, Literal
+from collections.abc import Callable
 from copy import deepcopy
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import jax
 import jax.numpy as jnp
@@ -10,27 +12,25 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from pypomp.types import ParamDict
+from pypomp import benchmarks
 from pypomp import functional as F
 from pypomp.maths import logmeanexp
-from pypomp import benchmarks
-from .algorithms.helpers import run_jax_batch_sharded
-from .rw_sigma import RWSigma
-from .learning_rate import LearningRate
-from .optimizer import Optimizer, Adam
-from .results import (
-    build_pfilter_result,
-    build_mif_result,
-    build_train_result,
-    build_pmcmc_result,
-    build_abc_result,
-)
 from pypomp.proposals import Proposal
-from .parameters import PompParameters
+from pypomp.types import ParamDict
+
+from .algorithms.helpers import run_jax_batch_sharded
+from .learning_rate import LearningRate
 from .model_struct import _DPrior
-
-
-from typing import TYPE_CHECKING
+from .optimizer import Adam, Optimizer
+from .parameters import PompParameters
+from .results import (
+    build_abc_result,
+    build_mif_result,
+    build_pfilter_result,
+    build_pmcmc_result,
+    build_train_result,
+)
+from .rw_sigma import RWSigma
 
 if TYPE_CHECKING:
     from .interfaces import PompInterface as Base
@@ -595,8 +595,8 @@ class PompEstimationMixin(Base):
             ),
             dims=["theta_idx", "iteration", "variable"],
             coords={
-                "theta_idx": range(0, n_reps),
-                "iteration": range(0, M + 1),
+                "theta_idx": range(n_reps),
+                "iteration": range(M + 1),
                 "variable": ["logLik"] + self.canonical_param_names,
             },
         )
@@ -1093,7 +1093,7 @@ class PompEstimationMixin(Base):
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
-    ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Pomp]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | Pomp:
         """Simulate latent states and observations from the POMP model.
 
         Propagates the latent state through time via ``rproc`` and draws
@@ -1169,8 +1169,8 @@ class PompEstimationMixin(Base):
         )
 
         def _to_long(
-            arr: Union[jax.Array, np.ndarray],
-            times_vec: Union[jax.Array, np.ndarray, pd.Index],
+            arr: jax.Array | np.ndarray,
+            times_vec: jax.Array | np.ndarray | pd.Index,
             column_names: list[str],
         ) -> pd.DataFrame:
             vals = np.asarray(arr)  # (n_theta, n_sim, n_time, n_feat)

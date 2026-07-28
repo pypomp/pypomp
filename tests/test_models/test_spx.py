@@ -1,5 +1,6 @@
 import jax
 import pytest
+
 import pypomp as pp
 from pypomp.core.results import ResultsHistory
 

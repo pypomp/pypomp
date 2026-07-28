@@ -29,17 +29,17 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from pypomp.core.pomp import Pomp
 from pypomp.core.par_trans import ParTrans
+from pypomp.core.pomp import Pomp
 from pypomp.types import (
-    StateDict,
-    ParamDict,
     CovarDict,
-    TimeFloat,
-    StepSizeFloat,
-    RNGKey,
-    ObservationDict,
     InitialTimeFloat,
+    ObservationDict,
+    ParamDict,
+    RNGKey,
+    StateDict,
+    StepSizeFloat,
+    TimeFloat,
 )
 
 #: Largest state or observation dimension supported. Above this, the ``A11``

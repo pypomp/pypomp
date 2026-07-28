@@ -1,7 +1,8 @@
+from collections.abc import Callable
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
-from dataclasses import dataclass
-from typing import Optional, Callable
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class Optimizer:
         Only used when ls=True.
     """
 
-    clip_norm: Optional[float] = None
+    clip_norm: float | None = None
     scale: bool = False
     ls: bool = False
     c: float = 0.1
@@ -54,8 +55,8 @@ class Optimizer:
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         """Compute the parameter update direction and update the optimizer state.
 
@@ -108,8 +109,8 @@ class SGD(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         return -grad, ()
 
@@ -140,8 +141,8 @@ class Adam(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         m, v = state
         m_new = self.beta1 * m + (1 - self.beta1) * grad
@@ -197,8 +198,8 @@ class FullMatrixAdam(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         m, v = state
         if grad.ndim == 1:
@@ -223,8 +224,8 @@ class BFGS(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         hess, prev_grad = state
 
@@ -277,8 +278,8 @@ class Newton(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         if compute_hessian_fn is None:
             raise ValueError("Newton optimizer requires compute_hessian_fn")
@@ -299,8 +300,8 @@ class WeightedNewton(Optimizer):
         grad: jax.Array,
         state: tuple,
         step_num: int | jax.Array,
-        compute_hessian_fn: Optional[Callable[[], jax.Array]] = None,
-        eta_i: Optional[jax.Array] = None,
+        compute_hessian_fn: Callable[[], jax.Array] | None = None,
+        eta_i: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         if compute_hessian_fn is None:
             raise ValueError("WeightedNewton optimizer requires compute_hessian_fn")

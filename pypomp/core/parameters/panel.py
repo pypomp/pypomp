@@ -1,29 +1,27 @@
 from __future__ import annotations
+
 import copy
-import pandas as pd
-import jax.numpy as jnp
-import numpy as np
-import jax
-import xarray as xr
+from collections.abc import Mapping, Sequence
 from typing import (
-    Union,
-    Literal,
     Any,
+    Literal,
     overload,
-    Mapping,
-    Sequence,
 )
 
-from .base import ParameterSet
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+import xarray as xr
+
 from ..par_trans import ParTrans
+from .base import ParameterSet
 
 
 def _standardize_panel_theta(
-    theta: Union[
-        Mapping[str, pd.DataFrame | None],
-        Sequence[Mapping[str, pd.DataFrame | None]],
-        None,
-    ],
+    theta: Mapping[str, pd.DataFrame | None]
+    | Sequence[Mapping[str, pd.DataFrame | None]]
+    | None,
 ) -> tuple[xr.Dataset, list[str], list[str]]:
     if theta is None or (isinstance(theta, Sequence) and len(theta) == 0):
         shared_da = xr.DataArray(
@@ -212,13 +210,11 @@ class PanelParameters(ParameterSet):
 
     def __init__(
         self,
-        theta: Union[
-            Mapping[str, pd.DataFrame | None],
-            Sequence[Mapping[str, pd.DataFrame | None]],
-            "PanelParameters",
-            xr.Dataset,
-            None,
-        ],
+        theta: Mapping[str, pd.DataFrame | None]
+        | Sequence[Mapping[str, pd.DataFrame | None]]
+        | PanelParameters
+        | xr.Dataset
+        | None,
         logLik_unit: np.ndarray | None = None,
         estimation_scale: bool = False,
     ):
@@ -313,7 +309,7 @@ class PanelParameters(ParameterSet):
         unit_names: list[str],
         logLik_unit: np.ndarray | None = None,
         estimation_scale: bool = False,
-    ) -> "PanelParameters":
+    ) -> PanelParameters:
         """Build a PanelParameters directly from value arrays.
 
         This is the canonical way to construct a panel parameter set from raw
@@ -705,7 +701,7 @@ class PanelParameters(ParameterSet):
         self._logLik_unit = self._logLik_unit[indices]
         self._logLik = self._logLik_unit.sum(axis=1)
 
-    def _eq_logLik(self, other: "PanelParameters") -> bool:
+    def _eq_logLik(self, other: PanelParameters) -> bool:
         if self._canonical_shared_param_names != other._canonical_shared_param_names:
             return False
         if self._canonical_unit_param_names != other._canonical_unit_param_names:

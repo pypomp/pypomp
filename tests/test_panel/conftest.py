@@ -1,8 +1,11 @@
-import pandas as pd
-import jax
-import pypomp as pp
-import pytest
 from copy import deepcopy
+
+import jax
+import numpy as np
+import pandas as pd
+import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture(scope="module")
@@ -296,9 +299,6 @@ def lg_panel_mp(lg_panel_mp_module):
 # ---------------------------------------------------------------------------
 # SIR panel fixtures for test_panel_dpop_train.py
 # ---------------------------------------------------------------------------
-
-
-import numpy as np  # noqa: E402 (module-level import at end of conftest is fine)
 
 
 def _build_sir_panel_dpop():

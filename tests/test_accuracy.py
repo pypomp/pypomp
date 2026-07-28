@@ -1,12 +1,13 @@
+from typing import Any, cast
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import pypomp as pp
-from pypomp.types import ParamDict
 import pytest
 
-from typing import Any, cast
+import pypomp as pp
+from pypomp.types import ParamDict
 
 pytestmark = pytest.mark.heavy
 
@@ -41,17 +42,18 @@ def save_traces_plotnine(
         return
 
     try:
+        import warnings
+
         from plotnine import (
-            ggplot,
             aes,
-            geom_line,
-            geom_hline,
             facet_wrap,
-            theme_minimal,
+            geom_hline,
+            geom_line,
+            ggplot,
             labs,
+            theme_minimal,
         )
         from plotnine.exceptions import PlotnineWarning
-        import warnings
 
         warnings.filterwarnings("ignore", category=PlotnineWarning)
 

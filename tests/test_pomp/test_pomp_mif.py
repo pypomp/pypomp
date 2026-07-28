@@ -1,8 +1,10 @@
+from copy import deepcopy
+
 import jax
 import jax.numpy as jnp
 import pytest
+
 import pypomp as pp
-from copy import deepcopy
 
 
 @pytest.fixture(scope="module")

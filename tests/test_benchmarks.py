@@ -1,7 +1,8 @@
-import pytest
+from unittest.mock import MagicMock
+
 import numpy as np
 import pandas as pd
-from unittest.mock import MagicMock
+import pytest
 
 # Attempt to import statsmodels for tests
 try:
@@ -11,8 +12,7 @@ try:
 except ImportError:
     HAS_STATSMODELS = False
 
-from pypomp import benchmarks
-from pypomp import Pomp
+from pypomp import Pomp, benchmarks
 from pypomp.panel.estimation_mixin import PanelEstimationMixin
 
 
@@ -140,8 +140,8 @@ def test_missing_statsmodels_raises(monkeypatch, dummy_data):
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
 def test_benchmark_warning_suppression(dummy_data):
-    from unittest.mock import patch, MagicMock
     import warnings
+    from unittest.mock import MagicMock, patch
 
     # Patch ARIMA class in the statsmodels module
     with patch("statsmodels.tsa.arima.model.ARIMA") as mock_arima_cls:
@@ -198,8 +198,8 @@ def test_benchmark_warning_suppression(dummy_data):
 
 @pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels not installed")
 def test_panel_benchmark_warning_suppression(dummy_data):
-    from unittest.mock import patch, MagicMock
     import warnings
+    from unittest.mock import MagicMock, patch
 
     unit1 = MagicMock()
     unit1.ys = dummy_data[["y1"]]

@@ -1,15 +1,15 @@
 import copy
 from typing import Any, cast
-import pytest
+
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 import pypomp.core.parameters as pp
 from pypomp.core.par_trans import ParTrans
-from pypomp.core.parameters.pomp import _standardize_pomp_theta
 from pypomp.core.parameters.panel import _standardize_panel_theta
-
+from pypomp.core.parameters.pomp import _standardize_pomp_theta
 
 # =====================================================================
 # 1. Base Class (base.py) Test Cases

@@ -175,7 +175,7 @@ class Result:
     # Merge.
     # ------------------------------------------------------------------
     @classmethod
-    def merge(cls, *results: "Result") -> "Result":
+    def merge(cls, *results: Result) -> Result:
         """Merge results of the same type by concatenating along ``theta_idx``."""
         if not results:
             raise ValueError(f"At least one {cls.__name__} object must be provided.")

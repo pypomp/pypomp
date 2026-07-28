@@ -8,26 +8,27 @@ particle filtering, iterated filtering, and gradient-based training.
 """
 
 import importlib
-import cloudpickle
+import warnings
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable, Any, cast
+from typing import Any, cast
 
-import numpy as np
+import cloudpickle
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
-import warnings
 
-from .metadata import ModelMetadata
-from .model_struct import _RInit, _RProc, _DMeas, _RMeas, _DPrior
-from .algorithms.helpers import _calc_ys_covars
-from .par_trans import ParTrans
-from .results import ResultsHistory
-from .parameters import PompParameters
 from pypomp.functional.structs import PompStruct
 
-from .estimation_mixin import PompEstimationMixin
+from .algorithms.helpers import _calc_ys_covars
 from .analysis_mixin import PompAnalysisMixin
+from .estimation_mixin import PompEstimationMixin
+from .metadata import ModelMetadata
+from .model_struct import _DMeas, _DPrior, _RInit, _RMeas, _RProc
+from .par_trans import ParTrans
+from .parameters import PompParameters
+from .results import ResultsHistory
 
 
 class Pomp(PompEstimationMixin, PompAnalysisMixin):

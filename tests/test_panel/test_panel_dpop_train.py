@@ -1,11 +1,12 @@
 from copy import deepcopy
 from typing import Any
-import numpy as np
+
 import jax
+import numpy as np
 import pytest
+
 import pypomp as pp
 from pypomp.core.results import Result
-
 
 # Short times series for fast test execution
 _test_times = np.arange(1 / 52, 5 / 52, 1 / 52)

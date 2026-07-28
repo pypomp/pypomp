@@ -1,6 +1,9 @@
+from collections.abc import Callable
+from typing import NamedTuple
+
 import jax
 import jax.numpy as jnp
-from typing import NamedTuple, Callable
+
 from ..core.par_trans import ParTrans
 
 

@@ -48,7 +48,7 @@ else:
             encoding="utf-8",
         ) as f:
             content = f.read()
-        match = re.search(r'^version\s*=\s*"(.*?)"', content, re.M)
+        match = re.search(r'^version\s*=\s*"(.*?)"', content, re.MULTILINE)
         release = match.group(1) if match else "unknown"
     except Exception:
         release = "unknown"

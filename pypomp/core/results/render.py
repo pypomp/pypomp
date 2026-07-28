@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from .result import Result
 
 
-def _var(result: "Result", name: str) -> xr.DataArray | None:
+def _var(result: Result, name: str) -> xr.DataArray | None:
     """Return a payload variable with public dim names, or ``None`` if absent."""
     payload = result.payload
     if name not in payload.data_vars:
@@ -53,7 +53,7 @@ _SUMMARY_LABELS = {
 # ======================================================================
 # Public dispatch entry points (called by Result.<method>).
 # ======================================================================
-def to_dataframe(result: "Result", ignore_nan: bool = False) -> pd.DataFrame:
+def to_dataframe(result: Result, ignore_nan: bool = False) -> pd.DataFrame:
     if result.kind == "table":
         return (
             _panel_table_to_df(result, ignore_nan)
@@ -65,7 +65,7 @@ def to_dataframe(result: "Result", ignore_nan: bool = False) -> pd.DataFrame:
     return _panel_trace_to_df(result) if result.panel else _pomp_trace_to_df(result)
 
 
-def traces(result: "Result") -> pd.DataFrame:
+def traces(result: Result) -> pd.DataFrame:
     if result.kind == "table":
         return (
             _panel_table_traces(result) if result.panel else _pomp_table_traces(result)
@@ -75,7 +75,7 @@ def traces(result: "Result") -> pd.DataFrame:
     return _panel_trace_traces(result) if result.panel else _pomp_trace_traces(result)
 
 
-def CLL(result: "Result", average: bool = False) -> pd.DataFrame:
+def CLL(result: Result, average: bool = False) -> pd.DataFrame:
     cll_da = result.payload["CLL"] if "CLL" in result.payload else None
     if cll_da is None or cll_da.size == 0:
         return pd.DataFrame()
@@ -95,7 +95,7 @@ def CLL(result: "Result", average: bool = False) -> pd.DataFrame:
     )
 
 
-def ESS(result: "Result", average: bool = False) -> pd.DataFrame:
+def ESS(result: Result, average: bool = False) -> pd.DataFrame:
     ess_da = result.payload["ESS"] if "ESS" in result.payload else None
     if ess_da is None or ess_da.size == 0:
         return pd.DataFrame()
@@ -103,7 +103,7 @@ def ESS(result: "Result", average: bool = False) -> pd.DataFrame:
     return ess.to_dataframe(name="ESS").reset_index()
 
 
-def print_summary(result: "Result", n: int = 5) -> None:
+def print_summary(result: Result, n: int = 5) -> None:
     if result.method in _MCMC_METHODS:
         _print_mcmc_summary(result, n)
         return
@@ -143,7 +143,7 @@ def print_summary(result: "Result", n: int = 5) -> None:
 # ======================================================================
 # pfilter ("table") — single-unit.
 # ======================================================================
-def _pomp_table_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
+def _pomp_table_to_df(result: Result, ignore_nan: bool) -> pd.DataFrame:
     theta = result.theta
     logLiks = result.payload["logLiks"] if "logLiks" in result.payload else None
     if not theta or logLiks is None or logLiks.size == 0:
@@ -163,7 +163,7 @@ def _pomp_table_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
     return pd.concat([df, theta_df], axis=1)
 
 
-def _pomp_table_traces(result: "Result") -> pd.DataFrame:
+def _pomp_table_traces(result: Result) -> pd.DataFrame:
     df = _pomp_table_to_df(result, ignore_nan=False)
     if df.empty:
         return df
@@ -204,7 +204,7 @@ def _attach_panel_params(theta, df_s, df_u):
     return df_s, df_u
 
 
-def _panel_table_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
+def _panel_table_to_df(result: Result, ignore_nan: bool) -> pd.DataFrame:
     logLiks = result.payload["logLiks"]
     ll = logmeanexp(logLiks.values, axis=-1, ignore_nan=ignore_nan)
     unit_names = logLiks.coords["unit"].values
@@ -254,7 +254,7 @@ def _panel_table_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
     return df
 
 
-def _panel_table_traces(result: "Result") -> pd.DataFrame:
+def _panel_table_traces(result: Result) -> pd.DataFrame:
     logLiks = result.payload["logLiks"]
     ll = logmeanexp(logLiks.values, axis=-1)
     se_unit = (
@@ -304,7 +304,7 @@ def _panel_table_traces(result: "Result") -> pd.DataFrame:
 # ======================================================================
 # Estimation ("trace") — single-unit (mif / train).
 # ======================================================================
-def _pomp_trace_to_df(result: "Result") -> pd.DataFrame:
+def _pomp_trace_to_df(result: Result) -> pd.DataFrame:
     traces_da = result.payload["traces"] if "traces" in result.payload else None
     if traces_da is None or not traces_da.sizes:
         return pd.DataFrame()
@@ -320,7 +320,7 @@ def _pomp_trace_to_df(result: "Result") -> pd.DataFrame:
     return df
 
 
-def _pomp_trace_traces(result: "Result") -> pd.DataFrame:
+def _pomp_trace_traces(result: Result) -> pd.DataFrame:
     traces_da = result.payload["traces"] if "traces" in result.payload else None
     if traces_da is None or traces_da.size == 0:
         return pd.DataFrame()
@@ -338,7 +338,7 @@ def _pomp_trace_traces(result: "Result") -> pd.DataFrame:
 # ======================================================================
 # Estimation ("trace") — panel (mif / train / dpop_train).
 # ======================================================================
-def _panel_trace_to_df(result: "Result") -> pd.DataFrame:
+def _panel_trace_to_df(result: Result) -> pd.DataFrame:
     shared_traces = _var(result, "shared_traces")
     unit_traces = _var(result, "unit_traces")
     if shared_traces is None or unit_traces is None or shared_traces.size == 0:
@@ -374,7 +374,7 @@ def _panel_trace_to_df(result: "Result") -> pd.DataFrame:
     return u_df[cols + [c for c in u_df.columns if c not in cols]]
 
 
-def _panel_trace_traces(result: "Result") -> pd.DataFrame:
+def _panel_trace_traces(result: Result) -> pd.DataFrame:
     shared_traces = _var(result, "shared_traces")
     unit_traces = _var(result, "unit_traces")
     if shared_traces is None or unit_traces is None or shared_traces.size == 0:
@@ -419,7 +419,7 @@ def _panel_trace_traces(result: "Result") -> pd.DataFrame:
 # ======================================================================
 # MCMC family ("trace") — pmcmc / abc.
 # ======================================================================
-def _mcmc_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
+def _mcmc_to_df(result: Result, ignore_nan: bool) -> pd.DataFrame:
     traces_da = result.payload["traces"] if "traces" in result.payload else None
     if traces_da is None or traces_da.size == 0:
         return pd.DataFrame()
@@ -432,7 +432,7 @@ def _mcmc_to_df(result: "Result", ignore_nan: bool) -> pd.DataFrame:
     return df
 
 
-def _mcmc_traces(result: "Result") -> pd.DataFrame:
+def _mcmc_traces(result: Result) -> pd.DataFrame:
     df = _mcmc_to_df(result, ignore_nan=False)
     if df.empty:
         return df
@@ -443,7 +443,7 @@ def _mcmc_traces(result: "Result") -> pd.DataFrame:
     return df
 
 
-def _print_mcmc_summary(result: "Result", n: int) -> None:
+def _print_mcmc_summary(result: Result, n: int) -> None:
     print(f"Method: {result.method}")
     print(f"Number of chains: {result.n_chains}")
     if result.method == "pmcmc":

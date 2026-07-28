@@ -26,8 +26,9 @@ names and scalar settings are static PyTree aux metadata.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence, Protocol, Any
+from typing import Any, Protocol
 
 import jax
 import jax.numpy as jnp

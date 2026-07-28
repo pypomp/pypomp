@@ -4,7 +4,7 @@ It handles input validation, standardization, and conversion to JAX arrays.
 """
 
 from .base import ParameterSet
-from .pomp import PompParameters
 from .panel import PanelParameters
+from .pomp import PompParameters
 
-__all__ = ["ParameterSet", "PompParameters", "PanelParameters"]
+__all__ = ["PanelParameters", "ParameterSet", "PompParameters"]

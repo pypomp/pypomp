@@ -23,31 +23,29 @@ types
     Annotated type aliases used in user-defined model component functions.
 """
 
-from .core.model_struct import vectorized
-from .core.parameters import PanelParameters, PompParameters
-from .core.par_trans import ParTrans
-from .core.pomp import Pomp
-from .core.rw_sigma import RWSigma
+from . import benchmarks, functional, maths, models, random, types
 from .core.learning_rate import LearningRate
+from .core.model_struct import vectorized
 from .core.optimizer import (
+    BFGS,
     SGD,
     Adam,
     FullMatrixAdam,
-    BFGS,
     Newton,
     WeightedNewton,
 )
-from .panel.panel import PanelPomp
-
+from .core.par_trans import ParTrans
+from .core.parameters import PanelParameters, PompParameters
+from .core.pomp import Pomp
+from .core.rw_sigma import RWSigma
 from .mcap import mcap
+from .panel.panel import PanelPomp
 from .proposals import (
-    Proposal,
     MVNDiagRW,
-    MVNRWFull,
     MVNRWAdaptive,
+    MVNRWFull,
+    Proposal,
 )
-
-from . import random, models, benchmarks, types, maths, functional
 
 
 def _get_version():

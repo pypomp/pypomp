@@ -1,12 +1,15 @@
 import os
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from scipy import stats
+
 import pypomp.random as ppr
 
 # Mark all tests in this module as heavy
@@ -248,7 +251,7 @@ def test_poisson_plots() -> None:
             color="C0",
             edgecolor="k",
         )
-        ax_hist.set_title(r"$\lambda$ = {:.2f}".format(lam_val), fontsize=9)
+        ax_hist.set_title(rf"$\lambda$ = {lam_val:.2f}", fontsize=9)
         ax_hist.set_xlabel("Sample value", fontsize=9)
         if i == 0:
             ax_hist.set_ylabel("Density", fontsize=9)
@@ -322,7 +325,7 @@ def test_gamma_plots() -> None:
         # Plot Density Estimate
         ax_hist = hist_axes[i]
         if alpha_val == 0.01:
-            import matplotlib.ticker as ticker
+            from matplotlib import ticker
 
             ref_pos = np.array(ref_samples[ref_samples > 0])
             fast_pos = np.array(fast_samples[fast_samples > 0])
@@ -373,7 +376,7 @@ def test_gamma_plots() -> None:
             )
             ax_hist.fill_between(grid, kde_ref(grid), alpha=0.15, color="C1")
             ax_hist.fill_between(grid, kde_fast(grid), alpha=0.15, color="C0")
-        ax_hist.set_title(r"$\alpha$ = {:.2f}".format(alpha_val), fontsize=9)
+        ax_hist.set_title(rf"$\alpha$ = {alpha_val:.2f}", fontsize=9)
         ax_hist.set_xlabel("Sample value", fontsize=9)
         if i == 0:
             ax_hist.set_ylabel("Density", fontsize=9)

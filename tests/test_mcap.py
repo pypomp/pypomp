@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pypomp.mcap import MCAPResult, mcap, _qchisq
+from pypomp.mcap import MCAPResult, _qchisq, mcap
 
 
 def _quadratic_profile(rng, n=60, center=0.3, curvature=0.5, noise=0.05):

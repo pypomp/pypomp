@@ -1,6 +1,7 @@
-import pandas as pd
-import numpy as np
 import importlib.util
+
+import numpy as np
+import pandas as pd
 
 
 def _check_statsmodels():
@@ -36,8 +37,9 @@ def arma(
         float: The sum of the log-likelihoods from the fitted models.
     """
     _check_statsmodels()
-    from statsmodels.tsa.arima.model import ARIMA
     import warnings
+
+    from statsmodels.tsa.arima.model import ARIMA
 
     total_llf = 0.0
 

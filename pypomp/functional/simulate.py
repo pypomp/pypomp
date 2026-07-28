@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
-from .structs import PompStruct
+
 from ..core.algorithms.simulate import _jv_simulate_internal
+from .structs import PompStruct
 
 
 def simulate(

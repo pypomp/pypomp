@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+
 import pypomp.random as ppr
 from tests.test_random.helpers import jax_x64_enabled
 

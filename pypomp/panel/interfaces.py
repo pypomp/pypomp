@@ -1,10 +1,13 @@
 from __future__ import annotations
-from typing import Protocol, Any, overload, Union, Literal
+
+from typing import Any, Literal, Protocol, overload
+
+import jax
 import jax.numpy as jnp
 import pandas as pd
-import jax
-from ..core.pomp import Pomp
+
 from ..core.parameters import PanelParameters
+from ..core.pomp import Pomp
 from ..core.results import ResultsHistory
 from ..functional.structs import PanelPompStruct
 
@@ -62,7 +65,7 @@ class PanelPompInterface(Protocol):
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
-    ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Any]: ...
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | Any: ...
 
     @staticmethod
     def merge(*panel_pomp_objs: Any) -> Any: ...

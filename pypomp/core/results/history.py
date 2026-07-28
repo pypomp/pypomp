@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import overload, Sequence, Any
-import pandas as pd
 import warnings
+from collections.abc import Sequence
+from typing import overload
+
+import pandas as pd
+
 from .result import Result
 
 
@@ -62,7 +65,7 @@ class ResultsHistory:
             entry.print_summary(n=n)
             print()
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Structural equality for history."""
         if not isinstance(other, ResultsHistory):
             return False
@@ -71,7 +74,7 @@ class ResultsHistory:
         return all(a == b for a, b in zip(self._entries, other._entries))
 
     @staticmethod
-    def merge(*histories: "ResultsHistory") -> "ResultsHistory":
+    def merge(*histories: ResultsHistory) -> ResultsHistory:
         """Merge multiple histories into one by merging entries at each index.
 
         Parameters

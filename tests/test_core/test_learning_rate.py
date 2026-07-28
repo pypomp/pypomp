@@ -1,6 +1,7 @@
-import pytest
-import numpy as np
 import jax
+import numpy as np
+import pytest
+
 import pypomp as pp
 from pypomp.core.learning_rate import LearningRate
 

@@ -1,7 +1,8 @@
-import pytest
-import pypomp as pp
 import jax
 import numpy as np
+import pytest
+
+import pypomp as pp
 
 # import matplotlib.pyplot as plt
 
@@ -184,6 +185,7 @@ def test_measles_invalid_interp_method():
 
 def test_measles_covariates_r_alignment():
     import os
+
     import pandas as pd
 
     csv_path = os.path.join(

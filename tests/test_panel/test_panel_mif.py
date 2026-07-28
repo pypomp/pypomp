@@ -1,9 +1,11 @@
-import xarray as xr
-import jax.numpy as jnp
-import jax
-import pandas as pd
-import pypomp as pp
 from copy import deepcopy
+
+import jax
+import jax.numpy as jnp
+import pandas as pd
+import xarray as xr
+
+import pypomp as pp
 
 
 def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):

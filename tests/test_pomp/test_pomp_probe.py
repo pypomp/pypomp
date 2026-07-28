@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
-import pytest
-import pypomp as pp
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture(scope="function")

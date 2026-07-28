@@ -1,8 +1,9 @@
-import pytest
+from copy import deepcopy
+
+import jax
 import numpy as np
 import pandas as pd
-import jax
-from copy import deepcopy
+import pytest
 
 import pypomp as pp
 from pypomp.core.results import Result

@@ -1,8 +1,9 @@
 import jax
-import pytest
-import numpy as np
-import pypomp as pp
 import jax.numpy as jnp
+import numpy as np
+import pytest
+
+import pypomp as pp
 
 J_DEFAULT = 2
 M_DEFAULT = 2

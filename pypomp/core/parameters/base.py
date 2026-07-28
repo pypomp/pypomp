@@ -1,17 +1,18 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
+
 import copy
-import numpy as np
-import jax
-import xarray as xr
+from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import (
-    Union,
-    Literal,
-    Iterator,
     Any,
+    Literal,
     cast,
     overload,
 )
+
+import jax
+import numpy as np
+import xarray as xr
 
 try:
     from typing import Self
@@ -58,7 +59,6 @@ class ParameterSet(ABC):
             shape is ``(n_reps, n_params)``.  For ``PanelPomp`` models, shape
             is ``(n_reps, n_units, n_params)``.
         """
-        pass
 
     def num_replicates(self) -> int:
         """Returns the number of parameter sets/replicates."""
@@ -180,7 +180,7 @@ class ParameterSet(ABC):
         new_obj._slice_logLik(new_indices)
         return new_obj
 
-    def subset(self, indices: Union[int, list[int], slice]) -> Self:
+    def subset(self, indices: int | list[int] | slice) -> Self:
         """Return a new parameter set with only the selected replicates.
 
         Parameters
@@ -248,7 +248,6 @@ class ParameterSet(ABC):
         Default is a no-op; subclasses may override (e.g. to restore
         ``.attrs`` metadata that ``xr.concat`` does not carry).
         """
-        pass
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, type(self)):
@@ -335,7 +334,6 @@ class ParameterSet(ABC):
         """
         Set or overwrite the parameter values.
         """
-        pass
 
     @property
     @abstractmethod
@@ -349,13 +347,11 @@ class ParameterSet(ABC):
     @abstractmethod
     def _check_merge_compatible(self, other: Any) -> None:
         """Raise if ``other`` cannot be merged with ``self`` (name mismatch)."""
-        pass
 
     @staticmethod
     @abstractmethod
     def _concat_logLik(param_objs: tuple[Any, ...]) -> dict[str, np.ndarray]:
         """Return the log-likelihood keyword arguments for the merged object."""
-        pass
 
     @abstractmethod
     def _replicated_logLik(self, n: int) -> dict[str, np.ndarray]:

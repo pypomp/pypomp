@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 
 import pypomp as pp
-from pypomp.types import ParamDict
+from pypomp import MVNDiagRW, MVNRWAdaptive, MVNRWFull
 from pypomp.core.results import Result
-from pypomp import MVNDiagRW, MVNRWFull, MVNRWAdaptive
+from pypomp.types import ParamDict
 
 
 def _abc_res(res) -> Result:

@@ -12,20 +12,20 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from pypomp.core.learning_rate import LearningRate
+from pypomp.core.optimizer import Adam
+from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.results import (
     Result,
     ResultsHistory,
-    build_pfilter_result,
     build_mif_result,
-    build_train_result,
-    build_panel_pfilter_result,
     build_panel_mif_result,
+    build_panel_pfilter_result,
     build_panel_train_result,
+    build_pfilter_result,
+    build_train_result,
 )
-from pypomp.core.parameters import PompParameters, PanelParameters
 from pypomp.core.rw_sigma import RWSigma
-from pypomp.core.learning_rate import LearningRate
-from pypomp.core.optimizer import Adam
 
 KEY = jax.random.key(0)
 

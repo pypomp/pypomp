@@ -1,8 +1,10 @@
 from copy import deepcopy
+
 import jax
+import numpy as np
 import pandas as pd
 import pytest
-import numpy as np
+
 import pypomp as pp
 from pypomp.core.results import Result
 

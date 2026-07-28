@@ -1,13 +1,14 @@
 import warnings
 from typing import Any
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 def _check_plotly():
     try:
-        import plotly.graph_objects as go
         import plotly.express as px
+        import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
         return go, px, make_subplots
@@ -58,7 +59,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
         plot_df = df_long
 
     n_facets = len(facet_values)
-    cols = 3 if n_facets > 3 else n_facets
+    cols = min(n_facets, 3)
     rows = (n_facets + cols - 1) // cols if n_facets > 0 else 1
 
     fig = make_subplots(
@@ -150,7 +151,7 @@ def plot_simulations_internal(
     obs_cols = [c for c in obs.columns if c not in ["time", "theta_idx", "sim"]]
     n_vars = len(obs_cols)
 
-    cols = 2 if n_vars > 2 else n_vars
+    cols = min(n_vars, 2)
     rows = (n_vars + cols - 1) // cols if n_vars > 0 else 1
 
     fig = make_subplots(
@@ -262,7 +263,7 @@ def plot_panel_simulations_internal(
     # Map var to sims column (sims uses obs_0, obs_1 etc if generated via simulate)
     val_col = var if var in sims.columns else "obs_0"
 
-    cols = 3 if n_units > 3 else n_units
+    cols = min(n_units, 3)
     rows = (n_units + cols - 1) // cols if n_units > 0 else 1
 
     fig = make_subplots(

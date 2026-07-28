@@ -3,31 +3,33 @@ This file contains the classes for components that define the model structure.
 """
 
 import inspect
-import jax
-import jax.numpy as jnp
-import numpy as np
+from collections.abc import Callable
 from functools import partial
-from .par_trans import ParTrans
 from typing import (
     Annotated,
     Any,
-    Callable,
     TypeVar,
-    get_origin,
     get_args,
+    get_origin,
     get_type_hints,
 )
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
 from pypomp.types import (
-    StateDict,
-    ParamDict,
     CovarDict,
-    TimeFloat,
-    StepSizeFloat,
-    RNGKey,
-    ObservationDict,
     InitialTimeFloat,
+    ObservationDict,
+    ParamDict,
+    RNGKey,
+    StateDict,
+    StepSizeFloat,
+    TimeFloat,
 )
 
+from .par_trans import ParTrans
 
 # --- Type Inspection Utilities ---
 

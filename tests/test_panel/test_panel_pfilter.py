@@ -1,7 +1,9 @@
-import xarray as xr
-import numpy as np
-import jax
 from copy import deepcopy
+
+import jax
+import numpy as np
+import xarray as xr
+
 from pypomp.core.results.panel import build_panel_pfilter_result
 
 

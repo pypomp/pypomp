@@ -1,8 +1,10 @@
-import jax
-import pytest
-import numpy as np
-import pypomp as pp
 from copy import deepcopy
+
+import jax
+import numpy as np
+import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture(scope="module")

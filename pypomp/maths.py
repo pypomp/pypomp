@@ -2,13 +2,13 @@
 Numerical utilities.
 """
 
-from typing import Any, overload
-import numpy as np
 import warnings
-from jax.scipy.special import logit, expit
+from typing import Any, overload
 
+import numpy as np
+from jax.scipy.special import expit, logit
 
-__all__ = ["logmeanexp", "logmeanexp_se", "logit", "expit"]
+__all__ = ["expit", "logit", "logmeanexp", "logmeanexp_se"]
 
 
 @overload

@@ -16,6 +16,7 @@ def test_simulate(lg_panel_setup_some_shared):
 
 def test_simulate_as_pomp(lg_panel_setup_some_shared):
     import pytest
+
     import pypomp as pp
 
     panel, rw_sd, key = lg_panel_setup_some_shared

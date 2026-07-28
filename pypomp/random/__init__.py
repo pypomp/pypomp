@@ -27,7 +27,7 @@ gammainv
     Vectorised inverse Gamma CDF.
 """
 
-from . import poisson, binom, gamma, nbinom, _dtype_helpers
+from . import _dtype_helpers, binom, gamma, nbinom, poisson
 
 fast_poisson = poisson.fast_poisson
 fast_binomial = binom.fast_binomial
@@ -40,14 +40,14 @@ binominv = binom.binominv
 gammainv = gamma.gammainv
 
 __all__ = [
-    "fast_poisson",
-    "fast_binomial",
-    "fast_multinomial",
-    "fast_gamma",
-    "fast_nbinomial",
-    "poissoninv",
     "binominv",
+    "fast_binomial",
+    "fast_gamma",
+    "fast_multinomial",
+    "fast_nbinomial",
+    "fast_poisson",
     "gammainv",
+    "poissoninv",
 ]
 
 del poisson, binom, gamma, nbinom, _dtype_helpers

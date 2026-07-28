@@ -1,19 +1,21 @@
-from typing import Literal
-import numpy as np
-import pandas as pd
 import os
 import pickle
+from typing import Literal
+
+import numpy as np
+import pandas as pd
+from scipy.interpolate import make_smoothing_spline
+
 import pypomp.models.measles.model_001 as m001
 import pypomp.models.measles.model_001b as m001b
 import pypomp.models.measles.model_001d as m001d
 import pypomp.models.measles.model_002 as m002
 import pypomp.models.measles.model_002d as m002d
 import pypomp.models.measles.model_003 as m003
-from scipy.interpolate import make_smoothing_spline
+from pypomp.core.par_trans import ParTrans
+from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.panel.panel import PanelPomp
-from pypomp.core.par_trans import ParTrans
-from pypomp.core.parameters import PompParameters, PanelParameters
 
 
 def evaluate_spline_with_linear_extrapolation(spline, x, x_min, x_max):

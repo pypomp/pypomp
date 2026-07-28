@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Any
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-from scipy.stats import chi2
-
 from loess.loess_1d import loess_1d  # pyright: ignore[reportMissingImports]
+from scipy.stats import chi2
 
 FloatArray = npt.NDArray[np.floating[Any]]
 
@@ -86,7 +85,7 @@ def _fit_local_quadratic(
     *,
     center: float,
     span: float,
-) -> Tuple[float, float, float, FloatArray]:
+) -> tuple[float, float, float, FloatArray]:
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -153,7 +152,7 @@ class MCAPResult:
     mle: float
     """The maximum likelihood estimate of the focal parameter, taken as the argmax of the smoothed profile."""
 
-    ci: Tuple[Optional[float], Optional[float]]
+    ci: tuple[float | None, float | None]
     """The profile likelihood confidence interval (lower, upper)."""
 
     delta: float
@@ -168,13 +167,13 @@ class MCAPResult:
     se_total: float
     """The total standard error, calculated as the root sum of squares of se_stat and se_mc."""
 
-    fit: Dict[str, FloatArray]
+    fit: dict[str, FloatArray]
     """A dictionary containing the grid of parameters ('parameter'), the smoothed log-likelihood values ('smoothed'), and the local quadratic fit values ('quadratic')."""
 
     quadratic_max: float
     """The parameter value that maximizes the local quadratic fit."""
 
-    quadratic_coef: Dict[str, float]
+    quadratic_coef: dict[str, float]
     """The coefficients of the local quadratic fit: c - ax^2 + bx."""
 
     vcov: FloatArray

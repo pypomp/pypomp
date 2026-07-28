@@ -2,12 +2,12 @@
 This file contains the internal simulation functions for POMP models.
 """
 
+from collections.abc import Callable
 from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax import jit
-from typing import Callable
-
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 

@@ -1,36 +1,37 @@
 from __future__ import annotations
+
+import time
+import warnings
+from collections.abc import Callable
+from copy import deepcopy
+from typing import TYPE_CHECKING, Literal, cast, overload
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 import xarray as xr
-import numpy as np
-import time
+
 import pypomp.functional as F
-from copy import deepcopy
-from typing import TYPE_CHECKING, cast, Callable, overload, Literal
-import warnings
 
-
-from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
-from ..core.algorithms.helpers import run_jax_batch_sharded
-from ..core.rw_sigma import RWSigma
-from ..core.learning_rate import LearningRate
-from ..core.optimizer import Optimizer, Adam
-from ..core.results import (
-    build_panel_pfilter_result,
-    build_panel_mif_result,
-    build_panel_train_result,
-    build_panel_dpop_train_result,
-)
-
-from ..core.parameters import PanelParameters
-from ..maths import logmeanexp
 from .. import benchmarks
-
+from ..core.algorithms.helpers import run_jax_batch_sharded
+from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
+from ..core.learning_rate import LearningRate
+from ..core.optimizer import Adam, Optimizer
+from ..core.parameters import PanelParameters
+from ..core.results import (
+    build_panel_dpop_train_result,
+    build_panel_mif_result,
+    build_panel_pfilter_result,
+    build_panel_train_result,
+)
+from ..core.rw_sigma import RWSigma
+from ..maths import logmeanexp
 
 if TYPE_CHECKING:
-    from .interfaces import PanelPompInterface as Base
     from ..core.pomp import Pomp
+    from .interfaces import PanelPompInterface as Base
 else:
     Base = object  # At runtime, this is just a normal class
 
@@ -223,7 +224,7 @@ class PanelEstimationMixin(Base):
         nsim: int = 1,
         *,
         as_pomp: Literal[True],
-    ) -> "Base": ...
+    ) -> Base: ...
 
     def simulate(
         self,
@@ -270,7 +271,7 @@ class PanelEstimationMixin(Base):
 
         X_sims_list = []
         Y_sims_list = []
-        new_unit_objects: dict[str, "Pomp"] = {}
+        new_unit_objects: dict[str, Pomp] = {}
         for unit, obj in self.unit_objects.items():
             theta_list = self.get_unit_parameters(unit, theta=theta)
             from ..core.parameters import PompParameters
@@ -993,7 +994,7 @@ class PanelEstimationMixin(Base):
         self,
         J: int,
         M: int,
-        eta: "LearningRate | dict[str, float] | float",
+        eta: LearningRate | dict[str, float] | float,
         chunk_size: int = 1,
         optimizer: Optimizer = Adam(),
         alpha: float = 0.97,
@@ -1068,8 +1069,7 @@ class PanelEstimationMixin(Base):
         # Determine chunk size
         chunk_size_value = int(chunk_size)
 
-        if chunk_size_value < 1:
-            chunk_size_value = 1
+        chunk_size_value = max(chunk_size_value, 1)
         chunk_size_value = min(chunk_size_value, U)
         if U % chunk_size_value != 0:
             original_chunk_size = chunk_size_value

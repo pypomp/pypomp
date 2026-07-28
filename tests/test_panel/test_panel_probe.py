@@ -1,6 +1,6 @@
-import pandas as pd
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
+import pandas as pd
 
 
 def test_panel_pomp_probe(lg_panel_setup_some_shared):

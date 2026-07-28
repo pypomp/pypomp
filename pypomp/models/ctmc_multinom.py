@@ -11,8 +11,6 @@ Multinomial samples are drawn using a fast inverse-CDF based sampler
 computed via an explicit multinomial log-pmf formula.
 """
 
-from typing import Tuple
-
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import gammaln
@@ -177,7 +175,7 @@ def sample_and_log_prob(
     rates: jax.Array,
     dt: float,
     key: jax.Array,
-) -> Tuple[jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Draw Euler-multinomial increments and return both the sample and its log-prob.
 

@@ -19,14 +19,14 @@ Parameters:
 - R_0: Initial recovered population proportion
 """
 
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import jax.scipy.special as jspecial
-from pypomp.random.poisson import fast_poisson
+
 from pypomp.random.binom import fast_multinomial
 from pypomp.random.gamma import fast_gamma
+from pypomp.random.poisson import fast_poisson
 from pypomp.types import ParamDict
-
 
 param_names = (
     "R0",  # 0

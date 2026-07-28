@@ -1,10 +1,11 @@
 import warnings
+from typing import TYPE_CHECKING, Any
+
 import jax
 import pandas as pd
-from typing import TYPE_CHECKING, Any
-from ..core.viz import plot_traces_internal, plot_panel_simulations_internal
 
 from ..core.parameters import PanelParameters
+from ..core.viz import plot_panel_simulations_internal, plot_traces_internal
 
 if TYPE_CHECKING:
     from .interfaces import PanelPompInterface as Base

@@ -3,12 +3,12 @@ Integration tests for parameter transformations in mif and train methods.
 These tests verify that traces are properly transformed from estimation space to natural space.
 """
 
-import numpy as np
 import jax
 import jax.numpy as jnp
-import pypomp as pp
+import numpy as np
 import pytest
 
+import pypomp as pp
 from pypomp.types import ParamDict
 
 

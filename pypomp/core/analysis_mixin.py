@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Any
-import pandas as pd
+
+from typing import TYPE_CHECKING, Any
+
 import jax
+import pandas as pd
 
 from .parameters import PompParameters
-from .viz import plot_traces_internal, plot_simulations_internal
-
-from typing import TYPE_CHECKING
+from .viz import plot_simulations_internal, plot_traces_internal
 
 if TYPE_CHECKING:
     from .interfaces import PompInterface as Base

@@ -12,13 +12,13 @@ import jax.scipy.special as jspecial
 import numpy as np
 import pandas as pd
 
-from pypomp.core.pomp import Pomp
 from pypomp.core.par_trans import ParTrans
-from pypomp.types import ParamDict
+from pypomp.core.pomp import Pomp
 from pypomp.models.ctmc_multinom import sample_and_log_prob
-from pypomp.random.poisson import fast_poisson
 from pypomp.random.gamma import fast_gamma
 from pypomp.random.nbinom import fast_nbinomial
+from pypomp.random.poisson import fast_poisson
+from pypomp.types import ParamDict
 
 STATENAMES = ["S", "I", "R", "cases", "W", "logw"]
 

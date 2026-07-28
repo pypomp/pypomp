@@ -13,15 +13,15 @@ from __future__ import annotations
 from functools import partial
 
 import jax
-from jax import Array, lax
 import jax.numpy as jnp
-from jax.scipy.stats import norm
 import numpy as np
+from jax import Array, lax
 from jax._src import dtypes
+from jax.scipy.stats import norm
 
 from ._dtype_helpers import (
-    check_and_canonicalize_user_dtype,
     _get_available_dtype,
+    check_and_canonicalize_user_dtype,
 )
 
 

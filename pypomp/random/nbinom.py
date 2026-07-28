@@ -7,9 +7,9 @@ from __future__ import annotations
 from functools import partial
 
 import jax
-from jax import Array
 import jax.numpy as jnp
 import numpy as np
+from jax import Array
 from jax._src import dtypes
 
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype

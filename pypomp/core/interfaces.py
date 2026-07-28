@@ -1,14 +1,18 @@
 from __future__ import annotations
-from typing import Protocol, Any, overload, Union, Literal
+
+from typing import Any, Literal, Protocol, overload
+
 import jax
 import numpy as np
 import pandas as pd
+
 from pypomp.functional.structs import PompStruct
+
+from .metadata import ModelMetadata
+from .model_struct import _DMeas, _DPrior, _RInit, _RMeas, _RProc
+from .par_trans import ParTrans
 from .parameters import PompParameters
 from .results import ResultsHistory
-from .model_struct import _RInit, _RProc, _DMeas, _RMeas, _DPrior
-from .par_trans import ParTrans
-from .metadata import ModelMetadata
 
 
 class PompInterface(Protocol):
@@ -87,6 +91,6 @@ class PompInterface(Protocol):
         times: jax.Array | None = None,
         nsim: int = 1,
         as_pomp: bool = False,
-    ) -> Union[tuple[pd.DataFrame, pd.DataFrame], Any]: ...
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | Any: ...
 
     def traces(self) -> pd.DataFrame: ...

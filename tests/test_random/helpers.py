@@ -1,8 +1,9 @@
+import warnings
+from collections.abc import Generator
+from contextlib import contextmanager
+
 import jax
 import numpy as np
-import warnings
-from contextlib import contextmanager
-from typing import Generator, Tuple
 
 
 @contextmanager
@@ -16,7 +17,7 @@ def jax_x64_enabled() -> Generator[None, None, None]:
         jax.config.update("jax_enable_x64", orig)
 
 
-def calculate_empirical_moments(samples: np.ndarray) -> Tuple[float, float, float]:
+def calculate_empirical_moments(samples: np.ndarray) -> tuple[float, float, float]:
     """Calculate mean, variance, and skewness of the samples."""
     mean_emp = float(samples.mean())
     var_emp = float(samples.var())
@@ -34,9 +35,9 @@ def check_moments(
     mean_th: float,
     var_th: float,
     skew_th: float = 0.0,
-    mean_tol: Tuple[float, float] = (0.02, 0.02),
-    var_tol: Tuple[float, float] = (0.03, 0.03),
-    skew_tol: Tuple[float, float] = (0.10, 0.04),
+    mean_tol: tuple[float, float] = (0.02, 0.02),
+    var_tol: tuple[float, float] = (0.03, 0.03),
+    skew_tol: tuple[float, float] = (0.10, 0.04),
     check_skew: bool = False,
 ) -> None:
     """Utility to compare empirical vs theoretical moments and issue warnings if they diverge."""

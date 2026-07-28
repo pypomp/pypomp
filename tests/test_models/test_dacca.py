@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
-import pypomp as pp
 import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture(scope="function")

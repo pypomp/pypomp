@@ -9,13 +9,13 @@ from __future__ import annotations
 from functools import partial
 
 import jax
-from jax import Array
 import jax.numpy as jnp
-from jax.scipy.special import ndtri
 import numpy as np
+from jax import Array
 from jax._src import dtypes
+from jax.scipy.special import ndtri
 
-from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
+from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 
 
 @partial(jax.jit, static_argnames=["adjustment_size", "dtype", "newton_steps"])

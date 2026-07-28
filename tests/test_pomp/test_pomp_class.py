@@ -1,13 +1,13 @@
-import jax
-import numpy as np
 import pickle
-import pypomp as pp
-import pytest
-import jax.numpy as jnp
-import pandas as pd
-
-
 from copy import deepcopy
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture(scope="module")

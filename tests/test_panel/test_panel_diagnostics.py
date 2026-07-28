@@ -1,8 +1,9 @@
 import jax
-import pytest
-import pypomp as pp
 import numpy as np
 import pandas as pd
+import pytest
+
+import pypomp as pp
 
 
 @pytest.fixture

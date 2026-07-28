@@ -1,9 +1,9 @@
+from typing import cast
+
 import jax
 import numpy as np
 import pytest
-from typing import cast
 
-from pypomp.types import ParamDict
 import pypomp as pp
 from pypomp.models.sir import (
     DEFAULT_THETA,
@@ -13,6 +13,7 @@ from pypomp.models.sir import (
     periodic_bspline_basis_eval,
     to_est,
 )
+from pypomp.types import ParamDict
 
 
 @pytest.fixture(scope="module")
@@ -24,7 +25,7 @@ def test_sir_construct_default(sir_default):
     sir = sir_default
     assert isinstance(sir, pp.Pomp)
     # 4 years of weekly observations under default `times`.
-    assert len(sir.ys) == int(4 * 52)
+    assert len(sir.ys) == (4 * 52)
     assert list(sir.ys.columns) == ["reports"]
     assert sir.statenames == STATENAMES
     for name in DEFAULT_THETA:

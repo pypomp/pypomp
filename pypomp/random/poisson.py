@@ -10,17 +10,17 @@ small.
 
 from __future__ import annotations
 
-from typing import Tuple, Any
 from functools import partial
+from typing import Any
 
 import jax
-from jax import Array, lax
 import jax.numpy as jnp
-from jax.scipy import special as jsp_special
 import numpy as np
+from jax import Array, lax
 from jax._src import dtypes
+from jax.scipy import special as jsp_special
 
-from ._dtype_helpers import check_and_canonicalize_user_dtype, _get_available_dtype
+from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 
 
 @partial(
@@ -288,7 +288,7 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
 
     def _find_quantile(
         x_init: Array, s0: Array, del0: Array, lami: Array
-    ) -> Tuple[Array, Array, Array]:
+    ) -> tuple[Array, Array, Array]:
 
         x = x_init
         s = s0
@@ -322,7 +322,7 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
     x_init = jnp.array(0.0, dtype=dtype)
     x, s, delta = _find_quantile(x_init, s0, del0, lami)
 
-    def _top_down_branch(state: Tuple[Array, Array]) -> Array:
+    def _top_down_branch(state: tuple[Array, Array]) -> Array:
         x_val, delta_val = state
         one = jnp.array(1.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
@@ -438,7 +438,7 @@ def _poissoninv_scalar(
 _poissoninv_vmap = jax.vmap(_poissoninv_scalar, in_axes=(0, 0, None, None, None))
 
 
-_RM_COEFFS: Tuple[float, ...] = (
+_RM_COEFFS: tuple[float, ...] = (
     2.82298751e-07,
     -2.58136133e-06,
     1.02118025e-05,
@@ -454,7 +454,7 @@ _RM_COEFFS: Tuple[float, ...] = (
     1.66666667e-01,
 )
 
-_T_COEFFS: Tuple[float, ...] = (
+_T_COEFFS: tuple[float, ...] = (
     1.86386867e-05,
     -2.07319499e-04,
     9.68945100e-04,
@@ -470,7 +470,7 @@ _T_COEFFS: Tuple[float, ...] = (
     3.33333333e-01,
 )
 
-_X_COEFFS: Tuple[float, ...] = (
+_X_COEFFS: tuple[float, ...] = (
     -1.45852240e-04,
     1.46121529e-03,
     -6.10328845e-03,

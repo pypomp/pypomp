@@ -1,8 +1,9 @@
+import datetime
 import importlib.metadata
 import platform
-import datetime
-import jax
 from dataclasses import dataclass, field
+
+import jax
 
 
 @dataclass(frozen=True)

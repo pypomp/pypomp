@@ -1,25 +1,26 @@
-import pypomp as pp
-import jax.numpy as jnp
 import jax
-import pytest
+import jax.numpy as jnp
 import numpy as np
-from pypomp.types import (
-    StateDict,
-    ParamDict,
-    CovarDict,
-    TimeFloat,
-    StepSizeFloat,
-    RNGKey,
-    ObservationDict,
-    InitialTimeFloat,
-)
+import pytest
+
+import pypomp as pp
 from pypomp.core.model_struct import (
-    _RInit,
-    _RProc,
     _DMeas,
-    _RMeas,
     _DPrior,
     _ModelComponent,
+    _RInit,
+    _RMeas,
+    _RProc,
+)
+from pypomp.types import (
+    CovarDict,
+    InitialTimeFloat,
+    ObservationDict,
+    ParamDict,
+    RNGKey,
+    StateDict,
+    StepSizeFloat,
+    TimeFloat,
 )
 
 

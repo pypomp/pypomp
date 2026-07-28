@@ -1,9 +1,12 @@
 from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from typing import Any
+
+import cloudpickle
 import jax
 import jax.numpy as jnp
 import numpy as np
-import cloudpickle
-from typing import Callable, Any, Sequence
 
 
 def default_cooling(nt: Any, m: Any, ntimes: Any) -> float:

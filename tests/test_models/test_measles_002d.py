@@ -1,8 +1,10 @@
-import pytest
-import pypomp as pp
+from typing import cast
+
 import jax
 import jax.numpy as jnp
-from typing import cast
+import pytest
+
+import pypomp as pp
 
 BASE_THETA_002D = {
     "R0": 56.8,
@@ -63,7 +65,7 @@ def test_002d_dpop_train(london_002d):
 
 def test_002d_par_trans_roundtrip(london_002d):
     """Parameter transform round-trip: natural -> est -> natural."""
-    from pypomp.models.measles.model_002d import to_est, from_est
+    from pypomp.models.measles.model_002d import from_est, to_est
 
     theta = BASE_THETA_002D.copy()
     theta_jax = cast(dict[str, jax.Array], {k: jnp.array(v) for k, v in theta.items()})

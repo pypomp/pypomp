@@ -1,4 +1,5 @@
 import os
+
 import jax
 
 # Configure JAX persistent compilation cache to avoid duplicate compilations

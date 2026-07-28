@@ -1,20 +1,21 @@
 from __future__ import annotations
-import pandas as pd
-import jax.numpy as jnp
-import numpy as np
-import jax
-import xarray as xr
+
+from collections.abc import Mapping, Sequence
 from typing import (
-    Mapping,
-    Sequence,
-    Literal,
     Any,
+    Literal,
     cast,
     overload,
 )
 
-from .base import ParameterSet
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+import xarray as xr
+
 from ..par_trans import ParTrans
+from .base import ParameterSet
 
 
 def _empty_unit_specific(n_reps: int) -> xr.DataArray:
@@ -357,7 +358,7 @@ class PompParameters(ParameterSet):
     def _slice_logLik(self, indices: np.ndarray) -> None:
         self._logLik = self._logLik[indices]
 
-    def _eq_logLik(self, other: "PompParameters") -> bool:
+    def _eq_logLik(self, other: PompParameters) -> bool:
         return np.array_equal(self._logLik, other._logLik, equal_nan=True)
 
     def _check_merge_compatible(self, other: Any) -> None:

@@ -1,12 +1,13 @@
+from collections.abc import Callable
 from functools import partial
+
 import jax
-from jax import jit
 import jax.numpy as jnp
-from typing import Callable
+from jax import jit
+
+from ..optimizer import SGD, Adam, Optimizer
 from .dpop import _dpop_internal
 from .helpers import _cosine_cooling
-from ..optimizer import Optimizer, SGD, Adam
-
 
 _panel_dpop_internal_vmap = jax.vmap(
     _dpop_internal,

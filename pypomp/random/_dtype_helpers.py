@@ -1,6 +1,6 @@
 """Helper functions for dtype handling in JAX random number generators."""
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from jax import Array
@@ -8,6 +8,7 @@ else:
     Array = Any
 
 import warnings
+
 import jax.numpy as jnp
 import numpy as np
 from jax._src import dtypes

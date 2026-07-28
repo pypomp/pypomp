@@ -1,8 +1,10 @@
-import pandas as pd
-import pypomp as pp
-import numpy as np
-import jax.numpy as jnp
 from typing import cast
+
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+
+import pypomp as pp
 from pypomp.types import ParamDict
 
 

@@ -1,20 +1,22 @@
 import os
-import pandas as pd
-import numpy as np
-import jax.numpy as jnp
-import jax.random as random
+
 import jax
-from pypomp.core.pomp import Pomp
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+from jax import random
+
 from pypomp.core.par_trans import ParTrans
+from pypomp.core.pomp import Pomp
 from pypomp.types import (
-    StateDict,
-    ParamDict,
     CovarDict,
-    TimeFloat,
-    StepSizeFloat,
-    RNGKey,
-    ObservationDict,
     InitialTimeFloat,
+    ObservationDict,
+    ParamDict,
+    RNGKey,
+    StateDict,
+    StepSizeFloat,
+    TimeFloat,
 )
 
 module_dir = os.path.dirname(os.path.abspath(__file__))

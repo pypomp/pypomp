@@ -1,5 +1,6 @@
-import pypomp.core.algorithms.helpers as ifunc
 import numpy as np
+
+import pypomp.core.algorithms.helpers as ifunc
 
 
 def test_calc_ys_covars():
@@ -189,6 +190,7 @@ def test_interp_covars_linear_and_constant():
 
 def test_pomp_constant_interpolation():
     import pandas as pd
+
     import pypomp as pp
 
     ys = pd.DataFrame({"y": [1.0, 2.0]}, index=[1.0, 2.0])

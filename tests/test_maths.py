@@ -1,8 +1,10 @@
-import pytest
-import numpy as np
-import pypomp as pp
-import warnings
 import time
+import warnings
+
+import numpy as np
+import pytest
+
+import pypomp as pp
 
 # test_val is based on a direct test against R-pomp::logmeanexp
 #

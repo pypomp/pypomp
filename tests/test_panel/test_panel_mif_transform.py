@@ -2,13 +2,15 @@
 Integration tests for parameter transformations in PanelPomp.mif method.
 """
 
-import numpy as np
-import pandas as pd
+from typing import cast
+
 import jax
 import jax.numpy as jnp
-import pypomp as pp
+import numpy as np
+import pandas as pd
 import pytest
-from typing import cast
+
+import pypomp as pp
 from pypomp.types import ParamDict
 
 

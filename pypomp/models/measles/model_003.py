@@ -2,21 +2,22 @@
 He10 model with continuous process model.
 """
 
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import jax.scipy.special as jspecial
+from jax.scipy.special import log_ndtr
+
 from pypomp.random.gamma import fast_gamma
 from pypomp.types import (
-    ObservationDict,
-    StateDict,
-    ParamDict,
     CovarDict,
-    TimeFloat,
-    RNGKey,
     InitialTimeFloat,
+    ObservationDict,
+    ParamDict,
+    RNGKey,
+    StateDict,
     StepSizeFloat,
+    TimeFloat,
 )
-from jax.scipy.special import log_ndtr
 
 
 def softclamp(x, floor: float | jax.Array = 0.0, sharpness: float = 100.0):

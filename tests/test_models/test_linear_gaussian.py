@@ -1,18 +1,20 @@
+from typing import cast
+
 import jax
 import numpy as np
 import pytest
+
 import pypomp as pp
-from pypomp.types import ParamDict
 from pypomp.models.linear_gaussian import (
     MAX_DIM,
-    _to_est,
-    _from_est,
-    _get_thetas,
     _default_A,
     _default_Q,
     _default_R,
+    _from_est,
+    _get_thetas,
+    _to_est,
 )
-from typing import cast
+from pypomp.types import ParamDict
 
 
 def _theta_of(model: pp.Pomp) -> ParamDict:

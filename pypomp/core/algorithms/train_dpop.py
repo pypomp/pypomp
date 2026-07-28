@@ -1,8 +1,10 @@
+from collections.abc import Callable
 from functools import partial
+
 import jax
-from jax import jit
 import jax.numpy as jnp
-from typing import Callable
+from jax import jit
+
 from .dpop import (
     _dpop_internal_mean,
 )  # DPOP mean negative log-likelihood per observation

@@ -13,8 +13,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from pypomp.models.ctmc_multinom import (
-    reulermultinom,
     deulermultinom,
+    reulermultinom,
     sample_and_log_prob,
 )
 

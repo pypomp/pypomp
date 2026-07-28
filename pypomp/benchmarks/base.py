@@ -125,7 +125,7 @@ def negbin(
                 y_past = y[:-1]
                 y_curr = y[1:]
 
-                def neg_log_lik(params):
+                def neg_log_lik(params, y_past=y_past, y_curr=y_curr):
                     a, b, size = params
                     mu = a + b * y_past
                     if np.any(mu <= 0) or size <= 0:

@@ -68,7 +68,7 @@ def logmeanexp(
             res = np.log(mean_exp) + x_max
     else:
         if axis is None and x_array.size == 0:
-            warnings.warn("x is an empty array, returning nan")
+            warnings.warn("x is an empty array, returning nan", stacklevel=2)
             return np.nan
 
         x_max = np.max(x_array, axis=axis, keepdims=True)

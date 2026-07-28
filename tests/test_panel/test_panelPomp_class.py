@@ -286,7 +286,7 @@ def test_performance_comprehensive():
         build_panel_pfilter_result,
     )
 
-    for i in range(6):  # 6 MIF runs
+    for _i in range(6):  # 6 MIF runs
         result = build_panel_mif_result(
             execution_time=1.0,
             key=jax.random.key(42),
@@ -314,7 +314,7 @@ def test_performance_comprehensive():
         panel.results_history.add(result)
 
     # Add some pfilter results too (stress test with mixed result types)
-    for i in range(4):  # 4 pfilter runs
+    for _i in range(4):  # 4 pfilter runs
         pfilter_logLiks = xr.DataArray(
             np.random.randn(n_reps, n_units, 3),  # 3 replicates per pfilter
             dims=["theta_idx", "unit", "rep"],
@@ -419,7 +419,7 @@ def test_prune(lg_panel_mp):
                 "shared": s.copy() if s is not None else None,
                 "unit_specific": u.copy() if u is not None else None,
             }
-            for s, u in zip(original_shared, original_unit_specific)  # type: ignore[reportArgumentType]
+            for s, u in zip(original_shared, original_unit_specific, strict=False)  # type: ignore[reportArgumentType]
         ]
         if original_shared is not None
         else []

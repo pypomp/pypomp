@@ -62,7 +62,7 @@ with open(dacca_path, "r") as f:
     reader = csv.reader(f)
     next(reader)
     data = [(float(row[1]), float(row[2])) for row in reader]
-    times, values = zip(*data)
+    times, values = zip(*data, strict=False)
     ys = pd.DataFrame(values, index=pd.Index(times), columns=pd.Index(["deaths"]))
 
 with open(covart_path, "r") as f:

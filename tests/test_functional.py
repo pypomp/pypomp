@@ -403,7 +403,7 @@ def test_abc_functional_scale_defaults_to_one(model_setup):
         keys=keys,
     )
 
-    for default_arr, explicit_arr in zip(default_traces, explicit_traces):
+    for default_arr, explicit_arr in zip(default_traces, explicit_traces, strict=False):
         assert jnp.array_equal(default_arr, explicit_arr)
 
 

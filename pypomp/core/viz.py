@@ -12,11 +12,11 @@ def _check_plotly():
         from plotly.subplots import make_subplots
 
         return go, px, make_subplots
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "Plotly is required for plotting. "
             "Please install it with `pip install plotly` or `pip install 'pypomp[viz]'`."
-        )
+        ) from e
 
 
 def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
@@ -24,7 +24,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
     Internal function to plot traces using Plotly.
     """
     if traces.empty:
-        warnings.warn("No trace data to plot.", UserWarning)
+        warnings.warn("No trace data to plot.", UserWarning, stacklevel=2)
         return None
 
     go, px, make_subplots = _check_plotly()
@@ -41,7 +41,7 @@ def plot_traces_internal(traces: pd.DataFrame, title: str = "Traces") -> Any:
     df_long = df_long.dropna(subset=["value"])
 
     if df_long.empty:
-        warnings.warn("No valid trace data to plot.", UserWarning)
+        warnings.warn("No valid trace data to plot.", UserWarning, stacklevel=2)
         return None
 
     variables = df_long["variable"].unique()

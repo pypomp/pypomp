@@ -151,7 +151,7 @@ def test_benchmark_warning_suppression(dummy_data):
         mock_model.fit.return_value = mock_res
 
         def side_effect(*args, **kwargs):
-            warnings.warn("Fake statsmodels warning", RuntimeWarning)
+            warnings.warn("Fake statsmodels warning", RuntimeWarning, stacklevel=2)
             return mock_res
 
         mock_model.fit.side_effect = side_effect
@@ -177,7 +177,7 @@ def test_benchmark_warning_suppression(dummy_data):
         mock_model.fit.return_value = mock_res
 
         def side_effect_nb(*args, **kwargs):
-            warnings.warn("Fake NB warning", RuntimeWarning)
+            warnings.warn("Fake NB warning", RuntimeWarning, stacklevel=2)
             return mock_res
 
         mock_model.fit.side_effect = side_effect_nb
@@ -219,7 +219,7 @@ def test_panel_benchmark_warning_suppression(dummy_data):
         mock_model.fit.return_value = mock_res
 
         def side_effect(*args, **kwargs):
-            warnings.warn("Fake statsmodels warning", RuntimeWarning)
+            warnings.warn("Fake statsmodels warning", RuntimeWarning, stacklevel=2)
             return mock_res
 
         mock_model.fit.side_effect = side_effect
@@ -246,7 +246,7 @@ def test_panel_benchmark_warning_suppression(dummy_data):
         mock_model.fit.return_value = mock_res
 
         def side_effect_nb(*args, **kwargs):
-            warnings.warn("Fake NB warning", RuntimeWarning)
+            warnings.warn("Fake NB warning", RuntimeWarning, stacklevel=2)
             return mock_res
 
         mock_model.fit.side_effect = side_effect_nb

@@ -86,7 +86,7 @@ def test_mif_order_of_sigmas_consistency(simple):
 
     base_sigma = 0.01
     unique_sigmas = [base_sigma + 0.001 * i for i in range(len(param_names))]
-    sigmas_dict = {k: v for k, v in zip(param_names, unique_sigmas)}
+    sigmas_dict = {k: v for k, v in zip(param_names, unique_sigmas, strict=False)}
     rw_sd_orig = pp.RWSigma(sigmas=sigmas_dict, init_names=[]).geometric_cooling(0.5)
 
     reversed_param_names = list(reversed(param_names))

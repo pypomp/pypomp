@@ -368,11 +368,11 @@ def _scan_jit(
             current_args[arg_idx] = restored
 
         # 2. Fill static args
-        for idx, val in zip(static_idxs_static, static_args_static):
+        for idx, val in zip(static_idxs_static, static_args_static, strict=False):
             current_args[idx] = val
 
         # 3. Fill dynamic args
-        for idx, val in zip(dynamic_idxs_static, dynamic_args):
+        for idx, val in zip(dynamic_idxs_static, dynamic_args, strict=False):
             current_args[idx] = val
 
         # 4. Reconstruct kwargs

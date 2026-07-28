@@ -674,7 +674,11 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                     jax.Array, jax.random.wrap_key_data(state["_fresh_key_data"])
                 )
             except Exception as e:
-                warnings.warn(f"Failed to reconstruct JAX fresh_key: {e}", UserWarning)
+                warnings.warn(
+                    f"Failed to reconstruct JAX fresh_key: {e}",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 self.fresh_key = None
         elif "fresh_key" not in self.__dict__:
             self.fresh_key = None
@@ -700,6 +704,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                     f"Failed to reconstruct {prefix} function: {e}. "
                     f"The model may be unusable for simulations or estimation.",
                     UserWarning,
+                    stacklevel=2,
                 )
             return None
 

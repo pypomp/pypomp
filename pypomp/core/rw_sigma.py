@@ -152,11 +152,11 @@ class RWSigma:
                 raise ValueError(f"Value for '{name}' must be a float, got bool")
             try:
                 fval = float(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as e:
                 raise ValueError(
                     f"Value for parameter '{name}' in sigmas must be a float: "
                     f"got {type(value).__name__}"
-                )
+                ) from e
             if fval < 0:
                 raise ValueError("All values in sigmas dictionary must be non-negative")
             clean[name] = fval
@@ -370,7 +370,9 @@ class RWSigma:
         """Read-only dict view of ``{param_name: sigma}`` (host-side only)."""
         return {
             n: float(v)
-            for n, v in zip(self.param_names, np.asarray(self.sigmas_all_arr))
+            for n, v in zip(
+                self.param_names, np.asarray(self.sigmas_all_arr), strict=False
+            )
         }
 
     def __getitem__(self, param_name: str) -> float:
@@ -451,7 +453,7 @@ def _callables_equal(fn1: Callable | None, fn2: Callable | None) -> bool:
     if cells1 is not None and cells2 is not None:
         if len(cells1) != len(cells2):
             return False
-        for c1, c2 in zip(cells1, cells2):
+        for c1, c2 in zip(cells1, cells2, strict=False):
             if c1.cell_contents != c2.cell_contents:
                 return False
     return True

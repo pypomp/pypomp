@@ -450,7 +450,7 @@ class PompEstimationMixin(Base):
         eta: LearningRate,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-        optimizer: Optimizer = Adam(),
+        optimizer: Optimizer | None = None,
         alpha: float = 0.97,
         thresh: float = 0.0,
         alpha_cooling: float = 1.0,
@@ -541,6 +541,7 @@ class PompEstimationMixin(Base):
         >>> model.results()
         """
         start_time = time.time()
+        optimizer = optimizer or Adam()
         thresh = float(max(0.0, thresh))
 
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
@@ -638,7 +639,7 @@ class PompEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate,
-        optimizer: Optimizer = Adam(),
+        optimizer: Optimizer | None = None,
         alpha: float = 0.8,
         alpha_cooling: float = 1.0,
         decay: float = 0.0,
@@ -707,6 +708,8 @@ class PompEstimationMixin(Base):
         new_key, _ = self._update_fresh_key(key)
         theta_obj = self._prepare_theta_input(theta)
         theta_nat = theta_obj.params(as_list=True)[0]
+        optimizer = optimizer or Adam()
+
         param_names = self.canonical_param_names
         theta_est_dict = self.par_trans.to_est(cast(ParamDict, theta_nat))
         theta_init = jnp.array([theta_est_dict[name] for name in param_names])
@@ -1145,6 +1148,7 @@ class PompEstimationMixin(Base):
                 warnings.warn(
                     "as_pomp is True, but nsim > 1. Only 1 simulation will be performed as_pomp overrides nsim.",
                     UserWarning,
+                    stacklevel=2,
                 )
             nsim = 1
 

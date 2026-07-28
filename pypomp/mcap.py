@@ -64,6 +64,7 @@ def _loess_smooth_1d(
         warnings.warn(
             "LinAlgError in loess_1d, retrying with 1e10 sigy",
             RuntimeWarning,
+            stacklevel=2,
         )
         res = loess_1d(
             x,

@@ -44,4 +44,4 @@ def align_params(
     except KeyError as e:
         raise KeyError(
             f"Parameter '{e.args[0]}' is required by the model structure but missing from inputs."
-        )
+        ) from e

@@ -264,6 +264,7 @@ class PanelEstimationMixin(Base):
                 warnings.warn(
                     "as_pomp is True, but nsim > 1. Only 1 simulation will be performed as_pomp overrides nsim.",
                     UserWarning,
+                    stacklevel=2,
                 )
             nsim = 1
 
@@ -777,7 +778,7 @@ class PanelEstimationMixin(Base):
         M: int,
         eta: LearningRate,
         chunk_size: int = 1,
-        optimizer: Optimizer = Adam(),
+        optimizer: Optimizer | None = None,
         alpha: float = 0.97,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
@@ -842,6 +843,7 @@ class PanelEstimationMixin(Base):
            *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
         """
         start_time = time.time()
+        optimizer = optimizer or Adam()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         theta_for_result = deepcopy(theta_obj_in)
 
@@ -996,7 +998,7 @@ class PanelEstimationMixin(Base):
         M: int,
         eta: LearningRate | dict[str, float] | float,
         chunk_size: int = 1,
-        optimizer: Optimizer = Adam(),
+        optimizer: Optimizer | None = None,
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
         decay: float = 0.0,
@@ -1049,6 +1051,7 @@ class PanelEstimationMixin(Base):
         )
 
         start_time = time.time()
+        optimizer = optimizer or Adam()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
         if theta_obj_in is None:
             raise ValueError("theta must be provided or self.theta must exist")
@@ -1080,6 +1083,7 @@ class PanelEstimationMixin(Base):
                 "chunk_size does not divide the number of units; "
                 f"using chunk_size={chunk_size_value} instead of {original_chunk_size}.",
                 UserWarning,
+                stacklevel=2,
             )
         chunk_size = chunk_size_value
 
@@ -1093,11 +1097,11 @@ class PanelEstimationMixin(Base):
             )
         try:
             process_weight_index = int(rep_unit.statenames.index(process_weight_state))
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"process_weight_state '{process_weight_state}' not found in "
                 f"statenames: {rep_unit.statenames}"
-            )
+            ) from e
 
         unit_param_permutations = jnp.stack(
             [self._get_unit_param_permutation(u) for u in unit_names], axis=0

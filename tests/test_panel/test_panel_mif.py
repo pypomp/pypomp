@@ -20,7 +20,7 @@ def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
         theta_orig.params(as_list=True),
     )
     assert len(theta_list1) == len(theta_list2)
-    for d1, d2 in zip(theta_list1, theta_list2):
+    for d1, d2 in zip(theta_list1, theta_list2, strict=False):
         for k in ["shared", "unit_specific"]:
             v1, v2 = d1.get(k), d2.get(k)
             if v1 is None or v2 is None:

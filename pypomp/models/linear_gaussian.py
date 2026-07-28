@@ -341,7 +341,7 @@ def LG(
     Q: np.ndarray | None = None,
     R: np.ndarray | None = None,
     X0: np.ndarray | None = None,
-    key: jax.Array = jax.random.key(1),
+    key: jax.Array | None = None,
 ) -> Pomp:
     """
     Initialize a Pomp object with the linear Gaussian model.
@@ -388,6 +388,9 @@ def LG(
     >>> LG(A=np.eye(3), C=np.eye(2, 3))       # 3-D state, 2-D observation
     >>> LG(X0=np.array([5.0, -5.0]))          # start away from the origin
     """
+    if key is None:
+        key = jax.random.key(1)
+
     dx, dy = _infer_dims(A, C, Q, R, X0)
 
     A_ = _default_A(dx) if A is None else np.asarray(A, dtype=float)
@@ -402,8 +405,10 @@ def LG(
             raise ValueError(f"Covariance matrix {name} must be symmetric.")
         try:
             np.linalg.cholesky(mat)
-        except np.linalg.LinAlgError:
-            raise ValueError(f"Covariance matrix {name} must be positive-definite.")
+        except np.linalg.LinAlgError as e:
+            raise ValueError(
+                f"Covariance matrix {name} must be positive-definite."
+            ) from e
 
     L_Q = np.linalg.cholesky(Q_)
     L_R = np.linalg.cholesky(R_)

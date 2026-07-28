@@ -13,7 +13,7 @@ def test_multinomial_basics() -> None:
 
     assert x.shape == (2, 3)  # 2 draws, 3 categories
     assert np.allclose(np.sum(np.array(x), axis=1), np.array(n))
-    for xi, ni in zip(x, n):
+    for xi, ni in zip(x, n, strict=False):
         assert np.all(xi >= 0)
         assert np.all(xi <= ni)
 

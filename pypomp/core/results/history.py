@@ -71,7 +71,7 @@ class ResultsHistory:
             return False
         if len(self) != len(other):
             return False
-        return all(a == b for a, b in zip(self._entries, other._entries))
+        return all(a == b for a, b in zip(self._entries, other._entries, strict=False))
 
     @staticmethod
     def merge(*histories: ResultsHistory) -> ResultsHistory:

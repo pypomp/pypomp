@@ -100,7 +100,7 @@ class ParTrans:
         transform_fn = self._get_transform_fn(direction)
 
         def transform_single_row(row):
-            param_dict = dict(zip(param_names, row))
+            param_dict = dict(zip(param_names, row, strict=False))
             transformed_dict = transform_fn(param_dict)
             return jnp.stack([transformed_dict[name] for name in param_names])
 

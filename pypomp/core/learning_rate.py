@@ -251,7 +251,7 @@ class LearningRate:
         """Dictionary mapping parameter names to learning rate values or schedules."""
         arr = np.asarray(self.rates_all_arr)
         if arr.ndim == 1:
-            return {n: float(v) for n, v in zip(self.param_names, arr)}
+            return {n: float(v) for n, v in zip(self.param_names, arr, strict=False)}
         return {
             n: (
                 float(arr[0, i])

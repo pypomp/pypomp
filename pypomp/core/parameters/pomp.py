@@ -107,10 +107,10 @@ def _standardize_pomp_theta(
     else:
         try:
             theta_dicts = [dict(t) for t in cast(Any, theta)]
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
             raise TypeError(
                 "theta must be a Mapping, Sequence of Mappings, or PompParameters"
-            )
+            ) from e
 
     # Validate elements are dictionaries and not empty
     if len(theta_dicts) == 0:
@@ -129,10 +129,10 @@ def _standardize_pomp_theta(
                 )
             try:
                 t_copy[key] = float(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as e:
                 raise TypeError(
                     f"Parameter '{key}' at index {i} is not a float: got {type(value).__name__}"
-                )
+                ) from e
         clean_dicts.append(t_copy)
 
     # Ensure all dicts have identical keys
@@ -276,7 +276,7 @@ class PompParameters(ParameterSet):
         except KeyError as e:
             raise KeyError(
                 f"Parameter {e} expected by model but missing from parameter set."
-            )
+            ) from e
 
         return jnp.array(ordered_values)
 
@@ -372,7 +372,11 @@ class PompParameters(ParameterSet):
         return {"logLik": np.concatenate([obj._logLik for obj in param_objs])}
 
     def _getitem_int(self, index: int) -> dict[str, float]:
-        return dict(zip(self.get_param_names(), self._data["shared"].values[index]))
+        return dict(
+            zip(
+                self.get_param_names(), self._data["shared"].values[index], strict=False
+            )
+        )
 
     def _transform_and_load(
         self,

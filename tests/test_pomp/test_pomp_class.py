@@ -65,7 +65,7 @@ def neapolitan_setup(setup):
 def test_invalid_initialization(model):
     LG, _ = model
     for arg in ["ys", "theta", "rinit", "rproc", "dmeas"]:
-        with pytest.raises(Exception):
+        with pytest.raises((TypeError, ValueError, AttributeError)):
             kwargs = {
                 k: getattr(LG, k) for k in ["ys", "theta", "rinit", "rproc", "dmeas"]
             }

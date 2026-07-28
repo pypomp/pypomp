@@ -428,7 +428,7 @@ def compute_lgm_panel_mle(ys_dict, shared_params, unit_specific_params):
     def unpack_params(vec):
         s_dict = {}
         u_dict = {u: {} for u in units}
-        for (category, name), val in zip(param_map, vec):
+        for (category, name), val in zip(param_map, vec, strict=False):
             if category == "shared":
                 s_dict[name] = val
             else:
@@ -449,7 +449,7 @@ def compute_lgm_panel_mle(ys_dict, shared_params, unit_specific_params):
         return -tot_ll
 
     bounds = []
-    for category, name in param_map:
+    for _category, name in param_map:
         if name == "a":
             bounds.append((0.01, 0.99))
         else:

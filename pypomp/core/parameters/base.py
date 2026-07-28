@@ -242,7 +242,7 @@ class ParameterSet(ABC):
             **cls._concat_logLik(param_objs),
         )
 
-    def _finalize_merged_data(self, merged_data: xr.Dataset) -> None:
+    def _finalize_merged_data(self, merged_data: xr.Dataset) -> None:  # noqa: B027
         """Adjust the concatenated data in place before construction.
 
         Default is a no-op; subclasses may override (e.g. to restore

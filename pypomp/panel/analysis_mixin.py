@@ -184,7 +184,7 @@ class PanelAnalysisMixin(Base):
         traces = self.traces()
         assert isinstance(traces, pd.DataFrame)
         if traces.empty:
-            warnings.warn("No trace data to plot.", UserWarning)
+            warnings.warn("No trace data to plot.", UserWarning, stacklevel=2)
             return None
 
         value_cols = [
@@ -207,7 +207,7 @@ class PanelAnalysisMixin(Base):
 
         if which == "shared":
             if not has_shared_rows:
-                warnings.warn("No shared rows to plot.", UserWarning)
+                warnings.warn("No shared rows to plot.", UserWarning, stacklevel=2)
                 return None
             df_plot = traces.loc[traces["unit"] == "shared"]
             title = "Shared Parameter Traces"

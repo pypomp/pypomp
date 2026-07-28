@@ -1,11 +1,3 @@
-.PHONY: install_requirements
-
-install_requirements: .venv
-	pip install -e ".[tests,benchmarks,viz]"
-
-.venv:
-	python3.12 -m venv .venv
-
 .PHONY: test-light test-heavy test-all
 
 test-light:

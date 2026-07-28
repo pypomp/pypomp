@@ -22,11 +22,8 @@ source .venv/bin/activate
 # Upgrade pip
 pip install --upgrade pip
 
-# Install main requirements
-pip install -r requirements.txt
-
 # Install the package in editable mode with all development, testing, and benchmark extras
-pip install -e .[tests,benchmarks,viz]
+pip install -e ".[tests,benchmarks,viz]"
 ```
 
 ---

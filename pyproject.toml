@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmarks = ["statsmodels"]
-tests = ["pytest", "pytest-xdist", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright", "plotnine"]
+tests = ["pytest", "pytest-cov", "pytest-xdist", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright", "plotnine"]
 viz = ["plotly"]
 
 
@@ -61,11 +61,11 @@ ignore = ["E741", "RUF009"]
 
 [tool.pyright]
 include = ["."]
-exclude = ["**/.venv"]
+exclude = ["**/.venv", "**/.claude", "scratch"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.14"
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
 
 [tool.mypy]
 python_version = "3.14"

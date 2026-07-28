@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Lint with Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check
+
       - name: Check formatting with Ruff
         uses: astral-sh/ruff-action@v3
         with:

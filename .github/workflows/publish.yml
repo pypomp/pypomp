@@ -11,6 +11,7 @@ jobs:
     uses: ./.github/workflows/test-package.yml
     with:
       run-heavy: true
+      all-python-versions: true
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 

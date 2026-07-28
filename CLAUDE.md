@@ -12,8 +12,8 @@ Pypomp is a Python package for modeling and inference using Partially Observed M
 python3.14 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install package in editable mode with extras
+pip install -e ".[tests,benchmarks,viz]"
 
 # Do not overwrite an existing environment.
 ```
@@ -27,7 +27,7 @@ pip list | grep pytest-
 # Install pypomp in editable mode for development. This is mandatory: without
 # `pip install -e .`, `import pypomp` may resolve to a stale site-packages copy
 # and pytest/coverage will silently exercise the wrong files.
-pip install -e .[tests,benchmarks,viz]
+pip install -e ".[tests,benchmarks,viz]"
 
 # `statsmodels` (pulled in by the [benchmarks] extra) is needed for some tests
 # under tests/test_models/.

@@ -24,7 +24,15 @@ import jax.scipy.special as jspecial
 from pypomp.random.poisson import fast_poisson
 from pypomp.random.binom import fast_multinomial
 from pypomp.random.gamma import fast_gamma
-from pypomp.types import ParamDict
+from pypomp.core.model_struct import vectorized
+from pypomp.types import (
+    StateDict,
+    ParamDict,
+    CovarDict,
+    TimeFloat,
+    StepSizeFloat,
+    RNGKey,
+)
 
 
 param_names = (
@@ -64,8 +72,18 @@ def rinit(theta_, key, covars, t0=None):
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
-def rproc(X_, theta_, key, covars, t, dt):
+@vectorized
+def rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
     S, E, I, R, W, C = X_["S"], X_["E"], X_["I"], X_["R"], X_["W"], X_["C"]
+    J = jnp.asarray(S).shape[0]
+
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
     gamma = theta_["gamma"]
@@ -107,41 +125,43 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
-    dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
-
-    rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
+    dw = fast_gamma(keys[0], jnp.broadcast_to(dt / sigmaSE**2, (J,))) * sigmaSE**2
 
     # Poisson births
-    births = fast_poisson(keys[1], br * dt)
+    births = fast_poisson(keys[1], jnp.broadcast_to(br * dt, (J,)))
 
     # transitions between classes
-    rt_final = jnp.zeros((3, 3))
-
-    rate_pairs = jnp.array([[rate[0], rate[1]], [rate[2], rate[3]], [rate[4], rate[5]]])
-    populations = jnp.array([S, E, I])
-
-    rate_sums = jnp.sum(rate_pairs, axis=1)
-    p0_values = jnp.exp(-rate_sums * dt)
-
-    rt_final = (
-        rt_final.at[:, 0:2]
-        .set(jnp.einsum("ij,i,i->ij", rate_pairs, 1 / rate_sums, 1 - p0_values))
-        .at[:, 2]
-        .set(p0_values)
+    rates_S = jnp.stack([foi * dw / dt, jnp.broadcast_to(mu, (J,))], axis=-1)
+    rates_E = jnp.stack(
+        [jnp.broadcast_to(sigma, (J,)), jnp.broadcast_to(mu, (J,))], axis=-1
+    )
+    rates_I = jnp.stack(
+        [jnp.broadcast_to(gamma, (J,)), jnp.broadcast_to(mu, (J,))], axis=-1
     )
 
-    transitions = fast_multinomial(keys[2], populations, rt_final)
+    rate_pairs = jnp.stack([rates_S, rates_E, rates_I], axis=1)  # (J, 3, 2)
+    populations = jnp.stack([S, E, I], axis=-1)  # (J, 3)
 
-    trans_S = transitions[0]
-    trans_E = transitions[1]
-    trans_I = transitions[2]
+    rate_sums = jnp.sum(rate_pairs, axis=-1)  # (J, 3)
+    p0_values = jnp.exp(-rate_sums * dt)  # (J, 3)
 
-    S = S + births - trans_S[0] - trans_S[1]
-    E = E + trans_S[0] - trans_E[0] - trans_E[1]
-    I = I + trans_E[0] - trans_I[0] - trans_I[1]
+    p_events = rate_pairs * ((1.0 - p0_values) / rate_sums)[..., None]  # (J, 3, 2)
+    rt_final = jnp.stack(
+        [p_events[..., 0], p_events[..., 1], p0_values], axis=-1
+    )  # (J, 3, 3)
+
+    transitions = fast_multinomial(keys[2], populations, rt_final)  # (J, 3, 3)
+
+    trans_S = transitions[:, 0, :]
+    trans_E = transitions[:, 1, :]
+    trans_I = transitions[:, 2, :]
+
+    S = S + births - trans_S[:, 0] - trans_S[:, 1]
+    E = E + trans_S[:, 0] - trans_E[:, 0] - trans_E[:, 1]
+    I = I + trans_E[:, 0] - trans_I[:, 0] - trans_I[:, 1]
     R = pop - S - E - I
     W = W + (dw - dt) / sigmaSE
-    C = C + trans_I[0]
+    C = C + trans_I[:, 0]
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 

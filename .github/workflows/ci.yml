@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full-matrix:
+        description: "Test all supported Python versions (3.10-3.14)"
+        type: boolean
+        default: false
+      run-heavy:
+        description: "Include heavy tests (accuracy/convergence checks)"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      full-matrix:
+        type: boolean
+        default: false
+      run-heavy:
+        type: boolean
+        default: false
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # `github.workflow` resolves to the *caller's* name for a reusable workflow,
+  # so a release-triggered run lands in a different group than a push to main
+  # and the two never cancel each other.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      # The pyright hook in .pre-commit-config.yaml is `language: system`, so it
+      # needs the project's dependencies importable to resolve jax/numpy/etc.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[tests,benchmarks,viz]"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # Currently doesn't work on pypy3.10 due to dependencies.
+        python-version: ${{ fromJSON(inputs.full-matrix
+          && '["3.10","3.11","3.12","3.13","3.14"]'
+          || '["3.12","3.14"]') }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[tests,benchmarks,viz]"
+
+      # tests/conftest.py points JAX's persistent compilation cache here.
+      # jaxlib upgrades invalidate entries internally, so a stale restore is
+      # safe -- it just yields fewer hits.
+      - uses: actions/cache@v4
+        with:
+          path: .pytest_cache/jax_cache
+          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ github.sha }}
+          restore-keys: |
+            jax-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Test with pytest
+        # An `${{ ... && '' || ... }}` expression cannot be used to build this
+        # flag: the empty string is falsy in GitHub expressions, so the `&&`
+        # branch would fall through to the `||` branch and heavy tests would
+        # never run. Branch in the shell instead.
+        env:
+          RUN_HEAVY: ${{ inputs.run-heavy }}
+        run: |
+          if [ "$RUN_HEAVY" = "true" ]; then
+            pytest --cov --junitxml=junit.xml -o junit_family=legacy
+          else
+            pytest -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Check metadata
+        run: twine check --strict dist/*
+      - name: Smoke-test the wheel
+        # Install into a clean venv (not the build env) so a missing runtime
+        # dependency or a packaging mistake surfaces here rather than on PyPI.
+        # The import must run from outside the checkout: with the repo as the
+        # working directory, `import pypomp` resolves to ./pypomp and the test
+        # passes without ever touching the wheel.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --upgrade pip
+          /tmp/smoke/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/smoke/bin/python -c "import pypomp; print(pypomp.__version__, pypomp.__file__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  docs:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install docs dependencies
+        # docs/requirements.txt pins `pypomp>=0.1` from PyPI; installing the
+        # working tree afterwards overrides it so the docs build against HEAD.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docs/requirements.txt
+          python -m pip install -e .
+      - name: Build HTML
+        run: sphinx-build -b html docs/source docs/build/html

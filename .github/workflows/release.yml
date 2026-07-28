@@ -1,0 +1,111 @@
+name: Release
+
+# Preferred path: Actions -> Release -> Run workflow, entering the version to
+# confirm. The tag is created by this workflow *after* everything passes, so a
+# failure at any stage leaves no tag behind -- fix, commit, and run it again.
+#
+# The tag-push trigger is kept so the older `git tag && git push` habit still
+# works, but on that path a failure requires deleting and re-pushing the tag.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.4.9 or 0.4.9rc1 (must match pyproject.toml)"
+        required: true
+        type: string
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Check version consistency
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history and tags, so the guard can verify the tag is unused and
+          # that HEAD is on main.
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip packaging
+      - id: check
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python tools/check_version.py
+
+  ci:
+    name: Full test suite
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+    with:
+      full-matrix: true
+      run-heavy: true
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  publish:
+    name: Publish to PyPI
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    # Requires manual approval when the environment has required reviewers
+    # configured (Settings -> Environments -> pypi). Everything before this
+    # point is reversible; nothing after it is.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pypomp/
+    permissions:
+      id-token: write # PyPI trusted publishing
+      attestations: write # build provenance
+      contents: write # push the tag and create the Release
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download the tested distributions
+        # Publishes the exact artifact the `build` job produced and smoke-tested
+        # rather than rebuilding from source.
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      # First side effect of the whole run. Skipped on the tag-push path, where
+      # the tag already exists.
+      - name: Create and push tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      # Irreversible: a PyPI version number can never be reused, even after
+      # deleting the release. `skip-existing` keeps a re-run idempotent if an
+      # earlier attempt uploaded only part of the set.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.guard.outputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}

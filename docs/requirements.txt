@@ -1,15 +1,11 @@
-# packages needed specifically for the documentation
+# Documentation-only dependencies.
+#
+# pypomp's own runtime dependencies are deliberately NOT listed here:
+# .readthedocs.yaml installs the package itself from pyproject.toml, which is
+# the single source of truth for them.
 sphinx
 furo
-# packages needed for pypomp
-jax>=0.5.3
-tqdm>=4.66.4
-pypomp>=0.1
-numpy>=1.24
-pandas
-xarray
-scipy
-typing_extensions
+
+# Used by the narrative docs and examples, not by the package itself.
 seaborn
 matplotlib
-loess

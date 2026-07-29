@@ -19,6 +19,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Serialise releases. Two runs for the same version would both reach
+  # `publish`: `skip-existing` keeps PyPI safe, but `git tag` fails on the
+  # second and the GitHub Release creation races.
+  #
+  # Never cancel: a cancelled run may already have pushed the tag or uploaded to
+  # PyPI, and a half-finished release is worse than a queued one.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   guard:
     name: Check version consistency
@@ -49,6 +59,9 @@ jobs:
     with:
       full-matrix: true
       run-heavy: true
+      # Run-scoped, so this CI run shares a concurrency group with nothing and
+      # cannot be cancelled by a push to main mid-release.
+      concurrency-key: release-ci-${{ github.run_id }}
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 

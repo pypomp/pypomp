@@ -6,7 +6,7 @@ This document provides instructions for developers contributing to the Pypomp re
 
 ## 1. Local Environment Setup
 
-We recommend setting up a virtual environment using Python 3.14 (the primary target version configured for type checking). However, Python versions `[3.10, 3.11, 3.12, 3.13]` are also fully supported.
+We recommend setting up a virtual environment using Python 3.14 (the primary target version configured for type checking). However, Python versions `[3.11, 3.12, 3.13]` are also fully supported.
 
 To create and configure your local development environment:
 
@@ -130,11 +130,17 @@ Because `checks` runs pre-commit, CI executes the exact tool versions pinned in
 `.pre-commit-config.yaml`. To upgrade a linter, run `pre-commit autoupdate` — CI follows
 automatically, with no workflow edit.
 
-Consecutive pushes cancel superseded runs, so only the latest commit is tested.
+Consecutive pushes cancel superseded runs, so only the latest commit is tested. Release-triggered
+runs are exempt: release.yml passes a run-scoped `concurrency-key`, so a push to main cannot
+cancel a release in progress.
 
-To run the full Python matrix (3.10–3.14) or the heavy tests without cutting a release, use
+To run the full Python matrix (3.11–3.14) or the heavy tests without cutting a release, use
 **Actions → CI → Run workflow** and tick `full-matrix` and/or `run-heavy`. Doing this before a
 release is worthwhile, since heavy tests do not run on ordinary pushes.
+
+Heavy tests run in their own single-cell job (Ubuntu, 3.14) rather than across the matrix:
+accuracy and convergence results should not vary by interpreter or OS, so running them on every
+combination costs ten times the runner time for the same signal.
 
 ---
 
@@ -170,8 +176,8 @@ Keep the two in sync by putting whatever form you want in `pyproject.toml` — a
 ```
 guard          version consistency; tag must not already exist; HEAD must be on main
   ↓
-ci.yml         full 3.10–3.14 matrix on Ubuntu and macOS, heavy tests included,
-               plus checks / build / docs
+ci.yml         full 3.11–3.14 matrix on Ubuntu and macOS, plus the heavy-test
+               job, checks / build / docs
   ↓
 publish        ⏸ pauses for manual approval
   ↓            downloads the distributions ci.yml already built and smoke-tested

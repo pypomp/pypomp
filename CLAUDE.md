@@ -8,7 +8,7 @@ Pypomp is a Python package for modeling and inference using Partially Observed M
 
 ### Environment Setup
 ```bash
-# Create virtual environment (Python 3.10+)
+# Create virtual environment (Python 3.11+)
 python3.14 -m venv .venv
 source .venv/bin/activate
 

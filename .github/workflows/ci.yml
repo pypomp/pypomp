@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       full-matrix:
-        description: "Test all supported Python versions (3.10-3.14)"
+        description: "Test all supported Python versions (3.11-3.14)"
         type: boolean
         default: false
       run-heavy:
@@ -22,6 +22,10 @@ on:
       run-heavy:
         type: boolean
         default: false
+      concurrency-key:
+        # Set by a caller that must never be cancelled (see `concurrency` below).
+        type: string
+        default: ""
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -30,11 +34,20 @@ permissions:
   contents: read
 
 concurrency:
-  # `github.workflow` resolves to the *caller's* name for a reusable workflow,
-  # so a release-triggered run lands in a different group than a push to main
-  # and the two never cancel each other.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+  # release.yml passes an explicit run-scoped `concurrency-key`, which is unique
+  # per run and so is never cancelled by anything else.
+  #
+  # Defence in depth rather than a fix for a known bug: a called workflow sees
+  # the *caller's* `github.workflow`, so release runs already group separately
+  # ("Release-..." vs "CI-..."). That is a subtle guarantee to rest a release on
+  # -- renaming either workflow is enough to collide them -- so state it
+  # explicitly instead.
+  #
+  # `inputs.concurrency-key ||` relies on an unset/empty input being falsy in
+  # GitHub expressions -- the same quirk called out on the pytest step below,
+  # used deliberately here.
+  group: ${{ inputs.concurrency-key || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ inputs.concurrency-key == '' && (github.event_name == 'push' || github.event_name == 'pull_request') }}
 
 jobs:
   checks:
@@ -62,13 +75,19 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    # The light suite takes ~4 min on macOS and ~12 min on Ubuntu, so this is
+    # pure headroom. It exists because Ubuntu runners have been dying mid-suite
+    # ("The runner has received a shutdown signal") and wedging for 54-56
+    # minutes before GitHub's 360-minute default reaped them -- on a 10-cell
+    # release matrix that is hours of runner time per hang.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # Currently doesn't work on pypy3.10 due to dependencies.
+        # Currently doesn't work on pypy due to dependencies.
         python-version: ${{ fromJSON(inputs.full-matrix
-          && '["3.10","3.11","3.12","3.13","3.14"]'
+          && '["3.11","3.12","3.13","3.14"]'
           || '["3.12","3.14"]') }}
     steps:
       - uses: actions/checkout@v5
@@ -86,7 +105,16 @@ jobs:
       # tests/conftest.py points JAX's persistent compilation cache here.
       # jaxlib upgrades invalidate entries internally, so a stale restore is
       # safe -- it just yields fewer hits.
-      - uses: actions/cache@v5
+      #
+      # Restore and save are split so that only pushes to main write entries.
+      # A single `actions/cache` step with `github.sha` in the key never hits
+      # exactly, so every commit on every branch would store a fresh copy;
+      # multiplied by the matrix, those hundreds-of-MB entries evict each other
+      # out of the 10 GB per-repo limit and the cache stops paying for itself.
+      # PR runs restore from main's entry instead (their own writes would be
+      # scoped to the PR and unusable elsewhere anyway).
+      - uses: actions/cache/restore@v5
+        id: jax-cache
         with:
           path: .pytest_cache/jax_cache
           key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ github.sha }}
@@ -94,18 +122,16 @@ jobs:
             jax-${{ runner.os }}-${{ matrix.python-version }}-
 
       - name: Test with pytest
-        # An `${{ ... && '' || ... }}` expression cannot be used to build this
-        # flag: the empty string is falsy in GitHub expressions, so the `&&`
-        # branch would fall through to the `||` branch and heavy tests would
-        # never run. Branch in the shell instead.
-        env:
-          RUN_HEAVY: ${{ inputs.run-heavy }}
-        run: |
-          if [ "$RUN_HEAVY" = "true" ]; then
-            pytest --cov --junitxml=junit.xml -o junit_family=legacy
-          else
-            pytest -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
-          fi
+        run: pytest -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
+
+      # Not gated on the tests passing: the compilation cache is still valid and
+      # worth keeping when a test fails. `cache-hit` is only 'true' on an exact
+      # key match (a re-run of the same sha), where saving would just warn.
+      - uses: actions/cache/save@v5
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
+        with:
+          path: .pytest_cache/jax_cache
+          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ github.sha }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -116,6 +142,55 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  heavy:
+    name: Heavy tests
+    # Accuracy and convergence results do not vary by interpreter or OS, so this
+    # runs on one cell rather than every matrix combination -- the same coverage
+    # for a tenth of the runner time. `inputs.run-heavy` is unset (and so falsy)
+    # on push and pull_request, which skips the job.
+    if: ${{ inputs.run-heavy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[tests,benchmarks,viz]"
+
+      - uses: actions/cache/restore@v5
+        id: jax-cache
+        with:
+          path: .pytest_cache/jax_cache
+          key: jax-heavy-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            jax-heavy-${{ runner.os }}-
+
+      - name: Test with pytest
+        run: pytest -m heavy --cov --junitxml=junit.xml -o junit_family=legacy
+
+      - uses: actions/cache/save@v5
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
+        with:
+          path: .pytest_cache/jax_cache
+          key: jax-heavy-${{ runner.os }}-${{ github.sha }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: heavy
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: heavy
 
   build:
     name: Build distributions
@@ -158,11 +233,16 @@ jobs:
           python-version: "3.14"
           cache: pip
       - name: Install docs dependencies
-        # docs/requirements.txt pins `pypomp>=0.1` from PyPI; installing the
-        # working tree afterwards overrides it so the docs build against HEAD.
+        # Mirrors .readthedocs.yaml: docs-only tooling from
+        # docs/requirements.txt, runtime dependencies from pyproject.toml. Keep
+        # the two install paths in step so CI cannot pass while RTD fails.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r docs/requirements.txt
           python -m pip install -e .
       - name: Build HTML
-        run: sphinx-build -b html docs/source docs/build/html
+        # -W turns warnings into errors so broken cross-references and malformed
+        # docstring markup fail here instead of silently rendering wrong.
+        # --keep-going reports every warning in one run rather than stopping at
+        # the first.
+        run: sphinx-build -W --keep-going -b html docs/source docs/build/html

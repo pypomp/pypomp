@@ -86,7 +86,7 @@ You can define the function arguments in two ways:
 .. _vectorized-rproc:
 
 Manually Vectorized rproc (CPU optimization)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 By default pypomp applies :func:`jax.vmap` to ``rproc``, so the function above is
 written for a *single* particle. Decorating ``rproc`` with

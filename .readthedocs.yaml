@@ -16,6 +16,13 @@ sphinx:
 
 # Declare the Python requirements required to build your documentation
 # See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+#
+# docs/requirements.txt carries docs-only tooling; the package itself (and so
+# its runtime dependencies) comes from pyproject.toml via the path install
+# below. Listing the runtime dependencies here by hand instead lets them drift
+# from pyproject.toml -- which had already happened, with `cloudpickle` missing.
 python:
    install:
    - requirements: docs/requirements.txt
+   - method: pip
+     path: .

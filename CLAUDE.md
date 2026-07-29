@@ -57,6 +57,11 @@ pytest tests/test_pomp/test_pomp_pfilter.py::test_class_basic_default
 pytest tests/test_pomp/
 pytest tests/test_panel/
 pytest tests/test_models/
+
+# CPU parallel-scaling timings. Not collected by a plain `pytest` run: they
+# measure wall-clock time, so they need the cores to themselves (see
+# tests/test_cpu_parallel/conftest.py).
+make test-cpu-scaling
 ```
 
 ### Linting and Type Checking
@@ -309,6 +314,10 @@ tests/
 ├── test_ParTrans_traces.py
 ├── test_RWSigma.py
 ├── test_model_struct.py
+├── test_cpu_parallel/         # Wall-clock CPU parallel-scaling checks
+│   ├── conftest.py            # Gates collection on PYPOMP_CPU_SCALING=1
+│   ├── _scaling_worker.py     # Times one pfilter per subprocess/config
+│   └── test_cpu_parallel_scaling.py
 ├── test_random/               # Modular JAX random distribution tests
 │   ├── helpers.py             # Shared test utilities
 │   ├── test_binomial.py

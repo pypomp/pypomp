@@ -95,6 +95,26 @@ pytest --cov
 > - A JAX persistent compilation cache is configured under `.pytest_cache/jax_cache` to speed up subsequent test runs.
 > - Ensure you have installed the package in editable mode (`pip install -e .[tests,benchmarks,viz]`) so that code coverage is measured against the active source files.
 
+### CPU parallel-scaling tests
+
+`tests/test_cpu_parallel/` times particle filters to check that the CPU sharding
+in `Pomp.pfilter` and `PanelPomp.pfilter` actually uses the available cores.
+Because they measure wall-clock time, they need the machine to themselves and
+are *not* collected by a normal `pytest` run — the environment variable below
+switches collection on:
+
+```bash
+# Equivalent to: PYPOMP_CPU_SCALING=1 pytest tests/test_cpu_parallel -n 0 -s
+make test-cpu-scaling
+```
+
+`-n 0` turns xdist off so the timings are not competing with other tests. The
+`cores` variants restrict the process's CPU affinity to build a serial baseline
+and are skipped on non-Linux platforms, where that is not possible. Two
+thresholds can be relaxed for a noisy machine:
+`PYPOMP_CPU_SCALING_MIN_EFFICIENCY` (default `0.5`) and
+`PYPOMP_CPU_SCALING_MAX_SHARDING_OVERHEAD` (default `2.0`).
+
 ---
 
 ## 4. Building Documentation
@@ -134,13 +154,20 @@ Consecutive pushes cancel superseded runs, so only the latest commit is tested. 
 runs are exempt: release.yml passes a run-scoped `concurrency-key`, so a push to main cannot
 cancel a release in progress.
 
-To run the full Python matrix (3.11–3.14) or the heavy tests without cutting a release, use
-**Actions → CI → Run workflow** and tick `full-matrix` and/or `run-heavy`. Doing this before a
-release is worthwhile, since heavy tests do not run on ordinary pushes.
+To run the full Python matrix (3.11–3.14), the heavy tests, or the CPU parallel-scaling timings
+without cutting a release, use **Actions → CI → Run workflow** and tick `full-matrix`,
+`run-heavy` and/or `run-cpu-scaling`. Doing this before a release is worthwhile, since heavy
+tests do not run on ordinary pushes. `run-cpu-scaling` is worth ticking after changes to the
+sharding code in `pypomp/core/algorithms/helpers.py`; note that a busy shared runner can fail
+those timings on its own.
 
 Heavy tests run in their own single-cell job (Ubuntu, 3.14) rather than across the matrix:
 accuracy and convergence results should not vary by interpreter or OS, so running them on every
 combination costs ten times the runner time for the same signal.
+
+The CPU parallel-scaling timings (see §3) get their own single-cell job for a different reason:
+they are wall-clock measurements, so a runner that happens to be busy or throttled can fail them
+with nothing wrong in the code. Releases do not run them.
 
 ---
 

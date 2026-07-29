@@ -14,12 +14,19 @@ on:
         description: "Include heavy tests (accuracy/convergence checks)"
         type: boolean
         default: false
+      run-cpu-scaling:
+        description: "Run the CPU parallel-scaling timings (needs an idle runner)"
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       full-matrix:
         type: boolean
         default: false
       run-heavy:
+        type: boolean
+        default: false
+      run-cpu-scaling:
         type: boolean
         default: false
       concurrency-key:
@@ -233,6 +240,53 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: heavy
+
+  cpu-scaling:
+    name: CPU parallel scaling
+    # Opt-in only: these are wall-clock timings, and a runner that happens to be
+    # busy or throttled would fail them for reasons unrelated to pypomp. Run it
+    # from the Actions tab after changing the sharding code. `inputs` is unset
+    # (and so falsy) on push and pull_request, which skips the job.
+    if: ${{ inputs.run-cpu-scaling }}
+    runs-on: ubuntu-latest
+    # Four tests of roughly a minute each; the rest is headroom for a slow
+    # runner. Unlike the `test` job, memory is not a concern here: `-n 0` means
+    # a single pytest process, which spawns one short-lived worker at a time.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[tests,benchmarks,viz]"
+
+      - name: Report available cores
+        # The tests parallelise over min(8, os.cpu_count()) cores; the standard
+        # GitHub Linux runner has 4. Recorded because a change in runner size
+        # moves every number the tests report.
+        run: nproc
+
+      # No JAX compilation cache and no --cov: each measurement runs in its own
+      # subprocess that does not load tests/conftest.py (so it never sees the
+      # cache), and coverage instrumentation would distort the timings it is
+      # supposed to be measuring.
+      #
+      # `-n 0` disables xdist -- the timings need the cores to themselves. The
+      # tests are only collected when PYPOMP_CPU_SCALING=1 (see
+      # tests/test_cpu_parallel/conftest.py), and `-s` lets their measurement
+      # reports reach the log. The per-test timeout is far above a legitimate
+      # run; it exists to turn a wedge into a thread dump rather than 30 silent
+      # minutes.
+      - name: Run CPU scaling tests
+        env:
+          PYPOMP_CPU_SCALING: "1"
+        run: |
+          pytest tests/test_cpu_parallel -n 0 -s \
+            --timeout=1200 --timeout-method=thread
 
   build:
     name: Build distributions

@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       # The pyright hook in .pre-commit-config.yaml is `language: system`, so it
       # needs the project's dependencies importable to resolve jax/numpy/etc.
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Install build tooling
         run: python -m pip install --upgrade pip build twine
       - name: Build sdist and wheel
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       - name: Install docs dependencies
         # docs/requirements.txt pins `pypomp>=0.1` from PyPI; installing the

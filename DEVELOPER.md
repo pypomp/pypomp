@@ -212,11 +212,3 @@ You can verify the version files at any time without starting a release:
 ```bash
 make check-version VERSION=0.4.9
 ```
-
-### Repository settings this depends on
-
-- **Settings → Environments → `pypi`** must have *Required reviewers* configured, otherwise the
-  approval gate does not exist and releases publish automatically. Leave *Prevent self-review*
-  disabled so a solo maintainer can approve their own release.
-- **Settings → Notifications → Actions → "Only notify for failed workflows"** is worth enabling;
-  without pull requests, an emailed failure is the main feedback channel for push-triggered CI.

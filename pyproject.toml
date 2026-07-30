@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmarks = ["statsmodels"]
-tests = ["pytest", "pytest-cov", "pytest-xdist", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright", "plotnine"]
+tests = ["pytest", "pytest-cov", "pytest-xdist", "pytest-timeout", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright", "plotnine"]
 viz = ["plotly"]
 
 

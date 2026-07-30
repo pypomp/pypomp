@@ -81,6 +81,16 @@ jobs:
     # minutes before GitHub's 360-minute default reaped them -- on a 10-cell
     # release matrix that is hours of runner time per hang.
     timeout-minutes: 45
+    env:
+      # glibc gives each thread its own arena (up to 8x the core count) and
+      # frees back into whichever one an allocation came from, so a process
+      # with many threads -- four xdist workers each running an XLA thread pool
+      # -- fragments across arenas and holds far more than it is using. Capping
+      # the count is the other half of the `malloc_trim` call in
+      # tests/conftest.py: trim can only return chunks that are actually free,
+      # and fewer arenas means fewer half-used ones. Ignored off glibc, so this
+      # is a no-op on the macOS cells.
+      MALLOC_ARENA_MAX: "2"
     strategy:
       fail-fast: false
       matrix:
@@ -197,6 +207,9 @@ jobs:
     if: ${{ inputs.run-heavy }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      # Same reasoning as the `test` job above.
+      MALLOC_ARENA_MAX: "2"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

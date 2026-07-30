@@ -81,21 +81,6 @@ jobs:
     # wedge for 54-56 minutes before GitHub's 360-minute default reaped them,
     # which on a 10-cell release matrix is hours of runner time per hang.
     timeout-minutes: 45
-    env:
-      # glibc allocator tuning, aimed at the same memory problem as `-n 2`:
-      # cap the per-thread arenas an xdist worker's XLA thread pool spreads its
-      # free chunks across, and stop glibc raising its mmap threshold (it does
-      # so, up to 32 MB, whenever an mmap'd block is freed, after which large
-      # XLA buffers come from the heap and can only be returned when a whole
-      # page falls empty).
-      #
-      # Kept as a cheap hedge rather than a demonstrated win: they went in
-      # alongside `-n 2`, so their individual contribution was never isolated,
-      # and CI has been green with them set. All three are ignored off glibc,
-      # so the macOS cells are unaffected.
-      MALLOC_ARENA_MAX: "2"
-      MALLOC_MMAP_THRESHOLD_: "131072"
-      MALLOC_TRIM_THRESHOLD_: "131072"
     strategy:
       fail-fast: false
       matrix:
@@ -150,15 +135,25 @@ jobs:
       # death; two need ~13.8 GB with no swap at all. Ubuntu also got *faster*
       # -- 4-6 min against the 9-11 it took while swapping.
       #
-      # Headroom is ~2.2 GB, and it will erode as the suite grows, since the
-      # dominant term scales with tests-per-worker. The next lever is splitting
-      # the run into two pytest invocations: fresh processes reset that term.
+      # Headroom measured ~2.2 GB, but that was with glibc MALLOC_ARENA_MAX /
+      # MALLOC_MMAP_THRESHOLD_ tuning that has since been removed for being
+      # unattributable, so treat it as an upper bound rather than the current
+      # margin. It also erodes as the suite grows, since the dominant term
+      # scales with tests-per-worker.
+      #
+      # If a cell starts dying here again, don't guess: put a sampler back in
+      # this step (`free -m` every few seconds, interleaved with the pytest
+      # output) and read the last line before the runner goes. That is what
+      # identified this in the first place. The next lever after that is
+      # splitting the run into two pytest invocations, which resets the
+      # work-proportional term because each gets fresh processes.
       #
       # macOS keeps `-n auto` -- the same suite peaks at 2.35 GB there.
       #
       # `--timeout` is unrelated to memory and stays regardless: it turns a
       # wedged test into a thread dump and a normal failure rather than a
       # silent job that burns an hour. 600s is ~15x the slowest light test.
+      #
       - name: Test with pytest
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -195,15 +190,10 @@ jobs:
     if: ${{ inputs.run-heavy }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    env:
-      # Same reasoning as the `test` job above. Note this job keeps `-n auto`:
-      # it has never been seen to run out of memory, and it is only reached on
-      # the release path, where halving its workers would push it towards the
-      # 120-minute cap. If it ever dies the way the light cells did, `-n 2` is
-      # the knob.
-      MALLOC_ARENA_MAX: "2"
-      MALLOC_MMAP_THRESHOLD_: "131072"
-      MALLOC_TRIM_THRESHOLD_: "131072"
+    # Unlike the `test` job this keeps pytest.ini's `-n auto`: it has never been
+    # seen to run out of memory, and it is only reached on the release path,
+    # where halving its workers would push it towards the 120-minute cap. If it
+    # ever dies the way the light cells did, `-n 2` is the knob.
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

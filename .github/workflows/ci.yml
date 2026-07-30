@@ -75,22 +75,29 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    # The light suite takes ~4 min on macOS and ~12 min on Ubuntu, so this is
-    # pure headroom. It exists because Ubuntu runners have been dying mid-suite
-    # ("The runner has received a shutdown signal") and wedging for 54-56
-    # minutes before GitHub's 360-minute default reaped them -- on a 10-cell
-    # release matrix that is hours of runner time per hang.
+    # The light suite takes ~4 min on macOS and, at the `-n 2` set below,
+    # ~20 min on Ubuntu, so this is still headroom. It exists because Ubuntu
+    # runners have been dying mid-suite ("The runner has received a shutdown
+    # signal") and wedging for 54-56 minutes before GitHub's 360-minute default
+    # reaped them -- on a 10-cell release matrix that is hours of runner time
+    # per hang.
     timeout-minutes: 45
     env:
-      # glibc gives each thread its own arena (up to 8x the core count) and
-      # frees back into whichever one an allocation came from, so a process
-      # with many threads -- four xdist workers each running an XLA thread pool
-      # -- fragments across arenas and holds far more than it is using. Capping
-      # the count is the other half of the `malloc_trim` call in
-      # tests/conftest.py: trim can only return chunks that are actually free,
-      # and fewer arenas means fewer half-used ones. Ignored off glibc, so this
-      # is a no-op on the macOS cells.
+      # Secondary to the `-n 2` below, and unproven -- the sampler output will
+      # say whether they are worth keeping. All three are ignored off glibc, so
+      # the macOS cells are unaffected.
+      #
+      # glibc gives each thread its own arena and frees back into whichever one
+      # an allocation came from, so a process with many threads (an xdist
+      # worker running an XLA thread pool) spreads its free chunks thin.
       MALLOC_ARENA_MAX: "2"
+      # glibc *raises* its mmap threshold, up to 32 MB, every time an mmap'd
+      # block is freed. Once that has happened, large XLA buffers come from the
+      # heap instead and free() can only return them if the whole page is
+      # empty. Pinning the threshold disables that adaptation, so big
+      # allocations keep going to mmap and are handed straight back on free.
+      MALLOC_MMAP_THRESHOLD_: "131072"
+      MALLOC_TRIM_THRESHOLD_: "131072"
     strategy:
       fail-fast: false
       matrix:
@@ -174,8 +181,19 @@ jobs:
             sample_resources &
             sampler=$!
             trap 'kill "$sampler" 2>/dev/null || true' EXIT
+            # `-n 2` instead of pytest.ini's `-n auto` (which picks 4 here).
+            #
+            # Each worker plateaus near 4 GB and *stays* there -- 4181, 4179,
+            # 4179, 4180, 4179 MB across five minutes in run 30577110014 -- so
+            # this is a steady-state working set, not a leak, and the total
+            # scales with the worker count. Four of them need ~15.5 GB of a
+            # 16 GB runner, which is why the cells were coin-flipping: 3.14
+            # finished that run with 1107 MB to spare while 3.12 died with 25 MB.
+            # Two workers need ~9 GB and leave real headroom.
+            #
+            # macOS keeps `-n auto`; the same suite peaks at 2.35 GB there.
             # 600s is ~15x the slowest light test but well under the wedge.
-            set -- -v --timeout=600 --timeout-method=thread
+            set -- -n 2 -v --timeout=600 --timeout-method=thread
           fi
           pytest "$@" -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
 
@@ -210,6 +228,8 @@ jobs:
     env:
       # Same reasoning as the `test` job above.
       MALLOC_ARENA_MAX: "2"
+      MALLOC_MMAP_THRESHOLD_: "131072"
+      MALLOC_TRIM_THRESHOLD_: "131072"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

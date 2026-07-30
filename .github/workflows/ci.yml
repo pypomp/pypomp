@@ -75,27 +75,25 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    # The light suite takes ~4 min on macOS and, at the `-n 2` set below,
-    # ~20 min on Ubuntu, so this is still headroom. It exists because Ubuntu
-    # runners have been dying mid-suite ("The runner has received a shutdown
-    # signal") and wedging for 54-56 minutes before GitHub's 360-minute default
-    # reaped them -- on a 10-cell release matrix that is hours of runner time
-    # per hang.
+    # The light suite takes ~4 min on macOS and ~4-6 min on Ubuntu, so this is
+    # pure headroom. It exists because Ubuntu runners used to die mid-suite on
+    # memory (see the `-n 2` below): as well as failing outright, they could
+    # wedge for 54-56 minutes before GitHub's 360-minute default reaped them,
+    # which on a 10-cell release matrix is hours of runner time per hang.
     timeout-minutes: 45
     env:
-      # Secondary to the `-n 2` below, and unproven -- the sampler output will
-      # say whether they are worth keeping. All three are ignored off glibc, so
-      # the macOS cells are unaffected.
+      # glibc allocator tuning, aimed at the same memory problem as `-n 2`:
+      # cap the per-thread arenas an xdist worker's XLA thread pool spreads its
+      # free chunks across, and stop glibc raising its mmap threshold (it does
+      # so, up to 32 MB, whenever an mmap'd block is freed, after which large
+      # XLA buffers come from the heap and can only be returned when a whole
+      # page falls empty).
       #
-      # glibc gives each thread its own arena and frees back into whichever one
-      # an allocation came from, so a process with many threads (an xdist
-      # worker running an XLA thread pool) spreads its free chunks thin.
+      # Kept as a cheap hedge rather than a demonstrated win: they went in
+      # alongside `-n 2`, so their individual contribution was never isolated,
+      # and CI has been green with them set. All three are ignored off glibc,
+      # so the macOS cells are unaffected.
       MALLOC_ARENA_MAX: "2"
-      # glibc *raises* its mmap threshold, up to 32 MB, every time an mmap'd
-      # block is freed. Once that has happened, large XLA buffers come from the
-      # heap instead and free() can only return them if the whole page is
-      # empty. Pinning the threshold disables that adaptation, so big
-      # allocations keep going to mmap and are handed straight back on free.
       MALLOC_MMAP_THRESHOLD_: "131072"
       MALLOC_TRIM_THRESHOLD_: "131072"
     strategy:
@@ -138,64 +136,36 @@ jobs:
           restore-keys: |
             jax-${{ runner.os }}-${{ matrix.python-version }}-
 
-      # Diagnostics for the Ubuntu runner deaths. Those jobs vanish mid-suite
-      # with zero test failures, in two shapes: an abrupt "The operation was
-      # canceled", or a wedge -- the pytest step stops producing output and sits
-      # there until "The runner has received a shutdown signal" (54 minutes, in
-      # run 30492815897). macOS runs the same 609 tests clean every time, so it
-      # is the Linux VM going away, not a test.
+      # Ubuntu runs the light suite with two xdist workers instead of
+      # pytest.ini's `-n auto` (which picks 4 here), because four of them do
+      # not fit in a 16 GB runner. Cells were dying mid-suite on memory with
+      # zero test failures -- sometimes an abrupt cancel, sometimes a wedge
+      # that sat there until the runner was reaped 54 minutes later.
       #
-      # Every occurrence so far has landed in the last ~30 tests, which is where
-      # `--dist=loadfile` piles up the slow `*_dpop_train` files: locally, total
-      # RSS across the four workers sits near 2 GB for the whole run and then
-      # spikes to ~5 GB in exactly that window. That is nowhere near the
-      # runner's 16 GB, so this samples the real thing rather than guessing.
+      # Halving the workers does not halve the total: most of the memory is
+      # work-proportional, so it just moves to the workers that remain (they go
+      # from ~4 GB each to ~6.5 GB). What it removes is one full copy of the
+      # per-process baseline, and that was the difference between fitting and
+      # not. Four workers needed ~15.9 GB plus 3 GB of swap and thrashed to
+      # death; two need ~13.8 GB with no swap at all. Ubuntu also got *faster*
+      # -- 4-6 min against the 9-11 it took while swapping.
       #
-      # `[res]` lines go to the same log as pytest, so whatever the last sample
-      # before the VM dies shows -- memory, swap, disk, load -- is the answer.
-      # `-v` names each test as it finishes, pinning down what was in flight.
-      # `--timeout` converts a wedge into a thread dump plus a normal failure
-      # instead of a silent job that has to be reaped.
+      # Headroom is ~2.2 GB, and it will erode as the suite grows, since the
+      # dominant term scales with tests-per-worker. The next lever is splitting
+      # the run into two pytest invocations: fresh processes reset that term.
       #
-      # All three are temporary; drop them once the cause is known.
+      # macOS keeps `-n auto` -- the same suite peaks at 2.35 GB there.
+      #
+      # `--timeout` is unrelated to memory and stays regardless: it turns a
+      # wedged test into a thread dump and a normal failure rather than a
+      # silent job that burns an hour. 600s is ~15x the slowest light test.
       - name: Test with pytest
         run: |
-          # Runs in a subshell, so `set +e` is local to it: a hiccup in any of
-          # these probes must not take the step down with it.
-          sample_resources() {
-            set +e
-            while :; do
-              printf '[res] %s ' "$(date -u +%H:%M:%S)"
-              free -m | awk '/^Mem:/  {printf "mem_used=%sM mem_avail=%sM ", $3, $7}
-                             /^Swap:/ {printf "swap_used=%sM ", $3}'
-              df -Pm . | awk 'NR==2 {printf "disk_avail=%sM ", $4}'
-              printf 'load=%s' "$(cut -d' ' -f1-3 /proc/loadavg)"
-              ps -eo rss=,comm= --sort=-rss | head -n 3 |
-                awk '{printf " | %s %dM", $2, $1/1024}'
-              echo
-              sleep 3
-            done
-          }
-
           if [ "$RUNNER_OS" = Linux ]; then
-            sample_resources &
-            sampler=$!
-            trap 'kill "$sampler" 2>/dev/null || true' EXIT
-            # `-n 2` instead of pytest.ini's `-n auto` (which picks 4 here).
-            #
-            # Each worker plateaus near 4 GB and *stays* there -- 4181, 4179,
-            # 4179, 4180, 4179 MB across five minutes in run 30577110014 -- so
-            # this is a steady-state working set, not a leak, and the total
-            # scales with the worker count. Four of them need ~15.5 GB of a
-            # 16 GB runner, which is why the cells were coin-flipping: 3.14
-            # finished that run with 1107 MB to spare while 3.12 died with 25 MB.
-            # Two workers need ~9 GB and leave real headroom.
-            #
-            # macOS keeps `-n auto`; the same suite peaks at 2.35 GB there.
-            # 600s is ~15x the slowest light test but well under the wedge.
-            set -- -n 2 -v --timeout=600 --timeout-method=thread
+            set -- -n 2
           fi
-          pytest "$@" -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
+          pytest "$@" --timeout=600 --timeout-method=thread \
+            -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
 
       # Not gated on the tests passing: the compilation cache is still valid and
       # worth keeping when a test fails. `cache-hit` is only 'true' on an exact
@@ -226,7 +196,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      # Same reasoning as the `test` job above.
+      # Same reasoning as the `test` job above. Note this job keeps `-n auto`:
+      # it has never been seen to run out of memory, and it is only reached on
+      # the release path, where halving its workers would push it towards the
+      # 120-minute cap. If it ever dies the way the light cells did, `-n 2` is
+      # the knob.
       MALLOC_ARENA_MAX: "2"
       MALLOC_MMAP_THRESHOLD_: "131072"
       MALLOC_TRIM_THRESHOLD_: "131072"

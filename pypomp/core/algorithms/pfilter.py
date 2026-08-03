@@ -102,16 +102,14 @@ def _pfilter_step(
 ) -> PfilterState:
     """Run the particle filter for one observation interval."""
     # 1. Setup and initialize keys.
-    split_keys = jax.random.split(state.key, num=context.J + 1)
-    key = split_keys[0]
-    keys = split_keys[1:]
+    key, subkey = jax.random.split(state.key)
     nstep = context.series.nstep_array[i].astype(int)
 
     # 2. Propagate particles for one observation interval.
     particlesP, t_idx = context.fns.rprocess_interp(
         state.particlesF,
         theta,
-        keys,
+        subkey,
         context.series.covars_extended,
         context.series.dt_array_extended,
         state.t,

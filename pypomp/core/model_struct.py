@@ -256,11 +256,12 @@ def vectorized(func: _F) -> _F:
     Euler step with every state entry as a ``(J,)`` array, and is responsible
     for handling all ``J`` particles itself.
 
-    This exists purely as a CPU performance escape hatch. XLA's CPU backend does
+    This exists as a performance optimization. XLA's CPU backend does
     not vectorize per-particle random number generation across the particle
     batch, so a manually vectorized ``rproc`` can be several times faster on CPU.
-    On GPU the default vmapped path already maps particles onto threads, so the
-    decorator is not expected to help there.
+    On GPU, carrying state as separate columns (which both default vmap and
+    ``@vectorized`` now use) provides substantial speedups at large effective batch sizes
+    (e.g., when vmapping over many replicates and particles) where the device is compute-bound.
 
     Contract for a vectorized ``rproc``:
 
@@ -483,11 +484,11 @@ class _RProc(_ModelComponent):
 
         # If nstep is given, interpolated functions use it in order to have a fixed
         # number of steps. This is necessary for train to work.
-        # The vectorized path threads the state through the sub-step loop as a
-        # dict of columns, so it uses the dict-based wrappers directly.
-        pf_step = self._struct_pf_dict if self._is_vectorized else self.struct_pf
-        per_step = self._struct_per_dict if self._is_vectorized else self.struct_per
-        base_step = self._struct_pf_dict if self._is_vectorized else self.struct
+        # Both vectorized and default paths thread the state through the sub-step
+        # loop as a dict of columns, using dict-based wrappers directly.
+        pf_step = self._struct_pf_dict
+        per_step = self._struct_per_dict
+        base_step = self._struct_pf_dict
         interp_args = (self.nstep, self._max_steps_bound, self._is_vectorized)
         self.struct_interp = _time_interp(base_step, *interp_args, self.statenames)
         self.struct_pf_interp = _time_interp(pf_step, *interp_args, self.statenames)
@@ -522,6 +523,31 @@ class _RProc(_ModelComponent):
                 }
             )
             return jnp.array([res[n] for n in snames]).reshape(-1)
+
+        return wrapped
+
+    def _make_wrapper_dict(self, user_func):
+        """Single-particle wrapper that receives and returns dicts of scalars."""
+        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
+        mapping, trans = self.name_mapping, self.par_trans
+
+        def wrapped(X_dict, theta_arr, key, covars, t, dt, should_trans):
+            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
+            if should_trans:
+                theta_dict = trans.from_est(theta_dict)
+            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
+
+            res = user_func(
+                **{
+                    mapping["X_"]: X_dict,
+                    mapping["theta_"]: theta_dict,
+                    mapping["key"]: key,
+                    mapping["covars"]: covars_dict,
+                    mapping["t"]: t,
+                    mapping["dt"]: dt,
+                }
+            )
+            return {n: res[n] for n in snames}
 
         return wrapped
 
@@ -569,18 +595,21 @@ class _RProc(_ModelComponent):
         return wrapped
 
     def _build_structs(self, struct: Callable) -> None:
-        if not self._is_vectorized:
-            super()._build_structs(struct)
-            return
-        # The user function maps over particles itself, so no vmap is applied.
-        self._struct_pf_dict = self._make_wrapper_vectorized(
-            struct, theta_batched=False
-        )
-        self._struct_per_dict = self._make_wrapper_vectorized(
-            struct, theta_batched=True
-        )
-        self.struct = self._array_adapter(self._struct_pf_dict, self.statenames)
-        self.struct_pf = self.struct
+        if self._is_vectorized:
+            # The user function maps over particles itself, so no vmap is applied.
+            self._struct_pf_dict = self._make_wrapper_vectorized(
+                struct, theta_batched=False
+            )
+            self._struct_per_dict = self._make_wrapper_vectorized(
+                struct, theta_batched=True
+            )
+        else:
+            dict_wrapper = self._make_wrapper_dict(struct)
+            self._struct_pf_dict = jax.vmap(dict_wrapper, self.vmap_axes_pf)
+            self._struct_per_dict = jax.vmap(dict_wrapper, self.vmap_axes_per)
+
+        self.struct = self._make_wrapper(struct)
+        self.struct_pf = self._array_adapter(self._struct_pf_dict, self.statenames)
         self.struct_per = self._array_adapter(self._struct_per_dict, self.statenames)
 
     def __eq__(self, other):
@@ -884,9 +913,9 @@ def _time_interp(
     """
     Interpolates state trajectories between observation times.
     """
-    if vectorized and not statenames:
-        raise ValueError("statenames are required to build a vectorized rproc")
-    snames: list[str] = list(statenames) if statenames else []
+    if not statenames:
+        raise ValueError("statenames are required to build rproc interp")
+    snames: list[str] = list(statenames)
 
     def _interp_body(
         i, inputs, theta_, covars_extended, dt_array_extended, should_trans
@@ -900,7 +929,7 @@ def _time_interp(
             X_ = rproc(X_, theta_, subkey, covars_t, t, dt, should_trans)
         else:
             # Generate per-particle keys for the vmapped rproc with a single split call.
-            J = X_.shape[0]
+            J = X_[snames[0]].shape[0]
             step_keys = jax.random.split(subkey, J)
             X_ = rproc(X_, theta_, step_keys, covars_t, t, dt, should_trans)
         return (X_, next_key, t + dt, t_idx + 1)
@@ -922,10 +951,9 @@ def _time_interp(
         if jnp.ndim(keys) != 0:
             # Callers may hand over one key per particle; extract a single scalar seed key.
             keys = keys[0]
-        if vectorized:
-            # Carry the state as separate columns so that it is not sliced and
-            # restacked on every sub-step.
-            X_ = {n: X_[:, i] for i, n in enumerate(snames)}
+        # Carry the state as separate columns so that it is not sliced and
+        # restacked on every sub-step.
+        X_ = {n: X_[:, i] for i, n in enumerate(snames)}
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
 
         final = jax.lax.fori_loop(
@@ -940,9 +968,8 @@ def _time_interp(
             ),
             (X_, keys, t, t_idx),
         )
-        X_out = final[0]
-        if vectorized:
-            X_out = jnp.stack([X_out[n] for n in snames], axis=-1)
+        X_dict_out = final[0]
+        X_out = jnp.stack([X_dict_out[n] for n in snames], axis=-1)
         return X_out, final[3]  # Return X_ and new t_idx
 
     return _rproc_interp

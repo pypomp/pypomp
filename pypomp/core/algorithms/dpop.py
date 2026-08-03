@@ -175,22 +175,18 @@ def _dpop_helper(
            is driven only by the measurement weights.
     """
     t, particlesF, loglik, weightsF, counts, key, t_idx = inputs
-    J = particlesF.shape[0]
 
     # Cooled weights from the previous time step.
     weightsP = alpha * weightsF
 
-    # Keys for the process model.
-    split_keys = jax.random.split(key, num=J + 1)
-    key = split_keys[0]
-    keys = split_keys[1:]
+    key, subkey = jax.random.split(key)
 
     # Predict forward within the current observation interval.
     nstep = nstep_array[i].astype(int)
     particlesP, t_idx = rprocess_interp(
         particlesF,
         theta,
-        keys,
+        subkey,
         covars_extended,
         dt_array_extended,
         t,

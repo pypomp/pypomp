@@ -112,16 +112,14 @@ def _simulate_helper(
 ) -> tuple[jax.Array, int, jax.Array, jax.Array, jax.Array, jax.Array]:
     (t, t_idx, X_sims, X_array, Y_array, key) = inputs
 
-    split_keys = jax.random.split(key, num=nsim + 1)
-    key = split_keys[0]
-    keys = split_keys[1:]
+    key, subkey = jax.random.split(key)
 
     nstep = nstep_array[i].astype(int)
 
     X_sims, t_idx = rprocess_interp(
         X_sims,
         theta,
-        keys,
+        subkey,
         covars_extended,
         dt_array_extended,
         t,

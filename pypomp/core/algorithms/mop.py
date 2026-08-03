@@ -84,17 +84,14 @@ def _mop_step(
     key = state.key
     t_idx = state.t_idx
 
-    J = context.J
     weightsP = context.alpha * weightsF
 
-    split_keys = jax.random.split(key, num=J + 1)
-    key = split_keys[0]
-    keys = split_keys[1:]
+    key, subkey = jax.random.split(key)
     nstep = context.series.nstep_array[i].astype(int)
     particlesP, t_idx = context.fns.rprocess_interp(
         particlesF,
         theta,
-        keys,
+        subkey,
         context.series.covars_extended,
         context.series.dt_array_extended,
         t,

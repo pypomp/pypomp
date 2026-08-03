@@ -181,11 +181,10 @@ def _perfilter_scan_body(
     )
 
     # 3. Propagate the particles for one observation interval.
-    keys_step = jax.random.split(key_process, num=context.J + 1)[1:]
     particlesP_Jx, updated_t_idx = context.per.rprocess_interp(
         carry.particlesF,
         perturbed_thetas,
-        keys_step,
+        key_process,
         context.series.covars_extended,
         context.series.dt_array_extended,
         carry.t,

@@ -875,16 +875,18 @@ def _flat_dprior(params: ParamDict) -> float:
 
 # --- Interpolation Helper
 def _time_interp(
-    rproc,
-    nstep_fixed,
-    max_steps_bound,
+    rproc: Callable,
+    nstep_fixed: int | None,
+    max_steps_bound: int | None,
     vectorized: bool = False,
     statenames: list[str] | None = None,
 ):
+    """
+    Interpolates state trajectories between observation times.
+    """
     if vectorized and not statenames:
         raise ValueError("statenames are required to build a vectorized rproc")
     snames: list[str] = list(statenames) if statenames else []
-    vsplit = jax.vmap(jax.random.split, (0, None))
 
     def _interp_body(
         i, inputs, theta_, covars_extended, dt_array_extended, should_trans
@@ -892,14 +894,16 @@ def _time_interp(
         X_, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
+        next_key, subkey = jax.random.split(keys)
         if vectorized:
             # A single key per step; the rproc draws for all particles at once.
-            next_key, subkey = jax.random.split(keys)
             X_ = rproc(X_, theta_, subkey, covars_t, t, dt, should_trans)
-            return (X_, next_key, t + dt, t_idx + 1)
-        vkeys = vsplit(keys, 2)
-        X_ = rproc(X_, theta_, vkeys[:, 0], covars_t, t, dt, should_trans)
-        return (X_, vkeys[:, 1], t + dt, t_idx + 1)
+        else:
+            # Generate per-particle keys for the vmapped rproc with a single split call.
+            J = X_.shape[0]
+            step_keys = jax.random.split(subkey, J)
+            X_ = rproc(X_, theta_, step_keys, covars_t, t, dt, should_trans)
+        return (X_, next_key, t + dt, t_idx + 1)
 
     def _rproc_interp(
         X_,
@@ -915,11 +919,10 @@ def _time_interp(
     ):
         if accumvars is not None and len(accumvars) > 0:
             X_ = X_.at[:, accumvars].set(0)
+        if jnp.ndim(keys) != 0:
+            # Callers may hand over one key per particle; extract a single scalar seed key.
+            keys = keys[0]
         if vectorized:
-            if jnp.ndim(keys) != 0:
-                # Callers hand over one key per particle; a vectorized rproc
-                # needs only one, so the rest are discarded.
-                keys = keys[0]
             # Carry the state as separate columns so that it is not sliced and
             # restacked on every sub-step.
             X_ = {n: X_[:, i] for i, n in enumerate(snames)}

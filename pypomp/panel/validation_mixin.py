@@ -22,7 +22,6 @@ class PanelValidationMixin(Base):
                 raise TypeError(
                     "Every element of unit_objects must be an instance of the class Pomp"
                 )
-            # TODO: loosen these constraints
             if unit_obj.t0 != unit_objs[0].t0:
                 raise ValueError("All units must have the same t0")
             if any(unit_obj._dt_array_extended != unit_objs[0]._dt_array_extended):

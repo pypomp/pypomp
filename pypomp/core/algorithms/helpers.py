@@ -4,7 +4,7 @@ This module implements helper functions for POMP algorithms.
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -472,6 +472,61 @@ def pad_array(arr: jax.Array, axis: int, padded_size: int, size: int) -> jax.Arr
     return arr
 
 
+class ShardPlan(NamedTuple):
+    """How :func:`run_jax_batch_sharded` will lay replicates over the devices.
+
+    Attributes:
+        num_shard_devices: How many of the available devices form the mesh.
+        batch_size: Replicates handed to the mesh at once.
+        num_batches: Sequential batches needed to cover them all.
+    """
+
+    num_shard_devices: int
+    batch_size: int
+    num_batches: int
+
+    @property
+    def padded_size(self) -> int:
+        """Replicates actually computed, including any padding."""
+        return self.num_batches * self.batch_size
+
+
+def plan_sharding(size: int, num_devices: int, is_cpu: bool) -> ShardPlan:
+    """Choose a mesh width and batching for `size` replicates over `num_devices`.
+
+    Splitting an axis evenly across D devices requires its length to be a
+    multiple of D, and any shortfall is made up by :func:`pad_array` repeating
+    the last replicate.  That padding is not free -- the duplicates are computed
+    in full and then sliced off -- so the mesh is capped at `size` devices:
+    fewer replicates than devices gives a narrower mesh, never padding.
+
+    Args:
+        size: Length of the axis being sharded, i.e. the replicate count.
+        num_devices: Devices available to shard over.
+        is_cpu: Whether the devices are CPU devices, which are batched
+            sequentially once there are more replicates than devices.
+
+    Returns:
+        The resulting :class:`ShardPlan`.
+    """
+    if is_cpu and size > num_devices:
+        # More replicates than devices: give every device one replicate per
+        # step and walk through the batches sequentially.
+        return ShardPlan(
+            num_shard_devices=num_devices,
+            batch_size=num_devices,
+            num_batches=(size + num_devices - 1) // num_devices,
+        )
+
+    num_shard_devices = max(1, min(size, num_devices))
+    return ShardPlan(
+        num_shard_devices=num_shard_devices,
+        batch_size=((size + num_shard_devices - 1) // num_shard_devices)
+        * num_shard_devices,
+        num_batches=1,
+    )
+
+
 def run_jax_batch_sharded(
     func: Callable[..., Any],
     shard_axes: dict[int, int],
@@ -503,9 +558,12 @@ def run_jax_batch_sharded(
     2. **Direct Parallel SPMD Sharding Path** (GPU/TPU, or CPU when R <= C):
        - If running on GPU/TPU, or on CPU when the replicate size R is less than or equal to the
          device count D, the replicates are executed in a single parallel step.
-       - The sharded arguments are padded to the next multiple of the total device count D (i.e.
-         padded_size = ceil(R / D) * D) by repeating the last element along the sharded axis.
-       - The padded arguments are sharded directly across all D devices using `NamedSharding`
+       - The replicates are spread over min(R, D) devices. Padding is not free -- the padded
+         replicates are duplicates that get computed and then discarded -- so when there are
+         fewer replicates than devices the mesh is narrowed to R devices rather than padding
+         R up to D. Only when R > D (GPU/TPU) is the sharded axis padded, to the next multiple
+         of D, by repeating the last element via :func:`pad_array`.
+       - The arguments are sharded across those devices using `NamedSharding`
          (PartitionSpec mapping the sharded axis to 'devices').
        - The function is called directly on these sharded inputs, executing completely in parallel.
        - The outputs are merged and sliced back to the original size R.
@@ -576,19 +634,17 @@ def run_jax_batch_sharded(
     first_axis = shard_axes[first_arg_idx]
     size = args[first_arg_idx].shape[first_axis]
 
-    if device_kind == "cpu" and size > num_devices:
-        batch_size = num_devices
-        num_batches = (size + batch_size - 1) // batch_size
-    else:
-        batch_size = ((size + num_devices - 1) // num_devices) * num_devices
-        num_batches = 1
-    padded_size = num_batches * batch_size
+    plan = plan_sharding(size, num_devices, is_cpu=device_kind == "cpu")
+    shard_devices = devices[: plan.num_shard_devices]
+    batch_size = plan.batch_size
+    num_batches = plan.num_batches
+    padded_size = plan.padded_size
 
     padded_args = list(args)
     for arg_idx, axis in shard_axes.items():
         padded_args[arg_idx] = pad_array(args[arg_idx], axis, padded_size, size)
 
-    mesh = jax.sharding.Mesh(devices, axis_names=("devices",))
+    mesh = jax.sharding.Mesh(shard_devices, axis_names=("devices",))
 
     # CPU Sequential Batching Path
     if num_batches > 1:

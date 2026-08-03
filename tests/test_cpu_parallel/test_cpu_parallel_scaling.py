@@ -7,8 +7,12 @@ CPU the device count is a knob, set with
 `--xla_force_host_platform_device_count` before JAX is imported, and the
 documented advice is to set it to the number of cores.
 
-Each test below holds the total amount of work fixed -- `reps` replicates of a
-particle filter -- and measures it twice, in two fresh subprocesses.  Two
+Each test below holds the total amount of work fixed -- one particle filter per
+parameter set, for as many parameter sets as there are devices -- and measures it
+twice, in two fresh subprocesses.  The workload is built from parameter sets
+rather than from the `reps` argument deliberately: the parameter-set axis is the
+one `run_jax_batch_sharded` partitions across devices, whereas `reps` is vmapped
+underneath the sharding and so does not scale with the device count.  Two
 different knobs are varied, because they are not the same thing:
 
 ``cores``
@@ -127,9 +131,15 @@ def _describe(run: dict) -> str:
 
 
 def _run_pair(model: str, mechanism: str, workload: dict) -> tuple[dict, dict, int]:
-    """Measure `workload` serially and in parallel, `width` replicates of work."""
+    """Measure `workload` serially and in parallel, `width` replicates of work.
+
+    The work is `width` distinct parameter sets rather than `width` `reps` of a
+    single one: `run_jax_batch_sharded` partitions the parameter-set axis across
+    devices, while `reps` is vmapped underneath it and does not scale with the
+    device count.
+    """
     width = _width()
-    common = dict(model=model, reps=width, n_timed=N_TIMED, seed=1, **workload)
+    common = dict(model=model, n_param_sets=width, n_timed=N_TIMED, seed=1, **workload)
     if mechanism == "cores":
         serial = _measure(cores=1, devices=1, **common)
         parallel = _measure(cores=width, devices=width, **common)
@@ -144,7 +154,7 @@ def _assert_scales(
 ) -> None:
     speedup = min(serial["times"]) / min(parallel["times"])
     report = (
-        f"{label} [{mechanism}]: {width} replicates, "
+        f"{label} [{mechanism}]: {width} parameter sets, "
         f"serial {_describe(serial)} vs parallel {_describe(parallel)} "
         f"-> speedup {speedup:.2f}x"
     )

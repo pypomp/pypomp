@@ -4,6 +4,10 @@ Run as a script, one process per measurement::
 
     python _scaling_worker.py '{"model": "pomp", "devices": 4, "cores": 4, ...}'
 
+The workload is `n_param_sets` parameter sets filtered at once.  That is the axis
+`run_jax_batch_sharded` partitions across devices; `reps` is vmapped below the
+sharding layer and so does not scale with the device count.
+
 A single process cannot measure more than one configuration.  Both knobs that
 matter here are frozen at the moment JAX is imported:
 
@@ -60,10 +64,39 @@ def _configure_devices(devices: int) -> None:
     )
 
 
+def _spread(base: dict[str, Any], i: int) -> dict[str, Any]:
+    """The `i`th of a family of slightly different parameter sets.
+
+    The replicate axis that gets sharded is the number of *parameter sets*, not
+    the `reps` argument (`reps` is vmapped underneath the sharding), so the
+    workload is built from distinct parameter sets.  They are perturbed rather
+    than copied so that the measurement cannot be flattered by the replicates
+    being identical.
+    """
+    return {name: value * (1.0 + 1e-3 * i) for name, value in base.items()}
+
+
 def _build_pomp(cfg: dict[str, Any]):
+    """Return the model and a callable running one pfilter over its parameters.
+
+    The pfilter call is returned rather than its arguments so that each model
+    keeps its own parameter type; `Pomp.pfilter` and `PanelPomp.pfilter` do not
+    accept each other's parameter objects.
+    """
     import pypomp as pp
 
-    return pp.models.LG(T=cfg["T"])
+    model = pp.models.LG(T=cfg["T"])
+    base = dict(model.theta[0])
+    theta = pp.PompParameters(
+        theta=[_spread(base, i) for i in range(cfg["n_param_sets"])]
+    )
+
+    def run(key: Any) -> None:
+        # reps=1: the work scales with the number of parameter sets in `theta`,
+        # since that is the axis the sharding partitions.
+        model.pfilter(J=cfg["J"], reps=1, theta=theta, key=key)
+
+    return model, run
 
 
 def _build_panel(cfg: dict[str, Any]):
@@ -73,12 +106,30 @@ def _build_panel(cfg: dict[str, Any]):
 
     units = {f"unit{i + 1}": pp.models.LG(T=cfg["T"]) for i in range(cfg["n_units"])}
     param_names = next(iter(units.values())).canonical_param_names
-    unit_specific = pd.DataFrame(
-        {name: [unit.theta[0][p] for p in param_names] for name, unit in units.items()},
-        index=pd.Index(param_names),
+    base = {
+        name: [unit.theta[0][p] for p in param_names] for name, unit in units.items()
+    }
+    theta = pp.PanelParameters(
+        theta=[
+            {
+                "shared": None,
+                "unit_specific": pd.DataFrame(
+                    {
+                        name: [v * (1.0 + 1e-3 * i) for v in values]
+                        for name, values in base.items()
+                    },
+                    index=pd.Index(param_names),
+                ),
+            }
+            for i in range(cfg["n_param_sets"])
+        ]
     )
-    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
-    return pp.PanelPomp(Pomp_dict=units, theta=theta)
+    model = pp.PanelPomp(Pomp_dict=units, theta=theta)
+
+    def run(key: Any) -> None:
+        model.pfilter(J=cfg["J"], reps=1, theta=theta, key=key)
+
+    return model, run
 
 
 def main(argv: list[str]) -> int:
@@ -96,12 +147,14 @@ def main(argv: list[str]) -> int:
             f"asked for {cfg['devices']} CPU devices but JAX reports {n_devices}"
         )
 
-    model = _build_pomp(cfg) if cfg["model"] == "pomp" else _build_panel(cfg)
+    model, run_pfilter = (
+        _build_pomp(cfg) if cfg["model"] == "pomp" else _build_panel(cfg)
+    )
 
     def timed_run() -> tuple[float, float]:
         key = jax.random.key(cfg["seed"])
         start = time.perf_counter()
-        model.pfilter(J=cfg["J"], reps=cfg["reps"], key=key)
+        run_pfilter(key)
         # Results are stored as xarray objects, which already forces the
         # computation to complete, but reduce them explicitly so the timing
         # cannot be fooled by JAX's asynchronous dispatch if that changes.

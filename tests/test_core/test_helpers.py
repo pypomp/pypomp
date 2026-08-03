@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 
 import pypomp.core.algorithms.helpers as ifunc
@@ -112,6 +114,106 @@ def test_merge_outputs_unsupported_type():
             num_batches=2,
             batch_size=1,
         )
+
+
+def test_plan_sharding_does_not_pad_below_the_device_count():
+    """Fewer replicates than devices narrows the mesh rather than padding.
+
+    Padding is not free: `pad_array` repeats the last replicate, and those
+    duplicates are computed in full before `merge_outputs` slices them off, so
+    padding one replicate up to four devices would be four times the work for
+    one replicate's worth of output.
+    """
+    for size in (1, 2, 3):
+        plan = ifunc.plan_sharding(size, num_devices=4, is_cpu=True)
+        assert plan.num_shard_devices == size
+        assert plan.num_batches == 1
+        assert plan.padded_size == size, (
+            f"{size} replicate(s) on 4 devices would compute {plan.padded_size}; "
+            "the surplus is padding that is calculated and then discarded"
+        )
+
+
+def test_plan_sharding_uses_every_device_when_replicates_match():
+    plan = ifunc.plan_sharding(4, num_devices=4, is_cpu=True)
+    assert plan == ifunc.ShardPlan(num_shard_devices=4, batch_size=4, num_batches=1)
+    assert plan.padded_size == 4
+
+
+def test_plan_sharding_batches_cpu_work_that_exceeds_the_devices():
+    # 10 replicates over 4 CPU devices: three sequential batches of four, the
+    # last of which is two-thirds padding. Padding is unavoidable here, since
+    # the batches have to be a uniform shape to scan over.
+    plan = ifunc.plan_sharding(10, num_devices=4, is_cpu=True)
+    assert plan == ifunc.ShardPlan(num_shard_devices=4, batch_size=4, num_batches=3)
+    assert plan.padded_size == 12
+
+
+def test_plan_sharding_pads_accelerators_only_above_the_device_count():
+    # Accelerators take the single-step path at any size, so more replicates
+    # than devices is the one case that still pads.
+    assert ifunc.plan_sharding(3, num_devices=8, is_cpu=False).padded_size == 3
+    assert ifunc.plan_sharding(12, num_devices=8, is_cpu=False).padded_size == 16
+
+
+def test_plan_sharding_invariants():
+    """Properties that must hold however the replicates fall across devices."""
+    for num_devices in range(1, 9):
+        for size in range(0, 20):
+            for is_cpu in (True, False):
+                plan = ifunc.plan_sharding(size, num_devices, is_cpu=is_cpu)
+                assert 1 <= plan.num_shard_devices <= num_devices
+                # Never drop a replicate, and never compute more than one extra
+                # mesh-width worth of padding.
+                assert size <= plan.padded_size < size + plan.num_shard_devices
+                # The mesh has to divide the work it is handed evenly.
+                assert plan.batch_size % plan.num_shard_devices == 0
+                # Below the device count there is nothing to pad.
+                if size <= num_devices:
+                    assert plan.padded_size == size
+
+
+# `plan_sharding` covers the arithmetic without needing devices; this checks
+# that the plan is what actually reaches the sharded function. It needs a
+# subprocess because the JAX device count is fixed when JAX is first imported
+# and the suite itself runs on a single device.
+_SHARD_PROBE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "_shard_probe.py"
+)
+
+
+def test_sharding_computes_no_more_replicates_than_it_was_given():
+    import json
+    import subprocess
+    import sys
+
+    sizes = (1, 3, 4)
+    # Hand the child this process's import path so that it exercises the same
+    # pypomp the test itself imported, rather than whichever copy happens to be
+    # first on a default sys.path.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+
+    proc = subprocess.run(
+        [sys.executable, _SHARD_PROBE, *(str(s) for s in sizes)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert proc.returncode == 0, (
+        f"shard probe failed\n--- stdout ---\n{proc.stdout}\n"
+        f"--- stderr ---\n{proc.stderr}"
+    )
+    report = json.loads(proc.stdout)
+
+    assert report["devices"] == 4
+    for size in sizes:
+        entry = report["sizes"][str(size)]
+        assert entry["computed"] == [size], (
+            f"{size} replicate(s) on 4 devices computed {entry['computed']}; "
+            "the surplus is padding that is calculated and then discarded"
+        )
+        assert entry["out"] == [2.0 * i for i in range(size)]
 
 
 def test_interp_covars_linear_and_constant():

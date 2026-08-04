@@ -316,8 +316,7 @@ tests/
 ├── test_model_struct.py
 ├── test_cpu_parallel/         # Wall-clock CPU parallel-scaling checks
 │   ├── conftest.py            # Gates collection on PYPOMP_CPU_SCALING=1
-│   ├── _scaling_worker.py     # Times one pfilter per subprocess/config
-│   └── test_cpu_parallel_scaling.py
+│   └── test_cpu_parallel_scaling.py # CPU parallel-scaling checks and worker entrypoint
 ├── test_random/               # Modular JAX random distribution tests
 │   ├── helpers.py             # Shared test utilities
 │   ├── test_binomial.py

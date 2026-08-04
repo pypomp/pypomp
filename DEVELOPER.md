@@ -108,12 +108,8 @@ switches collection on:
 make test-cpu-scaling
 ```
 
-`-n 0` turns xdist off so the timings are not competing with other tests. The
-`cores` variants restrict the process's CPU affinity to build a serial baseline
-and are skipped on non-Linux platforms, where that is not possible. Two
-thresholds can be relaxed for a noisy machine:
-`PYPOMP_CPU_SCALING_MIN_EFFICIENCY` (default `0.5`) and
-`PYPOMP_CPU_SCALING_MAX_SHARDING_OVERHEAD` (default `2.0`).
+`-n 0` turns xdist off so wall-clock timings are not competing with other tests.
+The test benchmarks serial (1 device) vs parallel (N devices) execution using `--xla_force_host_platform_device_count`.
 
 ---
 

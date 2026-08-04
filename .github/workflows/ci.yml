@@ -41,18 +41,8 @@ permissions:
   contents: read
 
 concurrency:
-  # release.yml passes an explicit run-scoped `concurrency-key`, which is unique
-  # per run and so is never cancelled by anything else.
-  #
-  # Defence in depth rather than a fix for a known bug: a called workflow sees
-  # the *caller's* `github.workflow`, so release runs already group separately
-  # ("Release-..." vs "CI-..."). That is a subtle guarantee to rest a release on
-  # -- renaming either workflow is enough to collide them -- so state it
-  # explicitly instead.
-  #
-  # `inputs.concurrency-key ||` relies on an unset/empty input being falsy in
-  # GitHub expressions -- the same quirk called out on the pytest step below,
-  # used deliberately here.
+  # Group runs by explicit concurrency key if provided, or by (workflow, ref).
+  # Cancel in-progress push/PR runs unless a custom concurrency key is set.
   group: ${{ inputs.concurrency-key || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: ${{ inputs.concurrency-key == '' && (github.event_name == 'push' || github.event_name == 'pull_request') }}
 
@@ -66,8 +56,7 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-      # The pyright hook in .pre-commit-config.yaml is `language: system`, so it
-      # needs the project's dependencies importable to resolve jax/numpy/etc.
+      # Pre-commit uses system pyright; dependencies must be installed to resolve imports.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -82,11 +71,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    # The light suite takes ~4 min on macOS and ~4-6 min on Ubuntu, so this is
-    # pure headroom. It exists because Ubuntu runners used to die mid-suite on
-    # memory (see the `-n 2` below): as well as failing outright, they could
-    # wedge for 54-56 minutes before GitHub's 360-minute default reaped them,
-    # which on a 10-cell release matrix is hours of runner time per hang.
+    # Prevent wedged jobs from burning runner time on OOM or hangs.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -109,17 +94,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[tests,benchmarks,viz]"
 
-      # tests/conftest.py points JAX's persistent compilation cache here.
-      # jaxlib upgrades invalidate entries internally, so a stale restore is
-      # safe -- it just yields fewer hits.
-      #
-      # Restore and save are split so that only pushes to main write entries.
-      # A single `actions/cache` step with `github.sha` in the key never hits
-      # exactly, so every commit on every branch would store a fresh copy;
-      # multiplied by the matrix, those hundreds-of-MB entries evict each other
-      # out of the 10 GB per-repo limit and the cache stops paying for itself.
-      # PR runs restore from main's entry instead (their own writes would be
-      # scoped to the PR and unusable elsewhere anyway).
+      # Restore JAX compilation cache from main (restored entries are scoped to main to save cache space).
       - uses: actions/cache/restore@v5
         id: jax-cache
         with:
@@ -128,39 +103,7 @@ jobs:
           restore-keys: |
             jax-${{ runner.os }}-${{ matrix.python-version }}-
 
-      # Ubuntu runs the light suite with two xdist workers instead of
-      # pytest.ini's `-n auto` (which picks 4 here), because four of them do
-      # not fit in a 16 GB runner. Cells were dying mid-suite on memory with
-      # zero test failures -- sometimes an abrupt cancel, sometimes a wedge
-      # that sat there until the runner was reaped 54 minutes later.
-      #
-      # Halving the workers does not halve the total: most of the memory is
-      # work-proportional, so it just moves to the workers that remain (they go
-      # from ~4 GB each to ~6.5 GB). What it removes is one full copy of the
-      # per-process baseline, and that was the difference between fitting and
-      # not. Four workers needed ~15.9 GB plus 3 GB of swap and thrashed to
-      # death; two need ~13.8 GB with no swap at all. Ubuntu also got *faster*
-      # -- 4-6 min against the 9-11 it took while swapping.
-      #
-      # Headroom measured ~2.2 GB, but that was with glibc MALLOC_ARENA_MAX /
-      # MALLOC_MMAP_THRESHOLD_ tuning that has since been removed for being
-      # unattributable, so treat it as an upper bound rather than the current
-      # margin. It also erodes as the suite grows, since the dominant term
-      # scales with tests-per-worker.
-      #
-      # If a cell starts dying here again, don't guess: put a sampler back in
-      # this step (`free -m` every few seconds, interleaved with the pytest
-      # output) and read the last line before the runner goes. That is what
-      # identified this in the first place. The next lever after that is
-      # splitting the run into two pytest invocations, which resets the
-      # work-proportional term because each gets fresh processes.
-      #
-      # macOS keeps `-n auto` -- the same suite peaks at 2.35 GB there.
-      #
-      # `--timeout` is unrelated to memory and stays regardless: it turns a
-      # wedged test into a thread dump and a normal failure rather than a
-      # silent job that burns an hour. 600s is ~15x the slowest light test.
-      #
+      # Limit Linux to 2 workers to fit in runner memory (4 workers causes OOM).
       - name: Test with pytest
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -169,9 +112,7 @@ jobs:
           pytest "$@" --timeout=600 --timeout-method=thread \
             -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
 
-      # Not gated on the tests passing: the compilation cache is still valid and
-      # worth keeping when a test fails. `cache-hit` is only 'true' on an exact
-      # key match (a re-run of the same sha), where saving would just warn.
+      # Save updated JAX compilation cache on main pushes, even if tests fail.
       - uses: actions/cache/save@v5
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
         with:
@@ -190,17 +131,10 @@ jobs:
 
   heavy:
     name: Heavy tests
-    # Accuracy and convergence results do not vary by interpreter or OS, so this
-    # runs on one cell rather than every matrix combination -- the same coverage
-    # for a tenth of the runner time. `inputs.run-heavy` is unset (and so falsy)
-    # on push and pull_request, which skips the job.
+    # Opt-in heavy suite runs on a single cell since accuracy/convergence results are OS/Python agnostic.
     if: ${{ inputs.run-heavy }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    # Unlike the `test` job this keeps pytest.ini's `-n auto`: it has never been
-    # seen to run out of memory, and it is only reached on the release path,
-    # where halving its workers would push it towards the 120-minute cap. If it
-    # ever dies the way the light cells did, `-n 2` is the knob.
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -243,15 +177,9 @@ jobs:
 
   cpu-scaling:
     name: CPU parallel scaling
-    # Opt-in only: these are wall-clock timings, and a runner that happens to be
-    # busy or throttled would fail them for reasons unrelated to pypomp. Run it
-    # from the Actions tab after changing the sharding code. `inputs` is unset
-    # (and so falsy) on push and pull_request, which skips the job.
+    # Opt-in CPU scaling benchmarks (sensitive to runner load/throttling).
     if: ${{ inputs.run-cpu-scaling }}
     runs-on: ubuntu-latest
-    # Four tests of roughly a minute each; the rest is headroom for a slow
-    # runner. Unlike the `test` job, memory is not a concern here: `-n 0` means
-    # a single pytest process, which spawns one short-lived worker at a time.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -265,22 +193,10 @@ jobs:
           python -m pip install -e ".[tests,benchmarks,viz]"
 
       - name: Report available cores
-        # The tests parallelise over min(8, os.cpu_count()) cores; the standard
-        # GitHub Linux runner has 4. Recorded because a change in runner size
-        # moves every number the tests report.
+        # Log CPU core count for benchmarking context.
         run: nproc
 
-      # No JAX compilation cache and no --cov: each measurement runs in its own
-      # subprocess that does not load tests/conftest.py (so it never sees the
-      # cache), and coverage instrumentation would distort the timings it is
-      # supposed to be measuring.
-      #
-      # `-n 0` disables xdist -- the timings need the cores to themselves. The
-      # tests are only collected when PYPOMP_CPU_SCALING=1 (see
-      # tests/test_cpu_parallel/conftest.py), and `-s` lets their measurement
-      # reports reach the log. The per-test timeout is far above a legitimate
-      # run; it exists to turn a wedge into a thread dump rather than 30 silent
-      # minutes.
+      # Run scaling tests sequentially without coverage to ensure accurate wall-clock timing.
       - name: Run CPU scaling tests
         env:
           PYPOMP_CPU_SCALING: "1"
@@ -303,11 +219,7 @@ jobs:
       - name: Check metadata
         run: twine check --strict dist/*
       - name: Smoke-test the wheel
-        # Install into a clean venv (not the build env) so a missing runtime
-        # dependency or a packaging mistake surfaces here rather than on PyPI.
-        # The import must run from outside the checkout: with the repo as the
-        # working directory, `import pypomp` resolves to ./pypomp and the test
-        # passes without ever touching the wheel.
+        # Install wheel into clean venv and test import outside source tree.
         run: |
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --upgrade pip
@@ -329,16 +241,11 @@ jobs:
           python-version: "3.14"
           cache: pip
       - name: Install docs dependencies
-        # Mirrors .readthedocs.yaml: docs-only tooling from
-        # docs/requirements.txt, runtime dependencies from pyproject.toml. Keep
-        # the two install paths in step so CI cannot pass while RTD fails.
+        # Mirror .readthedocs.yaml dependencies.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r docs/requirements.txt
           python -m pip install -e .
       - name: Build HTML
-        # -W turns warnings into errors so broken cross-references and malformed
-        # docstring markup fail here instead of silently rendering wrong.
-        # --keep-going reports every warning in one run rather than stopping at
-        # the first.
+        # Fail on warnings (-W) and report all issues (--keep-going).
         run: sphinx-build -W --keep-going -b html docs/source docs/build/html

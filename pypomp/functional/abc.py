@@ -61,7 +61,7 @@ def abc(
         is used for every probe.
     dprior : Callable or None, optional
         Pure-JAX log-prior function or ``None`` to use ``struct.dprior_pf``
-        (or, if that is absent too, a flat prior on the natural parameter
+        (or, if that is absent too, defaults to a flat prior on the natural parameter
         scale). Sampling is performed on the estimation scale, so the
         change-of-variables log-Jacobian is added to the est-scale acceptance
         ratio internally; this term is *not* included in the recorded

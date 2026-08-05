@@ -450,3 +450,39 @@ def test_pmcmc_and_abc_functional_par_trans():
         keys=keys,
     )
     assert jnp.allclose(theta_traces_abc[0, 0, :], theta_val[0])
+
+
+def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
+    struct, thetas_array, key, J, n_reps, param_names = model_setup
+    keys = jax.random.split(key, n_reps)
+    M = 2
+    prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
+
+    def raw_dprior(params: pp.types.ParamDict) -> float:
+        return 0.0
+
+    ll_traces, lp_traces, theta_traces, accepts = F.pmcmc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        M=M,
+        J=J,
+        keys=keys,
+        dprior=raw_dprior,
+    )
+    assert lp_traces.shape == (n_reps, M + 1)
+    assert jnp.all(jnp.isfinite(lp_traces))
+
+    probes = {"mean": lambda y: jnp.mean(y["Y1"])}
+    dist_traces, lp_traces_abc, theta_traces_abc, accepts_abc = F.abc(
+        struct,
+        thetas_array,
+        proposal=prop,
+        probes=probes,
+        epsilon=1e6,
+        M=M,
+        keys=keys,
+        dprior=raw_dprior,
+    )
+    assert lp_traces_abc.shape == (n_reps, M + 1)
+    assert jnp.all(jnp.isfinite(lp_traces_abc))

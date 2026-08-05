@@ -20,7 +20,6 @@ from pypomp.types import ParamDict
 
 from .algorithms.helpers import run_jax_batch_sharded
 from .learning_rate import LearningRate
-from .model_struct import _DPrior
 from .optimizer import Adam, Optimizer
 from .parameters import PompParameters
 from .results import (
@@ -851,18 +850,6 @@ class PompEstimationMixin(Base):
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
 
-        log_prior = (
-            _DPrior(
-                struct=dprior,
-                statenames=self.statenames,
-                param_names=self.canonical_param_names,
-                covar_names=self.covar_names,
-                par_trans=self.par_trans,
-            ).struct
-            if dprior is not None
-            else None
-        )
-
         keys = jax.random.split(new_key, n_chains)
 
         ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
@@ -873,7 +860,7 @@ class PompEstimationMixin(Base):
             J=J,
             thresh=thresh,
             keys=keys,
-            dprior=log_prior,
+            dprior=dprior,
         )
 
         ll_traces, lp_traces, theta_traces, accepts = jax.device_get(
@@ -997,18 +984,6 @@ class PompEstimationMixin(Base):
         canonical_names = self.canonical_param_names
         theta_array = theta_obj_in.to_jax_array(canonical_names)
 
-        log_prior = (
-            _DPrior(
-                struct=dprior,
-                statenames=self.statenames,
-                param_names=self.canonical_param_names,
-                covar_names=self.covar_names,
-                par_trans=self.par_trans,
-            ).struct
-            if dprior is not None
-            else None
-        )
-
         keys = jax.random.split(new_key, n_chains)
 
         dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
@@ -1020,7 +995,7 @@ class PompEstimationMixin(Base):
             epsilon=float(epsilon),
             M=M,
             keys=keys,
-            dprior=log_prior,
+            dprior=dprior,
         )
 
         dist_traces, lp_traces, theta_traces, accepts = jax.device_get(

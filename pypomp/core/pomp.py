@@ -88,9 +88,6 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         Parameter transformation object mapping between the natural
         parameter space and the estimation space.  Defaults to the
         identity transformation.
-    covars : pd.DataFrame or None, optional
-        Time-varying covariate data frame.  The index must contain numeric
-        covariate times.  Interpolated to the integration grid at runtime.
     nstep : int or None, optional
         Number of Euler integration steps between consecutive observations.
         Mutually exclusive with ``dt``.
@@ -99,6 +96,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     accumvars : list of str or None, optional
         Names of accumulator state variables (e.g. incidence counters) that
         are reset to zero at the start of each observation interval.
+    covars : pd.DataFrame or None, optional
+        Time-varying covariate data frame.  The index must contain numeric
+        covariate times.  Interpolated to the integration grid at runtime.
     validate_logic : bool, optional
         Whether to validate model component function signatures and logic
         at construction time.  Defaults to ``True``.

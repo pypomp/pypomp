@@ -281,9 +281,39 @@ def sir(
     seed: int = 329343545,
     delta_t: float = 1 / 52 / 20,
 ) -> Pomp:
-    """
-    Create a Pomp object for the SIR model with seasonal forcing.
+    """Create a Pomp object for the SIR model with seasonal forcing.
     Supports DPOP through the logw state variable.
+
+    Parameters
+    ----------
+    gamma : float, optional
+        Recovery rate. Default is 26.0.
+    mu : float, optional
+        Per-capita birth/death rate. Default is 0.02.
+    iota : float, optional
+        Infection import rate. Default is 0.01.
+    beta1, beta2, beta3 : float, optional
+        Seasonal transmission coefficients. Defaults are 400.0, 480.0, 320.0.
+    beta_sd : float, optional
+        Process noise intensity. Default is 0.001.
+    rho : float, optional
+        Reporting probability. Default is 0.6.
+    k : float, optional
+        Overdispersion parameter for negative binomial measurement model. Default is 0.1.
+    pop : float, optional
+        Population size. Default is 2100000.0.
+    S_0, I_0 : float, optional
+        Initial Susceptible and Infected population fractions.
+    R_0 : float or None, optional
+        Initial Recovered fraction. Default is None (1 - S_0 - I_0).
+    t0 : float, optional
+        Initial time. Default is 0.0.
+    times : np.ndarray or None, optional
+        Observation times. Default is None (weekly times over 4 years).
+    seed : int, optional
+        Random seed. Default is 329343545.
+    delta_t : float, optional
+        Euler step size. Default is 1 / 52 / 20.
     """
     if R_0 is None:
         R_0 = 1.0 - S_0 - I_0

@@ -284,7 +284,21 @@ class RWSigma:
         )
 
     def geometric_cooling(self, a: float) -> RWSigma:
-        """Return a copy using geometric cooling with 50-iteration factor ``a``."""
+        """Return a copy using geometric cooling.
+
+        Computes the multiplicative cooling factor at step :math:`t = m + \\frac{nt}{ntimes}`:
+
+        .. math::
+
+            \\text{factor}(t) = a^{t / 50} = (a^{1/50})^{m + \\frac{nt}{ntimes}}
+
+        where :math:`a \\in [0, 1]` is the cooling factor reached after 50 iterations.
+
+        Parameters
+        ----------
+        a : float
+            50-iteration cooling factor in :math:`[0, 1]`.
+        """
         if not (0 <= a <= 1):
             raise ValueError("a should be between 0 and 1")
         obj = self.copy()
@@ -292,7 +306,23 @@ class RWSigma:
         return obj
 
     def cosine_cooling(self, c: float, M: int) -> RWSigma:
-        """Return a copy using cosine annealing cooling."""
+        """Return a copy using cosine annealing cooling.
+
+        Computes the multiplicative cooling factor at step :math:`t = m + \\frac{nt}{ntimes}`:
+
+        .. math::
+
+            \\text{factor}(t) = c + (1 - c) \\cdot \\frac{1 + \\cos\\left(\\pi \\cdot \\frac{t}{M}\\right)}{2}
+
+        where :math:`c \\in [0, 1]` is the final factor reached at :math:`t = M`.
+
+        Parameters
+        ----------
+        c : float
+            Final cooling factor in :math:`[0, 1]`.
+        M : int
+            Number of iterations for the schedule.
+        """
         if not (0 <= c <= 1):
             raise ValueError("c should be between 0 and 1")
         if M <= 0:
@@ -302,7 +332,21 @@ class RWSigma:
         return obj
 
     def hyperbolic_cooling(self, s: float) -> RWSigma:
-        """Return a copy using hyperbolic cooling."""
+        """Return a copy using hyperbolic cooling.
+
+        Computes the multiplicative cooling factor at step :math:`t = m + \\frac{nt}{ntimes}`:
+
+        .. math::
+
+            \\text{factor}(t) = \\frac{1}{1 + s \\cdot \\left(m + \\frac{nt}{ntimes}\\right)}
+
+        where :math:`s \\ge 0` controls the decay rate.
+
+        Parameters
+        ----------
+        s : float
+            Cooling rate parameter (:math:`s \\ge 0`).
+        """
         if s < 0:
             raise ValueError("s must be non-negative")
         obj = self.copy()
@@ -310,7 +354,17 @@ class RWSigma:
         return obj
 
     def custom_cooling(self, cooling_fn: Callable) -> RWSigma:
-        """Return a copy using a custom ``(nt, m, ntimes) -> float`` cooling function."""
+        """Return a copy using a custom cooling function.
+
+        The custom function must have signature ``cooling_fn(nt, m, ntimes) -> float``
+        and return the multiplicative factor applied to random-walk standard deviations
+        at sub-step ``nt`` of iteration ``m``.
+
+        Parameters
+        ----------
+        cooling_fn : callable
+            Custom cooling schedule function ``(nt, m, ntimes) -> float``.
+        """
         obj = self.copy()
         obj._set_cooling("custom", custom_fn=cooling_fn)
         return obj

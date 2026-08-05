@@ -82,6 +82,7 @@ def _dpop_internal(
             the accumulated transition log-weight over a single
             observation interval. If None, no process penalty is
             applied and DPOP reduces to MOP.
+        ntimes: Number of observation times.
         key: JAX random key.
 
     Returns:

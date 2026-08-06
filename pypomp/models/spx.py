@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from jax import random
 
+from pypomp.core.model_struct import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (
@@ -62,6 +63,7 @@ def _rinit(
     return {"V": V_0, "S": S_0}
 
 
+@vectorized
 def _rproc(
     X_: StateDict,
     theta_: ParamDict,
@@ -71,6 +73,7 @@ def _rproc(
     dt: StepSizeFloat,
 ):
     V, S = X_["V"], X_["S"]
+    J = jnp.asarray(S).shape[0]
     mu, kappa, theta_val, xi, rho = (
         theta_["mu"],
         theta_["kappa"],
@@ -80,7 +83,7 @@ def _rproc(
     )
     y_prev = covars["y_prev"]
 
-    dZ = random.normal(key)
+    dZ = random.normal(key, (J,))
     dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
 
     dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ

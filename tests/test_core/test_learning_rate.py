@@ -178,6 +178,30 @@ def test_linear_decay():
         lr.linear_decay(0.5, 3)
 
 
+def test_hyperbolic_decay():
+    """Test hyperbolic_decay schedule."""
+    rates = {"beta": 0.1, "rho": np.array([0.2, 0.4])}
+    lr = pp.LearningRate(rates)
+
+    # Negative decay_rate
+    with pytest.raises(ValueError, match="decay_rate should be non-negative"):
+        lr.hyperbolic_decay(-0.1, 2)
+
+    # Successful decay
+    decayed = lr.hyperbolic_decay(decay_rate=0.5, M=2)
+    assert isinstance(decayed, LearningRate)
+    expected_factor = 1.0 / (1.0 + 0.5 * np.arange(2))
+    assert np.allclose(decayed.rates["beta"], 0.1 * expected_factor)
+    assert np.allclose(decayed.rates["rho"], np.array([0.2, 0.4]) * expected_factor)
+
+    # Mismatched array size for hyperbolic decay
+    with pytest.raises(
+        ValueError,
+        match="Cannot apply hyperbolic decay of length 3 to schedule of length 2 for 'rho'",
+    ):
+        lr.hyperbolic_decay(0.5, 3)
+
+
 def test_equality():
     """Test __eq__ method."""
     lr1 = pp.LearningRate({"beta": 0.1, "rho": np.array([1.0, 2.0])})

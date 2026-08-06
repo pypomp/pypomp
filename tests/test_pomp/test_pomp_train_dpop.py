@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -20,37 +22,42 @@ def simple_sir_for_dpop():
 
 
 @pytest.mark.parametrize(
-    "optimizer, decay, eta_type",
+    "optimizer, eta_type",
     [
-        (pp.Adam(), 0.0, "dict"),
-        (pp.SGD(), 0.1, "dict"),
-        (pp.Adam(), 0.1, "dict"),
-        (pp.SGD(), 0.1, "scalar"),
+        (pp.Adam(), "constant"),
+        (pp.SGD(), "constant"),
+        (pp.SGD(), "hyperbolic"),
     ],
 )
-def test_dpop_train_variants(simple_sir_for_dpop, optimizer, decay, eta_type):
+def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
     """
     Test dpop_train with various optimizer configurations.
     """
     model = simple_sir_for_dpop
-    if eta_type == "dict":
+    if eta_type == "constant":
         eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
     else:
-        eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+        eta = pp.LearningRate(
+            {name: 0.01 for name in model.canonical_param_names}
+        ).hyperbolic_decay(0.1, M=M_DEFAULT)
 
-    nll, theta_hist = model.dpop_train(
+    model.results_history.clear()
+    ret = model.dpop_train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
         optimizer=optimizer,
         alpha=0.8,
-        decay=decay,
         process_weight_state="logw",
         key=jax.random.key(1),
     )
-    assert nll.shape == (M_DEFAULT + 1,)
-    assert theta_hist.shape[0] == M_DEFAULT + 1
-    assert jnp.all(jnp.isfinite(nll))
+    assert ret is None
+    res = model.results_history[-1]
+    assert res.method == "dpop_train"
+    assert res.kind == "trace"
+    traces = res.traces()
+    assert not traces.empty
+    assert "logLik" in traces.columns
 
 
 def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
@@ -63,65 +70,74 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     J = J_DEFAULT
     M = M_DEFAULT
     eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+    initial_theta = deepcopy(model.theta)
 
     # First run: default theta ordering
     key1 = jax.random.key(123)
-    nll1, theta_hist1 = model.dpop_train(
+    model.results_history.clear()
+    model.dpop_train(
         J=J,
         M=M,
         eta=eta,
         optimizer=pp.SGD(),
-        decay=0.1,
         alpha=0.8,
         key=key1,
+        theta=deepcopy(initial_theta),
         process_weight_state="logw",
     )
+    res1 = model.results_history[-1]
 
     # Build a permuted theta with reversed key order
-    theta_orig = model.theta  # list[dict]
+    theta_orig = initial_theta.params(as_list=True)  # list[dict]
     param_keys = list(theta_orig[0].keys())
     rev_keys = list(reversed(param_keys))
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta_orig]
 
     # Second run: same random key & hyper-parameters, but permuted theta
     key2 = jax.random.key(123)
-    nll2, theta_hist2 = model.dpop_train(
+    model.dpop_train(
         J=J,
         M=M,
         eta=eta,
         optimizer=pp.SGD(),
-        decay=0.1,
         alpha=0.8,
         key=key2,
         theta=pp.PompParameters(permuted_theta),
         process_weight_state="logw",
     )
+    res2 = model.results_history[-1]
 
     # Histories should match exactly up to numerical precision
-    np.testing.assert_allclose(nll1, nll2, atol=1e-7)
-    np.testing.assert_allclose(theta_hist1, theta_hist2, atol=1e-7)
+    np.testing.assert_allclose(
+        res1.traces()["logLik"], res2.traces()["logLik"], atol=1e-7
+    )
 
 
 def test_dpop_train_alpha_cooling_one_matches_default(simple_sir_for_dpop):
     """alpha_cooling=1.0 should preserve fixed-alpha DPOP behavior."""
     model = simple_sir_for_dpop
     eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+    initial_theta = deepcopy(model.theta)
     kwargs = dict(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
         optimizer=pp.SGD(),
-        decay=0.1,
         alpha=0.8,
         process_weight_state="logw",
         key=jax.random.key(321),
     )
 
-    nll_default, theta_default = model.dpop_train(**kwargs)
-    nll_fixed, theta_fixed = model.dpop_train(alpha_cooling=1.0, **kwargs)
+    model.results_history.clear()
+    model.dpop_train(theta=deepcopy(initial_theta), **kwargs)
+    res_default = model.results_history[-1]
 
-    np.testing.assert_allclose(nll_default, nll_fixed, atol=1e-7)
-    np.testing.assert_allclose(theta_default, theta_fixed, atol=1e-7)
+    model.dpop_train(theta=deepcopy(initial_theta), alpha_cooling=1.0, **kwargs)
+    res_fixed = model.results_history[-1]
+
+    np.testing.assert_allclose(
+        res_default.traces()["logLik"], res_fixed.traces()["logLik"], atol=1e-7
+    )
 
 
 def test_jgrad_and_jvg_dpop(simple_sir_for_dpop):

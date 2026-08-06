@@ -16,7 +16,6 @@ from pypomp import benchmarks
 from pypomp import functional as F
 from pypomp.maths import logmeanexp
 from pypomp.proposals import Proposal
-from pypomp.types import ParamDict
 
 from .algorithms.helpers import run_jax_batch_sharded
 from .learning_rate import LearningRate
@@ -24,6 +23,7 @@ from .optimizer import Adam, Optimizer
 from .parameters import PompParameters
 from .results import (
     build_abc_result,
+    build_dpop_train_result,
     build_mif_result,
     build_pfilter_result,
     build_pmcmc_result,
@@ -641,11 +641,11 @@ class PompEstimationMixin(Base):
         optimizer: Optimizer | None = None,
         alpha: float = 0.8,
         alpha_cooling: float = 1.0,
-        decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-    ) -> tuple[jax.Array, jax.Array]:
+        track_time: bool = True,
+    ) -> None:
         """
         Optimizes model parameters using the DPOP differentiable particle filter and gradient-based methods.
 
@@ -659,7 +659,7 @@ class PompEstimationMixin(Base):
             Setting `nstep` ensures this, but `dt` can also yield constant steps.
 
         This method trains the model parameters to maximize the DPOP objective function using
-        first-order optimizers like Adam or SGD, with optional learning rate decay. Gradients
+        first-order optimizers like Adam or SGD. Gradients
         are computed efficiently via JAX reverse-mode automatic differentiation.
 
         Parameters
@@ -678,9 +678,6 @@ class PompEstimationMixin(Base):
             Cosine cooling factor for alpha. This factor represents the
             multiplier for the distance of alpha from 1.0 by the end of
             training. The default keeps alpha fixed.
-        decay : float, default 0.0
-            Learning-rate decay coefficient. At iteration m, the effective
-            learning rate is ``eta / (1 + decay * m)``.
         process_weight_state : str or None, default None
             Name of the state component that stores the accumulated
             process log-weight (e.g. ``"logw"``).
@@ -688,13 +685,15 @@ class PompEstimationMixin(Base):
             Random key. If None, uses ``self.fresh_key``.
         theta : PompParameters, default None
             Optional initial parameter(s). Defaults to self.theta.
+        track_time : bool, default True
+            Whether to record wall-clock execution time.
 
         Returns
         -------
-        nll_history : jax.Array, shape (M+1,)
-            Mean DPOP negative log-likelihood per observation at each step.
-        theta_history : jax.Array, shape (M+1, p)
-            Parameter vector (estimation space) at each step.
+        None
+            A :class:`~pypomp.core.results.Result` is appended
+            to :attr:`results_history`, containing log-likelihood and
+            parameter traces over iterations.
         """
         warnings.warn(
             "dpop_train is experimental and its API and behavior are subject to change.",
@@ -702,39 +701,22 @@ class PompEstimationMixin(Base):
             stacklevel=2,
         )
 
-        from .algorithms.train_dpop import dpop_train as _dpop_train
-
-        new_key, _ = self._update_fresh_key(key)
-        theta_obj = self._prepare_theta_input(theta)
-        theta_nat = theta_obj.params(as_list=True)[0]
+        start_time = time.time()
         optimizer = optimizer or Adam()
 
-        param_names = self.canonical_param_names
-        theta_est_dict = self.par_trans.to_est(cast(ParamDict, theta_nat))
-        theta_init = jnp.array([theta_est_dict[name] for name in param_names])
+        theta_obj_in = deepcopy(self._prepare_theta_input(theta))
+        theta_obj_for_result = deepcopy(theta_obj_in)
+
+        n_reps = theta_obj_in.num_replicates()
+
+        theta_obj_in = theta_obj_in.transformed(self.par_trans, direction="to_est")
+        if self.dmeas is None:
+            raise ValueError("dpop_train requires self.dmeas to be not None.")
+        if J < 1:
+            raise ValueError("J should be greater than 0")
 
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
-
-        # Full (M, p) per-iteration LR schedule (e.g. from
-        # LearningRate(...).cosine_decay(...)); the kernel indexes row m.
-        eta_array = eta.to_array(param_names, M)
-
-        ys_array = jnp.array(self.ys.values)
-        dt_array_extended = self._dt_array_extended
-        nstep_array = self._nstep_array
-        t0 = self.t0
-        times_array = jnp.array(self.ys.index.values)
-
-        rinitializer = self.rinit.struct_pf
-        rprocess_interp = self.rproc.struct_pf_interp
-
-        if self.dmeas is None:
-            raise ValueError("dpop_train requires self.dmeas to be not None.")
-        dmeasure = self.dmeas.struct_pf
-
-        accumvars = self.rproc.accumvars
-        covars_extended = self._covars_extended
 
         if process_weight_state is None:
             raise ValueError(
@@ -752,39 +734,80 @@ class PompEstimationMixin(Base):
                 f"{self.statenames}"
             ) from e
 
-        ntimes = len(self.ys)
-        opt_name = optimizer.__class__.__name__
-        beta1 = getattr(optimizer, "beta1", 0.9)
-        beta2 = getattr(optimizer, "beta2", 0.999)
-        epsilon = getattr(optimizer, "epsilon", 1e-8)
-        theta_hist, nll_hist = _dpop_train(
-            theta_init=theta_init,
-            ys=ys_array,
-            dt_array_extended=dt_array_extended,
-            nstep_array=nstep_array,
-            t0=t0,
-            times=times_array,
-            J=J,
-            rinitializer=rinitializer,
-            rprocess_interp=rprocess_interp,
-            dmeasure=dmeasure,
-            accumvars=accumvars,
-            covars_extended=covars_extended,
-            alpha=alpha,
-            process_weight_index=process_weight_index,
-            ntimes=ntimes,
-            key=new_key,
-            M=M,
-            eta=eta_array,
-            optimizer=opt_name,
-            decay=decay,
-            beta1=beta1,
-            beta2=beta2,
-            epsilon=epsilon,
-            alpha_cooling=alpha_cooling,
+        new_key, old_key = self._update_fresh_key(key)
+        keys = jnp.array(jax.random.split(new_key, n_reps))
+
+        theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
+
+        nLLs, theta_ests = run_jax_batch_sharded(
+            F.dpop_train,
+            {1: 0, 8: 0},
+            [0, 0],
+            self.to_struct(),
+            theta_array,
+            J,
+            optimizer,
+            M,
+            eta,
+            alpha,
+            process_weight_index,
+            keys,
+            alpha_cooling,
         )
 
-        return nll_hist, theta_hist
+        theta_ests_natural = self.par_trans._transform_array(
+            np.asarray(theta_ests),
+            self.canonical_param_names,
+            direction="from_est",
+        )
+
+        joined_array = xr.DataArray(
+            np.concatenate(
+                [
+                    -nLLs[..., np.newaxis],  # shape: (theta_idx, iteration, 1)
+                    theta_ests_natural,  # shape: (theta_idx, iteration, n_theta)
+                ],
+                axis=-1,
+            ),
+            dims=["theta_idx", "iteration", "variable"],
+            coords={
+                "theta_idx": range(n_reps),
+                "iteration": range(M + 1),
+                "variable": ["logLik"] + self.canonical_param_names,
+            },
+        )
+
+        final_theta_da = xr.DataArray(
+            theta_ests_natural[:, -1, :],
+            dims=["theta_idx", "parameter"],
+            coords={
+                "theta_idx": np.arange(n_reps),
+                "parameter": self.canonical_param_names,
+            },
+        )
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
+
+        if track_time is True:
+            nLLs.block_until_ready()
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
+
+        result = build_dpop_train_result(
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_obj_for_result,
+            traces=joined_array,
+            optimizer=optimizer,
+            J=J,
+            M=M,
+            eta=eta,
+            alpha=alpha,
+            alpha_cooling=alpha_cooling,
+            process_weight_state=process_weight_state,
+        )
+
+        self.results_history.add(result)
 
     def pmcmc(
         self,

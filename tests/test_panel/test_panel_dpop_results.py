@@ -80,7 +80,6 @@ def test_dpop_result_equality(dpop_results_module):
         ("alpha", 0.5),
         ("alpha_cooling", 0.5),
         ("process_weight_state", "diff_state"),
-        ("decay", 9.9),
     ]:
         res_diff = deepcopy(res0)
         res_diff.config[key] = val

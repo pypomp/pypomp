@@ -49,7 +49,8 @@ def test_002d_pfilter(london_002d):
 
 def test_002d_dpop_train(london_002d):
     eta = pp.LearningRate({name: 0.01 for name in london_002d.canonical_param_names})
-    nll, theta_hist = london_002d.dpop_train(
+    london_002d.results_history.clear()
+    ret = london_002d.dpop_train(
         J=DEFAULT_J,
         M=2,
         eta=eta,
@@ -58,9 +59,10 @@ def test_002d_dpop_train(london_002d):
         process_weight_state="logw",
         key=DEFAULT_KEY,
     )
-    assert nll.shape == (3,)
-    assert theta_hist.shape[0] == 3
-    assert jnp.all(jnp.isfinite(nll))
+    assert ret is None
+    res = london_002d.results_history[-1]
+    assert res.method == "dpop_train"
+    assert not res.traces().empty
 
 
 def test_002d_par_trans_roundtrip(london_002d):

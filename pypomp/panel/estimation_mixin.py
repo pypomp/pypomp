@@ -783,7 +783,7 @@ class PanelEstimationMixin(Base):
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         alpha_cooling: float = 1.0,
-    ):
+    ) -> None:
         """Estimate parameters using MOP-based gradient-descent optimization.
 
         Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter (Tan et al. 2024 [1]_), treating the particle filter
@@ -1001,11 +1001,10 @@ class PanelEstimationMixin(Base):
         optimizer: Optimizer | None = None,
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
-        decay: float = 0.0,
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
-    ):
+    ) -> None:
         """Estimate parameters using DPOP-based gradient-descent optimization.
 
         .. warning::
@@ -1034,8 +1033,6 @@ class PanelEstimationMixin(Base):
             DPOP discount / cooling factor.  Defaults to ``0.97``.
         alpha_cooling : float, optional
             Cosine cooling factor for alpha.  Defaults to ``1.0``.
-        decay : float, optional
-            Learning-rate decay coefficient.  Defaults to ``0.0``.
         process_weight_state : str or None, optional
             Name of the state component that stores the accumulated process
             log-weight (e.g. ``"logw"``).
@@ -1217,7 +1214,6 @@ class PanelEstimationMixin(Base):
             U,
             process_weight_index,
             ntimes,
-            decay,
         )
         logliks_trace = -np.array(logliks_history)
 
@@ -1311,7 +1307,6 @@ class PanelEstimationMixin(Base):
             alpha=alpha,
             alpha_cooling=alpha_cooling,
             process_weight_state=process_weight_state,
-            decay=decay,
         )
 
         self.results_history.add(result)

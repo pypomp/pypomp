@@ -54,6 +54,30 @@ def test_dpop_functional(model_setup):
     assert jnp.all(jnp.isfinite(results))
 
 
+def test_dpop_train_functional(model_setup):
+    struct, thetas_array, key, J, n_reps, param_names = model_setup
+    keys = jax.random.split(key, n_reps)
+    M = 2
+    eta = pp.LearningRate({name: 0.01 for name in param_names})
+
+    neg_logliks, theta_traces = F.dpop_train(
+        struct,
+        thetas_array,
+        J,
+        optimizer=pp.Adam(),
+        M=M,
+        eta=eta,
+        alpha=0.8,
+        process_weight_index=0,
+        keys=keys,
+    )
+
+    assert neg_logliks.shape == (n_reps, M + 1)
+    assert theta_traces.shape == (n_reps, M + 1, len(param_names))
+    assert jnp.all(jnp.isfinite(neg_logliks))
+    assert jnp.all(jnp.isfinite(theta_traces))
+
+
 def test_train_functional(model_setup):
     struct, thetas_array, key, J, n_reps, param_names = model_setup
     keys = jax.random.split(key, n_reps)

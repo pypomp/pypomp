@@ -46,7 +46,6 @@ _SUMMARY_LABELS = {
     "n_monitors": "Number of monitors",
     "block": "Block",
     "process_weight_state": "Process weight state",
-    "decay": "Decay",
 }
 
 

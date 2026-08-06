@@ -299,7 +299,7 @@ def _calc_ys_covars(
     return interp_covars, dt_extended, nstep_array, max_nstep
 
 
-def _cosine_cooling(i: int, M: int, c: float) -> float | jax.Array:
+def _cosine_cooling(i: int | jax.Array, M: int, c: float) -> float | jax.Array:
     """
     Calculate cosine cooling parameters for train.
 

@@ -31,7 +31,7 @@ def _get_sir_panel_n_units(n_units):
 
 
 def test_panel_dpop_train_comprehensive(sir_panel_dpop):
-    """Comprehensive test checking Adam optimizer, decay, alpha cooling, parameters change, and dimensions."""
+    """Comprehensive test checking Adam optimizer, alpha cooling, parameters change, and dimensions."""
     panel = sir_panel_dpop
     J, M = 2, 2
     panel.dpop_train(
@@ -43,7 +43,6 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
         optimizer=pp.Adam(),
         alpha=0.8,
         alpha_cooling=0.5,
-        decay=0.1,
         process_weight_state="logw",
         key=jax.random.key(0),
     )
@@ -59,7 +58,6 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
     assert res.unit_traces.shape[1] == M + 1
     assert res.unit_traces.shape[2] == len(panel.get_unit_names())  # U
     assert res.process_weight_state == "logw"
-    assert res.decay == 0.1
     assert res.alpha == 0.8
     assert res.alpha_cooling == 0.5
     assert np.all(np.isfinite(np.asarray(res.shared_traces.sel(variable="logLik"))))

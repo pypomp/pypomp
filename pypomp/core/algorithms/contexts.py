@@ -318,6 +318,43 @@ class TrainContext(MopContext):
         )
 
 
+# ----DPOP TRAIN----------------------------------------------------------------
+
+
+@register_dataclass
+@dataclass(frozen=True, kw_only=True)
+class DpopTrainContext(TrainContext):
+    """Extends :class:`TrainContext` for DPOP optimization with process weights."""
+
+    process_weight_index: int | None = static()
+
+    @classmethod
+    def from_dpop_train_struct(
+        cls,
+        struct: PompStruct,
+        J: int,
+        M: int,
+        alpha_cooling: float,
+        thresh: float,
+        n_monitors: int,
+        eta: jax.Array,
+        alpha: float | jax.Array,
+        process_weight_index: int | None,
+    ) -> DpopTrainContext:
+        return cls(
+            series=SeriesData.from_struct(struct),
+            alpha=alpha,
+            fns=ModelFns.pf(struct),
+            J=J,
+            eta=eta,
+            M=M,
+            alpha_cooling=alpha_cooling,
+            thresh=thresh,
+            n_monitors=n_monitors,
+            process_weight_index=process_weight_index,
+        )
+
+
 # ----PANEL TRAIN---------------------------------------------------------------
 
 

@@ -176,7 +176,6 @@ def _panel_dpop_train_internal(
     U: int,  # ys.shape[0]
     process_weight_index: int | None,
     ntimes: int,
-    decay: float,
 ):
     if not isinstance(optimizer, (SGD, Adam)):
         raise ValueError(
@@ -228,11 +227,8 @@ def _panel_dpop_train_internal(
         (shared_ests, unit_ests_c, opt_state_s, opt_state_u_c, global_step) = carry
         iter_keys_c = keys[i].reshape((n_chunks, chunk_size) + keys.shape[2:])
 
-        # Learning rate decay
-        i_f = i.astype(jnp.float32)
-        lr_scale = 1.0 / (1.0 + decay * i_f)
-        eta_shared_scaled = eta_shared[i] * lr_scale
-        eta_spec_scaled = eta_spec[i] * lr_scale
+        eta_shared_scaled = eta_shared[i]
+        eta_spec_scaled = eta_spec[i]
         curr_alpha = 1.0 - (1.0 - alpha) * _cosine_cooling(i, M, alpha_cooling)
 
         def chunk_scan_step(chunk_carry, chunk_idx):
@@ -328,5 +324,5 @@ def _panel_dpop_train_internal(
 
 _vmapped_panel_dpop_train_internal = jax.vmap(
     _panel_dpop_train_internal,
-    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 17,
+    in_axes=(0, 0) + (None,) * 7 + (0,) + (None,) * 16,
 )

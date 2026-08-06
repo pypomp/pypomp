@@ -14,7 +14,7 @@ class LearningRate:
     This class encapsulates learning rate values for each parameter, which can be
     either constant values or time-varying schedules (1D arrays of length M).
     It provides utility methods to generate common decay schedules such as
-    cosine, geometric, and linear decay.
+    cosine, geometric, linear, and hyperbolic decay.
 
     Parameters
     ----------
@@ -245,6 +245,29 @@ class LearningRate:
         if not (0 <= final_factor <= 1):
             raise ValueError("final_factor should be between 0 and 1")
         return self._apply_decay(np.linspace(1.0, final_factor, M), M, "linear")
+
+    def hyperbolic_decay(self, decay_rate: float, M: int) -> LearningRate:
+        """Apply a hyperbolic (inverse-time) decay schedule.
+
+        The rate at step ``t`` is ``eta_t = eta_0 / (1 + decay_rate * t)``.
+
+        Parameters
+        ----------
+        decay_rate : float
+            Decay coefficient :math:`c \\ge 0`.
+        M : int
+            Number of iterations for the schedule.
+
+        Returns
+        -------
+        LearningRate
+            A new learning rate object with hyperbolic decay applied.
+        """
+        if decay_rate < 0:
+            raise ValueError("decay_rate should be non-negative")
+        iterations = np.arange(M)
+        factor = 1.0 / (1.0 + decay_rate * iterations)
+        return self._apply_decay(factor, M, "hyperbolic")
 
     @property
     def rates(self) -> dict[str, float | np.ndarray]:

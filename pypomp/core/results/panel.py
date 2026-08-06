@@ -150,7 +150,6 @@ def build_panel_dpop_train_result(
     alpha: float,
     alpha_cooling: float,
     process_weight_state: str | None,
-    decay: float,
 ) -> Result:
     return Result(
         method="dpop_train",
@@ -167,7 +166,6 @@ def build_panel_dpop_train_result(
             "alpha": alpha,
             "alpha_cooling": alpha_cooling,
             "process_weight_state": process_weight_state,
-            "decay": decay,
         },
         payload=_trace_payload(shared_traces, unit_traces, logLiks),
     )

@@ -579,7 +579,7 @@ def test_dpop_train_validation(base_pomp):
     with pytest.raises(ValueError, match="not found in statenames"):
         base_pomp.dpop_train(J=5, M=1, eta=eta, process_weight_state="non_existent")
 
-    # 5. Test valid call with optimizer='SGD' and decay=0.1
+    # 5. Test valid call with optimizer='SGD'
     # Add logw to states
     pomp_dpop = pp.Pomp(
         ys=base_pomp.ys,
@@ -595,11 +595,16 @@ def test_dpop_train_validation(base_pomp):
         nstep=1,
     )
     pomp_dpop.fresh_key = jax.random.key(1)
-    nll_h, theta_h = pomp_dpop.dpop_train(
-        J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD(), decay=0.1
+    pomp_dpop.results_history.clear()
+    ret = pomp_dpop.dpop_train(
+        J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD()
     )
-    assert nll_h.shape == (3,)
-    assert theta_h.shape == (3, 2)
+    assert ret is None
+    res = pomp_dpop.results_history[-1]
+    assert res.method == "dpop_train"
+    assert res.kind == "trace"
+    traces = res.traces()
+    assert len(traces) > 0
 
 
 def test_merge_validation(base_pomp):

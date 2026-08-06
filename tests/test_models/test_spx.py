@@ -52,3 +52,13 @@ def test_spx_mif_basic(simple):
 
     assert isinstance(spx_model.results_history, ResultsHistory)
     assert len(spx_model.results_history) > 0
+
+
+def test_spx_vectorized_toggle():
+    m_vec = pp.models.spx(_pre_vectorized=True)
+    assert m_vec.rproc._is_vectorized is True
+    m_vec.pfilter(J=3, key=jax.random.key(1))
+
+    m_unvec = pp.models.spx(_pre_vectorized=False)
+    assert m_unvec.rproc._is_vectorized is False
+    m_unvec.pfilter(J=3, key=jax.random.key(1))

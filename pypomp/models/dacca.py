@@ -7,6 +7,7 @@ import jax.scipy.special as jspecial
 import numpy as np
 import pandas as pd
 
+from pypomp.core.model_struct import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (
@@ -148,6 +149,7 @@ def _rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFlo
     }
 
 
+@vectorized
 def _rproc(
     X_: StateDict,
     theta_: ParamDict,
@@ -162,6 +164,8 @@ def _rproc(
     deaths = X_["Mn"]
     pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
     count = X_["count"]
+
+    J = jnp.asarray(S).shape[0]
 
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
@@ -184,13 +188,13 @@ def _rproc(
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros(nrstage + 1)
+    passages = jnp.zeros((nrstage + 1, J))
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
     omega = jnp.exp(jnp.dot(seas, omegas))
 
-    dw = jax.random.normal(key) * std
+    dw = jax.random.normal(key, (J,)) * std
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
@@ -215,7 +219,7 @@ def _rproc(
     deaths = deaths + disease * dt
 
     stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0)
+    count = count + jnp.any(stack_states < 0, axis=0)
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
@@ -286,16 +290,6 @@ def _rproc_gamma(
 
     rdeaths = pts * delta
     passages = passages.at[1:].set(pts * neps)
-
-    """
-    # old code: perturb = sd_beta * dw / dt, where dw is a standard normal
-        rproc does the above
-    # this function draws from a gamma white noise process
-            Gamma(shape=dt/sigma**2, scale=sigma**2)
-    # with gamma noise, want the mean to be dt,
-            and the variance to be sd_beta**2 * dt,
-            before dividing by dt to yield multiplicative noise by 1
-    """
 
     perturb = jax.random.gamma(key, dt / sd_beta**2) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
@@ -422,8 +416,98 @@ def _from_est(theta: ParamDict) -> ParamDict:
     }
 
 
+def _rproc_scalar(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
+    S = X_["S"]
+    I = X_["I"]
+    Y = X_["Y"]
+    deaths = X_["Mn"]
+    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
+    count = X_["count"]
+
+    trend = covars["trend"]
+    dpopdt = covars["dpopdt"]
+    pop = covars["pop"]
+    seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
+
+    gamma = theta_["gamma"]
+    deltaI = theta_["m"]
+    rho = theta_["rho"]
+    eps = theta_["epsilon"]
+    clin = theta_["c"]
+    beta_trend = theta_["beta_trend"]
+    sd_beta = theta_["sigma"]
+    alpha = theta_["alpha"]
+    delta = theta_["delta"]
+    omegas = jnp.stack([theta_[f"omegas{i}"] for i in range(1, 7)], axis=0)
+    bs = jnp.stack([theta_[f"bs{i}"] for i in range(1, 7)], axis=0)
+
+    nrstage = 3
+    std = jnp.sqrt(dt)
+
+    neps = eps * nrstage  # rate
+    passages = jnp.zeros(nrstage + 1)
+
+    # Get current time step values
+    beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
+    omega = jnp.exp(jnp.dot(seas, omegas))
+
+    dw = jax.random.normal(key) * std
+
+    effI = (I / pop) ** alpha
+    births = dpopdt + delta * pop
+    passages = passages.at[0].set(gamma * I)
+    ideaths = delta * I
+    disease = deltaI * I
+    ydeaths = delta * Y
+    wanings = rho * Y
+
+    rdeaths = pts * delta
+    passages = passages.at[1:].set(pts * neps)
+
+    infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
+    sdeaths = delta * S
+
+    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
+
+    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+
+    deaths = deaths + disease * dt
+
+    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
+    count = count + jnp.any(stack_states < 0)
+
+    S = jnp.clip(S, 0)
+    I = jnp.clip(I, 0)
+    Y = jnp.clip(Y, 0)
+    pts = jnp.clip(pts, 0)
+    deaths = jnp.clip(deaths, 0)
+
+    return {
+        "S": S,
+        "I": I,
+        "Y": Y,
+        "Mn": deaths,
+        "R1": pts[0],
+        "R2": pts[1],
+        "R3": pts[2],
+        "count": count,
+    }
+
+
 def dhaka(
-    dt: float | None = 1 / 240, nstep: int | None = None, gamma: bool = False
+    dt: float | None = 1 / 240,
+    nstep: int | None = None,
+    gamma: bool = False,
+    _pre_vectorized: bool = True,
 ) -> Pomp:
     """
     Creates a POMP model for the Dhaka cholera data.
@@ -485,7 +569,11 @@ def dhaka(
        (2008): 877–880. https://doi.org/10.1038/nature07084.
     """
 
-    rproc_func = _rproc_gamma if gamma else _rproc
+    if gamma:
+        rproc_func = _rproc_gamma
+    else:
+        rproc_func = _rproc if _pre_vectorized else _rproc_scalar
+
     if gamma:
         print(
             "Warning: Using overdispersed gamma white noise. Ensure this is intended behavior."

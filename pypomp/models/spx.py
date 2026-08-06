@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from jax import random
 
+from pypomp.core.model_struct import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (
@@ -62,7 +63,38 @@ def _rinit(
     return {"V": V_0, "S": S_0}
 
 
+@vectorized
 def _rproc(
+    X_: StateDict,
+    theta_: ParamDict,
+    key: RNGKey,
+    covars: CovarDict,
+    t: TimeFloat,
+    dt: StepSizeFloat,
+):
+    V, S = X_["V"], X_["S"]
+    J = jnp.asarray(S).shape[0]
+    mu, kappa, theta_val, xi, rho = (
+        theta_["mu"],
+        theta_["kappa"],
+        theta_["theta"],
+        theta_["xi"],
+        theta_["rho"],
+    )
+    y_prev = covars["y_prev"]
+
+    dZ = random.normal(key, (J,))
+    dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
+
+    dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
+    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
+    V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
+
+    V = jnp.maximum(V, 1e-32)
+    return {"V": V, "S": S}
+
+
+def _rproc_scalar(
     X_: StateDict,
     theta_: ParamDict,
     key: RNGKey,
@@ -126,7 +158,7 @@ def _from_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def spx():
+def spx(_pre_vectorized: bool = True):
     """
     Creates a POMP model for the S&P 500 stock index data.
 
@@ -149,6 +181,8 @@ def spx():
     assert isinstance(sp500, pd.DataFrame)
     from pypomp.core.parameters import PompParameters
 
+    rproc_func = _rproc if _pre_vectorized else _rproc_scalar
+
     return Pomp(
         ys=sp500,
         theta=PompParameters(theta),
@@ -156,7 +190,7 @@ def spx():
         nstep=1,
         dt=None,
         rinit=_rinit,
-        rproc=_rproc,
+        rproc=rproc_func,
         dmeas=_dmeas,
         covars=covars,
         statenames=statenames,

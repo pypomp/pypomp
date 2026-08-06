@@ -7,7 +7,6 @@ import jax.scipy.special as jspecial
 import numpy as np
 import pandas as pd
 
-from pypomp.core.model_struct import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (
@@ -149,7 +148,6 @@ def _rinit(theta_: ParamDict, key: RNGKey, covars: CovarDict, t0: InitialTimeFlo
     }
 
 
-@vectorized
 def _rproc(
     X_: StateDict,
     theta_: ParamDict,
@@ -164,8 +162,6 @@ def _rproc(
     deaths = X_["Mn"]
     pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
     count = X_["count"]
-
-    J = jnp.asarray(S).shape[0]
 
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
@@ -188,13 +184,13 @@ def _rproc(
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros((nrstage + 1, J))
+    passages = jnp.zeros(nrstage + 1)
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
     omega = jnp.exp(jnp.dot(seas, omegas))
 
-    dw = jax.random.normal(key, (J,)) * std
+    dw = jax.random.normal(key) * std
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
@@ -219,7 +215,7 @@ def _rproc(
     deaths = deaths + disease * dt
 
     stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0, axis=0)
+    count = count + jnp.any(stack_states < 0)
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
@@ -239,7 +235,6 @@ def _rproc(
     }
 
 
-@vectorized
 def _rproc_gamma(
     X_: StateDict,
     theta_: ParamDict,
@@ -254,8 +249,6 @@ def _rproc_gamma(
     deaths = X_["Mn"]
     pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
     count = X_["count"]
-
-    J = jnp.asarray(S).shape[0]
 
     trend = covars["trend"]
     dpopdt = covars["dpopdt"]
@@ -277,7 +270,7 @@ def _rproc_gamma(
     nrstage = 3
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros((nrstage + 1, J))
+    passages = jnp.zeros(nrstage + 1)
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
@@ -304,7 +297,7 @@ def _rproc_gamma(
             before dividing by dt to yield multiplicative noise by 1
     """
 
-    perturb = jax.random.gamma(key, dt / sd_beta**2, shape=(J,)) * sd_beta**2 / dt
+    perturb = jax.random.gamma(key, dt / sd_beta**2) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
 
     sdeaths = delta * S
@@ -318,7 +311,7 @@ def _rproc_gamma(
     deaths = deaths + disease * dt
 
     stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0, axis=0)
+    count = count + jnp.any(stack_states < 0)
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)

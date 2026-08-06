@@ -48,9 +48,10 @@ Optimizing CPU Performance
 When using JAX on CPUs, parallelizing across individual particles can be inefficient due to inter-core communication overhead (e.g., utilizing 36 cores may only be as fast as using 2 cores).
 To resolve this, Pypomp methods like :meth:`~pypomp.core.pomp.Pomp.mif` and :meth:`~pypomp.core.pomp.Pomp.pfilter` automatically shard parameter sets across available devices.
 
-Note that it is specifically the *parameter sets* that are sharded, so the speedup scales with how many of them you pass in ``theta``.
-The ``reps`` argument is vectorized underneath the sharding and does not spread work across devices: eight parameter sets with ``reps=1`` parallelizes across eight devices, whereas a single parameter set with ``reps=8`` runs on one.
-Passing fewer parameter sets than there are devices simply leaves the surplus devices idle.
+.. note::
+    It is specifically the *parameter sets* that are sharded, so the speedup scales with how many of them you pass in ``theta``.
+    The ``reps`` argument is evaluated sequentially (via ``jax.lax.map``) underneath the sharding to conserve memory and does not spread work across devices: eight parameter sets with ``reps=1`` parallelizes across eight devices, whereas a single parameter set with ``reps=8`` runs on one.
+    Passing fewer parameter sets than there are devices simply leaves the surplus devices idle.
 
 For this optimization to take effect, you must manually set the number of JAX devices to match your available CPU cores **before** importing JAX.
 You can do this by adding the following snippet at the beginning of your script:

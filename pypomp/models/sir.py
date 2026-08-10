@@ -200,22 +200,20 @@ def rproc(X_, theta_, key, covars, t, dt):
     I_int = jnp.maximum(jnp.round(I), 0.0)
     R_int = jnp.maximum(jnp.round(R), 0.0)
 
-    N = jnp.stack([S_int, I_int, R_int])
-    rates = jnp.stack(
-        [jnp.array([rate_foi, mu]), jnp.array([gamma, mu]), jnp.array([mu, 0.0])]
-    )
+    rates_S = jnp.array([rate_foi, mu])
+    rates_I = jnp.array([gamma, mu])
+    rates_R = jnp.array([mu, 0.0])
 
     keys_compartments = jax.random.split(k_trans, 3)
-    # Should manually vectorize sample_and_log_prob
-    trans, lps, _ = jax.vmap(sample_and_log_prob, in_axes=(0, 0, None, 0))(
-        N, rates, dt, keys_compartments
-    )
+    trans_S, lps_S, _ = sample_and_log_prob(S_int, rates_S, dt, keys_compartments[0])
+    trans_I, lps_I, _ = sample_and_log_prob(I_int, rates_I, dt, keys_compartments[1])
+    trans_R, lps_R, _ = sample_and_log_prob(R_int, rates_R, dt, keys_compartments[2])
 
-    infections, deaths_S = trans[0, 0], trans[0, 1]
-    recoveries, deaths_I = trans[1, 0], trans[1, 1]
-    deaths_R = trans[2, 0]
+    infections, deaths_S = trans_S[0], trans_S[1]
+    recoveries, deaths_I = trans_I[0], trans_I[1]
+    deaths_R = trans_R[0]
 
-    logw_step = jnp.sum(lps)
+    logw_step = lps_S + lps_I + lps_R
     logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
 
     S_new = S + births - infections - deaths_S

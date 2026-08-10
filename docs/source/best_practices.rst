@@ -42,6 +42,41 @@ This also simplifies downstream analysis, as methods like :meth:`~pypomp.core.po
 
 Creating a separate :class:`~pypomp.core.pomp.Pomp` or :class:`~pypomp.panel.panel.PanelPomp` object for each parameter set negates these performance and structural advantages, so it is generally not recommended.
 
+
+Avoiding 2-D Temporaries Under MIF
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Under :meth:`~pypomp.core.pomp.Pomp.mif`, parameters are perturbed per particle and arrive as ``(J,)`` arrays rather than scalars.
+Any intermediate built inside an ``rproc`` by combining several state variables or parameters into an array therefore becomes a genuine 2-D buffer, ``(k, J)``, rebuilt on every Euler sub-step.
+On JAX >= 0.10.2, the compiler no longer fuses that pattern away, which can cause significant slowdowns (2x or more).
+The same code under :meth:`~pypomp.core.pomp.Pomp.pfilter` is free because parameters there are scalars.
+
+This applies to both default (vmapped) and :func:`~pypomp.core.model_struct.vectorized` process functions.
+
+**The rule:** inside an ``rproc``, never allocate a buffer whose length is a compile-time constant. Use that many named variables instead.
+
+Concretely:
+
+.. code-block:: python
+
+    # Slow under mif (creates 2-D buffers and scatter targets)
+    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
+    passages = jnp.zeros((4, J))
+    passages = passages.at[0].set(gamma * I)
+    count = count + jnp.any(jnp.stack([S, I, Y]) < 0, axis=0)
+
+    # Fast (elementwise operations on named variables)
+    q0, q1, q2 = X_["R1"], X_["R2"], X_["R3"]
+    pass0 = gamma * I
+    count = count + ((S < 0) | (I < 0) | (Y < 0))
+
+Key patterns to avoid:
+
+- Scatter targets like ``passages.at[i].set(...)`` inside the time-stepping loop.
+- Array reductions across states/parameters like ``jnp.any(jnp.stack(...), axis=0)``.
+- Intermediate state arrays like ``pts = jnp.stack([R1, R2, R3])`` that are updated or reduced across.
+
+
 Optimizing CPU Performance
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -162,7 +162,7 @@ def _rproc(
     I = X_["I"]
     Y = X_["Y"]
     deaths = X_["Mn"]
-    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
+    q0, q1, q2 = X_["R1"], X_["R2"], X_["R3"]
     count = X_["count"]
 
     J = jnp.asarray(S).shape[0]
@@ -188,7 +188,10 @@ def _rproc(
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros((nrstage + 1, J))
+    pass0 = gamma * I
+    pass1 = q0 * neps
+    pass2 = q1 * neps
+    pass3 = q2 * neps
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
@@ -198,33 +201,38 @@ def _rproc(
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
-    passages = passages.at[0].set(gamma * I)
     ideaths = delta * I
     disease = deltaI * I
     ydeaths = delta * Y
     wanings = rho * Y
 
-    rdeaths = pts * delta
-    passages = passages.at[1:].set(pts * neps)
+    rdeaths0 = q0 * delta
+    rdeaths1 = q1 * delta
+    rdeaths2 = q2 * delta
 
     infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
     sdeaths = delta * S
 
-    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    S = S + (births - infections - sdeaths + pass3 + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - pass0) * dt
     Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
 
-    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+    q0 = q0 + (pass0 - pass1 - rdeaths0) * dt
+    q1 = q1 + (pass1 - pass2 - rdeaths1) * dt
+    q2 = q2 + (pass2 - pass3 - rdeaths2) * dt
 
     deaths = deaths + disease * dt
 
-    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0, axis=0)
+    count = count + (
+        (S < 0) | (I < 0) | (Y < 0) | (deaths < 0) | (q0 < 0) | (q1 < 0) | (q2 < 0)
+    )
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
     Y = jnp.clip(Y, 0)
-    pts = jnp.clip(pts, 0)
+    q0 = jnp.clip(q0, 0)
+    q1 = jnp.clip(q1, 0)
+    q2 = jnp.clip(q2, 0)
     deaths = jnp.clip(deaths, 0)
 
     return {
@@ -232,9 +240,9 @@ def _rproc(
         "I": I,
         "Y": Y,
         "Mn": deaths,
-        "R1": pts[0],
-        "R2": pts[1],
-        "R3": pts[2],
+        "R1": q0,
+        "R2": q1,
+        "R3": q2,
         "count": count,
     }
 
@@ -251,7 +259,7 @@ def _rproc_gamma(
     I = X_["I"]
     Y = X_["Y"]
     deaths = X_["Mn"]
-    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
+    q0, q1, q2 = X_["R1"], X_["R2"], X_["R3"]
     count = X_["count"]
 
     trend = covars["trend"]
@@ -274,7 +282,10 @@ def _rproc_gamma(
     nrstage = 3
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros(nrstage + 1)
+    pass0 = gamma * I
+    pass1 = q0 * neps
+    pass2 = q1 * neps
+    pass3 = q2 * neps
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
@@ -282,35 +293,40 @@ def _rproc_gamma(
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
-    passages = passages.at[0].set(gamma * I)
     ideaths = delta * I
     disease = deltaI * I
     ydeaths = delta * Y
     wanings = rho * Y
 
-    rdeaths = pts * delta
-    passages = passages.at[1:].set(pts * neps)
+    rdeaths0 = q0 * delta
+    rdeaths1 = q1 * delta
+    rdeaths2 = q2 * delta
 
     perturb = jax.random.gamma(key, dt / sd_beta**2) * sd_beta**2 / dt
     infections = (omega + beta * perturb * effI) * S
 
     sdeaths = delta * S
 
-    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    S = S + (births - infections - sdeaths + pass3 + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - pass0) * dt
     Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
 
-    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+    q0 = q0 + (pass0 - pass1 - rdeaths0) * dt
+    q1 = q1 + (pass1 - pass2 - rdeaths1) * dt
+    q2 = q2 + (pass2 - pass3 - rdeaths2) * dt
 
     deaths = deaths + disease * dt
 
-    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0)
+    count = count + (
+        (S < 0) | (I < 0) | (Y < 0) | (deaths < 0) | (q0 < 0) | (q1 < 0) | (q2 < 0)
+    )
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
     Y = jnp.clip(Y, 0)
-    pts = jnp.clip(pts, 0)
+    q0 = jnp.clip(q0, 0)
+    q1 = jnp.clip(q1, 0)
+    q2 = jnp.clip(q2, 0)
     deaths = jnp.clip(deaths, 0)
 
     return {
@@ -318,9 +334,9 @@ def _rproc_gamma(
         "I": I,
         "Y": Y,
         "Mn": deaths,
-        "R1": pts[0],
-        "R2": pts[1],
-        "R3": pts[2],
+        "R1": q0,
+        "R2": q1,
+        "R3": q2,
         "count": count,
     }
 
@@ -428,7 +444,7 @@ def _rproc_scalar(
     I = X_["I"]
     Y = X_["Y"]
     deaths = X_["Mn"]
-    pts = jnp.stack([X_["R1"], X_["R2"], X_["R3"]], axis=0)
+    q0, q1, q2 = X_["R1"], X_["R2"], X_["R3"]
     count = X_["count"]
 
     trend = covars["trend"]
@@ -452,7 +468,10 @@ def _rproc_scalar(
     std = jnp.sqrt(dt)
 
     neps = eps * nrstage  # rate
-    passages = jnp.zeros(nrstage + 1)
+    pass0 = gamma * I
+    pass1 = q0 * neps
+    pass2 = q1 * neps
+    pass3 = q2 * neps
 
     # Get current time step values
     beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
@@ -462,33 +481,38 @@ def _rproc_scalar(
 
     effI = (I / pop) ** alpha
     births = dpopdt + delta * pop
-    passages = passages.at[0].set(gamma * I)
     ideaths = delta * I
     disease = deltaI * I
     ydeaths = delta * Y
     wanings = rho * Y
 
-    rdeaths = pts * delta
-    passages = passages.at[1:].set(pts * neps)
+    rdeaths0 = q0 * delta
+    rdeaths1 = q1 * delta
+    rdeaths2 = q2 * delta
 
     infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
     sdeaths = delta * S
 
-    S = S + (births - infections - sdeaths + passages[nrstage] + wanings) * dt
-    I = I + (clin * infections - disease - ideaths - passages[0]) * dt
+    S = S + (births - infections - sdeaths + pass3 + wanings) * dt
+    I = I + (clin * infections - disease - ideaths - pass0) * dt
     Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
 
-    pts = pts + (passages[:-1] - passages[1:] - rdeaths) * dt
+    q0 = q0 + (pass0 - pass1 - rdeaths0) * dt
+    q1 = q1 + (pass1 - pass2 - rdeaths1) * dt
+    q2 = q2 + (pass2 - pass3 - rdeaths2) * dt
 
     deaths = deaths + disease * dt
 
-    stack_states = jnp.stack([S, I, Y, deaths, pts[0], pts[1], pts[2]], axis=0)
-    count = count + jnp.any(stack_states < 0)
+    count = count + (
+        (S < 0) | (I < 0) | (Y < 0) | (deaths < 0) | (q0 < 0) | (q1 < 0) | (q2 < 0)
+    )
 
     S = jnp.clip(S, 0)
     I = jnp.clip(I, 0)
     Y = jnp.clip(Y, 0)
-    pts = jnp.clip(pts, 0)
+    q0 = jnp.clip(q0, 0)
+    q1 = jnp.clip(q1, 0)
+    q2 = jnp.clip(q2, 0)
     deaths = jnp.clip(deaths, 0)
 
     return {
@@ -496,9 +520,9 @@ def _rproc_scalar(
         "I": I,
         "Y": Y,
         "Mn": deaths,
-        "R1": pts[0],
-        "R2": pts[1],
-        "R3": pts[2],
+        "R1": q0,
+        "R2": q1,
+        "R3": q2,
         "count": count,
     }
 

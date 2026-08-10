@@ -101,11 +101,11 @@ def _matrix_from_flat(name: str, nrow: int, ncol: int, theta: ParamDict) -> jax.
 
 def _tril_from_flat(name: str, d: int, theta: ParamDict) -> jax.Array:
     """Assemble a lower-triangular matrix from the ``name{i}{j}`` entries."""
-    L = jnp.zeros((d, d))
-    for i in range(1, d + 1):
-        for j in range(1, i + 1):
-            L = L.at[i - 1, j - 1].set(theta[f"{name}{i}{j}"])
-    return L
+    rows = [
+        [theta[f"{name}{i}{j}"] if j <= i else 0.0 for j in range(1, d + 1)]
+        for i in range(1, d + 1)
+    ]
+    return jnp.array(rows)
 
 
 def _unpack(

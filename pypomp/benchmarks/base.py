@@ -48,14 +48,17 @@ def arma(
         for col in ys.columns:
             data = ys[col].dropna()
             if len(data) > 0:
+                vals = data.to_numpy()
                 if log_ys:
-                    data = np.log(data + 1)
-                model = ARIMA(data, order=order)
+                    vals = np.log(vals + 1)
+                model = ARIMA(vals, order=order)
                 res = model.fit()
                 total_llf += res.llf
 
     if not suppress_warnings:
-        fit_all()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            fit_all()
     else:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -107,11 +110,12 @@ def negbin(
             if len(data) == 0:
                 continue
 
+            vals = data.to_numpy()
             if not autoregressive:
                 import statsmodels.api as sm
 
-                exog = np.ones_like(data)
-                model = sm.NegativeBinomial(data, exog)
+                exog = np.ones((len(vals), 1))
+                model = sm.NegativeBinomial(vals, exog)
                 res = model.fit(disp=0)
                 total_llf += res.llf
             else:
@@ -119,7 +123,7 @@ def negbin(
                 from scipy.optimize import minimize
                 from scipy.stats import nbinom
 
-                y = np.asarray(data.values)
+                y = np.asarray(vals)
                 if len(y) < 2:
                     continue
                 y_past = y[:-1]
@@ -147,7 +151,9 @@ def negbin(
                 total_llf += -float(res.fun)
 
     if not suppress_warnings:
-        fit_all()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            fit_all()
     else:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")

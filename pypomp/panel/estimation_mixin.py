@@ -1365,12 +1365,14 @@ class PanelEstimationMixin(Base):
                     stacklevel=2,
                 )
         else:
-            for name, unit in self.unit_objects.items():
-                llf = benchmarks.arma(
-                    unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
-                )
-                results.append({"unit": name, "logLik": llf})
-                total_llf += llf
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                for name, unit in self.unit_objects.items():
+                    llf = benchmarks.arma(
+                        unit.ys, order=order, log_ys=log_ys, suppress_warnings=False
+                    )
+                    results.append({"unit": name, "logLik": llf})
+                    total_llf += llf
 
         # Insert total at the beginning
         results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})
@@ -1423,12 +1425,14 @@ class PanelEstimationMixin(Base):
                     stacklevel=2,
                 )
         else:
-            for name, unit in self.unit_objects.items():
-                llf = benchmarks.negbin(
-                    unit.ys, autoregressive=autoregressive, suppress_warnings=False
-                )
-                results.append({"unit": name, "logLik": llf})
-                total_llf += llf
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                for name, unit in self.unit_objects.items():
+                    llf = benchmarks.negbin(
+                        unit.ys, autoregressive=autoregressive, suppress_warnings=False
+                    )
+                    results.append({"unit": name, "logLik": llf})
+                    total_llf += llf
 
         # Insert total at the beginning
         results.insert(0, {"unit": "[[TOTAL]]", "logLik": total_llf})

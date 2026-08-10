@@ -272,6 +272,73 @@ def test_mismatched_schedule_lengths():
         pp.LearningRate({"beta": [0.1, 0.2], "rho": [0.01, 0.02, 0.03]})
 
 
+def test_init_empty_rates():
+    """An empty rates mapping produces an empty param_names/array pair."""
+    lr = pp.LearningRate({})
+    assert lr.param_names == ()
+    assert lr.rates_all_arr.shape == (0,)
+    assert lr.rates == {}
+
+
+def test_mismatched_param_fallback_empty_param_names():
+    """_mismatched_param falls back to 'PARAM_NAMES_NONE' when there are no params."""
+    lr = pp.LearningRate({})
+    assert lr._mismatched_param(5) == "PARAM_NAMES_NONE"
+
+
+def test_mismatched_param_fallback_no_varying_column():
+    """_mismatched_param falls back to the first param name when every
+    column of a 2D schedule happens to be constant (so no column differs
+    from its own first row), even though the row count doesn't match M."""
+    # "rho" is a 1D schedule of two identical values, forcing rates_all_arr
+    # to be 2D (broadcasting "beta") while every column is still constant.
+    lr = pp.LearningRate({"beta": 0.1, "rho": [0.2, 0.2]})
+    assert lr.rates_all_arr.ndim == 2
+    assert lr._mismatched_param(5) == "beta"
+
+
+def test_container_methods():
+    """Test dictionary-like container operations (read-only, insertion order)."""
+    lr = pp.LearningRate({"beta": 0.1, "rho": 0.2})
+
+    # __getitem__
+    assert lr["beta"] == 0.1
+    assert lr["rho"] == 0.2
+    with pytest.raises(KeyError, match="Parameter 'gamma' not found in learning rates"):
+        _ = lr["gamma"]
+
+    # __contains__
+    assert "beta" in lr
+    assert "gamma" not in lr
+
+    # __len__
+    assert len(lr) == 2
+
+    # __iter__ (insertion order)
+    assert list(lr) == ["beta", "rho"]
+
+    # keys, values, items
+    assert list(lr.keys()) == ["beta", "rho"]
+    assert list(lr.values()) == [0.1, 0.2]
+    assert list(lr.items()) == [("beta", 0.1), ("rho", 0.2)]
+
+    # get
+    assert lr.get("beta") == 0.1
+    assert lr.get("gamma") is None
+    assert lr.get("gamma", 0.5) == 0.5
+
+
+def test_getitem_schedule_value():
+    """__getitem__ on a 2D, non-constant schedule returns the raw array."""
+    lr = pp.LearningRate({"beta": 0.1, "rho": np.array([0.2, 0.4])})
+    assert isinstance(lr["rho"], np.ndarray)
+    assert np.allclose(lr["rho"], [0.2, 0.4])
+    # "beta" is broadcast to a schedule but constant, so it collapses to a
+    # scalar float even though the underlying storage is 2D.
+    assert lr["beta"] == 0.1
+    assert isinstance(lr["beta"], float)
+
+
 def test_str_repr():
     """Test __str__ and __repr__ formatting."""
     # 1. Scalar values

@@ -108,7 +108,7 @@ class LearningRate:
         for i, name in enumerate(self.param_names):
             if arr.ndim == 2 and not np.all(arr[:, i] == arr[0, i]):
                 return name
-        return self.param_names[0] if self.param_names else "parameter"
+        return self.param_names[0] if self.param_names else "PARAM_NAMES_NONE"
 
     def _canonicalize(self, canonical_names: Sequence[str]) -> LearningRate:
         """Reorder learning rates to match canonical parameter names.

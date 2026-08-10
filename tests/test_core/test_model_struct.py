@@ -11,6 +11,7 @@ from pypomp.core.model_struct import (
     _RInit,
     _RMeas,
     _RProc,
+    _time_interp,
 )
 from pypomp.types import (
     CovarDict,
@@ -874,3 +875,63 @@ def test_DPrior_par_trans():
     # in estimation space log(beta)=0.0 -> beta=1.0
     val_trans = dprior_obj.struct(jnp.array([0.0]), should_trans=True)
     assert np.isclose(float(val_trans), 1.0)
+
+
+def test_rproc_single_particle_struct_with_should_trans():
+    """_RProc.struct (the non-vmapped single-particle wrapper) applies the
+    from_est transform when should_trans=True."""
+
+    def step(X_, theta_, key, covars, t, dt):
+        return {"state_0": X_["state_0"] + theta_["param_0"] * dt}
+
+    par_trans = pp.ParTrans(
+        to_est=lambda p: {"param_0": jnp.log(p["param_0"])},
+        from_est=lambda p: {"param_0": jnp.exp(p["param_0"])},
+    )
+    rproc = _RProc(
+        step,
+        statenames=["state_0"],
+        param_names=["param_0"],
+        covar_names=[],
+        nstep=1,
+        par_trans=par_trans,
+    )
+    key = jax.random.key(42)
+    # theta_arr carries log(2.0) on the estimation scale; from_est maps it back to 2.0.
+    result = rproc.struct(
+        jnp.array([1.0]), jnp.array([jnp.log(2.0)]), key, jnp.array([]), 0.0, 0.5, True
+    )
+    assert np.isclose(float(result[0]), 2.0)  # 1.0 + 2.0 * 0.5
+
+
+def test_rproc_struct_pf_array_adapter():
+    """struct_pf/struct_per (built via the internal array adapter) accept
+    and return plain (J, n_states) arrays rather than dicts."""
+
+    def step(X_, theta_, key, covars, t, dt):
+        return {"state_0": X_["state_0"] + theta_["param_0"] * dt}
+
+    rproc = _RProc(
+        step,
+        statenames=["state_0"],
+        param_names=["param_0"],
+        covar_names=[],
+        nstep=1,
+        par_trans=pp.ParTrans(),
+    )
+    keys = jax.random.split(jax.random.key(0), 2)
+    X_arr = jnp.array([[1.0], [2.0]])
+    theta_arr = jnp.array([3.0])
+    result = rproc.struct_pf(X_arr, theta_arr, keys, jnp.array([]), 0.0, 0.5, False)
+    assert result.shape == (2, 1)
+    assert np.allclose(np.asarray(result).ravel(), [2.5, 3.5])
+
+
+def test_time_interp_requires_statenames():
+    """_time_interp must be given statenames to build the sub-step loop."""
+
+    def step(X_, theta_, key, covars, t, dt):
+        return X_
+
+    with pytest.raises(ValueError, match="statenames are required"):
+        _time_interp(step, nstep_fixed=1, max_steps_bound=None, statenames=None)

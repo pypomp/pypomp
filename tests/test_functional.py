@@ -282,6 +282,123 @@ def test_panel_train_functional(panel_setup):
     assert unit_history.shape == (n_reps, M + 1, U, n_spec)
 
 
+def test_panel_train_functional_unsupported_optimizer(panel_setup):
+    """Panel train only supports SGD/Adam/FullMatrixAdam (no Hessian-based
+    optimizers, since panel train doesn't compute one); other optimizers raise."""
+    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+    M = 1
+    all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
+    eta = pp.LearningRate({name: 0.01 for name in all_param_names})
+    keys = jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U)
+
+    with pytest.raises(ValueError, match="not supported for panel train"):
+        F.panel_train(
+            struct,
+            shared_array,
+            unit_array,
+            J=J,
+            optimizer=pp.Newton(),
+            M=M,
+            eta=eta,
+            alpha=0.97,
+            keys=keys,
+            alpha_cooling=1.0,
+            chunk_size=1,
+        )
+
+
+def test_panel_train_functional_scale_and_clip(panel_setup):
+    """Exercise the gradient-clipping and direction-rescaling branches of the
+    per-chunk panel train step (clip_norm and scale=True)."""
+    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+    M = 1
+    all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
+    eta = pp.LearningRate({name: 0.01 for name in all_param_names})
+    keys = jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U)
+
+    neg_logliks, shared_history, unit_history = F.panel_train(
+        struct,
+        shared_array,
+        unit_array,
+        J=J,
+        optimizer=pp.SGD(scale=True, clip_norm=1.0),
+        M=M,
+        eta=eta,
+        alpha=0.97,
+        keys=keys,
+        alpha_cooling=1.0,
+        chunk_size=1,
+    )
+
+    assert neg_logliks.shape == (n_reps, M + 1)
+    assert jnp.all(jnp.isfinite(neg_logliks[:, 1:]))
+    assert jnp.all(jnp.isfinite(shared_history))
+    assert jnp.all(jnp.isfinite(unit_history))
+
+
+def test_chunked_panel_mop_internal_direct(panel_setup):
+    """``_chunked_panel_mop_internal``/``_vg_chunked_panel_mop_internal`` in
+    pypomp.core.algorithms.mop compute the total panel negative log-likelihood
+    (and its gradient) in one chunked pass, rather than via the per-chunk
+    optimizer-step scan that pypomp.core.algorithms.train.py uses for actual
+    training. They aren't called anywhere in the current codebase, but are
+    exercised directly here since they're plain, independently-testable
+    functions built on the same MopContext machinery as the rest of mop.py.
+    """
+    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+    from pypomp.core.algorithms.contexts import PanelTrainContext
+    from pypomp.core.algorithms.mop import (
+        _chunked_panel_mop_internal,
+        _vg_chunked_panel_mop_internal,
+    )
+
+    M = 1
+    all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
+    eta = pp.LearningRate({name: 0.01 for name in all_param_names})
+    eta_shared = eta.to_array(struct.shared_param_names, M)
+    eta_spec = eta.to_array(struct.unit_param_names, M)
+    alpha = 0.97
+
+    # Only the series/alpha/fns/J fields survive to_mop_context(), so the
+    # placeholder shape of `keys` here doesn't need to match training usage.
+    placeholder_keys = jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U)
+    panel_context = PanelTrainContext.from_panel_train_struct(
+        struct, J, 1, M, 1.0, placeholder_keys, eta_shared, eta_spec, alpha
+    )
+    mop_context = panel_context.to_mop_context()
+
+    shared_est, unit_est = struct.par_trans._transform_panel_array(
+        shared_array,
+        unit_array,
+        struct.shared_param_names,
+        struct.unit_param_names,
+        direction="to_est",
+    )
+    rep_shared = shared_est[0]
+    rep_unit = unit_est[0]
+    unit_keys = jax.random.split(key, U)
+
+    loss_chunk1 = _chunked_panel_mop_internal(
+        rep_shared, rep_unit, struct.unit_param_permutations, mop_context, unit_keys, 1
+    )
+    loss_chunkU = _chunked_panel_mop_internal(
+        rep_shared, rep_unit, struct.unit_param_permutations, mop_context, unit_keys, U
+    )
+    assert jnp.isfinite(loss_chunk1)
+    # Chunking is purely a memory/vectorization strategy: the aggregated loss
+    # must be the same regardless of how many chunks it's split across.
+    assert jnp.allclose(loss_chunk1, loss_chunkU, rtol=1e-4)
+
+    val, (grad_shared, grad_unit) = _vg_chunked_panel_mop_internal(
+        rep_shared, rep_unit, struct.unit_param_permutations, mop_context, unit_keys, 1
+    )
+    assert jnp.isfinite(val)
+    assert grad_shared.shape == rep_shared.shape
+    assert grad_unit.shape == rep_unit.shape
+    assert jnp.all(jnp.isfinite(grad_shared))
+    assert jnp.all(jnp.isfinite(grad_unit))
+
+
 def test_align_params():
     # 1. Test scalar float parameters
     params_scalar = {"alpha": 1.0, "beta": 2.0, "gamma": 3.0}

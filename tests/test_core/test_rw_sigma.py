@@ -74,6 +74,11 @@ def test_init_valid_cases(sigmas, init_names, expected_all):
             [],
             "All values in sigmas dictionary must be non-negative",
         ),
+        (
+            {1: 0.1},
+            [],
+            "All keys in sigmas must be strings",
+        ),
     ],
 )
 def test_init_invalid_cases(sigmas, init_names, expected_error):
@@ -286,6 +291,21 @@ def test_pytree_roundtrip():
     assert all(isinstance(leaf, np.ndarray) for leaf in leaves)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert rebuilt == rw
+
+
+def test_default_cooling_flat_schedule():
+    """default_cooling always returns 1.0 (no reduction)."""
+    from pypomp.core.rw_sigma import default_cooling
+
+    assert default_cooling(nt=0, m=0, ntimes=10) == 1.0
+    assert default_cooling(nt=5, m=3, ntimes=10) == 1.0
+
+
+def test_init_with_custom_cooling_fn():
+    """The cooling_fn constructor kwarg selects a custom schedule directly."""
+    rw = pp.RWSigma({"param1": 0.1}, cooling_fn=dummy_cooling_global)
+    assert rw.cooling_type == "custom"
+    assert rw.cooling_factor(0, 0, 10) == 1.0
 
 
 def test_cooling_fn_equality():

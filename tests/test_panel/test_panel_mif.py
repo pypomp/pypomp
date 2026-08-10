@@ -236,6 +236,30 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
         )
 
 
+def test_mif_shared_only(lg_panel_setup_shared_only):
+    """MIF with an all-shared panel (no unit-specific parameters at all).
+
+    Exercises the ``n_spec == 0`` setup branch, where the unit-specific
+    parameter swarm is built as a zero-width array.
+    """
+    panel, rw_sd, key = lg_panel_setup_shared_only
+    J, M, a = 2, 2, 0.5
+    theta_orig = deepcopy(panel.theta)
+    rw_sd_cooled = rw_sd.geometric_cooling(a=a)
+    panel.mif(J=J, rw_sd=rw_sd_cooled, M=M, key=key)
+
+    result = panel.results_history[-1]
+    check_mif_result(result, panel, J, M, a, rw_sd_cooled, theta_orig)
+
+    # No unit-specific params: unit_traces should carry only unitLogLik.
+    assert list(result.unit_traces.coords["variable"].values) == ["unitLogLik"]
+    assert result.unit_traces.shape[-1] == 1
+    assert (
+        list(result.shared_traces.coords["variable"].values)
+        == ["logLik"] + panel.canonical_shared_param_names
+    )
+
+
 def test_pif(lg_panel_setup_some_shared):
     """Test sequential PIF (block=False)."""
     panel, rw_sd, key = lg_panel_setup_some_shared

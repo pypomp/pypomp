@@ -3,6 +3,7 @@ from typing import Any
 
 import jax
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
@@ -28,6 +29,147 @@ def _get_sir_panel_n_units(n_units):
     )
     theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
     return pp.PanelPomp(Pomp_dict=pomps, theta=theta)
+
+
+def _build_sir_panel_all_shared_dpop():
+    """Build a 2-unit SIR panel with every parameter shared (no unit-specific)."""
+    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
+    sir1 = pp.models.sir(seed=100, times=test_times)
+    sir2 = pp.models.sir(seed=200, times=test_times)
+    param_names = sir1.canonical_param_names
+    theta1 = sir1.theta[0]
+    theta2 = sir2.theta[0]
+
+    shared = pd.DataFrame(
+        {"shared": [(theta1[p] + theta2[p]) / 2 for p in param_names]},
+        index=pd.Index(param_names),
+    )
+    empty_unit_specific = pd.DataFrame(index=pd.Index([]), columns=["unit1", "unit2"])
+    theta = pp.PanelParameters(
+        theta=[{"shared": shared, "unit_specific": empty_unit_specific}]
+    )
+    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
+    return panel, theta
+
+
+def test_panel_dpop_train_all_shared():
+    """All parameters shared: covers the ``n_spec == 0`` setup branch and the
+    zero-filled unit_traces fallback used when there is nothing unit-specific
+    to trace."""
+    panel, theta = _build_sir_panel_all_shared_dpop()
+    J, M = 2, 2
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=0.01,
+        theta=deepcopy(theta),
+        chunk_size=1,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(0),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+    assert list(res.unit_traces.coords["variable"].values) == ["unitLogLik"]
+    assert res.unit_traces.shape == (1, M + 1, 2, 1)
+    # Placeholder unit_traces (no unit-specific params) should be all zeros.
+    assert np.all(np.asarray(res.unit_traces) == 0.0)
+
+    shared_vars = list(res.shared_traces.coords["variable"].values)
+    assert shared_vars == ["logLik"] + panel.canonical_shared_param_names
+    assert np.all(np.isfinite(np.asarray(res.shared_traces.sel(variable="logLik"))))
+
+
+def test_panel_dpop_train_learning_rate_eta(sir_panel_with_shared_dpop):
+    """Passing a LearningRate object exercises the per-iteration (M, p) eta
+    schedule path, as opposed to the constant dict/float broadcast path."""
+    panel = sir_panel_with_shared_dpop
+    param_names = panel.canonical_param_names
+    eta = pp.LearningRate({p: 0.01 for p in param_names})
+
+    J, M = 2, 2
+    panel.dpop_train(
+        J=J,
+        M=M,
+        eta=eta,
+        theta=deepcopy(panel.theta),
+        chunk_size=1,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(7),
+    )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+    assert res.eta == eta
+    # Parameters should have moved from their initial values.
+    unit_vars = [
+        v for v in res.unit_traces.coords["variable"].values if v != "unitLogLik"
+    ]
+    initial = res.unit_traces.sel(theta_idx=0, iteration=0, variable=unit_vars).values
+    final = res.unit_traces.sel(theta_idx=0, iteration=M, variable=unit_vars).values
+    assert not np.allclose(initial, final)
+
+
+def test_panel_dpop_train_dmeas_none(sir_panel_dpop):
+    panel = sir_panel_dpop
+    panel.unit_objects["unit1"].dmeas = None
+    with pytest.raises(ValueError, match="dmeas cannot be None in PanelPomp units"):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+
+def test_panel_dpop_train_chunk_size_warns_and_adjusts():
+    """A chunk_size that survives the U-clamp but still doesn't divide U
+    (e.g. U=3, chunk_size=2) should warn and fall back to a divisor."""
+    panel = _get_sir_panel_n_units(3)
+    with pytest.warns(
+        UserWarning, match="chunk_size does not divide the number of units"
+    ):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            chunk_size=2,
+            optimizer=pp.Adam(),
+            alpha=0.8,
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
+
+    res = panel.results_history[-1]
+    assert isinstance(res, Result)
+    assert res.unit_traces.shape[2] == 3
+
+
+def test_panel_dpop_train_partial_covariates(sir_panel_dpop):
+    """Some units having covariates but not all is unsupported and should
+    raise before any sharded computation is attempted."""
+    panel = sir_panel_dpop
+    panel.unit_objects["unit1"]._covars_extended = np.array([1.0, 2.0, 3.0])
+    panel.unit_objects["unit2"]._covars_extended = None
+    with pytest.raises(
+        NotImplementedError,
+        match="Some units have covariates, but not all units have covariates",
+    ):
+        panel.dpop_train(
+            J=2,
+            M=2,
+            eta=0.01,
+            theta=deepcopy(panel.theta),
+            process_weight_state="logw",
+            key=jax.random.key(0),
+        )
 
 
 def test_panel_dpop_train_comprehensive(sir_panel_dpop):

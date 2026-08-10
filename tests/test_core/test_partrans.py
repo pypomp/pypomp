@@ -307,3 +307,35 @@ def test_partrans_serialization():
     # Should fall back to defaults
     assert p_corrupted.to_est(theta) == {"p": 5.0}
     assert p_corrupted.from_est(theta) == {"p": 5.0}
+
+
+def test_partrans_serialization_of_non_module_callable():
+    """A callable with no __name__ (e.g. functools.partial) can't be
+    serialized by module+name, so it falls back to the is_lambda marker --
+    same fallback path as lambdas, but exercised via a different __getstate__
+    branch (functions missing __name__ rather than being actual lambdas)."""
+    import functools
+    import pickle
+
+    def scale(theta, factor):
+        return {k: v * factor for k, v in theta.items()}
+
+    partial_to_est = functools.partial(scale, factor=2.0)
+    assert not hasattr(partial_to_est, "__name__")
+
+    p = pp.ParTrans(partial_to_est, dummy_from_est)
+    state = p.__getstate__()
+    assert state["_to_est_is_lambda"] is True
+
+    p_loaded = pickle.loads(pickle.dumps(p))
+    theta: ParamDict = {"p": 5.0}
+    # Falls back to the identity default rather than the partial.
+    assert p_loaded.to_est(theta) == {"p": 5.0}
+
+
+def test_transform_array_empty_params():
+    """_transform_array with zero parameters returns the input unchanged."""
+    par_trans = pp.ParTrans()
+    empty = jnp.zeros((3, 0))
+    result = par_trans._transform_array(empty, [], direction="to_est")
+    assert result.shape == (3, 0)

@@ -163,6 +163,47 @@ def test_different_learning_rates(simple):
     assert not np.allclose(out_uniform, out_varied, atol=1e-10)
 
 
+def test_train_line_search_requires_monitor(simple):
+    """Line search needs a monitor run to evaluate the objective at trial
+    step sizes, so ls=True with n_monitors=0 must raise."""
+    LG, ys, covars, theta, J, key, M = simple
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+
+    with pytest.raises(ValueError, match="Line search requires at least one monitor"):
+        LG.train(J=J, M=M, eta=eta, optimizer=pp.SGD(ls=True), n_monitors=0, key=key)
+
+
+def test_train_unsupported_optimizer(simple):
+    """Only SGD/Adam/FullMatrixAdam/Newton/WeightedNewton/BFGS are supported by
+    train(); the abstract base Optimizer (or any other subclass) must raise."""
+    from pypomp.core.optimizer import Optimizer
+
+    LG, ys, covars, theta, J, key, M = simple
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+
+    with pytest.raises(ValueError, match="not supported"):
+        LG.train(J=J, M=M, eta=eta, optimizer=Optimizer(), key=key)
+
+
+@pytest.mark.parametrize("n_monitors", [0, 2])
+def test_train_n_monitors_variants(n_monitors, simple):
+    """n_monitors=0 skips the log-likelihood monitor entirely (NaN trace);
+    n_monitors>1 averages several unperturbed pfilter runs for the monitor."""
+    LG, ys, covars, theta, J, key, M = simple
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.SGD(), n_monitors=n_monitors, key=key)
+
+    traces = LG.results_history[-1].traces_da
+    logliks = traces.sel(theta_idx=0, variable="logLik").values
+
+    if n_monitors == 0:
+        assert np.all(np.isnan(logliks))
+    else:
+        # iteration 0 is NaN by design (pre-training); the rest should be finite
+        assert np.all(np.isfinite(logliks[1:]))
+
+
 def test_train_clipping(simple):
     """Test that gradient clipping correctly limits parameter updates."""
     LG, _, _, theta, J, key, _ = simple

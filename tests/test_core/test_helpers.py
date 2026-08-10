@@ -1,6 +1,8 @@
 import os
+from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 import pypomp.core.algorithms.helpers as ifunc
 
@@ -288,6 +290,85 @@ def test_interp_covars_linear_and_constant():
 
     with pytest.raises(ValueError, match="Unsupported interpolation order"):
         ifunc._interp_covars(0.5, ctimes, covars, order="spline")
+
+
+def test_interp_covars_returns_none_when_covars_or_ctimes_missing():
+    ctimes = np.array([0.0, 1.0, 2.0])
+    covars = np.array([10.0, 20.0, 30.0])
+
+    assert ifunc._interp_covars(0.5, None, None) is None
+    assert ifunc._interp_covars(0.5, None, covars) is None
+    assert ifunc._interp_covars(0.5, ctimes, None) is None
+
+
+def test_num_fixedstep_steps_requires_nstep():
+    with pytest.raises(ValueError, match="nstep must be provided"):
+        ifunc._num_fixedstep_steps(0.0, 1.0, None, None)
+
+
+def test_num_euler_steps_requires_dt():
+    with pytest.raises(ValueError, match="dt must be provided"):
+        ifunc._num_euler_steps(0.0, 1.0, None, None)
+
+
+def test_num_euler_steps_non_positive_interval_returns_zero():
+    # t1 >= t2: no steps needed for a zero/negative-length interval.
+    assert ifunc._num_euler_steps(1.0, 1.0, 0.1, None) == (0, 0.0)
+    assert ifunc._num_euler_steps(2.0, 1.0, 0.1, None) == (0, 0.0)
+
+
+def test_calc_steps_argument_validation():
+    times0 = np.array([0.0, 1.0, 2.0])
+
+    with pytest.raises(ValueError, match="Only nstep or dt can be provided, not both"):
+        ifunc._calc_steps(times0, dt=0.1, nstep=5)
+
+    with pytest.raises(ValueError, match="Either dt or nstep must be provided"):
+        ifunc._calc_steps(times0, dt=None, nstep=None)
+
+
+def test_is_dynamic_exception_fallback():
+    """Exercise the ``except`` branch of ``is_dynamic`` directly.
+
+    ``jax.tree_util.tree_leaves`` essentially never raises for ordinary
+    inputs (unregistered objects are just treated as opaque leaves), so the
+    fallback logic is only reachable by forcing the primary path to fail.
+    """
+    import jax.numpy as jnp
+
+    with patch("jax.tree_util.tree_leaves", side_effect=RuntimeError("boom")):
+        assert ifunc.is_dynamic(jnp.array([1.0])) is True
+        assert ifunc.is_dynamic(np.array([1.0])) is True
+        assert ifunc.is_dynamic([jnp.array([1.0]), 2]) is True
+        assert ifunc.is_dynamic((1, jnp.array([1.0]))) is True
+        assert ifunc.is_dynamic({"a": jnp.array([1.0])}) is True
+        assert ifunc.is_dynamic({"a": 2}) is False
+        assert ifunc.is_dynamic([1, 2]) is False
+        assert ifunc.is_dynamic(5) is False
+
+
+def test_run_jax_batch_sharded_kwargs_dynamic_and_static():
+    """Direct kwargs (dynamic array-valued and static) reach the sharded func.
+
+    In this single-CPU-device test environment, any ``size > 1`` call takes
+    the CPU sequential-batching path (``num_batches > 1``); none of the
+    library's internal callers pass kwargs through ``run_jax_batch_sharded``,
+    so this is the only way to exercise the kwargs-splitting loop.
+    """
+    import jax.numpy as jnp
+
+    assert len(__import__("jax").devices()) == 1
+
+    def f(x, c, *, bias, label):
+        assert label == "add"
+        return x + c + bias
+
+    x = jnp.arange(4.0).reshape(4, 1)
+    out = ifunc.run_jax_batch_sharded(
+        f, {0: 0}, 0, x, 1.0, bias=jnp.array(2.0), label="add"
+    )
+    expected = x + 1.0 + 2.0
+    assert np.allclose(np.asarray(out), np.asarray(expected))
 
 
 def test_pomp_constant_interpolation():

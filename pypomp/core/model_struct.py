@@ -489,10 +489,28 @@ class _RProc(_ModelComponent):
         pf_step = self._struct_pf_dict
         per_step = self._struct_per_dict
         base_step = self._struct_pf_dict
-        interp_args = (self.nstep, self._max_steps_bound, self._is_vectorized)
-        self.struct_interp = _time_interp(base_step, *interp_args, self.statenames)
-        self.struct_pf_interp = _time_interp(pf_step, *interp_args, self.statenames)
-        self.struct_per_interp = _time_interp(per_step, *interp_args, self.statenames)
+        interp_args = (self.nstep, self._max_steps_bound)
+        self.struct_interp = _time_interp(
+            base_step,
+            *interp_args,
+            self.statenames,
+            prepare_theta=self._prepare_theta_pf,
+            step_prepared=self._step_pf,
+        )
+        self.struct_pf_interp = _time_interp(
+            pf_step,
+            *interp_args,
+            self.statenames,
+            prepare_theta=self._prepare_theta_pf,
+            step_prepared=self._step_pf,
+        )
+        self.struct_per_interp = _time_interp(
+            per_step,
+            *interp_args,
+            self.statenames,
+            prepare_theta=self._prepare_theta_per,
+            step_prepared=self._step_per,
+        )
 
     def _validate_output(self, result):
         if not isinstance(result, dict):
@@ -552,18 +570,32 @@ class _RProc(_ModelComponent):
         return wrapped
 
     def _make_wrapper_vectorized(self, user_func, theta_batched: bool):
-        """Wrapper for an rproc that already handles the particle axis itself."""
+        """
+        Wrapper for an rproc that already handles the particle axis itself.
+
+        Returns three callables:
+        - ``combined``: theta-array signature matching the vmapped wrappers
+          (extracts + transforms theta on every call). Used for `struct_pf` /
+          `struct_per`.
+        - ``prepare_theta``: extracts + transforms theta into a dict, on its own.
+        - ``step``: takes an already-prepared theta dict instead of an array.
+          Pairs with `prepare_theta` so `_time_interp` can prepare theta once
+          per observation interval instead of once per sub-step.
+        """
         pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
         mapping, trans = self.name_mapping, self.par_trans
 
-        def wrapped(X_dict, theta_arr, key, covars, t, dt, should_trans):
-            J = X_dict[snames[0]].shape[0]
+        def prepare_theta(theta_arr, should_trans):
             if theta_batched:
                 theta_dict = {n: theta_arr[:, i] for i, n in enumerate(pnames)}
             else:
                 theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
             if should_trans:
                 theta_dict = trans.from_est(theta_dict)
+            return theta_dict
+
+        def step(X_dict, theta_dict, key, covars, t, dt):
+            J = X_dict[snames[0]].shape[0]
             covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
 
             res = user_func(
@@ -581,7 +613,11 @@ class _RProc(_ModelComponent):
             # stable from one sub-step to the next.
             return {n: jnp.broadcast_to(jnp.asarray(res[n]), (J,)) for n in snames}
 
-        return wrapped
+        def combined(X_dict, theta_arr, key, covars, t, dt, should_trans):
+            theta_dict = prepare_theta(theta_arr, should_trans)
+            return step(X_dict, theta_dict, key, covars, t, dt)
+
+        return combined, prepare_theta, step
 
     @staticmethod
     def _array_adapter(dict_func, snames: list[str]):
@@ -597,16 +633,24 @@ class _RProc(_ModelComponent):
     def _build_structs(self, struct: Callable) -> None:
         if self._is_vectorized:
             # The user function maps over particles itself, so no vmap is applied.
-            self._struct_pf_dict = self._make_wrapper_vectorized(
-                struct, theta_batched=False
-            )
-            self._struct_per_dict = self._make_wrapper_vectorized(
-                struct, theta_batched=True
-            )
+            # `_prepare_theta_*`/`_step_*` let `_time_interp` prepare theta once
+            # per observation interval instead of on every sub-step.
+            (
+                self._struct_pf_dict,
+                self._prepare_theta_pf,
+                self._step_pf,
+            ) = self._make_wrapper_vectorized(struct, theta_batched=False)
+            (
+                self._struct_per_dict,
+                self._prepare_theta_per,
+                self._step_per,
+            ) = self._make_wrapper_vectorized(struct, theta_batched=True)
         else:
             dict_wrapper = self._make_wrapper_dict(struct)
             self._struct_pf_dict = jax.vmap(dict_wrapper, self.vmap_axes_pf)
             self._struct_per_dict = jax.vmap(dict_wrapper, self.vmap_axes_per)
+            self._prepare_theta_pf = self._step_pf = None
+            self._prepare_theta_per = self._step_per = None
 
         self.struct = self._make_wrapper(struct)
         self.struct_pf = self._array_adapter(self._struct_pf_dict, self.statenames)
@@ -907,11 +951,20 @@ def _time_interp(
     rproc: Callable,
     nstep_fixed: int | None,
     max_steps_bound: int | None,
-    vectorized: bool = False,
     statenames: list[str] | None = None,
+    prepare_theta: Callable | None = None,
+    step_prepared: Callable | None = None,
 ):
     """
     Interpolates state trajectories between observation times.
+
+    Two step paths, chosen by whether `step_prepared` is given:
+    - Vectorized rproc (`step_prepared` given, paired with `prepare_theta`):
+      theta is extracted/transformed into a dict once per observation
+      interval (below, before the sub-step loop) rather than on every
+      sub-step, and a single key is shared across all particles.
+    - Default vmapped rproc (`step_prepared` is None, using `rproc`
+      directly): each particle needs its own key, split once per sub-step.
     """
     if not statenames:
         raise ValueError("statenames are required to build rproc interp")
@@ -924,9 +977,8 @@ def _time_interp(
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         next_key, subkey = jax.random.split(keys)
-        if vectorized:
-            # A single key per step; the rproc draws for all particles at once.
-            X_ = rproc(X_, theta_, subkey, covars_t, t, dt, should_trans)
+        if step_prepared is not None:
+            X_ = step_prepared(X_, theta_, subkey, covars_t, t, dt)
         else:
             # Generate per-particle keys for the vmapped rproc with a single split call.
             J = X_[snames[0]].shape[0]
@@ -955,6 +1007,9 @@ def _time_interp(
         # restacked on every sub-step.
         X_ = {n: X_[:, i] for i, n in enumerate(snames)}
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
+
+        if step_prepared is not None and prepare_theta is not None:
+            theta_ = prepare_theta(theta_, should_trans)
 
         final = jax.lax.fori_loop(
             0,

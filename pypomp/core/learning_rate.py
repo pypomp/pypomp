@@ -129,7 +129,7 @@ class LearningRate:
             if n not in idx:
                 raise ValueError(f"Parameter '{n}' not found in learning rates")
 
-        order = [idx[n] for n in names]
+        order = np.asarray([idx[n] for n in names], dtype=int)
         arr = self.rates_all_arr
         new_arr = arr[order] if arr.ndim == 1 else arr[:, order]
         return LearningRate._from_leaves(names, new_arr)

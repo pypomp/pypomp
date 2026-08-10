@@ -244,6 +244,26 @@ def test_canonicalize():
         lr._canonicalize(["beta", "gamma"])
 
 
+def test_canonicalize_jax_array():
+    """Test _canonicalize when rates_all_arr is a 1D or 2D JAX array (e.g. inside jax.jit)."""
+    lr1d = pp.LearningRate({"beta": 0.1, "rho": 0.02})
+    lr2d = pp.LearningRate({"beta": [0.1, 0.2], "rho": [0.02, 0.04]})
+
+    @jax.jit
+    def canonicalize_1d(lr_obj):
+        return lr_obj._canonicalize(["rho", "beta"]).rates_all_arr
+
+    @jax.jit
+    def canonicalize_2d(lr_obj):
+        return lr_obj._canonicalize(["rho", "beta"]).rates_all_arr
+
+    res1d = canonicalize_1d(lr1d)
+    assert np.allclose(res1d, [0.02, 0.1])
+
+    res2d = canonicalize_2d(lr2d)
+    assert np.allclose(res2d, [[0.02, 0.1], [0.04, 0.2]])
+
+
 def test_mismatched_schedule_lengths():
     """Test error when schedules have conflicting lengths."""
     with pytest.raises(

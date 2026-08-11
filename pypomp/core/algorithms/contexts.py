@@ -1,39 +1,12 @@
 """Algorithm context containers.
 
-Each inference algorithm in ``pypomp/core/algorithms/`` takes exactly one
-``*Context`` object holding everything it needs.  A context object mixes two kinds
-of field, and the distinction is declared *inline* on each field:
+Inference algorithms accept a ``*Context`` pytree mixing inline-declared static
+fields (callables/scalars marked with :func:`static`, stored in the treedef)
+and dynamic traced fields (JAX arrays).
 
-* **static** fields -- model callables and Python scalars -- are marked with
-  :func:`static`.  JAX stores them in the pytree's treedef, so they behave like
-  ``jax.jit`` static arguments: changing one triggers recompilation.
-* **dynamic** fields (the default) hold JAX arrays and are traced normally.
-
-Because the split is declared next to each field, there is no parallel list of
-field names to keep in sync -- adding a field cannot silently land on the wrong
-side of the static/traced boundary.  This replaces an earlier design that split
-every algorithm into a static ``*Config`` plus a traced ``*Inputs`` and copied
-each field by hand in ``from_*_struct`` factories and ``to_*`` converters, which
-was a recurring source of subtle bugs.
-
-Shared contexts are composed by the per-algorithm context objects rather than
-having their fields re-declared:
-
-* :class:`SimFns` -- the callables needed to simulate the latent process, for one
-  "flavor" (``pf`` for the particle filter, ``per`` for the IF2 perturbed loop).
-  Entirely static.  Used by likelihood-free ABC.
-* :class:`ModelFns` -- ``SimFns`` plus the ``dmeasure`` density that the
-  filtering algorithms additionally require.
-* :class:`SeriesData` -- the observation series and integration grid.  Entirely
-  dynamic.  Held as the ``series`` field, so conversions between algorithms pass
-  the same sub-object through by reference instead of re-copying six fields, and
-  the ``times``-to-float normalization happens in exactly one place.
-
-Because static fields live in the treedef, a ``jax.vmap`` ``in_axes`` prototype
-for a context object must carry *identical* static fields to the value it
-describes.  Build prototypes with :meth:`SeriesData.axes` plus
-``dataclasses.replace`` on a live object (see ``_panel_pfilter_vmap`` in
-``pfilter.py``) -- never as a module-level constant with placeholder statics.
+Per-algorithm contexts compose shared structures (:class:`SimFns`, :class:`ModelFns`,
+:class:`SeriesData`). For ``jax.vmap`` ``in_axes`` prototypes, static fields must
+match live instances; build them using ``.axes()`` or ``dataclasses.replace``.
 """
 
 from __future__ import annotations

@@ -43,8 +43,8 @@ This also simplifies downstream analysis, as methods like :meth:`~pypomp.core.po
 Creating a separate :class:`~pypomp.core.pomp.Pomp` or :class:`~pypomp.panel.panel.PanelPomp` object for each parameter set negates these performance and structural advantages, so it is generally not recommended.
 
 
-Avoiding 2-D Temporaries Under MIF
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Avoiding 2-D Temporaries Under IF2
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Under :meth:`~pypomp.core.pomp.Pomp.mif`, parameters are perturbed per particle and arrive as ``(J,)`` arrays rather than scalars.
 Any intermediate built inside an ``rproc`` by combining several state variables or parameters into an array therefore becomes a genuine 2-D buffer, ``(k, J)``, rebuilt on every Euler sub-step.

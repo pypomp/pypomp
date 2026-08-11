@@ -111,6 +111,25 @@ make test-cpu-scaling
 `-n 0` turns xdist off so wall-clock timings are not competing with other tests.
 The test benchmarks serial (1 device) vs parallel (N devices) execution using `--xla_force_host_platform_device_count`.
 
+### Regression tests
+
+`tests/test_regression/` uses `pytest-regressions` (`num_regression`) to lock in numerical output baselines for algorithms under `pypomp/functional/`.
+
+If an algorithm's output intentionally changes (e.g., due to updated internal random key splitting, modified default hyperparameters, or numerical improvements), the saved baseline CSV files must be updated.
+
+To regenerate baseline CSV files:
+
+```bash
+# Regenerate baselines for a specific regression test (Recommended)
+pytest tests/test_regression/test_abc_regression.py --force-regen
+
+# Regenerate baselines for all regression tests
+pytest tests/test_regression/ --force-regen
+```
+
+> [!TIP]
+> After regenerating baselines, always inspect the changes via `git diff tests/test_regression/` to verify that the numerical diff matches your expectations before committing.
+
 ---
 
 ## 4. Building Documentation

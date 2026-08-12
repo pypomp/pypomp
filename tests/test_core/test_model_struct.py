@@ -34,7 +34,7 @@ def test_RInit_value_error():
         lambda theta_, key, covars, foo: {"state_0": 0},
     ]
     for fn in bad_lambdas:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Could not map arguments for"):
             _RInit(
                 fn,
                 statenames=["state_0"],
@@ -63,7 +63,7 @@ def test_RProc_value_error():
         lambda X_, theta_, key, covars, t, foo: {"state_0": 0},
     ]
     for fn in bad_lambdas:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Could not map arguments for"):
             _RProc(
                 fn,
                 statenames=["state_0"],
@@ -93,7 +93,7 @@ def test_DMeas_value_error():
         lambda Y_, X_, theta_, covars, foo: 0.0,
     ]
     for fn in bad_lambdas:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Could not map arguments for"):
             _DMeas(
                 fn,
                 statenames=["state_0"],
@@ -121,7 +121,7 @@ def test_RMeas_value_error():
         lambda X_, theta_, key, covars, foo: {"y_0": 0},
     ]
     for fn in bad_lambdas:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Could not map arguments for"):
             _RMeas(
                 fn,
                 y_names=["y_0"],
@@ -833,7 +833,7 @@ def test_DPrior_value_error():
     def bad_fn(foo):
         return 0.0
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Could not map arguments for"):
         _DPrior(
             bad_fn,
             statenames=["S"],

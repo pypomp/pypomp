@@ -63,15 +63,63 @@ def neapolitan_setup(setup):
     return LG, setup
 
 
-def test_invalid_initialization(model):
-    LG, _ = model
-    for arg in ["ys", "theta", "rinit", "rproc", "dmeas"]:
-        with pytest.raises((TypeError, ValueError, AttributeError)):
-            kwargs = {
-                k: getattr(LG, k) for k in ["ys", "theta", "rinit", "rproc", "dmeas"]
-            }
-            kwargs[arg] = None
-            pp.Pomp(**kwargs)
+def _valid_pomp_kwargs():
+    """A complete, valid Pomp argument set built from raw callables.
+
+    Pomp takes unwrapped functions, so these cannot be read back off an
+    existing model via getattr (that yields the wrapped _RInit/_RProc/_DMeas).
+    """
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"]}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        return jax.scipy.stats.norm.logpdf(
+            Y_["Y"], loc=theta_["mu"], scale=theta_["sigma"]
+        )
+
+    return {
+        "ys": pd.DataFrame({"Y": [1.0]}, index=[1.0]),
+        "theta": pp.PompParameters({"mu": 0.0, "sigma": 0.1}),
+        "statenames": ["X"],
+        "t0": 0.0,
+        "rinit": rinit,
+        "rproc": rproc,
+        "dmeas": dmeas,
+        "nstep": 1,
+    }
+
+
+def test_valid_initialization_baseline():
+    """The baseline used by test_invalid_initialization must itself construct.
+
+    Without this, a change that made every construction fail would leave the
+    invalid-argument test below passing for the wrong reason.
+    """
+    assert isinstance(pp.Pomp(**_valid_pomp_kwargs()), pp.Pomp)
+
+
+@pytest.mark.parametrize(
+    "arg, exc, message",
+    [
+        ("ys", TypeError, "ys must be a pandas DataFrame"),
+        ("theta", TypeError, "theta must be a PompParameters instance"),
+        ("statenames", ValueError, "statenames must be provided"),
+        ("t0", TypeError, "must be a string or a real number"),
+        ("rinit", TypeError, "not a callable object"),
+        ("rproc", TypeError, "not a callable object"),
+        ("dmeas", ValueError, "at least one of dmeas or rmeas"),
+    ],
+)
+def test_invalid_initialization(arg, exc, message):
+    """Each required argument is rejected with its own specific error."""
+    kwargs = _valid_pomp_kwargs()
+    kwargs[arg] = None
+    with pytest.raises(exc, match=message):
+        pp.Pomp(**kwargs)
 
 
 def test_results(neapolitan_setup):
@@ -186,7 +234,7 @@ def test_prune(model):
     LG.prune(n=10, refill=False)
     assert len(LG.theta) == min(10, orig_len)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="No valid log-likelihoods available to prune"):
         LG.__class__(
             ys=LG.ys.copy(),
             theta=pp.PompParameters(LG.theta.params(as_list=True)[0].copy()),

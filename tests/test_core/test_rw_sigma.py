@@ -208,7 +208,7 @@ def test_validation_via_constructor_invalid(sigmas, init_names, expected_error):
 def test_immutable_setitem():
     """RWSigma is immutable: item assignment is not supported."""
     rw_sigma = pp.RWSigma({"param1": 0.1, "param2": 0.2}, ["param1"])
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="does not support item assignment"):
         rw_sigma["param1"] = 0.5  # type: ignore[index]
 
 
@@ -393,7 +393,7 @@ def test_container_methods():
     # __getitem__
     assert rw["param1"] == 0.1
     assert rw["param2"] == 0.2
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="not found in sigmas"):
         _ = rw["param3"]
 
     # __contains__

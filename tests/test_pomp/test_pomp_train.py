@@ -89,7 +89,7 @@ def test_train_validation(simple):
     eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
 
     # Invalid J should raise ValueError
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="J should be greater than 0"):
         LG.train(J=0, M=M, eta=eta, optimizer=pp.SGD(scale=True), key=key)
 
     # Wrong eta keys should raise ValueError

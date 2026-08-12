@@ -91,7 +91,7 @@ def test_to_jax_array_unknown_param_raises():
 
 def test_to_jax_array_unknown_unit_raises():
     panel = _mixed_panel()
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="Unit mismatch"):
         panel.to_jax_array(["s1", "u1"], unit_names=["unit1", "unit_does_not_exist"])
 
 

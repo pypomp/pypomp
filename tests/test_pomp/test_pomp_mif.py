@@ -187,7 +187,7 @@ def test_order_of_parameters_consistency(simple):
 
 def test_invalid_mif_input(simple):
     LG, rw_sd, J, key, M = simple
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="J should be greater than 0"):
         LG.mif(
             rw_sd=rw_sd,
             M=M,

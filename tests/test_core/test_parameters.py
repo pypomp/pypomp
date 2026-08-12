@@ -40,7 +40,9 @@ def test_base_parameter_set_methods():
     assert 2 * pomp == pomp * 2
     assert len(pomp * 3) == 3
 
-    with pytest.raises(TypeError):
+    with pytest.raises(
+        TypeError, match="unsupported operand type|object is not iterable"
+    ):
         _ = pomp * cast(int, 2.5)
     with pytest.raises(ValueError, match="non-negative"):
         _ = pomp * -1
@@ -211,7 +213,9 @@ def test_standardize_pomp_theta_validation():
         pp.PompParameters([])
 
     # sequence of non-mappings (raises TypeError)
-    with pytest.raises(TypeError):
+    with pytest.raises(
+        TypeError, match="unsupported operand type|object is not iterable"
+    ):
         pp.PompParameters(cast(Any, [{"a": 1}, 123]))
 
     # dict with bool
@@ -356,7 +360,9 @@ def test_standardize_panel_theta_validation():
     assert len(u_names) == 0
 
     # non-dict/non-list type
-    with pytest.raises(TypeError):
+    with pytest.raises(
+        TypeError, match="unsupported operand type|object is not iterable"
+    ):
         pp.PanelParameters(cast(Any, 123))
 
     # missing keys in dict

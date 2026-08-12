@@ -125,21 +125,38 @@ def test_other_models(model, theta):
 
 
 def test_measles_sim(london):
+    """Simulated measles case counts must be non-negative and finite."""
     measles = london
-    measles.simulate(key=DEFAULT_KEY, nsim=1)
+    _, obs = measles.simulate(key=DEFAULT_KEY, nsim=1)
+
+    values = obs.drop(columns=["theta_idx", "sim", "time"]).to_numpy()
+    assert np.all(np.isfinite(values)), "simulated observations must be finite"
+    assert np.all(values >= 0), "measles case counts cannot be negative"
 
 
 def test_measles_pfilter(london):
+    """The filter returns a finite negative log-likelihood in both precisions."""
     measles = london
-    measles.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
 
-    # Test that double precision works
-    jax.config.update("jax_enable_x64", True)
     measles.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
-    jax.config.update("jax_enable_x64", False)
+    ll_f32 = np.asarray(measles.results_history[-1].payload["logLiks"])
+    assert np.all(np.isfinite(ll_f32)), f"non-finite logLik: {ll_f32}"
+    assert np.all(ll_f32 < 0)
+
+    # x64 is global state, so restore it even if the filter raises; otherwise
+    # every later test in this worker would silently run in double precision.
+    jax.config.update("jax_enable_x64", True)
+    try:
+        measles.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
+    finally:
+        jax.config.update("jax_enable_x64", False)
+
+    ll_f64 = np.asarray(measles.results_history[-1].payload["logLiks"])
+    assert np.all(np.isfinite(ll_f64)), f"non-finite logLik in x64: {ll_f64}"
 
 
 def test_measles_mif(london, default_rw_sd):
+    """mif yields one finite trace row per iteration."""
     measles = london
     measles.mif(
         J=DEFAULT_J,
@@ -147,6 +164,12 @@ def test_measles_mif(london, default_rw_sd):
         M=DEFAULT_M,
         rw_sd=default_rw_sd.geometric_cooling(a=DEFAULT_A),
     )
+
+    traces = measles.results_history[-1].payload["traces"]
+    assert traces.sizes["iteration"] == DEFAULT_M + 1
+    for name in measles.canonical_param_names:
+        values = np.asarray(traces.sel(variable=name))
+        assert np.all(np.isfinite(values)), f"non-finite trace for {name}"
 
 
 def test_measles_clean():

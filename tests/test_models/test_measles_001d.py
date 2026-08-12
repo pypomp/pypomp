@@ -2,6 +2,7 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 import pypomp as pp
@@ -40,11 +41,21 @@ def london_001d():
 
 
 def test_001d_simulate(london_001d):
-    london_001d.simulate(key=DEFAULT_KEY, nsim=1)
+    """Simulated case counts must be non-negative and finite."""
+    _, obs = london_001d.simulate(key=DEFAULT_KEY, nsim=1)
+
+    values = obs.drop(columns=["theta_idx", "sim", "time"]).to_numpy()
+    assert np.all(np.isfinite(values))
+    assert np.all(values >= 0), "measles case counts cannot be negative"
 
 
 def test_001d_pfilter(london_001d):
+    """The filter returns a finite negative log-likelihood."""
     london_001d.pfilter(J=DEFAULT_J, key=DEFAULT_KEY)
+
+    logLiks = np.asarray(london_001d.results_history[-1].payload["logLiks"])
+    assert np.all(np.isfinite(logLiks)), f"non-finite logLik: {logLiks}"
+    assert np.all(logLiks < 0)
 
 
 def test_001d_dpop_train(london_001d):

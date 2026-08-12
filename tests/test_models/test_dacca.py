@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 import pypomp as pp
@@ -47,29 +48,68 @@ def test_dacca_pfilter_heavy(simple):
 
 
 def test_dacca_pfilter(simple):
+    """A cheap filter run must still return a finite, negative log-likelihood.
+
+    J=2 is far too small for an accurate estimate, so this asserts only what
+    must hold regardless of Monte Carlo error. The accuracy check against the
+    R pomp MLE is test_dacca_pfilter_heavy.
+    """
     dacca, rw_sd, J, key, ys = simple
     dacca.pfilter(J=J, key=key)
 
+    logLiks = np.asarray(dacca.results_history[-1].payload["logLiks"])
+    assert logLiks.shape == (len(dacca.theta), 1)
+    assert np.all(np.isfinite(logLiks)), f"non-finite logLik: {logLiks}"
+    assert np.all(logLiks < 0), "log-likelihood of count data must be negative"
+
+
+def _assert_trace_well_formed(model, n_iterations, param_names):
+    """Trace has one row per iteration, starts at theta, and stays finite."""
+    traces = model.results_history[-1].payload["traces"]
+    assert traces.sizes["iteration"] == n_iterations
+
+    for name in param_names:
+        values = np.asarray(traces.sel(variable=name))
+        assert np.all(np.isfinite(values)), f"non-finite trace for {name}: {values}"
+
 
 def test_dacca_mif(simple):
-    # Check whether dacca.mif() runs without error.
+    """mif produces a well-formed trace that starts from the supplied theta."""
     dacca, rw_sd, J, key, ys = simple
-    dacca.mif(rw_sd=rw_sd.geometric_cooling(a=0.5), J=J, key=key, M=1)
+    M = 2
+    param_names = dacca.canonical_param_names
+    theta_start = np.asarray(dacca.theta.to_jax_array(param_names))
+
+    dacca.mif(rw_sd=rw_sd.geometric_cooling(a=0.5), J=J, key=key, M=M)
+
+    _assert_trace_well_formed(dacca, M + 1, param_names)
+    traces = dacca.results_history[-1].payload["traces"]
+    start = np.stack(
+        [np.asarray(traces.sel(variable=n))[:, 0] for n in param_names], axis=-1
+    )
+    # Tolerance rather than equality: mif perturbs on the estimation scale, and
+    # the simplex-constrained initial conditions (S_0, I_0, ...) do not survive
+    # the float32 round-trip back to the natural scale exactly. A misaligned
+    # parameter vector would still be off by orders of magnitude.
+    np.testing.assert_allclose(start, theta_start, rtol=1e-2, atol=1e-6)
 
 
 def test_dacca_nstep():
-    # Check that dacca.train() runs without error when nstep is specified.
+    """Specifying nstep instead of dt still yields a well-formed train trace."""
     dacca_nstep = pp.models.dacca(nstep=10, dt=None)
     eta = pp.LearningRate({param: 0.2 for param in dacca_nstep.canonical_param_names})
     dacca_nstep.train(J=2, M=1, eta=eta, key=jax.random.key(111))
 
+    _assert_trace_well_formed(dacca_nstep, 2, dacca_nstep.canonical_param_names)
+
 
 def test_dacca_train_dt():
-    # Check that dacca.train() runs without error when dt is specified and nstep
-    # happens to be the same for every observation interval.
+    """Specifying dt instead of nstep yields the same well-formed trace."""
     dacca_dt = pp.models.dacca(nstep=None, dt=1 / 240)
     eta = pp.LearningRate({param: 0.2 for param in dacca_dt.canonical_param_names})
     dacca_dt.train(J=2, M=1, eta=eta, key=jax.random.key(111))
+
+    _assert_trace_well_formed(dacca_dt, 2, dacca_dt.canonical_param_names)
 
 
 def test_dhaka_alias():

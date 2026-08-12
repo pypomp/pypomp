@@ -169,6 +169,3 @@ def panel_pfilter(
     )
     results["logLik"] = -results.pop("neg_loglik")
     return results
-
-    results["logLik"] = -results.pop("neg_loglik")
-    return results

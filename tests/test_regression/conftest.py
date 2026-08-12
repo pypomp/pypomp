@@ -1,7 +1,13 @@
 """Fixed, small models for algorithm regression tests.
 
-Every algorithm is exercised on a 1-D linear-Gaussian model so that the
-locked baselines stay small.
+Most algorithms are exercised on a 1-D linear-Gaussian model so that the locked
+baselines stay small. ``sir_struct`` adds a non-Gaussian counterpart: the LG
+model has no accumulator variables, no discrete measurement, and a trivial
+parameter transform, so on its own it leaves those paths unlocked.
+
+``lg_struct_multi`` carries two distinct parameter sets so that the
+vmap-over-replicates axis is covered; a broadcasting bug that collapsed
+replicates would pass against a single-replicate baseline.
 """
 
 import jax
@@ -24,6 +30,33 @@ def lg_struct():
     J = 12
     n_reps = 1
     return struct, theta0, key, J, n_reps, param_names
+
+
+@pytest.fixture(scope="module")
+def lg_struct_multi():
+    """(struct, thetas, key, J, n_reps, param_names) with two distinct thetas."""
+    model = pp.models.LG(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
+    struct = model.to_struct()
+    param_names = model.canonical_param_names
+    theta0 = model.theta.to_jax_array(param_names)
+    # Second replicate is a deterministic perturbation of the first, so the two
+    # rows stay distinguishable in the baseline.
+    thetas = jnp.concatenate([theta0, theta0 * 1.05], axis=0)
+    return struct, thetas, jax.random.key(20260812), 12, 2, param_names
+
+
+@pytest.fixture(scope="module")
+def sir_struct():
+    """(struct, theta0, key, J, n_reps, param_names) for a small SIR model.
+
+    Non-Gaussian and discrete-valued, with accumulator variables that reset at
+    every observation time.
+    """
+    model = pp.models.sir(times=np.arange(1, 6) / 52.0, seed=11)
+    struct = model.to_struct()
+    param_names = model.canonical_param_names
+    theta0 = model.theta.to_jax_array(param_names)
+    return struct, theta0, jax.random.key(20260812), 8, 1, param_names
 
 
 @pytest.fixture(scope="module")

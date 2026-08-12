@@ -84,6 +84,14 @@ Once installed, the hooks configured in `.pre-commit-config.yaml` will run autom
 We use `pytest` for unit testing. Our test suite is configured with `pytest-xdist` to run tests in parallel across CPU cores.
 
 ```bash
+# Fast inner loop (~20s, ~300 tests): the highest-signal subset. Locked
+# numerical baselines, layer-parity checks, and the core unit tests, with no
+# model-integration cost. Run this while iterating on an algorithm.
+pytest tests/test_regression tests/test_layer_parity.py tests/test_core -x -q
+
+# Full light suite; the pre-commit check (also `make test-light`)
+pytest -m "not heavy"
+
 # Run the entire test suite
 pytest
 
@@ -94,6 +102,19 @@ pytest --cov
 > [!NOTE]
 > - A JAX persistent compilation cache is configured under `.pytest_cache/jax_cache` to speed up subsequent test runs.
 > - Ensure you have installed the package in editable mode (`pip install -e .[tests,benchmarks,viz]`) so that code coverage is measured against the active source files.
+
+### Layer-parity tests
+
+`tests/test_layer_parity.py` asserts that the `Pomp`/`PanelPomp` methods and the
+`pypomp.functional` entry points agree exactly. The methods delegate to the
+functional layer, so these tests pin the glue in `core/estimation_mixin.py`:
+canonical parameter alignment, key derivation, the sharded dispatch, and result
+packing. Comparisons are exact rather than approximate, because both paths run
+the same compiled kernel and any difference is a real divergence.
+
+When adding an algorithm, add its parity case here as well as its regression
+baseline: the regression tests call `pypomp.functional` directly and so cannot
+see a bug introduced in the object-oriented wrapper.
 
 ### CPU parallel-scaling tests
 
@@ -129,6 +150,25 @@ pytest tests/test_regression/ --force-regen
 
 > [!TIP]
 > After regenerating baselines, always inspect the changes via `git diff tests/test_regression/` to verify that the numerical diff matches your expectations before committing.
+
+> [!IMPORTANT]
+> `--force-regen` overwrites the baseline instead of failing, so it can turn a
+> real regression into a passing test. A failing regression test means
+> *investigate the numerical change first*; regenerate only once a human has
+> confirmed the change is intended. This applies with particular force to
+> AI-assisted edits, where regenerating is the path of least resistance.
+
+Baselines are locked per column, so the failure report names which entry moved.
+`test_mif_trace_regression.py` locks every IF2 iteration and
+`test_pfilter_diagnostics_regression.py` locks every observation time, so a
+mismatch identifies where the divergence starts rather than only that a final
+number differs. Prefer adding a new locked test over widening an existing
+baseline's tolerance.
+
+Coverage spans two model families deliberately: the linear-Gaussian fixtures
+exercise the common path, and `test_sir_regression.py` covers the accumulator
+reset, discrete measurement density, and non-trivial parameter transform that LG
+does not.
 
 ---
 

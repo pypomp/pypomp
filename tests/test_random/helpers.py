@@ -1,4 +1,3 @@
-import warnings
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -40,22 +39,21 @@ def check_moments(
     skew_tol: tuple[float, float] = (0.10, 0.04),
     check_skew: bool = False,
 ) -> None:
-    """Utility to compare empirical vs theoretical moments and issue warnings if they diverge."""
+    """Compare empirical against theoretical moments, failing if they diverge.
+
+    The tolerances are the contract for each sampler's accuracy, so a breach is
+    an assertion rather than a warning: a checker that only warns reports as a
+    passing test and hides drift in the approximate samplers.
+    """
     mean_emp, var_emp, skew_emp = calculate_empirical_moments(samples)
 
-    if not np.allclose(mean_emp, mean_th, rtol=mean_tol[0], atol=mean_tol[1]):
-        warnings.warn(
-            f"{dist_name} mean fail for {params_str}. Empirical: {mean_emp}, Theoretical: {mean_th}",
-            stacklevel=2,
-        )
-    if not np.allclose(var_emp, var_th, rtol=var_tol[0], atol=var_tol[1]):
-        warnings.warn(
-            f"{dist_name} var fail for {params_str}. Empirical: {var_emp}, Theoretical: {var_th}",
-            stacklevel=2,
-        )
+    assert np.allclose(mean_emp, mean_th, rtol=mean_tol[0], atol=mean_tol[1]), (
+        f"{dist_name} mean fail for {params_str}. Empirical: {mean_emp}, Theoretical: {mean_th}"
+    )
+    assert np.allclose(var_emp, var_th, rtol=var_tol[0], atol=var_tol[1]), (
+        f"{dist_name} var fail for {params_str}. Empirical: {var_emp}, Theoretical: {var_th}"
+    )
     if check_skew:
-        if not np.allclose(skew_emp, skew_th, rtol=skew_tol[0], atol=skew_tol[1]):
-            warnings.warn(
-                f"{dist_name} skew fail for {params_str}. Empirical: {skew_emp}, Theoretical: {skew_th}",
-                stacklevel=2,
-            )
+        assert np.allclose(skew_emp, skew_th, rtol=skew_tol[0], atol=skew_tol[1]), (
+            f"{dist_name} skew fail for {params_str}. Empirical: {skew_emp}, Theoretical: {skew_th}"
+        )

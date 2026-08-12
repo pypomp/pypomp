@@ -1,3 +1,14 @@
+"""Timing and distribution-comparison plots for ``pypomp.random`` samplers.
+
+Development tooling, not tests: these measure speed against ``jax.random`` and
+write comparison plots. Run directly:
+
+    python tools/random_benchmarks.py
+
+Correctness of these samplers is asserted in
+``tests/test_random/test_sampler_accuracy.py``.
+"""
+
 import os
 import time
 from collections.abc import Callable
@@ -7,24 +18,15 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import pytest
 from scipy import stats
 
 import pypomp.random as ppr
 
-# Mark all tests in this module as heavy
-pytestmark = pytest.mark.heavy
-
-# Plot directory setup
+# Plots land next to this script; *.png is gitignored.
 PLOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
 
 
-def check_and_skip_ci() -> bool:
-    """Check if we are in a CI/GitHub Actions environment."""
-    return os.getenv("GITHUB_ACTIONS") is not None
-
-
-def run_performance_test(
+def run_benchmark(
     name: str,
     reps: int,
     fast_sampler: Callable[[], Any],
@@ -92,9 +94,7 @@ def run_performance_test(
 # =====================================================================
 
 
-def test_poisson_performance() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def benchmark_poisson() -> None:
     n = 1_000_000
     key = jax.random.key(1001)
     lam = jnp.array([0.01, 0.2, 1.0, 8.0, 10.0, 12.0, 50.0, 100.0], dtype=jnp.float32)
@@ -115,12 +115,10 @@ def test_poisson_performance() -> None:
         state_key2[0], subkey = jax.random.split(state_key2[0])
         return jax.random.poisson(subkey, lam_samples)
 
-    run_performance_test("Poisson", 20, run_fast, run_ref)
+    run_benchmark("Poisson", 20, run_fast, run_ref)
 
 
-def test_binomial_performance() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def benchmark_binomial() -> None:
     n = 1_000_000
     key = jax.random.key(1002)
     trials = jnp.array([1, 5, 20, 50, 100, 200], dtype=jnp.float32)
@@ -146,12 +144,10 @@ def test_binomial_performance() -> None:
         state_key2[0], subkey = jax.random.split(state_key2[0])
         return jax.random.binomial(subkey, trial_samples, p_samples)
 
-    run_performance_test("Binomial", 20, run_fast, run_ref)
+    run_benchmark("Binomial", 20, run_fast, run_ref)
 
 
-def test_gamma_performance() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def benchmark_gamma() -> None:
     n = 1_000_000
     key = jax.random.key(1003)
     alpha = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0], dtype=jnp.float32)
@@ -171,12 +167,10 @@ def test_gamma_performance() -> None:
         state_key2[0], subkey = jax.random.split(state_key2[0])
         return jax.random.gamma(subkey, alpha_samples)
 
-    run_performance_test("Gamma", 20, run_fast, run_ref)
+    run_benchmark("Gamma", 20, run_fast, run_ref)
 
 
-def test_nbinomial_performance() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def benchmark_nbinomial() -> None:
     n = 1_000_000
     key = jax.random.key(1004)
     size = jnp.array([1.0, 5.0, 20.0, 100.0], dtype=jnp.float32)
@@ -196,7 +190,7 @@ def test_nbinomial_performance() -> None:
         state_key1[0], subkey = jax.random.split(state_key1[0])
         return ppr.fast_nbinomial(subkey, size_samples, p=p_samples)
 
-    run_performance_test("NBinomial", 20, run_fast, None)
+    run_benchmark("NBinomial", 20, run_fast, None)
 
 
 # =====================================================================
@@ -204,9 +198,7 @@ def test_nbinomial_performance() -> None:
 # =====================================================================
 
 
-def test_poisson_plots() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def plot_poisson() -> None:
 
     os.makedirs(PLOTS_DIR, exist_ok=True)
     seed = 1005
@@ -299,9 +291,7 @@ def test_poisson_plots() -> None:
     plt.close()
 
 
-def test_gamma_plots() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def plot_gamma() -> None:
 
     os.makedirs(PLOTS_DIR, exist_ok=True)
     seed = 1006
@@ -415,9 +405,7 @@ def test_gamma_plots() -> None:
     plt.close()
 
 
-def test_nbinomial_plots() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def plot_nbinomial() -> None:
 
     os.makedirs(PLOTS_DIR, exist_ok=True)
     seed = 1007
@@ -525,9 +513,7 @@ def test_nbinomial_plots() -> None:
     plt.close()
 
 
-def test_binomial_plots() -> None:
-    if check_and_skip_ci():
-        pytest.skip("Skipping plots in GITHUB_ACTIONS environment")
+def plot_binomial() -> None:
 
     os.makedirs(PLOTS_DIR, exist_ok=True)
     seed = 1008
@@ -645,194 +631,17 @@ def test_binomial_plots() -> None:
     plt.close(fig_qq)
 
 
-def test_poisson_quantile_mismatch_rate() -> None:
-    from pypomp.random.poisson import poissoninv
-
-    n_samples = 100_000
-    key = jax.random.key(12345)
-    u = jax.random.uniform(key, (n_samples,), dtype=jnp.float32)
-    # Clip to avoid extreme tail float inaccuracies
-    u_clip = jnp.clip(u, 1e-9, 1.0 - 1e-9)
-    u_np = np.array(u_clip)
-
-    lam_vals = [0.1, 1.0, 10.0, 100.0, 500.0]
-    for lam in lam_vals:
-        exact = stats.poisson.ppf(u_np, lam)
-        lam_arr = jnp.full((n_samples,), lam, dtype=jnp.float32)
-        fast = np.array(poissoninv(u_clip, lam_arr, dtype=jnp.float32))
-
-        mismatches = np.sum(exact != fast)
-        mismatch_rate = mismatches / n_samples
-        assert mismatch_rate < 0.0001, (
-            f"Poisson lam={lam} mismatch rate too high: {mismatch_rate:.4%}"
-        )
-        print(f"Poisson lam={lam} mismatch rate: {mismatch_rate:.4%}")
-
-
-def test_binomial_quantile_mismatch_rate() -> None:
-    from pypomp.random.binom import binominv
-
-    n_samples = 100_000
-    key = jax.random.key(12345)
-    u = jax.random.uniform(key, (n_samples,), dtype=jnp.float32)
-    u_clip = jnp.clip(u, 1e-9, 1.0 - 1e-9)
-    u_np = np.array(u_clip)
-
-    binom_params = [
-        (10, 0.1),
-        (10, 0.5),
-        (10, 0.9),
-        (100, 0.01),
-        (100, 0.5),
-        (100, 0.99),
-        (1000, 0.1),
-        (1000, 0.5),
-        (1000, 0.9),
-    ]
-    for n_val, p_val in binom_params:
-        exact = stats.binom.ppf(u_np, n_val, p_val)
-        n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
-        p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
-        fast = np.array(
-            binominv(u_clip, n_arr, p_arr, exact_max=5, order=2, dtype=jnp.float32)
-        )
-
-        mismatches = np.sum(exact != fast)
-        mismatch_rate = mismatches / n_samples
-        assert mismatch_rate < 0.0015, (
-            f"Binomial n={n_val}, p={p_val} mismatch rate too high: {mismatch_rate:.4%}"
-        )
-        print(f"Binomial n={n_val}, p={p_val} mismatch rate: {mismatch_rate:.4%}")
-
-
-def test_gamma_quantile_mismatch_rate() -> None:
-    from pypomp.random.gamma import gammainv
-
-    n_samples = 100_000
-    key = jax.random.key(12345)
-    u = jax.random.uniform(key, (n_samples,), dtype=jnp.float32)
-    u_clip = jnp.clip(u, 1e-9, 1.0 - 1e-9)
-    u_np = np.array(u_clip)
-
-    alpha_vals = [3.0, 5.0, 10.0, 50.0, 100.0]
-    for alpha in alpha_vals:
-        exact = stats.gamma.ppf(u_np, alpha)
-        alpha_arr = jnp.full((n_samples,), alpha, dtype=jnp.float32)
-        fast = np.array(gammainv(u_clip, alpha_arr, dtype=jnp.float32, newton_steps=3))
-
-        abs_diff = np.abs(exact - fast)
-        rel_diff = abs_diff / np.maximum(exact, 1e-5)
-
-        # Consider a mismatch if relative difference > 1e-3 AND absolute difference > 1e-4
-        mismatches = np.sum((rel_diff > 1e-3) & (abs_diff > 1e-4))
-        mismatch_rate = mismatches / n_samples
-
-        assert mismatch_rate < 0.0001, (
-            f"Gamma alpha={alpha} mismatch rate too high: {mismatch_rate:.6%}"
-        )
-        print(f"Gamma alpha={alpha} mismatch rate: {mismatch_rate:.6%}")
-
-
-def test_poisson_quantile_wasserstein_distance() -> None:
-    from pypomp.random.poisson import poissoninv
-
-    n_samples = 100_000
-    u = np.linspace(1e-5, 1 - 1e-5, n_samples)
-    u_jnp = jnp.array(u)
-
-    lam_vals = [0.1, 1.0, 10.0, 100.0, 500.0]
-    for lam in lam_vals:
-        fast = np.array(
-            poissoninv(u_jnp, jnp.full((n_samples,), lam), dtype=jnp.float32)
-        )
-        exact = stats.poisson.ppf(u, lam)
-        w1 = np.mean(np.abs(fast - exact))
-        assert w1 < 0.0001, f"Poisson lam={lam} Wasserstein distance too high: {w1:.6f}"
-        print(f"Poisson lam={lam} Wasserstein distance: {w1:.6f}")
-
-
-def test_binomial_quantile_wasserstein_distance() -> None:
-    from pypomp.random.binom import binominv
-
-    n_samples = 100_000
-    u = np.linspace(1e-5, 1 - 1e-5, n_samples)
-    u_jnp = jnp.array(u)
-
-    binom_params = [
-        (10, 0.1),
-        (10, 0.5),
-        (10, 0.9),
-        (100, 0.01),
-        (100, 0.5),
-        (100, 0.99),
-        (1000, 0.1),
-        (1000, 0.5),
-        (1000, 0.9),
-    ]
-    for n_val, p_val in binom_params:
-        fast = np.array(
-            binominv(
-                u_jnp,
-                jnp.full((n_samples,), n_val),
-                jnp.full((n_samples,), p_val),
-                exact_max=5,
-                order=2,
-                dtype=jnp.float32,
-            )
-        )
-        exact = stats.binom.ppf(u, n_val, p_val)
-        w1 = np.mean(np.abs(fast - exact))
-        assert w1 < 0.001, (
-            f"Binomial n={n_val}, p={p_val} Wasserstein distance too high: {w1:.6f}"
-        )
-        print(f"Binomial n={n_val}, p={p_val} Wasserstein distance: {w1:.6f}")
-
-
-def test_gamma_quantile_wasserstein_distance() -> None:
-    from pypomp.random.gamma import gammainv
-
-    n_samples = 100_000
-    u = np.linspace(1e-5, 1 - 1e-5, n_samples)
-    u_jnp = jnp.array(u)
-
-    alpha_vals = [3.0, 5.0, 10.0, 50.0, 100.0]
-    for alpha in alpha_vals:
-        fast = np.array(
-            gammainv(
-                u_jnp, jnp.full((n_samples,), alpha), dtype=jnp.float32, newton_steps=3
-            )
-        )
-        exact = stats.gamma.ppf(u, alpha)
-        w1 = np.mean(np.abs(fast - exact))
-        assert w1 < 0.0001, (
-            f"Gamma alpha={alpha} Wasserstein distance too high: {w1:.6f}"
-        )
-        print(f"Gamma alpha={alpha} Wasserstein distance: {w1:.6f}")
-
-
-def test_nbinomial_empirical_wasserstein_distance() -> None:
-    n_samples = 100_000
-    u = np.linspace(1e-5, 1 - 1e-5, n_samples)
-
-    key = jax.random.key(54321)
-    nbinom_params = [(1.0, 0.1), (1.0, 0.5), (5.0, 0.5), (20.0, 0.9), (100.0, 0.5)]
-    for n_val, p_val in nbinom_params:
-        key, subkey = jax.random.split(key)
-        samples = np.sort(
-            np.array(
-                ppr.fast_nbinomial(
-                    subkey,
-                    jnp.full((n_samples,), n_val),
-                    p=jnp.full((n_samples,), p_val),
-                )
-            )
-        )
-        exact = stats.nbinom.ppf(u, n_val, p_val)
-        w1 = np.mean(np.abs(samples - exact))
-        # Allow headroom for sampling variance (since sample has standard deviation up to ~14)
-        assert w1 < 0.10, (
-            f"NBinomial n={n_val}, p={p_val} empirical Wasserstein distance too high: {w1:.6f}"
-        )
-        print(
-            f"NBinomial n={n_val}, p={p_val} empirical Wasserstein distance: {w1:.6f}"
-        )
+if __name__ == "__main__":
+    for fn in (
+        benchmark_poisson,
+        benchmark_binomial,
+        benchmark_gamma,
+        benchmark_nbinomial,
+        plot_poisson,
+        plot_gamma,
+        plot_nbinomial,
+        plot_binomial,
+    ):
+        print(f"\n=== {fn.__name__} ===")
+        fn()
+    print(f"\nPlots written to {PLOTS_DIR}")

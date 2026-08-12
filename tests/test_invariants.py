@@ -38,6 +38,65 @@ def _reversed_theta(theta):
 
 
 # ---------------------------------------------------------------------------
+# Algorithm output invariants
+#
+# Properties of the results themselves, independent of any locked baseline.
+# ---------------------------------------------------------------------------
+
+
+def test_pfilter_cll_sums_to_loglik(lg):
+    """Conditional log-likelihoods must sum to the reported log-likelihood."""
+    lg.pfilter(J=J, key=jax.random.key(SEED), CLL=True)
+    payload = lg.results_history[-1].payload
+
+    np.testing.assert_allclose(
+        np.asarray(payload["CLL"]).sum(axis=-1),
+        np.asarray(payload["logLiks"]),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+def test_mif_trace_starts_at_initial_theta(lg):
+    """Iteration 0 of the mif trace is the parameter vector mif started from."""
+    param_names = lg.canonical_param_names
+    theta_start = np.asarray(lg.theta.to_jax_array(param_names))
+    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+
+    lg.mif(J=J, M=2, rw_sd=rw_sd, key=jax.random.key(SEED), n_monitors=1)
+    traces = lg.results_history[-1].payload["traces"]
+
+    start = np.stack(
+        [np.asarray(traces.sel(variable=n))[:, 0] for n in param_names], axis=-1
+    )
+    np.testing.assert_allclose(start, theta_start, rtol=1e-6, atol=1e-6)
+
+
+def test_sir_simulate_state_invariants():
+    """Counts stay non-negative and finite; accumvars index into the state.
+
+    SIR rather than LG because LG has no accumulator variables and no
+    non-negativity constraint to violate.
+    """
+    model = pp.models.sir(times=np.arange(1, 6) / 52.0, seed=11)
+    states, obs = model.simulate(nsim=3, key=jax.random.key(SEED))
+
+    obs_values = obs.drop(columns=["theta_idx", "sim", "time"]).to_numpy()
+    assert np.all(np.isfinite(obs_values))
+    assert np.all(obs_values >= 0), "simulated SIR case counts must be non-negative"
+
+    # S, I, R and the cases accumulator are counts; W and logw are unconstrained.
+    state_values = states.drop(columns=["theta_idx", "sim", "time"])
+    counts = state_values[["S", "I", "R", "cases"]].to_numpy()
+    assert np.all(np.isfinite(state_values.to_numpy()))
+    assert np.all(counts >= 0), "SIR compartments and case accumulator must be >= 0"
+
+    struct = model.to_struct()
+    assert struct.accumvars is not None, "SIR model should declare accumvars"
+    assert all(0 <= i < len(model.statenames) for i in struct.accumvars)
+
+
+# ---------------------------------------------------------------------------
 # Parameter-order invariance
 #
 # Parameters are held in dicts and aligned to canonical_param_names internally,

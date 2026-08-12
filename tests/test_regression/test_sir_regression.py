@@ -46,27 +46,3 @@ def test_sir_mif_regression(sir_struct, tol, num_regression):
         },
         default_tolerance=tol,
     )
-
-
-def test_sir_simulate_state_invariants(sir_struct):
-    """Invariants a broken rproc or accumvar reset would violate."""
-    struct, theta0, key, J, n_reps, _ = sir_struct
-    keys = jax.random.split(key, n_reps)
-
-    X_sims, Y_sims = F.simulate(struct, theta0, 3, keys, times=struct.times)
-
-    obs = np.asarray(Y_sims)
-    assert np.all(obs >= 0), "simulated SIR case counts must be non-negative"
-    assert np.all(np.isfinite(obs))
-
-    # S, I, R, cases are counts; logw and W are unconstrained, so check only
-    # the compartments and the accumulator.
-    states = np.asarray(X_sims)
-    counts = states[..., :4]
-    assert np.all(counts >= 0), "SIR compartments and case accumulator must be >= 0"
-    assert np.all(np.isfinite(states))
-
-    # accumvars are recorded as indices on the struct; the reset only makes
-    # sense if those indices actually point into the state vector.
-    assert struct.accumvars is not None, "SIR model should declare accumvars"
-    assert all(0 <= i < states.shape[-1] for i in struct.accumvars)

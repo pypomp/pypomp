@@ -77,20 +77,6 @@ def test_pfilter_parity(lg):
         )
 
 
-def test_pfilter_cll_sums_to_loglik(lg):
-    """Conditional log-likelihoods must sum to the reported log-likelihood."""
-    model, _ = lg
-    model.pfilter(J=J, key=jax.random.key(SEED), CLL=True)
-    payload = model.results_history[-1].payload
-
-    np.testing.assert_allclose(
-        np.asarray(payload["CLL"]).sum(axis=-1),
-        np.asarray(payload["logLiks"]),
-        rtol=1e-5,
-        atol=1e-5,
-    )
-
-
 def test_mif_parity(lg):
     """Pomp.mif matches F.mif on both the loglik and the theta traces."""
     model, param_names = lg
@@ -114,19 +100,6 @@ def test_mif_parity(lg):
 
     packed_theta = np.stack([_trace(result, name) for name in param_names], axis=-1)
     np.testing.assert_array_equal(packed_theta, np.asarray(theta_traces))
-
-
-def test_mif_trace_starts_at_initial_theta(lg):
-    """Iteration 0 of the mif trace must be the parameters mif was started from."""
-    model, param_names = lg
-    theta_array = np.asarray(model.theta.to_jax_array(param_names))
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
-
-    model.mif(J=J, M=M, rw_sd=rw_sd, key=jax.random.key(SEED))
-    result = model.results_history[-1]
-
-    start = np.stack([_trace(result, name)[:, 0] for name in param_names], axis=-1)
-    np.testing.assert_allclose(start, theta_array, rtol=1e-6, atol=1e-6)
 
 
 def test_simulate_parity(lg):

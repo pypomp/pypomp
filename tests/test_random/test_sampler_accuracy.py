@@ -1,11 +1,5 @@
 """Distributional accuracy of the approximate samplers in ``pypomp.random``.
 
-These samplers are approximations (Giles & Beentjes for binomial, Temme for
-gamma, a ported CURAND Poisson), so correctness is checked against the exact
-``scipy.stats`` distributions rather than against another sampler. Wasserstein
-distance is used alongside a quantile mismatch rate because it is sensitive to
-the tail and location errors these approximations actually make.
-
 Marked heavy: each check draws large samples.
 """
 

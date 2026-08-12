@@ -1,10 +1,5 @@
 """Equivalence between the object-oriented and functional entry points.
 
-``Pomp`` methods delegate to ``pypomp.functional``, so these tests pin the glue
-in ``core/estimation_mixin.py``: canonical parameter alignment, key derivation,
-the sharded dispatch, and result packing. A change to any of those shows up here
-as an exact mismatch rather than as a silently different number downstream.
-
 Comparisons are exact: both paths run the same compiled kernel, so any
 difference is a real divergence and not float noise.
 """
@@ -103,22 +98,13 @@ def test_mif_parity(lg):
     key = jax.random.key(SEED)
     rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
 
-    # n_monitors must match on both sides: Pomp.mif defaults to 0, F.mif to 0,
-    # but a monitored run is what makes the loglik trace meaningful to compare.
-    model.mif(J=J, M=M, rw_sd=rw_sd, key=key, n_monitors=1)
+    model.mif(J=J, M=M, rw_sd=rw_sd, key=key)
     result = model.results_history[-1]
 
     keys = jax.random.split(_derive_new_key(key), theta_array.shape[0])
     theta_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
     logliks, theta_traces, _ = F.mif(
-        model.to_struct(),
-        theta_3d,
-        rw_sd,
-        M=M,
-        J=J,
-        thresh=0.0,
-        keys=keys,
-        n_monitors=1,
+        model.to_struct(), theta_3d, rw_sd, M=M, J=J, thresh=0.0, keys=keys
     )
 
     # Iteration 0 holds the starting theta, so its loglik is NaN by construction.

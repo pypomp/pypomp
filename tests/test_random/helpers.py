@@ -39,12 +39,7 @@ def check_moments(
     skew_tol: tuple[float, float] = (0.10, 0.04),
     check_skew: bool = False,
 ) -> None:
-    """Compare empirical against theoretical moments, failing if they diverge.
-
-    The tolerances are the contract for each sampler's accuracy, so a breach is
-    an assertion rather than a warning: a checker that only warns reports as a
-    passing test and hides drift in the approximate samplers.
-    """
+    """Compare empirical against theoretical moments, failing if they diverge."""
     mean_emp, var_emp, skew_emp = calculate_empirical_moments(samples)
 
     assert np.allclose(mean_emp, mean_th, rtol=mean_tol[0], atol=mean_tol[1]), (

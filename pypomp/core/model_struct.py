@@ -185,6 +185,17 @@ class _ModelComponent:
     # Components that support manual vectorization override this (see _RProc).
     _is_vectorized: bool = False
 
+    statenames: list[str]
+    param_names: list[str]
+    covar_names: list[str]
+    par_trans: ParTrans
+    y_names: list[str]
+    original_func: Callable
+    name_mapping: dict[str, str]
+    struct: Callable
+    struct_pf: Callable
+    struct_per: Callable
+
     def __init__(
         self,
         struct: Callable,
@@ -427,6 +438,21 @@ class _RProc(_ModelComponent):
             return {'S': new_S, 'I': new_I}
     """
 
+    _is_vectorized: bool
+    nstep: int | None
+    dt: float | None
+    accumvars: tuple[int, ...] | None
+    _max_steps_bound: int | None
+    _struct_pf_dict: Callable
+    _struct_per_dict: Callable
+    _prepare_theta_pf: Callable | None
+    _prepare_theta_per: Callable | None
+    _step_pf: Callable | None
+    _step_per: Callable | None
+    struct_interp: Callable
+    struct_pf_interp: Callable
+    struct_per_interp: Callable
+
     internal_names = ["X_", "theta_", "key", "covars", "t", "dt"]
     vmap_axes_pf = (0, None, 0, None, None, None, None)
     vmap_axes_per = (0, 0, 0, None, None, None, None)
@@ -489,25 +515,24 @@ class _RProc(_ModelComponent):
         pf_step = self._struct_pf_dict
         per_step = self._struct_per_dict
         base_step = self._struct_pf_dict
-        interp_args = (self.nstep, self._max_steps_bound)
         self.struct_interp = _time_interp(
-            base_step,
-            *interp_args,
-            self.statenames,
+            rproc=base_step,
+            nstep_fixed=self.nstep,
+            statenames=self.statenames,
             prepare_theta=self._prepare_theta_pf,
             step_prepared=self._step_pf,
         )
         self.struct_pf_interp = _time_interp(
-            pf_step,
-            *interp_args,
-            self.statenames,
+            rproc=pf_step,
+            nstep_fixed=self.nstep,
+            statenames=self.statenames,
             prepare_theta=self._prepare_theta_pf,
             step_prepared=self._step_pf,
         )
         self.struct_per_interp = _time_interp(
-            per_step,
-            *interp_args,
-            self.statenames,
+            rproc=per_step,
+            nstep_fixed=self.nstep,
+            statenames=self.statenames,
             prepare_theta=self._prepare_theta_per,
             step_prepared=self._step_per,
         )
@@ -519,7 +544,7 @@ class _RProc(_ModelComponent):
         if missing:
             raise ValueError(f"rproc function output missing state keys: {missing}")
 
-    def _make_wrapper(self, user_func):
+    def _make_wrapper(self, user_func: Callable):
         pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
         mapping, trans = self.name_mapping, self.par_trans
 
@@ -804,6 +829,8 @@ class _RMeas(_ModelComponent):
             return {'cases': sim_cases}
     """
 
+    ydim: int
+
     internal_names = ["X_", "theta_", "key", "covars", "t"]
     vmap_axes_pf = (0, None, 0, None, None, None)
     vmap_axes_per = (0, 0, 0, None, None, None)
@@ -950,13 +977,11 @@ def _flat_dprior(params: ParamDict) -> float:
 def _time_interp(
     rproc: Callable,
     nstep_fixed: int | None,
-    max_steps_bound: int | None,
-    statenames: list[str] | None = None,
+    statenames: list[str],
     prepare_theta: Callable | None = None,
     step_prepared: Callable | None = None,
-):
-    """
-    Interpolates state trajectories between observation times.
+) -> Callable:
+    """Constructs an interpolated version of rproc.
 
     Two step paths, chosen by whether `step_prepared` is given:
     - Vectorized rproc (`step_prepared` given, paired with `prepare_theta`):
@@ -965,39 +990,58 @@ def _time_interp(
       sub-step, and a single key is shared across all particles.
     - Default vmapped rproc (`step_prepared` is None, using `rproc`
       directly): each particle needs its own key, split once per sub-step.
+
+    Args:
+        rproc (Callable): Process simulation callable.
+        nstep_fixed (int | None): Fixed number of sub-steps per observation
+            interval, or None if specified dynamically at runtime.
+        statenames (list[str]): List of state variable names.
+        prepare_theta (Callable | None): Optional callable to transform or prepare
+            parameters once per observation interval. Defaults to None.
+        step_prepared (Callable | None): Optional vectorized single sub-step
+            simulation callable using prepared parameters. Defaults to None.
+
+    Returns:
+        Callable: Interpolated version of rproc.
     """
     if not statenames:
         raise ValueError("statenames are required to build rproc interp")
     snames: list[str] = list(statenames)
 
-    def _interp_body(
-        i, inputs, theta_, covars_extended, dt_array_extended, should_trans
-    ):
-        X_, keys, t, t_idx = inputs
+    def _interp_step(
+        i: int | jax.Array,
+        inputs: tuple[dict[str, jax.Array], jax.Array, jax.Array, int],
+        theta_: dict[str, jax.Array],
+        covars_extended: jax.Array | None,
+        dt_array_extended: jax.Array,
+        should_trans: bool,
+    ) -> tuple[dict[str, jax.Array], jax.Array, jax.Array, int]:
+        X_dict, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         next_key, subkey = jax.random.split(keys)
         if step_prepared is not None:
-            X_ = step_prepared(X_, theta_, subkey, covars_t, t, dt)
+            X_dict = step_prepared(X_dict, theta_, subkey, covars_t, t, dt)
         else:
             # Generate per-particle keys for the vmapped rproc with a single split call.
-            J = X_[snames[0]].shape[0]
+            J = X_dict[snames[0]].shape[0]
             step_keys = jax.random.split(subkey, J)
-            X_ = rproc(X_, theta_, step_keys, covars_t, t, dt, should_trans)
-        return (X_, next_key, t + dt, t_idx + 1)
+            X_dict = rproc(X_dict, theta_, step_keys, covars_t, t, dt, should_trans)
+        return (X_dict, next_key, t + dt, t_idx + 1)
 
     def _rproc_interp(
-        X_,
-        theta_,
-        keys,
-        covars_extended,
-        dt_array_extended,
-        t,
-        t_idx,
-        nstep_dynamic,
-        accumvars,
-        should_trans,
-    ):
+        X_: jax.Array,
+        theta_: dict[str, jax.Array],
+        keys: jax.Array,
+        covars_extended: jax.Array | None,
+        dt_array_extended: jax.Array,
+        t: float,
+        t_idx: int,
+        nstep_dynamic: int,
+        accumvars: tuple[int, ...] | None,
+        should_trans: bool,
+    ) -> tuple[jax.Array, int]:
+        """Interpolated version of rproc."""
         if accumvars is not None and len(accumvars) > 0:
             X_ = X_.at[:, accumvars].set(0)
         if jnp.ndim(keys) != 0:
@@ -1005,7 +1049,7 @@ def _time_interp(
             keys = keys[0]
         # Carry the state as separate columns so that it is not sliced and
         # restacked on every sub-step.
-        X_ = {n: X_[:, i] for i, n in enumerate(snames)}
+        X_dict = {n: X_[:, i] for i, n in enumerate(snames)}
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
 
         if step_prepared is not None and prepare_theta is not None:
@@ -1015,16 +1059,16 @@ def _time_interp(
             0,
             nstep,
             partial(
-                _interp_body,
+                _interp_step,
                 theta_=theta_,
                 covars_extended=covars_extended,
                 dt_array_extended=dt_array_extended,
                 should_trans=should_trans,
             ),
-            (X_, keys, t, t_idx),
+            (X_dict, keys, t, t_idx),
         )
         X_dict_out = final[0]
         X_out = jnp.stack([X_dict_out[n] for n in snames], axis=-1)
-        return X_out, final[3]  # Return X_ and new t_idx
+        return X_out, final[3]  # Return state and new t_idx
 
     return _rproc_interp

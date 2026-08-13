@@ -934,4 +934,4 @@ def test_time_interp_requires_statenames():
         return X_
 
     with pytest.raises(ValueError, match="statenames are required"):
-        _time_interp(step, nstep_fixed=1, max_steps_bound=None, statenames=None)
+        _time_interp(step, nstep_fixed=1, statenames=None)  # type: ignore

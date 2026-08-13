@@ -87,10 +87,6 @@ def test_dacca_mif(simple):
     start = np.stack(
         [np.asarray(traces.sel(variable=n))[:, 0] for n in param_names], axis=-1
     )
-    # Tolerance rather than equality: mif perturbs on the estimation scale, and
-    # the simplex-constrained initial conditions (S_0, I_0, ...) do not survive
-    # the float32 round-trip back to the natural scale exactly. A misaligned
-    # parameter vector would still be off by orders of magnitude.
     np.testing.assert_allclose(start, theta_start, rtol=1e-2, atol=1e-6)
 
 

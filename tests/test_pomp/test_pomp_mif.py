@@ -131,60 +131,6 @@ def test_mif_order_of_sigmas_consistency(simple):
     )
 
 
-def test_order_of_parameters_consistency(simple):
-    LG, rw_sd, J, key, M = simple
-    # check that the order of parameters in the theta dict does not affect the results
-    theta_orig = LG.theta[0]
-
-    keys = list(theta_orig.keys())
-    reversed_keys = list(reversed(keys))
-    theta_reordered = {k: theta_orig[k] for k in reversed_keys}
-
-    LG.mif(
-        J=J,
-        M=M,
-        rw_sd=rw_sd,
-        key=key,
-        theta=pp.PompParameters(theta_orig),
-    )
-    traces_orig = LG.results_history[-1].traces_da
-
-    LG.results_history.clear()
-
-    LG.mif(
-        J=J,
-        M=M,
-        rw_sd=rw_sd,
-        key=key,
-        theta=pp.PompParameters(theta_reordered),
-    )
-    traces_reordered = LG.results_history[-1].traces_da
-
-    for param in theta_orig.keys():
-        arr1 = traces_orig.sel(theta_idx=0, variable=param).values
-        arr2 = traces_reordered.sel(theta_idx=0, variable=param).values
-        assert jnp.allclose(arr1, arr2), (
-            f"Traces differed after reordering theta dict keys for param {param}:\n"
-            f"original: {arr1}\nreordered: {arr2}"
-        )
-    arr1 = traces_orig.sel(theta_idx=0, variable="logLik").values
-    arr2 = traces_reordered.sel(theta_idx=0, variable="logLik").values
-    # Handle NaN values by checking if they're in the same positions
-    nan_mask1 = jnp.isnan(arr1)
-    nan_mask2 = jnp.isnan(arr2)
-    assert jnp.array_equal(nan_mask1, nan_mask2), (
-        f"NaN positions differed after reordering theta dict keys:\n"
-        f"original NaN mask: {nan_mask1}\nreordered NaN mask: {nan_mask2}"
-    )
-    # Check non-NaN values
-    if not jnp.all(nan_mask1):
-        non_nan_mask = ~nan_mask1
-        assert jnp.allclose(arr1[non_nan_mask], arr2[non_nan_mask]), (
-            f"logLik traces differed after reordering theta dict keys:\n"
-            f"original: {arr1}\nreordered: {arr2}"
-        )
-
-
 def test_invalid_mif_input(simple):
     LG, rw_sd, J, key, M = simple
     with pytest.raises(ValueError, match="J should be greater than 0"):

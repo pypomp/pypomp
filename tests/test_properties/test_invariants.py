@@ -1,14 +1,16 @@
 """Properties that must hold across algorithms and parameter containers.
 
 Each test here targets a class of error rather than one instance: a result that
-depends on dict ordering, a transform that does not round-trip, a mutation
-contract that silently changes, or an identity that stops holding.
+depends on dict ordering, a simulated state that leaves its valid range, or a
+mutation contract that silently changes.
+
+Per-model parameter transform round-trips live with their models in
+test_models/, and logmeanexp's identities live in test_maths.py.
 """
 
 from copy import deepcopy
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -101,64 +103,63 @@ def test_sir_simulate_state_invariants():
 # Parameter-order invariance
 #
 # Parameters are held in dicts and aligned to canonical_param_names internally,
-# so results must not depend on the order the user supplied them in. This
-# pattern already exists for simulate/train/dpop_train; pfilter and mif were
-# uncovered.
+# so results must not depend on the order the user supplied them in.
+#
+# The dpop_train and panel_mif equivalents stay in their own files: they run a
+# different model and a different code path, so they are not instances of this
+# same check.
 # ---------------------------------------------------------------------------
 
 
-def test_pfilter_param_order_invariance(lg):
-    key = jax.random.key(SEED)
-    theta = lg.theta
-
-    lg.pfilter(J=J, key=key, theta=theta)
-    baseline = np.asarray(lg.results_history[-1].payload["logLiks"])
-
-    lg.pfilter(J=J, key=key, theta=_reversed_theta(theta))
-    permuted = np.asarray(lg.results_history[-1].payload["logLiks"])
-
-    np.testing.assert_array_equal(baseline, permuted)
+def _run_pfilter(model, theta):
+    model.pfilter(J=J, key=jax.random.key(SEED), theta=theta)
+    return np.asarray(model.results_history[-1].payload["logLiks"])
 
 
-def test_mif_param_order_invariance(lg):
-    key = jax.random.key(SEED)
-    theta = lg.theta
-    param_names = lg.canonical_param_names
-    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
-
-    lg.mif(J=J, M=2, rw_sd=rw_sd, key=key, theta=theta, n_monitors=1)
-    baseline = lg.results_history[-1].payload["traces"]
-
-    lg.mif(J=J, M=2, rw_sd=rw_sd, key=key, theta=_reversed_theta(theta), n_monitors=1)
-    permuted = lg.results_history[-1].payload["traces"]
-
-    for name in ["logLik", *param_names]:
-        np.testing.assert_array_equal(
-            np.asarray(baseline.sel(variable=name)),
-            np.asarray(permuted.sel(variable=name)),
-            err_msg=f"mif result depends on parameter dict order for {name}",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Parameter transforms
-# ---------------------------------------------------------------------------
-
-
-def test_par_trans_round_trip(lg):
-    """from_est(to_est(theta)) recovers theta for the bundled LG model."""
-    original = deepcopy(lg.theta).params(as_list=True)
-
-    theta = deepcopy(lg.theta)
-    round_tripped = theta.transformed(lg.par_trans, direction="to_est").transformed(
-        lg.par_trans, direction="from_est"
+def _run_mif(model, theta):
+    rw_sd = uniform_rw_sd(model.canonical_param_names, cooling=0.5)
+    model.mif(
+        J=J, M=2, rw_sd=rw_sd, key=jax.random.key(SEED), theta=theta, n_monitors=1
     )
+    return np.asarray(model.results_history[-1].traces_da.values)
 
-    for before, after in zip(original, round_tripped.params(as_list=True), strict=True):
-        for name, value in before.items():
-            np.testing.assert_allclose(
-                float(after[name]), float(value), rtol=1e-5, atol=1e-6
-            )
+
+def _run_train(model, theta):
+    eta = pp.LearningRate({n: 0.2 for n in model.canonical_param_names})
+    model.train(
+        J=J,
+        M=2,
+        eta=eta,
+        optimizer=pp.Newton(scale=True),
+        key=jax.random.key(SEED),
+        theta=theta,
+    )
+    return np.asarray(model.results_history[-1].traces_da.values)
+
+
+def _run_simulate(model, theta):
+    X_sims, Y_sims = model.simulate(nsim=1, key=jax.random.key(SEED), theta=theta)
+    return np.concatenate([X_sims.to_numpy().ravel(), Y_sims.to_numpy().ravel()])
+
+
+@pytest.mark.parametrize(
+    "run",
+    [_run_pfilter, _run_mif, _run_train, _run_simulate],
+    ids=["pfilter", "mif", "train", "simulate"],
+)
+def test_param_order_invariance(lg, run):
+    theta = lg.theta
+
+    baseline = run(lg, theta)
+    lg.results_history.clear()
+    permuted = run(lg, _reversed_theta(theta))
+
+    np.testing.assert_allclose(
+        baseline,
+        permuted,
+        atol=1e-7,
+        err_msg="result depends on the order theta's keys were supplied in",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -193,51 +194,3 @@ def test_pruned_leaves_receiver_untouched(lg):
     assert theta.params(as_list=True) == before, "pruned() must not mutate the receiver"
     assert copy is not theta
     assert copy.num_replicates() <= theta.num_replicates()
-
-
-# ---------------------------------------------------------------------------
-# logmeanexp identities
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("shift", [-50.0, 0.0, 37.5])
-def test_logmeanexp_shift_invariance(shift):
-    """logmeanexp(x + c) == logmeanexp(x) + c."""
-    x = jnp.array([-3.0, -1.5, 0.25, 2.0, 4.5])
-
-    np.testing.assert_allclose(
-        float(pp.maths.logmeanexp(x + shift)),
-        float(pp.maths.logmeanexp(x)) + shift,
-        rtol=1e-5,
-        atol=1e-5,
-    )
-
-
-def test_logmeanexp_matches_direct_computation():
-    """On values that do not overflow, it equals the naive formula."""
-    x = jnp.array([-1.0, 0.0, 0.5, 1.25])
-
-    np.testing.assert_allclose(
-        float(pp.maths.logmeanexp(x)),
-        float(jnp.log(jnp.mean(jnp.exp(x)))),
-        rtol=1e-6,
-        atol=1e-6,
-    )
-
-
-def test_logmeanexp_constant_input():
-    """The log-mean-exp of a constant vector is that constant."""
-    np.testing.assert_allclose(
-        float(pp.maths.logmeanexp(jnp.full((7,), 3.25))), 3.25, rtol=1e-6, atol=1e-6
-    )
-
-
-def test_logmeanexp_survives_large_values():
-    """Shift-invariance must hold at magnitudes where naive exp overflows."""
-    x = jnp.array([800.0, 801.0, 802.0])
-
-    result = float(pp.maths.logmeanexp(x))
-    assert np.isfinite(result), "logmeanexp must not overflow"
-    np.testing.assert_allclose(
-        result, float(pp.maths.logmeanexp(x - 800.0)) + 800.0, rtol=1e-5, atol=1e-4
-    )

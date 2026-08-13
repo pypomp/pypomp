@@ -115,31 +115,6 @@ def test_train_validation(simple):
         LG.train(J=J, M=M, eta={"A11": 0.2}, key=key)  # type: ignore
 
 
-def test_train_param_order_invariance(simple):
-    """Test that parameter order doesn't affect results."""
-    LG, ys, covars, theta, J, key, M = simple
-    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
-
-    LG.train(J=J, M=M, eta=eta, optimizer=pp.Newton(scale=True), key=key, theta=theta)
-    out1 = LG.results_history[-1].traces_da.values
-
-    # Permute theta parameter order
-    param_keys = list(theta.params(as_list=True)[0].keys())
-    rev_keys = list(reversed(param_keys))
-    permuted_theta = [{k: th[k] for k in rev_keys} for th in theta.params(as_list=True)]
-
-    LG.train(
-        J=J,
-        M=M,
-        eta=eta,
-        optimizer=pp.Newton(scale=True),
-        key=key,
-        theta=pp.PompParameters(permuted_theta),
-    )
-    out2 = LG.results_history[-1].traces_da.values
-    np.testing.assert_allclose(out1, out2, atol=1e-7)
-
-
 def test_different_learning_rates(simple):
     """Test that different per-parameter learning rates produce different results."""
     LG, ys, covars, theta, J, key, M = simple

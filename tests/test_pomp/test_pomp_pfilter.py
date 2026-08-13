@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pytest
 
 import pypomp as pp
@@ -42,28 +41,6 @@ def test_reps_default(simple):
     val1 = LG.results_history[-1].logLiks
     assert val1.shape == (2, 2)
     assert LG.results_history[-1].CLL_da is None
-
-
-def test_order_of_parameters_consistency(simple):
-    # check that the order of parameters in the theta dict does not affect the results
-    LG, key, J = simple
-    theta_orig = LG.theta.params(as_list=True)[0]
-
-    keys = list(theta_orig.keys())
-    reversed_keys = list(reversed(keys))
-    theta_reordered = {k: theta_orig[k] for k in reversed_keys}
-
-    LG.pfilter(J=J, key=key, theta=pp.PompParameters(theta_orig))
-    loglik_orig = LG.results_history[-1].logLiks
-
-    LG.results_history.clear()
-    LG.pfilter(J=J, key=key, theta=pp.PompParameters(theta_reordered))
-    loglik_reordered = LG.results_history[-1].logLiks
-
-    assert np.allclose(loglik_orig.data, loglik_reordered.data), (
-        "Log-likelihoods differed after reordering theta dict keys:\n"
-        f"original: {loglik_orig}\nreordered: {loglik_reordered}"
-    )
 
 
 @pytest.mark.parametrize(

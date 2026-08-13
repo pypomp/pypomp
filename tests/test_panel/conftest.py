@@ -60,7 +60,8 @@ def measles_panel_setup_some_shared_module(
 
 @pytest.fixture(scope="function")
 def measles_panel_setup_some_shared(measles_panel_setup_some_shared_module):
-    panel, rw_sd, theta, key, fresh_key = measles_panel_setup_some_shared_module
+    panel_orig, rw_sd, theta, key, fresh_key = measles_panel_setup_some_shared_module
+    panel = deepcopy(panel_orig)
     panel.results_history.clear()
     panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key

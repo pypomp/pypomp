@@ -1,6 +1,7 @@
 import time
 import warnings
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -119,3 +120,40 @@ def test_ignore_nan(arr, expected_arr, expect_nan):
         expected_lme_se = pp.maths.logmeanexp_se(expected_arr)
         assert np.isclose(lme, expected_lme, atol=1e-7)
         assert np.isclose(lme_se, expected_lme_se, atol=1e-7)
+
+
+# ---------------------------------------------------------------------------
+# logmeanexp identities
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shift", [-50.0, 0.0, 37.5])
+def test_logmeanexp_shift_invariance(shift):
+    """logmeanexp(x + c) == logmeanexp(x) + c."""
+    x = jnp.array([-3.0, -1.5, 0.25, 2.0, 4.5])
+
+    np.testing.assert_allclose(
+        float(pp.maths.logmeanexp(x + shift)),
+        float(pp.maths.logmeanexp(x)) + shift,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+def test_logmeanexp_matches_direct_computation():
+    """On values that do not overflow, it equals the naive formula."""
+    x = jnp.array([-1.0, 0.0, 0.5, 1.25])
+
+    np.testing.assert_allclose(
+        float(pp.maths.logmeanexp(x)),
+        float(jnp.log(jnp.mean(jnp.exp(x)))),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
+def test_logmeanexp_constant_input():
+    """The log-mean-exp of a constant vector is that constant."""
+    np.testing.assert_allclose(
+        float(pp.maths.logmeanexp(jnp.full((7,), 3.25))), 3.25, rtol=1e-6, atol=1e-6
+    )

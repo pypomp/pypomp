@@ -37,6 +37,28 @@ def kalman_loglik(
 _BOUNDS = {"A11": (-0.99, 0.99), "Q11": (1e-4, 5.0), "R11": (1e-4, 5.0)}
 
 
+def _maximize(neg_loglik, start: np.ndarray, bounds: list[tuple[float, float]]):
+    """Minimize ``neg_loglik``, robustly enough to trust the result as truth.
+
+    Nelder-Mead carries the search: L-BFGS-B on this objective terminates
+    ABNORMAL both when started away from the optimum (returning a point that is
+    not a maximum) and on the flat surface at the optimum. It is therefore only
+    used as an opportunistic polish, kept when it converges and improves.
+    """
+    res = minimize(
+        neg_loglik,
+        start,
+        method="Nelder-Mead",
+        bounds=bounds,
+        options={"xatol": 1e-10, "fatol": 1e-10, "maxiter": 20000, "maxfev": 20000},
+    )
+    if not res.success:
+        raise RuntimeError(f"exact MLE search did not converge: {res.message}")
+
+    polished = minimize(neg_loglik, res.x, method="L-BFGS-B", bounds=bounds)
+    return polished if polished.success and polished.fun < res.fun else res
+
+
 def lg_mle(
     ys: np.ndarray,
     estimated: Sequence[str],
@@ -69,11 +91,10 @@ def lg_mle(
             p0=theta["Q11"] ** 2,
         )
 
-    res = minimize(
+    res = _maximize(
         neg_loglik,
         np.array([float(start[n]) for n in names]),
-        method="L-BFGS-B",
-        bounds=[_BOUNDS[n] for n in names],
+        [_BOUNDS[n] for n in names],
     )
     mle = {n: float(v) for n, v in zip(names, res.x, strict=True)}
     mle["logLik"] = float(-res.fun)
@@ -91,7 +112,10 @@ def lg_panel_mle(
 
     Maximizes the summed per-unit Kalman log-likelihood. Keys of the result are
     the shared names plus ``"{name}_{unit}"`` for the unit-specific ones, with
-    the attained total under ``logLik``.
+    the attained total under ``logLik``. ``start`` accepts the same keys, so a
+    unit whose parameters differ from its neighbours can be started from its own
+    values; searching every unit from a common point can otherwise leave a
+    unit-specific slot stuck against a bound.
     """
     units = list(ys_by_unit)
     slots: list[tuple[str | None, str]] = [(None, n) for n in shared]
@@ -123,11 +147,15 @@ def lg_panel_mle(
             )
         return -total
 
-    res = minimize(
+    res = _maximize(
         neg_loglik,
-        np.array([float(start[n]) for _, n in slots]),
-        method="L-BFGS-B",
-        bounds=[_BOUNDS[n] for _, n in slots],
+        np.array(
+            [
+                float(start.get(n if u is None else f"{n}_{u}", start[n]))
+                for u, n in slots
+            ]
+        ),
+        [_BOUNDS[n] for _, n in slots],
     )
 
     mle: dict[str, float] = {}

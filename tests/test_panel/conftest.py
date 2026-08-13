@@ -47,26 +47,6 @@ def measles_rw_sd():
 
 
 @pytest.fixture(scope="module")
-def measles_panel_setup_specific_only_module(
-    measles_panel_setup_pomps_module, measles_rw_sd
-):
-    london, hastings, AK_mles = measles_panel_setup_pomps_module
-    unit_specific = AK_mles[["London", "Hastings"]]
-    assert isinstance(unit_specific, pd.DataFrame)
-    theta = (
-        pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}]) * 2
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"London": london, "Hastings": hastings},
-        theta=theta,
-    )
-    key = jax.random.key(0)
-    assert panel.theta is not None
-    fresh_key = panel.fresh_key
-    return panel, measles_rw_sd, theta, key, fresh_key
-
-
-@pytest.fixture(scope="module")
 def measles_panel_setup_some_shared_module(
     measles_panel_setup_pomps_module, measles_rw_sd
 ):
@@ -94,63 +74,12 @@ def measles_panel_setup_some_shared_module(
 
 
 @pytest.fixture(scope="function")
-def measles_panel_setup_specific_only(measles_panel_setup_specific_only_module):
-    panel, rw_sd, theta, key, fresh_key = measles_panel_setup_specific_only_module
-    panel.results_history.clear()
-    panel.theta = theta
-    panel.fresh_key = fresh_key
-    return panel, rw_sd, key
-
-
-@pytest.fixture(scope="function")
 def measles_panel_setup_some_shared(measles_panel_setup_some_shared_module):
     panel, rw_sd, theta, key, fresh_key = measles_panel_setup_some_shared_module
     panel.results_history.clear()
     panel.theta = deepcopy(theta)
     panel.fresh_key = fresh_key
     return panel, rw_sd, key
-
-
-@pytest.fixture(scope="module")
-def measles_panel_mp_module(measles_panel_setup_specific_only_module):
-    panel, rw_sd, theta, key, fresh_key = measles_panel_setup_specific_only_module
-    J = 2
-    M = 2
-    a = 0.5
-    panel.mif(J=J, rw_sd=rw_sd.geometric_cooling(a=a), M=M, key=key)
-    panel.pfilter(J=J)
-    results_history = panel.results_history
-    fresh_key = panel.fresh_key
-    return (
-        panel,
-        rw_sd,
-        key,
-        J,
-        M,
-        a,
-        theta,
-        fresh_key,
-        results_history,
-    )
-
-
-@pytest.fixture(scope="function")
-def measles_panel_mp(measles_panel_mp_module):
-    (
-        panel,
-        rw_sd,
-        key,
-        J,
-        M,
-        a,
-        theta,
-        fresh_key,
-        results_history,
-    ) = measles_panel_mp_module
-    panel.results_history = results_history
-    panel.theta = deepcopy(theta)
-    panel.fresh_key = fresh_key
-    return panel, rw_sd, key, J, M, a
 
 
 @pytest.fixture(scope="module")

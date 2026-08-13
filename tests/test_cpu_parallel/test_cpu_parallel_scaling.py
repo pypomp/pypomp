@@ -18,8 +18,6 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.heavy
-
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WORKER_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "_scaling_worker.py"

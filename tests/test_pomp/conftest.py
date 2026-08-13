@@ -1,4 +1,4 @@
-"""Shared fixtures for test_pomp_abc.py and test_pomp_pmcmc.py.
+"""Shared fixtures for the test_pomp suite.
 
 Each expensive POMP model is built *once* per module (scope="module") and
 reset to a clean mutable state before every test (scope="function"), following
@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 import pypomp as pp
+from tests.helpers.dummy import dummy_pomp
 
 # ---------------------------------------------------------------------------
 # SIR model (used by most ABC and PMCMC tests)
@@ -134,3 +135,20 @@ def deterministic_meas_pomp(deterministic_meas_pomp_module):
     model.results_history.clear()
     model.theta = theta
     return model
+
+
+# ---------------------------------------------------------------------------
+# Minimal two-observation POMP, used by the validation, equality/merge, and
+# pickling tests. Its components live in tests.helpers.dummy so that tests
+# importing them share the fixture's function objects.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def base_pomp():
+    return dummy_pomp()
+
+
+@pytest.fixture
+def dprior_pomp():
+    return dummy_pomp(with_dprior=True)

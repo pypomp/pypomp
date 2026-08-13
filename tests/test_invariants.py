@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 import pypomp as pp
+from tests.helpers.params import uniform_rw_sd
 
 SEED = 20260812
 J = 6
@@ -61,7 +62,7 @@ def test_mif_trace_starts_at_initial_theta(lg):
     """Iteration 0 of the mif trace is the parameter vector mif started from."""
     param_names = lg.canonical_param_names
     theta_start = np.asarray(lg.theta.to_jax_array(param_names))
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
 
     lg.mif(J=J, M=2, rw_sd=rw_sd, key=jax.random.key(SEED), n_monitors=1)
     traces = lg.results_history[-1].payload["traces"]
@@ -123,7 +124,7 @@ def test_mif_param_order_invariance(lg):
     key = jax.random.key(SEED)
     theta = lg.theta
     param_names = lg.canonical_param_names
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
 
     lg.mif(J=J, M=2, rw_sd=rw_sd, key=key, theta=theta, n_monitors=1)
     baseline = lg.results_history[-1].payload["traces"]

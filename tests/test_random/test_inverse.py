@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 import pypomp.random as ppr
-from tests.test_random.helpers import jax_x64_enabled
+from tests.helpers.assertions import jax_x64_enabled
 
 
 def test_binominv_basics() -> None:

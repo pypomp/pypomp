@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import pypomp.random as ppr
-from tests.test_random.helpers import check_moments, jax_x64_enabled
+from tests.helpers.assertions import check_moments, jax_x64_enabled
 
 
 def test_nbinomial_basics() -> None:

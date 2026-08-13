@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import pypomp as pp
+from tests.helpers.assertions import pickle_roundtrip
 
 
 class CallableObj:
@@ -622,6 +623,6 @@ def test_flat_cooling_factor():
     assert rw.cooling_factor(10, 5, 20) == 1.0
     assert rw.a is None and rw.s is None and rw.c is None and rw.M is None
     # Round-trips through pickle.
-    rw2 = pickle.loads(pickle.dumps(rw))
+    rw2 = pickle_roundtrip(rw)
     assert rw2.cooling_type == "none"
     assert rw2.cooling_factor(10, 5, 20) == 1.0

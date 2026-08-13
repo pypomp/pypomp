@@ -1,46 +1,28 @@
 import jax
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
+from tests.helpers.models import lg_panel
 
 
 @pytest.fixture
 def simple_panel():
-    unit_names = ["unit1", "unit2"]
-    units = {name: pp.models.LG() for name in unit_names}
-
-    unit_theta = units["unit1"].theta.params(as_list=True)[0]
-    shared_names = [
-        n for n in unit_theta.keys() if n.startswith("A") or n.startswith("C")
-    ]
-    unit_specific_names = [
-        n for n in unit_theta.keys() if n.startswith(("Q", "R", "X0"))
-    ]
-
-    theta = pp.PanelParameters(
-        {
-            "shared": pd.DataFrame({n: [unit_theta[n]] for n in shared_names}).T.rename(
-                columns={0: "value"}
-            ),
-            "unit_specific": pd.DataFrame(
-                {
-                    un: [unit_theta[pn] for pn in unit_specific_names]
-                    for un in unit_names
-                },
-                index=pd.Index(unit_specific_names),
-            ),
-        }
+    # Every transition/measurement entry shared, every noise and initial-state
+    # entry unit-specific.
+    panel = lg_panel(
+        sharing="some",
+        shared_names=[
+            n for n in pp.models.LG().canonical_param_names if n.startswith(("A", "C"))
+        ],
     )
-    panel = pp.PanelPomp(units, theta=theta)
 
     key = jax.random.key(456)
     J = 5
     reps = 2
 
     panel.pfilter(J=J, key=key, reps=reps, CLL=True, ESS=True)
-    return panel, reps, unit_names
+    return panel, reps, list(panel.get_unit_names())
 
 
 def test_panel_cll(simple_panel):

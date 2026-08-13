@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import pypomp as pp
 import pypomp.functional as F
+from tests.helpers.params import uniform_rw_sd
 
 M = 3
 
@@ -13,7 +13,7 @@ def test_panel_mif_regression(lg_panel_struct, tol, num_regression):
     shared_mif = jnp.repeat(shared0[:, jnp.newaxis, :], J, axis=1)
     unit_mif = jnp.repeat(unit0[:, jnp.newaxis, :, :], J, axis=1)
     all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
-    rw_sd = pp.RWSigma({name: 0.02 for name in all_param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(all_param_names, cooling=0.5)
     keys = jax.random.split(key, n_reps)
 
     shared_traces, unit_traces, _, _ = F.panel_mif(

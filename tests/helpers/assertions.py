@@ -1,8 +1,28 @@
-from collections.abc import Generator
+"""Assertion and round-trip utilities shared across the test suite."""
+
+import pickle
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from typing import Any, TypeVar
 
 import jax
 import numpy as np
+
+T = TypeVar("T")
+
+
+def pickle_roundtrip(obj: T) -> T:
+    """Return ``obj`` after a pickle dump/load cycle."""
+    return pickle.loads(pickle.dumps(obj))
+
+
+def reversed_theta(theta: Mapping[str, Any]) -> dict[str, Any]:
+    """``theta`` with its keys in reverse order.
+
+    Results must not depend on the order the user supplied parameters in, since
+    they are aligned to canonical_param_names internally.
+    """
+    return {k: theta[k] for k in reversed(list(theta))}
 
 
 @contextmanager

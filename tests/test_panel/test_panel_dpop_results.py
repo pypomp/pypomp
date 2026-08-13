@@ -2,35 +2,18 @@ from copy import deepcopy
 
 import jax
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
 from pypomp.core.results import Result
+from tests.helpers.models import sir_panel
 
 _test_times = np.arange(1 / 52, 3 / 52, 1 / 52)
 
 
 def _build_sir_panel_for_results():
-    sir1 = pp.models.sir(seed=100, times=_test_times)
-    sir2 = pp.models.sir(seed=200, times=_test_times)
-    param_names = sir1.canonical_param_names
-    theta1 = sir1.theta[0]
-    theta2 = sir2.theta[0]
-
-    unit_specific = pd.DataFrame(
-        {
-            "unit1": [theta1[p] for p in param_names],
-            "unit2": [theta2[p] for p in param_names],
-        },
-        index=pd.Index(param_names),
-    )
-    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": sir1, "unit2": sir2},
-        theta=theta,
-    )
-    return panel, theta
+    panel = sir_panel(sharing="none", times=_test_times)
+    return panel, panel.theta
 
 
 @pytest.fixture(scope="module")

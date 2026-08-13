@@ -7,41 +7,18 @@ import xarray as xr
 
 import pypomp as pp
 from pypomp.core.results import Result
-
-
-def _build_lg_panel():
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    shared_names = ["A11", "C11"]
-    unit_specific_names = [
-        n for n in lg1.canonical_param_names if n not in shared_names
-    ]
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    shared_df = pd.DataFrame(
-        {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
-        index=pd.Index(shared_names),
-    )
-    unit_specific_df = pd.DataFrame(
-        {
-            "unit1": [p1[n] for n in unit_specific_names],
-            "unit2": [p2[n] for n in unit_specific_names],
-        },
-        index=pd.Index(unit_specific_names),
-    )
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]
-    )
-    return pp.PanelPomp(Pomp_dict={"unit1": lg1, "unit2": lg2}, theta=theta)
+from tests.helpers.models import lg_panel
+from tests.helpers.params import uniform_eta
 
 
 def _train_and_get_result(seed: int, optimizer=None):
     if optimizer is None:
         optimizer = pp.Adam()
-    panel = _build_lg_panel()
+    panel = lg_panel(sharing="some")
     panel.train(
         J=2,
         M=2,
-        eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
+        eta=uniform_eta(panel),
         theta=deepcopy(panel.theta),
         optimizer=optimizer,
         key=jax.random.key(seed),

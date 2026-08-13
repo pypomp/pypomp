@@ -3,11 +3,11 @@ from typing import Any
 
 import jax
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
 from pypomp.core.results import Result
+from tests.helpers.models import sir_panel
 
 # Short times series for fast test execution
 _test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
@@ -15,41 +15,18 @@ _test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
 
 def _get_sir_panel_n_units(n_units):
     """Build a SIR panel with all parameters unit-specific (variable n_units)."""
-    import pandas as pd
-
-    pomps = {
-        f"unit{i + 1}": pp.models.sir(seed=100 + i, times=_test_times)
-        for i in range(n_units)
-    }
-    first = next(iter(pomps.values()))
-    param_names = first.canonical_param_names
-    unit_specific = pd.DataFrame(
-        {unit: [pomp.theta[0][p] for p in param_names] for unit, pomp in pomps.items()},
-        index=pd.Index(param_names),
+    return sir_panel(
+        sharing="none",
+        n_units=n_units,
+        times=_test_times,
+        seeds=[100 + i for i in range(n_units)],
     )
-    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
-    return pp.PanelPomp(Pomp_dict=pomps, theta=theta)
 
 
 def _build_sir_panel_all_shared_dpop():
     """Build a 2-unit SIR panel with every parameter shared (no unit-specific)."""
-    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
-    sir1 = pp.models.sir(seed=100, times=test_times)
-    sir2 = pp.models.sir(seed=200, times=test_times)
-    param_names = sir1.canonical_param_names
-    theta1 = sir1.theta[0]
-    theta2 = sir2.theta[0]
-
-    shared = pd.DataFrame(
-        {"shared": [(theta1[p] + theta2[p]) / 2 for p in param_names]},
-        index=pd.Index(param_names),
-    )
-    empty_unit_specific = pd.DataFrame(index=pd.Index([]), columns=["unit1", "unit2"])
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared, "unit_specific": empty_unit_specific}]
-    )
-    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
-    return panel, theta
+    panel = sir_panel(sharing="all", times=_test_times)
+    return panel, panel.theta
 
 
 def test_panel_dpop_train_all_shared():

@@ -2,78 +2,23 @@ from copy import deepcopy
 
 import jax
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
 from pypomp.core.results import Result
+from tests.helpers.models import lg_panel
 
 
 def _get_lg_panel():
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    # Create PanelParameters with some shared and some unit-specific
-    shared_names = ["A11", "C11"]
-    unit_specific_names = [
-        n for n in lg1.canonical_param_names if n not in shared_names
-    ]
-
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    shared_df = pd.DataFrame(
-        {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
-        index=pd.Index(shared_names),
-    )
-
-    unit_specific_df = pd.DataFrame(
-        {
-            "unit1": [p1[n] for n in unit_specific_names],
-            "unit2": [p2[n] for n in unit_specific_names],
-        },
-        index=pd.Index(unit_specific_names),
-    )
-
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": lg1, "unit2": lg2},
-        theta=theta,
-    )
-    return panel
+    return lg_panel(sharing="some")
 
 
 def _get_lg_panel_specific_only():
-    """Build a 2-unit LG panel with no shared parameters at all."""
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    names = lg1.canonical_param_names
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    unit_specific_df = pd.DataFrame(
-        {"unit1": [p1[n] for n in names], "unit2": [p2[n] for n in names]},
-        index=pd.Index(names),
-    )
-    theta = pp.PanelParameters(
-        theta=[{"shared": None, "unit_specific": unit_specific_df}]
-    )
-    panel = pp.PanelPomp(Pomp_dict={"unit1": lg1, "unit2": lg2}, theta=theta)
-    return panel
+    return lg_panel(sharing="none")
 
 
 def _get_lg_panel_shared_only():
-    """Build a 2-unit LG panel with no unit-specific parameters at all."""
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    names = lg1.canonical_param_names
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    shared_df = pd.DataFrame(
-        {"shared": [(p1[n] + p2[n]) / 2 for n in names]}, index=pd.Index(names)
-    )
-    empty_unit_specific = pd.DataFrame(index=pd.Index([]), columns=["unit1", "unit2"])
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared_df, "unit_specific": empty_unit_specific}]
-    )
-    panel = pp.PanelPomp(Pomp_dict={"unit1": lg1, "unit2": lg2}, theta=theta)
-    return panel
+    return lg_panel(sharing="all")
 
 
 def test_panel_train_unit_specific_only():

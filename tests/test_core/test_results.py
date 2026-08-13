@@ -2,7 +2,6 @@
 its builders, rendering, merge, equality/pickling, and :class:`ResultsHistory`.
 """
 
-import pickle
 from typing import Any, cast
 
 import jax
@@ -14,6 +13,7 @@ import xarray as xr
 
 from pypomp.core.learning_rate import LearningRate
 from pypomp.core.optimizer import Adam
+from tests.helpers.assertions import pickle_roundtrip
 from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.results import (
     Result,
@@ -155,7 +155,7 @@ def test_result_equality_and_pickle():
     r4.payload["logLiks"].values[:] = 0.0
     assert r1 != r4
 
-    unpickled = pickle.loads(pickle.dumps(r1))
+    unpickled = pickle_roundtrip(r1)
     assert unpickled == r1
     assert jnp.array_equal(
         jax.random.key_data(unpickled.key), jax.random.key_data(r1.key)

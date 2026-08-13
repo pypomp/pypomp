@@ -2,23 +2,19 @@
 Integration tests for parameter transformations in PanelPomp.mif method.
 """
 
-from typing import cast
-
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 import pytest
 
 import pypomp as pp
 from pypomp.types import ParamDict
+from tests.helpers.models import lg_panel
 
 
 @pytest.fixture
 def panel_pomp_with_transform():
     """Create a simple PanelPomp model with custom ParTrans."""
-    LG1 = pp.models.LG()
-    LG2 = pp.models.LG()
 
     def to_est(theta: ParamDict) -> ParamDict:
         result = {}
@@ -38,34 +34,13 @@ def panel_pomp_with_transform():
                 result[k] = v
         return result
 
-    LG1.par_trans = pp.ParTrans(to_est, from_est)
-    LG2.par_trans = pp.ParTrans(to_est, from_est)
-
-    theta_base = LG1.theta.params(as_list=True)[0]
-
     shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
-    unit_param_names = ["Q11", "Q21", "Q22", "R11", "R21", "R22", "X0_1", "X0_2"]
 
-    shared_params = pd.DataFrame(
-        index=pd.Index(shared_param_names),
-        data={"shared": [theta_base[name] for name in shared_param_names]},
-    )
-
-    unit_specific_params = pd.DataFrame(
-        index=pd.Index(unit_param_names),
-        data={
-            "unit1": [theta_base[name] * 0.8 for name in unit_param_names],
-            "unit2": [theta_base[name] * 1.2 for name in unit_param_names],
-        },
-    )
-
-    theta = cast(
-        list[dict[str, pd.DataFrame | None]],
-        [{"shared": shared_params, "unit_specific": unit_specific_params}],
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": LG1, "unit2": LG2},
-        theta=pp.PanelParameters(theta),
+    panel = lg_panel(
+        sharing="some",
+        shared_names=shared_param_names,
+        unit_scales=[0.8, 1.2],
+        par_trans=pp.ParTrans(to_est, from_est),
     )
 
     return panel

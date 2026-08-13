@@ -4,6 +4,7 @@ import numpy as np
 
 import pypomp as pp
 import pypomp.functional as F
+from tests.helpers.params import uniform_rw_sd
 
 M = 3
 # The full-trace baseline runs a longer chain so the cooling schedule has room
@@ -14,7 +15,7 @@ TRACE_M = 4
 def test_mif_regression(lg_struct, tol, num_regression):
     struct, theta0, key, J, n_reps, param_names = lg_struct
     keys = jax.random.split(key, n_reps)
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
     thetas_mif = jnp.repeat(theta0[:, jnp.newaxis, :], J, axis=1)
 
     logliks_M, thetas_traces_Md, _ = F.mif(
@@ -39,7 +40,7 @@ def test_mif_full_trace_regression(lg_struct_multi, tol, num_regression):
     """
     struct, thetas, key, J, n_reps, param_names = lg_struct_multi
     keys = jax.random.split(key, n_reps)
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
     thetas_mif = jnp.repeat(thetas[:, jnp.newaxis, :], J, axis=1)
 
     logliks_M, thetas_traces_Md, _ = F.mif(

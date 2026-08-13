@@ -1,11 +1,13 @@
 from copy import deepcopy
 
 import jax
-import numpy as np
 import pandas as pd
 import pytest
 
 import pypomp as pp
+from tests.helpers.models import lg_panel, sir_panel
+from tests.helpers.params import measles_rw_sd as measles_rw_sigma
+from tests.helpers.params import uniform_rw_sd
 
 
 @pytest.fixture(scope="module")
@@ -26,24 +28,7 @@ def measles_panel_setup_pomps_module():
 
 @pytest.fixture(scope="module")
 def measles_rw_sd():
-    return pp.RWSigma(
-        sigmas={
-            "gamma": 0.02,
-            "cohort": 0.02,
-            "amplitude": 0.02,
-            "sigmaSE": 0.02,
-            "psi": 0.02,
-            "iota": 0.02,
-            "rho": 0.02,
-            "R0": 0.02,
-            "sigma": 0.02,
-            "S_0": 0.01,
-            "E_0": 0.01,
-            "I_0": 0.01,
-            "R_0": 0.01,
-        },
-        init_names=["S_0", "E_0", "I_0", "R_0"],
-    )
+    return measles_rw_sigma()
 
 
 @pytest.fixture(scope="module")
@@ -82,50 +67,14 @@ def measles_panel_setup_some_shared(measles_panel_setup_some_shared_module):
     return panel, rw_sd, key
 
 
+def _lg_panel_setup(sharing, n_reps):
+    panel = lg_panel(sharing=sharing, n_reps=n_reps)
+    return panel, uniform_rw_sd(panel), panel.theta, jax.random.key(0), panel.fresh_key
+
+
 @pytest.fixture(scope="module")
 def lg_panel_setup_some_shared_module():
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    # Create PanelParameters with some shared and some unit-specific
-    shared_names = ["A11", "C11"]
-    unit_specific_names = [
-        n for n in lg1.canonical_param_names if n not in shared_names
-    ]
-
-    # Simple averaging for shared
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    shared_df = pd.DataFrame(
-        {"shared": [(p1[n] + p2[n]) / 2 for n in shared_names]},
-        index=pd.Index(shared_names),
-    )
-
-    unit_specific_df = pd.DataFrame(
-        {
-            "unit1": [p1[n] for n in unit_specific_names],
-            "unit2": [p2[n] for n in unit_specific_names],
-        },
-        index=pd.Index(unit_specific_names),
-    )
-
-    theta = (
-        pp.PanelParameters(
-            theta=[{"shared": shared_df, "unit_specific": unit_specific_df}]
-        )
-        * 2
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": lg1, "unit2": lg2},
-        theta=theta,
-    )
-    key = jax.random.key(0)
-    fresh_key = panel.fresh_key
-
-    # Create simple rw_sd for LG
-    rw_sd = pp.RWSigma(
-        sigmas={n: 0.02 for n in lg1.canonical_param_names}, init_names=[]
-    )
-
-    return panel, rw_sd, theta, key, fresh_key
+    return _lg_panel_setup("some", n_reps=2)
 
 
 @pytest.fixture(scope="function")
@@ -140,35 +89,7 @@ def lg_panel_setup_some_shared(lg_panel_setup_some_shared_module):
 
 @pytest.fixture(scope="module")
 def lg_panel_setup_specific_only_module():
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    # Create PanelParameters with only unit-specific
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    unit_specific_df = pd.DataFrame(
-        {
-            "unit1": [p1[n] for n in lg1.canonical_param_names],
-            "unit2": [p2[n] for n in lg2.canonical_param_names],
-        },
-        index=pd.Index(lg1.canonical_param_names),
-    )
-
-    theta = (
-        pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific_df}])
-        * 2
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": lg1, "unit2": lg2},
-        theta=theta,
-    )
-    key = jax.random.key(0)
-    fresh_key = panel.fresh_key
-
-    # Create simple rw_sd for LG
-    rw_sd = pp.RWSigma(
-        sigmas={n: 0.02 for n in lg1.canonical_param_names}, init_names=[]
-    )
-
-    return panel, rw_sd, theta, key, fresh_key
+    return _lg_panel_setup("none", n_reps=2)
 
 
 @pytest.fixture(scope="function")
@@ -183,32 +104,7 @@ def lg_panel_setup_specific_only(lg_panel_setup_specific_only_module):
 
 @pytest.fixture(scope="module")
 def lg_panel_setup_shared_only_module():
-    lg1 = pp.models.LG()
-    lg2 = pp.models.LG()
-    names = lg1.canonical_param_names
-    p1, p2 = lg1.theta[0], lg2.theta[0]
-    shared_df = pd.DataFrame(
-        {"shared": [(p1[n] + p2[n]) / 2 for n in names]},
-        index=pd.Index(names),
-    )
-    # No unit-specific parameters at all: an empty-row DataFrame whose columns
-    # are the unit names is how PanelParameters records unit identity when
-    # every parameter is shared.
-    empty_unit_specific = pd.DataFrame(index=pd.Index([]), columns=["unit1", "unit2"])
-
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared_df, "unit_specific": empty_unit_specific}]
-    )
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": lg1, "unit2": lg2},
-        theta=theta,
-    )
-    key = jax.random.key(0)
-    fresh_key = panel.fresh_key
-
-    rw_sd = pp.RWSigma(sigmas={n: 0.02 for n in names}, init_names=[])
-
-    return panel, rw_sd, theta, key, fresh_key
+    return _lg_panel_setup("all", n_reps=1)
 
 
 @pytest.fixture(scope="function")
@@ -270,60 +166,11 @@ def lg_panel_mp(lg_panel_mp_module):
 # ---------------------------------------------------------------------------
 
 
-def _build_sir_panel_dpop():
-    """Build a 2-unit all-unit-specific SIR panel for dpop_train tests."""
-    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
-    sir1 = pp.models.sir(seed=100, times=test_times)
-    sir2 = pp.models.sir(seed=200, times=test_times)
-    param_names = sir1.canonical_param_names
-    theta1 = sir1.theta[0]
-    theta2 = sir2.theta[0]
-    unit_specific = pd.DataFrame(
-        {
-            "unit1": [theta1[p] for p in param_names],
-            "unit2": [theta2[p] for p in param_names],
-        },
-        index=pd.Index(param_names),
-    )
-    theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
-    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
-    return panel, theta
-
-
-def _build_sir_panel_with_shared_dpop():
-    """Build a 2-unit SIR panel with gamma and mu shared for dpop_train tests."""
-    test_times = np.arange(1 / 52, 5 / 52, 1 / 52)
-    sir1 = pp.models.sir(seed=100, times=test_times)
-    sir2 = pp.models.sir(seed=200, times=test_times)
-    param_names = sir1.canonical_param_names
-    theta1 = sir1.theta[0]
-    theta2 = sir2.theta[0]
-
-    shared_names = ["gamma", "mu"]
-    unit_names_param = [p for p in param_names if p not in shared_names]
-
-    shared = pd.DataFrame(
-        {"shared": [(theta1[p] + theta2[p]) / 2 for p in shared_names]},
-        index=pd.Index(shared_names),
-    )
-    unit_specific = pd.DataFrame(
-        {
-            "unit1": [theta1[p] for p in unit_names_param],
-            "unit2": [theta2[p] for p in unit_names_param],
-        },
-        index=pd.Index(unit_names_param),
-    )
-    theta = pp.PanelParameters(
-        theta=[{"shared": shared, "unit_specific": unit_specific}]
-    )
-    panel = pp.PanelPomp(Pomp_dict={"unit1": sir1, "unit2": sir2}, theta=theta)
-    return panel, theta
-
-
 @pytest.fixture(scope="module")
 def sir_panel_dpop_module():
     """Build the all-unit-specific SIR panel once per module."""
-    return _build_sir_panel_dpop()
+    panel = sir_panel(sharing="none")
+    return panel, panel.theta
 
 
 @pytest.fixture(scope="function")
@@ -339,7 +186,8 @@ def sir_panel_dpop(sir_panel_dpop_module):
 @pytest.fixture(scope="module")
 def sir_panel_with_shared_dpop_module():
     """Build the shared-params SIR panel once per module."""
-    return _build_sir_panel_with_shared_dpop()
+    panel = sir_panel(sharing="some")
+    return panel, panel.theta
 
 
 @pytest.fixture(scope="function")

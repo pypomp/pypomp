@@ -6,6 +6,7 @@ import pandas as pd
 
 import pypomp as pp
 from pypomp.types import ParamDict
+from tests.helpers.assertions import pickle_roundtrip
 
 
 def dummy_to_est(theta: ParamDict) -> ParamDict:
@@ -315,7 +316,6 @@ def test_partrans_serialization_of_non_module_callable():
     same fallback path as lambdas, but exercised via a different __getstate__
     branch (functions missing __name__ rather than being actual lambdas)."""
     import functools
-    import pickle
 
     def scale(theta, factor):
         return {k: v * factor for k, v in theta.items()}
@@ -327,7 +327,7 @@ def test_partrans_serialization_of_non_module_callable():
     state = p.__getstate__()
     assert state["_to_est_is_lambda"] is True
 
-    p_loaded = pickle.loads(pickle.dumps(p))
+    p_loaded = pickle_roundtrip(p)
     theta: ParamDict = {"p": 5.0}
     # Falls back to the identity default rather than the partial.
     assert p_loaded.to_est(theta) == {"p": 5.0}

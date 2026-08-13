@@ -1,4 +1,3 @@
-import pickle
 from copy import deepcopy
 
 import cloudpickle
@@ -9,6 +8,7 @@ import pandas as pd
 import pytest
 
 import pypomp as pp
+from tests.helpers.assertions import pickle_roundtrip
 
 
 @pytest.fixture(scope="module")
@@ -175,11 +175,11 @@ def test_theta_carryover(model, method):
 def test_pickle(model):
     LG, p = model
     LG.pfilter(J=p["J"], reps=1, key=p["key"])
-    unpickled = pickle.loads(pickle.dumps(LG))
+    unpickled = pickle_roundtrip(LG)
     assert LG == unpickled
     # Check that pickling works when rmeas is None and pfilter is called
     unpickled.rmeas = None
-    pickle.loads(pickle.dumps(unpickled)).pfilter(J=p["J"], reps=1)
+    pickle_roundtrip(unpickled).pfilter(J=p["J"], reps=1)
 
 
 def test_pickle_by_value():
@@ -207,10 +207,12 @@ def test_pickle_by_value():
     pomp.fresh_key = jax.random.key(1)
     del rinit_local, rproc_local, dmeas_local
 
-    unpickled = pickle.loads(pickle.dumps(pomp))
+    unpickled = pickle_roundtrip(pomp)
     assert unpickled.statenames == pomp.statenames
     assert float(unpickled.t0) == float(pomp.t0)
     assert unpickled.theta.params(as_list=True) == pomp.theta.params(as_list=True)
+    assert unpickled.fresh_key is not None
+    assert pomp.fresh_key is not None
     assert jnp.array_equal(
         jax.random.key_data(unpickled.fresh_key), jax.random.key_data(pomp.fresh_key)
     )
@@ -699,13 +701,13 @@ def test_merge_validation(base_pomp):
         pp.Pomp.merge(base_pomp, p2_diff_states)
 
     # 5. Mismatched ys
-    p2_diff_ys = pickle.loads(pickle.dumps(base_pomp))
+    p2_diff_ys = pickle_roundtrip(base_pomp)
     p2_diff_ys.ys = pd.DataFrame({"y": [3.0, 4.0]}, index=[1.0, 2.0])
     with pytest.raises(ValueError, match="same ys data"):
         pp.Pomp.merge(base_pomp, p2_diff_ys)
 
     # 6. Mismatched t0
-    p2_diff_t0 = pickle.loads(pickle.dumps(base_pomp))
+    p2_diff_t0 = pickle_roundtrip(base_pomp)
     p2_diff_t0.t0 = 5.0
     with pytest.raises(ValueError, match="same t0"):
         pp.Pomp.merge(base_pomp, p2_diff_t0)
@@ -725,7 +727,7 @@ def test_merge_validation(base_pomp):
         pp.Pomp.merge(base_pomp, pomp_no_dmeas)
 
     # 8. Mismatched theta is None
-    p2_no_theta = pickle.loads(pickle.dumps(base_pomp))
+    p2_no_theta = pickle_roundtrip(base_pomp)
     p2_no_theta._theta = None
     with pytest.raises(
         ValueError, match="Cannot merge Pomp objects with no parameters"
@@ -751,17 +753,17 @@ def test_eq_comparisons(base_pomp):
     assert base_pomp != p2_diff_params
 
     # 2. one theta is None
-    p2 = pickle.loads(pickle.dumps(base_pomp))
+    p2 = pickle_roundtrip(base_pomp)
     p2._theta = None
     assert base_pomp != p2
 
     # 3. different theta values
-    p3 = pickle.loads(pickle.dumps(base_pomp))
+    p3 = pickle_roundtrip(base_pomp)
     p3.theta = pp.PompParameters({"X0": 1.0, "sigma": 0.1})
     assert base_pomp != p3
 
     # 4. different ys
-    p4 = pickle.loads(pickle.dumps(base_pomp))
+    p4 = pickle_roundtrip(base_pomp)
     p4.ys = pd.DataFrame({"y": [3.0, 4.0]}, index=[1.0, 2.0])
     assert base_pomp != p4
 
@@ -779,12 +781,12 @@ def test_eq_comparisons(base_pomp):
     assert base_pomp != p5
 
     # 6. different t0
-    p6 = pickle.loads(pickle.dumps(base_pomp))
+    p6 = pickle_roundtrip(base_pomp)
     p6.t0 = 10.0
     assert base_pomp != p6
 
     # 7. different fresh_key
-    p7 = pickle.loads(pickle.dumps(base_pomp))
+    p7 = pickle_roundtrip(base_pomp)
     p7.fresh_key = jax.random.key(99)
     assert base_pomp != p7
 
@@ -797,7 +799,7 @@ def test_pickle_setstate_fallback_warning(base_pomp):
     state["_rinit_func_bytes"] = b"invalid_pickle_bytes"
 
     with pytest.warns(UserWarning, match="Failed to reconstruct rinit function"):
-        pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+        pomp_unpickled = pickle_roundtrip(base_pomp)
         del pomp_unpickled.rinit
         # Directly trigger __setstate__ with corrupted state
         pomp_unpickled.__setstate__(state)
@@ -826,7 +828,7 @@ def dprior_pomp():
 def test_dprior_construction_and_pickle_roundtrip(dprior_pomp):
     """Constructing with dprior= wraps it in a _DPrior; pickling round-trips it."""
     assert dprior_pomp.dprior is not None
-    unpickled = pickle.loads(pickle.dumps(dprior_pomp))
+    unpickled = pickle_roundtrip(dprior_pomp)
     assert unpickled.dprior is not None
     assert dprior_pomp == unpickled
 
@@ -1079,7 +1081,7 @@ def test_setstate_fresh_key_reconstruction_failure(base_pomp):
     state = base_pomp.__getstate__()
     state["_fresh_key_data"] = jnp.zeros((3,), dtype=jnp.uint32)
 
-    pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+    pomp_unpickled = pickle_roundtrip(base_pomp)
     with pytest.warns(UserWarning, match="Failed to reconstruct JAX fresh_key"):
         pomp_unpickled.__setstate__(state)
 
@@ -1093,7 +1095,7 @@ def test_setstate_legacy_by_reference_loading(base_pomp):
     state["_rinit_func_name"] = "dummy_rinit"
     state["_rinit_module"] = __name__
 
-    pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+    pomp_unpickled = pickle_roundtrip(base_pomp)
     del pomp_unpickled.rinit
     pomp_unpickled.__setstate__(state)
 
@@ -1109,7 +1111,7 @@ def test_setstate_prewrapped_components(dprior_pomp):
     state["_rmeas_func_bytes"] = cloudpickle.dumps(dprior_pomp.rmeas)
     state["_dprior_func_bytes"] = cloudpickle.dumps(dprior_pomp.dprior)
 
-    pomp_unpickled = pickle.loads(pickle.dumps(dprior_pomp))
+    pomp_unpickled = pickle_roundtrip(dprior_pomp)
     del pomp_unpickled.rinit
     del pomp_unpickled.rproc
     del pomp_unpickled.dmeas
@@ -1132,7 +1134,7 @@ def test_setstate_rproc_dt_and_nstep_both_present(base_pomp):
     state["_rproc_nstep"] = 3
     state["_rproc_accumvars"] = ["X"]
 
-    pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+    pomp_unpickled = pickle_roundtrip(base_pomp)
     del pomp_unpickled.rproc
     pomp_unpickled.__setstate__(state)
 
@@ -1145,7 +1147,7 @@ def test_setstate_rproc_missing_defaults_to_none(base_pomp):
     state = base_pomp.__getstate__()
     del state["_rproc_func_bytes"]
 
-    pomp_unpickled = pickle.loads(pickle.dumps(base_pomp))
+    pomp_unpickled = pickle_roundtrip(base_pomp)
     del pomp_unpickled.rproc
     pomp_unpickled.__setstate__(state)
 
@@ -1167,7 +1169,7 @@ def test_setstate_dmeas_missing_defaults_to_none():
     pomp.fresh_key = jax.random.key(1)
     assert pomp.dmeas is None
 
-    unpickled = pickle.loads(pickle.dumps(pomp))
+    unpickled = pickle_roundtrip(pomp)
     assert unpickled.dmeas is None
 
 

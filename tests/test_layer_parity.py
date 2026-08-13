@@ -13,6 +13,7 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from tests.helpers.params import uniform_rw_sd
 
 SEED = 20260812
 J = 6
@@ -82,7 +83,7 @@ def test_mif_parity(lg):
     model, param_names = lg
     theta_array = model.theta.to_jax_array(param_names)
     key = jax.random.key(SEED)
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
 
     model.mif(J=J, M=M, rw_sd=rw_sd, key=key)
     result = model.results_history[-1]

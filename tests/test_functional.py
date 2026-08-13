@@ -1,10 +1,11 @@
 import jax
 import jax.numpy as jnp
-import pandas as pd
 import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from tests.helpers.models import lg_panel
+from tests.helpers.params import uniform_rw_sd
 
 
 @pytest.fixture(scope="function")
@@ -108,7 +109,7 @@ def test_mif_functional(model_setup):
     struct, thetas_array, key, J, n_reps, param_names = model_setup
     keys = jax.random.split(key, n_reps)
     M = 2
-    rw_sd = pp.RWSigma({name: 0.02 for name in param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(param_names, cooling=0.5)
 
     # thetas_array for mif needs to be (n_reps, J, n_params)
     thetas_mif = jnp.repeat(thetas_array[:, jnp.newaxis, :], J, axis=1)
@@ -147,39 +148,16 @@ def test_simulate_functional(model_setup):
 
 @pytest.fixture(scope="function")
 def panel_setup():
-    LG1 = pp.models.LG()
-    LG2 = pp.models.LG()
-
     shared_param_names = ["A11", "A12", "A21", "A22", "C11", "C12", "C21", "C22"]
     unit_param_names = ["Q11", "Q21", "Q22", "R11", "R21", "R22", "X0_1", "X0_2"]
 
-    # Simple ParTrans (identity)
-    LG1.par_trans = pp.ParTrans()
-    LG2.par_trans = pp.ParTrans()
-
-    theta_base = LG1.theta.params(as_list=True)[0]
-
-    shared_params = pd.DataFrame(
-        index=pd.Index(shared_param_names),
-        data={"shared": [theta_base[name] for name in shared_param_names]},
+    panel = lg_panel(
+        sharing="some",
+        shared_names=shared_param_names,
+        unit_scales=[0.8, 1.2],
+        par_trans=pp.ParTrans(),
     )
-
-    unit_specific_params = pd.DataFrame(
-        index=pd.Index(unit_param_names),
-        data={
-            "unit1": [theta_base[name] * 0.8 for name in unit_param_names],
-            "unit2": [theta_base[name] * 1.2 for name in unit_param_names],
-        },
-    )
-
-    theta: list[dict[str, pd.DataFrame | None]] = [
-        {"shared": shared_params, "unit_specific": unit_specific_params}
-    ]
-
-    panel = pp.PanelPomp(
-        Pomp_dict={"unit1": LG1, "unit2": LG2},
-        theta=pp.PanelParameters(theta),
-    )
+    theta_base = pp.models.LG().theta.params(as_list=True)[0]
 
     struct = panel.to_struct()
 
@@ -231,7 +209,7 @@ def test_panel_mif_functional(panel_setup):
 
     all_param_names = struct.shared_param_names + struct.unit_param_names
     M = 2
-    rw_sd = pp.RWSigma({name: 0.02 for name in all_param_names}).geometric_cooling(0.5)
+    rw_sd = uniform_rw_sd(all_param_names, cooling=0.5)
 
     keys = jax.random.split(key, n_reps)
 

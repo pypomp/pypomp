@@ -1,6 +1,5 @@
 """Signature and type-annotation alignment for model components."""
 
-
 import jax
 import jax.numpy as jnp
 import pytest
@@ -424,4 +423,3 @@ def test_align_by_type_rough_type_match():
 
     mapping = _align_by_type(custom_func, ["X_", "theta_", "key", "covars", "t", "dt"])
     assert mapping["X_"] == "x_custom"
-

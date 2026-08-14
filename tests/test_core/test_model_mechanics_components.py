@@ -21,6 +21,7 @@ from pypomp.types import (
     ParamDict,
 )
 
+
 def test_model_component_list_validation():
     # statenames not a list
     with pytest.raises(ValueError, match="statenames must be a list of strings"):

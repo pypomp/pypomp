@@ -40,7 +40,7 @@ because they time particle filters and need the cores to themselves. Use
 | Directory | Contents |
 | --- | --- |
 | `helpers/` | Shared builders and assertions (see below). Not collected. |
-| `test_core/` | `pypomp/core/`: parameters, results, model_struct, transforms |
+| `test_core/` | `pypomp/core/`: parameters, results, model_mechanics, transforms |
 | `test_pomp/` | The single-unit `Pomp` class and its algorithms |
 | `test_panel/` | The `PanelPomp` class and its algorithms |
 | `test_models/` | The example models under `pypomp/models/` |

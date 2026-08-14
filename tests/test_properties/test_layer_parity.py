@@ -148,7 +148,7 @@ def test_train_parity(lg):
     result = model.results_history[-1]
 
     keys = jnp.array(jax.random.split(_derive_new_key(key), theta_array_est.shape[0]))
-    nLLs, theta_ests = F.train(
+    nLLs, _ = F.train(
         model.to_struct(),
         theta_array_est,
         J,

@@ -263,7 +263,7 @@ def test_panel_train_functional(panel_setup):
 def test_panel_train_functional_unsupported_optimizer(panel_setup):
     """Panel train only supports SGD/Adam/FullMatrixAdam (no Hessian-based
     optimizers, since panel train doesn't compute one); other optimizers raise."""
-    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+    struct, shared_array, unit_array, key, J, n_reps, U, _, _ = panel_setup
     M = 1
     all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
     eta = pp.LearningRate({name: 0.01 for name in all_param_names})
@@ -288,7 +288,7 @@ def test_panel_train_functional_unsupported_optimizer(panel_setup):
 def test_panel_train_functional_scale_and_clip(panel_setup):
     """Exercise the gradient-clipping and direction-rescaling branches of the
     per-chunk panel train step (clip_norm and scale=True)."""
-    struct, shared_array, unit_array, key, J, n_reps, U, n_shared, n_spec = panel_setup
+    struct, shared_array, unit_array, key, J, n_reps, U, _, _ = panel_setup
     M = 1
     all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
     eta = pp.LearningRate({name: 0.01 for name in all_param_names})
@@ -580,7 +580,7 @@ def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
     def raw_dprior(params: pp.types.ParamDict) -> float:
         return 0.0
 
-    ll_traces, lp_traces, theta_traces, accepts = F.pmcmc(
+    _, lp_traces, _, _ = F.pmcmc(
         struct,
         thetas_array,
         proposal=prop,
@@ -593,7 +593,7 @@ def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
     assert jnp.all(jnp.isfinite(lp_traces))
 
     probes = {"mean": lambda y: jnp.mean(y["Y1"])}
-    dist_traces, lp_traces_abc, theta_traces_abc, accepts_abc = F.abc(
+    _, lp_traces_abc, _, _ = F.abc(
         struct,
         thetas_array,
         proposal=prop,

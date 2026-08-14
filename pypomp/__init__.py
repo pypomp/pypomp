@@ -25,7 +25,7 @@ types
 
 from . import benchmarks, functional, maths, models, random, types
 from .core.learning_rate import LearningRate
-from .core.model_struct import vectorized
+from .core.model_mechanics import vectorized
 from .core.optimizer import (
     BFGS,
     SGD,

@@ -128,13 +128,19 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             times=jnp.array(rep_unit.ys.index),
             covars_per_unit=covars_per_unit,
             accumvars=rep_unit.rproc.accumvars,
-            rinit_pf=rep_unit.rinit.struct_pf,
-            rproc_pf=rep_unit.rproc.struct_pf_interp,
-            dmeas_pf=rep_unit.dmeas.struct_pf if rep_unit.dmeas is not None else None,
-            rinit_per=rep_unit.rinit.struct_per,
-            rproc_per=rep_unit.rproc.struct_per_interp,
-            dmeas_per=rep_unit.dmeas.struct_per if rep_unit.dmeas is not None else None,
-            rmeas_pf=rep_unit.rmeas.struct_pf if rep_unit.rmeas is not None else None,
+            rinit_pf=rep_unit.rinit.mechanics_pf,
+            rproc_pf=rep_unit.rproc.mechanics_pf_interp,
+            dmeas_pf=rep_unit.dmeas.mechanics_pf
+            if rep_unit.dmeas is not None
+            else None,
+            rinit_per=rep_unit.rinit.mechanics_per,
+            rproc_per=rep_unit.rproc.mechanics_per_interp,
+            dmeas_per=rep_unit.dmeas.mechanics_per
+            if rep_unit.dmeas is not None
+            else None,
+            rmeas_pf=rep_unit.rmeas.mechanics_pf
+            if rep_unit.rmeas is not None
+            else None,
             par_trans=rep_unit.par_trans,
             param_names=self.canonical_param_names,
             shared_param_names=self.canonical_shared_param_names,

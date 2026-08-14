@@ -51,7 +51,7 @@ Any intermediate built inside an ``rproc`` by combining several state variables 
 On JAX >= 0.10.2, the compiler no longer fuses that pattern away, which can cause significant slowdowns (2x or more).
 The same code under :meth:`~pypomp.core.pomp.Pomp.pfilter` is free because parameters there are scalars.
 
-This applies to both default (vmapped) and :func:`~pypomp.core.model_struct.vectorized` process functions.
+This applies to both default (vmapped) and :func:`~pypomp.core.model_mechanics.vectorized` process functions.
 
 **The rule:** inside an ``rproc``, never allocate a buffer whose length is a compile-time constant. Use that many named variables instead.
 

@@ -9,7 +9,7 @@ import pandas as pd
 from pypomp.functional.structs import PompStruct
 
 from .metadata import ModelMetadata
-from .model_struct import _DMeas, _DPrior, _RInit, _RMeas, _RProc
+from .model_mechanics import _DMeas, _DPrior, _RInit, _RMeas, _RProc
 from .par_trans import ParTrans
 from .parameters import PompParameters
 from .results import ResultsHistory

@@ -25,7 +25,7 @@ from .algorithms.helpers import _calc_ys_covars
 from .analysis_mixin import PompAnalysisMixin
 from .estimation_mixin import PompEstimationMixin
 from .metadata import ModelMetadata
-from .model_struct import _DMeas, _DPrior, _RInit, _RMeas, _RProc
+from .model_mechanics import _DMeas, _DPrior, _RInit, _RMeas, _RProc
 from .par_trans import ParTrans
 from .parameters import PompParameters
 from .results import ResultsHistory
@@ -270,7 +270,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         self.par_trans = par_trans or ParTrans()
         self.rinit = _RInit(
-            struct=rinit,
+            mechanics=rinit,
             statenames=self.statenames,
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
@@ -280,7 +280,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         if dmeas is not None:
             self.dmeas = _DMeas(
-                struct=dmeas,
+                mechanics=dmeas,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
@@ -293,7 +293,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         if rmeas is not None:
             self.rmeas = _RMeas(
-                struct=rmeas,
+                mechanics=rmeas,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
@@ -306,7 +306,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         if dprior is not None:
             self.dprior = _DPrior(
-                struct=dprior,
+                mechanics=dprior,
                 statenames=self.statenames,
                 param_names=self.canonical_param_names,
                 covar_names=self.covar_names,
@@ -335,7 +335,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         )
 
         self.rproc = _RProc(
-            struct=rproc,
+            mechanics=rproc,
             statenames=self.statenames,
             param_names=self.canonical_param_names,
             covar_names=self.covar_names,
@@ -345,7 +345,6 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             accumvars=self._accumvars_indices,
             validate_logic=validate_logic,
             nstep_array=self._nstep_array,
-            max_steps_bound=self._max_steps_per_interval,
         )
 
     @property
@@ -435,14 +434,14 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             if self._covars_extended is not None
             else None,
             accumvars=self.rproc.accumvars,
-            rinit_pf=self.rinit.struct_pf,
-            rproc_pf=self.rproc.struct_pf_interp,
-            dmeas_pf=self.dmeas.struct_pf if self.dmeas is not None else None,
-            rinit_per=self.rinit.struct_per,
-            rproc_per=self.rproc.struct_per_interp,
-            dmeas_per=self.dmeas.struct_per if self.dmeas is not None else None,
-            rmeas_pf=self.rmeas.struct_pf if self.rmeas is not None else None,
-            dprior_pf=self.dprior.struct if self.dprior is not None else None,
+            rinit_pf=self.rinit.mechanics_pf,
+            rproc_pf=self.rproc.mechanics_pf_interp,
+            dmeas_pf=self.dmeas.mechanics_pf if self.dmeas is not None else None,
+            rinit_per=self.rinit.mechanics_per,
+            rproc_per=self.rproc.mechanics_per_interp,
+            dmeas_per=self.dmeas.mechanics_per if self.dmeas is not None else None,
+            rmeas_pf=self.rmeas.mechanics_pf if self.rmeas is not None else None,
+            dprior_pf=self.dprior.mechanics if self.dprior is not None else None,
             par_trans=self.par_trans,
             param_names=self.canonical_param_names,
             y_names=list(self.ys.columns),
@@ -622,28 +621,23 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         # Use cloudpickle to store model functions by-value. This ensures that
         # the unpickling environment does not require the original source modules.
-        if hasattr(self.rinit, "struct"):
-            original_func = self.rinit.original_func
-            state["_rinit_func_bytes"] = cloudpickle.dumps(original_func)
+        if self.rinit is not None and hasattr(self.rinit, "original_func"):
+            state["_rinit_func_bytes"] = cloudpickle.dumps(self.rinit.original_func)
 
-        if hasattr(self.rproc, "struct"):
-            original_func = self.rproc.original_func
-            state["_rproc_func_bytes"] = cloudpickle.dumps(original_func)
+        if self.rproc is not None and hasattr(self.rproc, "original_func"):
+            state["_rproc_func_bytes"] = cloudpickle.dumps(self.rproc.original_func)
             state["_rproc_dt"] = getattr(self.rproc, "dt", None)
             state["_rproc_nstep"] = getattr(self.rproc, "nstep", None)
             state["_rproc_accumvars"] = getattr(self.rproc, "accumvars", None)
 
-        if self.dmeas is not None and hasattr(self.dmeas, "struct"):
-            original_func = self.dmeas.original_func
-            state["_dmeas_func_bytes"] = cloudpickle.dumps(original_func)
+        if self.dmeas is not None and hasattr(self.dmeas, "original_func"):
+            state["_dmeas_func_bytes"] = cloudpickle.dumps(self.dmeas.original_func)
 
-        if self.rmeas is not None and hasattr(self.rmeas, "struct"):
-            original_func = self.rmeas.original_func
-            state["_rmeas_func_bytes"] = cloudpickle.dumps(original_func)
+        if self.rmeas is not None and hasattr(self.rmeas, "original_func"):
+            state["_rmeas_func_bytes"] = cloudpickle.dumps(self.rmeas.original_func)
 
-        if self.dprior is not None and hasattr(self.dprior, "struct"):
-            original_func = self.dprior.original_func
-            state["_dprior_func_bytes"] = cloudpickle.dumps(original_func)
+        if self.dprior is not None and hasattr(self.dprior, "original_func"):
+            state["_dprior_func_bytes"] = cloudpickle.dumps(self.dprior.original_func)
 
         # Store JAX key as raw bits (key is not picklable directly)
         if self.fresh_key is not None:
@@ -715,7 +709,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 self.rinit = obj_rinit
             else:
                 self.rinit = _RInit(
-                    struct=obj_rinit,
+                    mechanics=obj_rinit,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -739,7 +733,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 if state.get("_rproc_accumvars") is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
                 self.rproc = _RProc(
-                    struct=obj_rproc,
+                    mechanics=obj_rproc,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -757,7 +751,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 self.dmeas = obj_dmeas
             else:
                 self.dmeas = _DMeas(
-                    struct=obj_dmeas,
+                    mechanics=obj_dmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -772,7 +766,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 self.rmeas = obj_rmeas
             else:
                 self.rmeas = _RMeas(
-                    struct=obj_rmeas,
+                    mechanics=obj_rmeas,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
@@ -787,7 +781,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 self.dprior = obj_dprior
             else:
                 self.dprior = _DPrior(
-                    struct=obj_dprior,
+                    mechanics=obj_dprior,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,

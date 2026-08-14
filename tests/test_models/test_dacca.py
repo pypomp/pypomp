@@ -182,14 +182,14 @@ def test_dacca_dmeas_edge_cases(simple):
     t = 1900.0
 
     # 1. Normal call (happy path)
-    loglik = dacca.dmeas.struct(Y_arr, X_arr, theta_arr, covar_arr, t, False)
+    loglik = dacca.dmeas.mechanics(Y_arr, X_arr, theta_arr, covar_arr, t, False)
     assert jnp.isfinite(loglik)
 
     # 2. State violation: count > 0
     X_dict_invalid = X_dict.copy()
     X_dict_invalid["count"] = 1.0
     X_arr_invalid = jnp.array([X_dict_invalid[name] for name in statenames])
-    loglik_invalid = dacca.dmeas.struct(
+    loglik_invalid = dacca.dmeas.mechanics(
         Y_arr, X_arr_invalid, theta_arr, covar_arr, t, False
     )
     assert jnp.allclose(loglik_invalid, jnp.log(1e-18))
@@ -198,7 +198,7 @@ def test_dacca_dmeas_edge_cases(simple):
     theta_dict_bad = dict(theta_dict)
     theta_dict_bad["tau"] = jnp.nan
     theta_arr_bad = jnp.array([theta_dict_bad[name] for name in param_names])
-    loglik_bad_var = dacca.dmeas.struct(
+    loglik_bad_var = dacca.dmeas.mechanics(
         Y_arr, X_arr, theta_arr_bad, covar_arr, t, False
     )
     assert jnp.allclose(loglik_bad_var, jnp.log(1e-18))
@@ -231,7 +231,7 @@ def test_dacca_rmeas(simple):
 
     t = 1900.0
 
-    sim_obs = dacca.rmeas.struct(X_arr, theta_arr, key, covar_arr, t, False)
+    sim_obs = dacca.rmeas.mechanics(X_arr, theta_arr, key, covar_arr, t, False)
     assert jnp.isfinite(sim_obs).all()
 
 

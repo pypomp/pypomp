@@ -157,9 +157,9 @@ def test_jgrad_and_jvg_dpop(simple_sir_for_dpop):
     t0 = model.t0
     times = jnp.array(model.ys.index)
     J = J_DEFAULT
-    rinitializer = model.rinit.struct_pf
-    rprocess = model.rproc.struct_pf_interp
-    dmeasure = model.dmeas.struct_pf
+    rinitializer = model.rinit.mechanics_pf
+    rprocess = model.rproc.mechanics_pf_interp
+    dmeasure = model.dmeas.mechanics_pf
     accumvars = model.rproc.accumvars
     covars_extended = (
         jnp.array(model._covars_extended)

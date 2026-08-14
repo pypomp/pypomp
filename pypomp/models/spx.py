@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from jax import random
 
-from pypomp.core.model_struct import vectorized
+from pypomp.core.model_mechanics import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (

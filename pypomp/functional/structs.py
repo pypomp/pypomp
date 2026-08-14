@@ -270,26 +270,26 @@ jax.tree_util.register_pytree_node(
 
 def resolve_dprior(dprior: Callable | None, struct: PompStruct) -> Callable:
     """Resolve prior Callable at functional entry points."""
-    from ..core.model_struct import _DPrior, _flat_dprior
+    from ..core.model_mechanics import _DPrior, _flat_dprior
 
     if dprior is not None:
         return _DPrior(
-            struct=dprior,
+            mechanics=dprior,
             statenames=[],
             param_names=struct.param_names,
             covar_names=[],
             par_trans=struct.par_trans,
             validate_logic=False,
-        ).struct
+        ).mechanics
 
     if struct.dprior_pf is not None:
         return struct.dprior_pf
 
     return _DPrior(
-        struct=_flat_dprior,
+        mechanics=_flat_dprior,
         statenames=[],
         param_names=struct.param_names,
         covar_names=[],
         par_trans=struct.par_trans,
         validate_logic=False,
-    ).struct
+    ).mechanics

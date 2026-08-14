@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 import pypomp as pp
-from pypomp.core.model_struct import _RProc
+from pypomp.core.model_mechanics import _RProc
 from pypomp.core.parameters import PompParameters
 
 STATENAMES = ["x", "acc"]

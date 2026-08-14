@@ -1109,9 +1109,9 @@ class PanelEstimationMixin(Base):
         t0 = rep_unit.t0
         times = jnp.array(rep_unit.ys.index)
 
-        rinitializers = rep_unit.rinit.struct_pf
-        rprocesses_interp = rep_unit.rproc.struct_pf_interp
-        dmeasures = rep_unit.dmeas.struct_pf
+        rinitializers = rep_unit.rinit.mechanics_pf
+        rprocesses_interp = rep_unit.rproc.mechanics_pf_interp
+        dmeasures = rep_unit.dmeas.mechanics_pf
         accumvars = rep_unit.rproc.accumvars
 
         has_covars = [

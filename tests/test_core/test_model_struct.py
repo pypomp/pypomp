@@ -1,10 +1,12 @@
+from collections.abc import Callable
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 import pypomp as pp
-from pypomp.core.model_struct import (
+from pypomp.core.model_mechanics import (
     _DMeas,
     _DPrior,
     _ModelComponent,
@@ -160,7 +162,7 @@ def test_RInit_type_annotations():
     # Test that it actually works
     key = jax.random.key(42)
     theta_array = jnp.array([1.5])
-    result = rinit.struct(theta_array, key, jnp.array([]), 0.0, False)
+    result = rinit.mechanics(theta_array, key, jnp.array([]), 0.0, False)
     assert result.shape == (1,)
     assert result[0] == 3.0
 
@@ -188,12 +190,23 @@ def test_RProc_type_annotations():
     )
 
     # Test that it actually works
-    key = jax.random.key(42)
-    X_array = jnp.array([1.0])
+    key = jax.random.key(100)
+    X_array = jnp.array([[1.0]])
     theta_array = jnp.array([2.0])
-    result = rproc.struct(X_array, theta_array, key, jnp.array([]), 0.0, 0.5, False)
-    assert result.shape == (1,)
-    assert result[0] == 2.0  # 1.0 + 2.0 * 0.5
+    result, _ = rproc.mechanics_pf_interp(
+        X_array,
+        theta_array,
+        jax.random.split(key, 1),
+        None,
+        jnp.array([0.5]),
+        0.0,
+        0,
+        nstep_dynamic=1,
+        accumvars=None,
+        should_trans=False,
+    )
+    assert result.shape == (1, 1)
+    assert result[0, 0] == 2.0  # 1.0 + 2.0 * 0.5
 
 
 def test_DMeas_type_annotations():
@@ -221,7 +234,7 @@ def test_DMeas_type_annotations():
     Y_array = jnp.array([1.0])
     X_array = jnp.array([1.0])
     theta_array = jnp.array([2.0])
-    result = dmeas.struct(Y_array, X_array, theta_array, jnp.array([]), 0.0, False)
+    result = dmeas.mechanics(Y_array, X_array, theta_array, jnp.array([]), 0.0, False)
     assert result == 0.0
 
 
@@ -250,7 +263,7 @@ def test_RMeas_type_annotations():
     key = jax.random.key(42)
     X_array = jnp.array([3.0])
     theta_array = jnp.array([2.0])
-    result = rmeas.struct(X_array, theta_array, key, jnp.array([]), 0.0, False)
+    result = rmeas.mechanics(X_array, theta_array, key, jnp.array([]), 0.0, False)
     assert result.shape == (1,)
     assert result[0] == 6.0
 
@@ -353,7 +366,7 @@ def test_type_annotations_argument_order():
     # Test that it works
     key = jax.random.key(42)
     theta_array = jnp.array([5.0])
-    result = rinit.struct(theta_array, key, jnp.array([]), 0.0, False)
+    result = rinit.mechanics(theta_array, key, jnp.array([]), 0.0, False)
     assert result[0] == 5.0
 
 
@@ -380,7 +393,7 @@ def test_type_annotations_with_covars():
     key = jax.random.key(42)
     theta_array = jnp.array([2.0])
     covars_array = jnp.array([10.0])
-    result = rinit.struct(theta_array, key, covars_array, 0.0, False)
+    result = rinit.mechanics(theta_array, key, covars_array, 0.0, False)
     assert result[0] == 12.0
 
 
@@ -410,7 +423,7 @@ def test_align_by_type_rough_type_match():
 
     # x_custom has MockType, which doesn't have Annotated origin, but compares equal to StateDict.
     # It should be matched to X_ in Step 2 via rough type match.
-    from pypomp.core.model_struct import _align_by_type
+    from pypomp.core.model_mechanics import _align_by_type
 
     mapping = _align_by_type(custom_func, ["X_", "theta_", "key", "covars", "t", "dt"])
     assert mapping["X_"] == "x_custom"
@@ -516,11 +529,11 @@ def test_rinit_with_parameter_transform():
     theta_array = jnp.array([jnp.log(5.0)])
 
     # should_trans=True will apply from_est which does exp(log(5.0)) -> 5.0
-    res = rinit.struct(theta_array, key, jnp.array([]), 0.0, True)
+    res = rinit.mechanics(theta_array, key, jnp.array([]), 0.0, True)
     assert jnp.allclose(res, 5.0)
 
     # should_trans=False will not transform, so we get log(5.0)
-    res_raw = rinit.struct(theta_array, key, jnp.array([]), 0.0, False)
+    res_raw = rinit.mechanics(theta_array, key, jnp.array([]), 0.0, False)
     assert jnp.allclose(res_raw, jnp.log(5.0))
 
 
@@ -589,7 +602,7 @@ def test_rproc_interp_and_accumvars():
     t_idx = 0
 
     # Test interpolated run
-    new_X, new_t_idx = rproc.struct_pf_interp(
+    new_X, new_t_idx = rproc.mechanics_pf_interp(
         X_,
         theta_,
         keys,
@@ -777,7 +790,7 @@ def test_base_model_component_validate_output_not_implemented():
         vmap_axes_pf = (None, 0, None, None, None)
         vmap_axes_per = (0, 0, None, None, None)
 
-        def _make_wrapper(self, user_func):
+        def _make_wrapper(self) -> Callable:
             return lambda *args: None
 
     with pytest.raises(NotImplementedError):
@@ -822,10 +835,10 @@ def test_DPrior_basic():
         covar_names=[],
         par_trans=pp.ParTrans(),
     )
-    val = dprior_obj.struct(jnp.array([1.0]), should_trans=False)
+    val = dprior_obj.mechanics(jnp.array([1.0]), should_trans=False)
     assert float(val) == 0.0
 
-    val_off = dprior_obj.struct(jnp.array([2.0]), should_trans=False)
+    val_off = dprior_obj.mechanics(jnp.array([2.0]), should_trans=False)
     assert float(val_off) == -0.5
 
 
@@ -873,13 +886,12 @@ def test_DPrior_par_trans():
         par_trans=par_trans,
     )
     # in estimation space log(beta)=0.0 -> beta=1.0
-    val_trans = dprior_obj.struct(jnp.array([0.0]), should_trans=True)
+    val_trans = dprior_obj.mechanics(jnp.array([0.0]), should_trans=True)
     assert np.isclose(float(val_trans), 1.0)
 
 
-def test_rproc_single_particle_struct_with_should_trans():
-    """_RProc.struct (the non-vmapped single-particle wrapper) applies the
-    from_est transform when should_trans=True."""
+def test_rproc_struct_with_should_trans():
+    """_RProc.mechanics_pf_interp applies the from_est transform when should_trans=True."""
 
     def step(X_, theta_, key, covars, t, dt):
         return {"state_0": X_["state_0"] + theta_["param_0"] * dt}
@@ -896,35 +908,21 @@ def test_rproc_single_particle_struct_with_should_trans():
         nstep=1,
         par_trans=par_trans,
     )
-    key = jax.random.key(42)
+    key = jax.random.key(100)
     # theta_arr carries log(2.0) on the estimation scale; from_est maps it back to 2.0.
-    result = rproc.struct(
-        jnp.array([1.0]), jnp.array([jnp.log(2.0)]), key, jnp.array([]), 0.0, 0.5, True
+    result, _ = rproc.mechanics_pf_interp(
+        jnp.array([[1.0]]),
+        jnp.array([jnp.log(2.0)]),
+        jax.random.split(key, 1),
+        None,
+        jnp.array([0.5]),
+        0.0,
+        0,
+        nstep_dynamic=1,
+        accumvars=None,
+        should_trans=True,
     )
-    assert np.isclose(float(result[0]), 2.0)  # 1.0 + 2.0 * 0.5
-
-
-def test_rproc_struct_pf_array_adapter():
-    """struct_pf/struct_per (built via the internal array adapter) accept
-    and return plain (J, n_states) arrays rather than dicts."""
-
-    def step(X_, theta_, key, covars, t, dt):
-        return {"state_0": X_["state_0"] + theta_["param_0"] * dt}
-
-    rproc = _RProc(
-        step,
-        statenames=["state_0"],
-        param_names=["param_0"],
-        covar_names=[],
-        nstep=1,
-        par_trans=pp.ParTrans(),
-    )
-    keys = jax.random.split(jax.random.key(0), 2)
-    X_arr = jnp.array([[1.0], [2.0]])
-    theta_arr = jnp.array([3.0])
-    result = rproc.struct_pf(X_arr, theta_arr, keys, jnp.array([]), 0.0, 0.5, False)
-    assert result.shape == (2, 1)
-    assert np.allclose(np.asarray(result).ravel(), [2.5, 3.5])
+    assert np.isclose(float(result[0, 0]), 2.0)  # 1.0 + 2.0 * 0.5
 
 
 def test_time_interp_requires_statenames():

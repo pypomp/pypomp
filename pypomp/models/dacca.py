@@ -7,7 +7,7 @@ import jax.scipy.special as jspecial
 import numpy as np
 import pandas as pd
 
-from pypomp.core.model_struct import vectorized
+from pypomp.core.model_mechanics import vectorized
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
 from pypomp.types import (

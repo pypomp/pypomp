@@ -1,5 +1,5 @@
 """
-This file contains the classes for components that define the model structure.
+This file contains the classes for components that define the model mechanics.
 """
 
 import inspect
@@ -34,7 +34,7 @@ from .par_trans import ParTrans
 # --- Type Inspection Utilities ---
 
 
-def _get_annotation_tag(annotation) -> str | None:
+def _get_annotation_tag(annotation: Any) -> str | None:
     """Extract tag from Annotated[base, tag] or return None."""
     if get_origin(annotation) is Annotated:
         args = get_args(annotation)
@@ -112,66 +112,9 @@ def _align_by_type(user_func: Callable, internal_order: list[str]) -> dict[str, 
     return name_mapping
 
 
-# --- Validation Utilities ---
-
+# --- Base Component Class ---
 
 _DUMMY_J = 3  # Particle count used when validating a vectorized component.
-
-
-def _get_dummies(
-    statenames: list[str],
-    param_names: list[str],
-    covar_names: list[str],
-    y_names: list[str] | None,
-    vectorized: bool = False,
-) -> dict[str, Any]:
-    """Generate dummy data for validation.
-
-    When ``vectorized`` is True the state entries are given a leading particle
-    axis, matching the convention for manually vectorized components. Parameters
-    and covariates stay scalar because they are shared across particles.
-    """
-    states: dict[str, Any] = (
-        {n: jnp.full((_DUMMY_J,), 0.1) for n in statenames}
-        if vectorized
-        else {n: 0.1 for n in statenames}
-    )
-    return {
-        "X_": states,
-        "theta_": {n: 0.1 for n in param_names},
-        "covars": {n: 0.1 for n in covar_names},
-        "Y_": {n: 0.1 for n in (y_names or [])},
-        "t": 0.0,
-        "t0": 0.0,
-        "dt": 0.1,
-        "key": jax.random.key(0),
-    }
-
-
-def _validate_call(
-    user_func: Callable,
-    name_mapping: dict[str, str],
-    dummies: dict[str, dict[str, float] | float | jax.Array],
-    output_validator: Callable,
-):
-    """Generic validator that runs the function once."""
-    kwargs = {
-        user_name: dummies[internal] for internal, user_name in name_mapping.items()
-    }
-
-    try:
-        result = user_func(**kwargs)
-    except (AttributeError, TypeError) as e:
-        raise TypeError(
-            f"Error running '{user_func.__name__}': {e}.\n"
-            "HINT: Check that you are treating inputs as dicts (not arrays) "
-            "and that argument order/types are correct."
-        ) from e
-
-    output_validator(result)
-
-
-# --- Base Component Class ---
 
 
 class _ModelComponent:
@@ -179,8 +122,8 @@ class _ModelComponent:
 
     # Subclasses must define these:
     internal_names: list[str]
-    vmap_axes_pf: tuple
-    vmap_axes_per: tuple
+    vmap_axes_pf: tuple[int | None, ...]
+    vmap_axes_per: tuple[int | None, ...]
 
     # Components that support manual vectorization override this (see _RProc).
     _is_vectorized: bool = False
@@ -192,64 +135,171 @@ class _ModelComponent:
     y_names: list[str]
     original_func: Callable
     name_mapping: dict[str, str]
-    struct: Callable
-    struct_pf: Callable
-    struct_per: Callable
+    mechanics: Callable
+    mechanics_pf: Callable
+    mechanics_per: Callable
 
     def __init__(
         self,
-        struct: Callable,
+        mechanics: Callable,
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
         par_trans: ParTrans,
         y_names: list[str] | None = None,
         validate_logic: bool = True,
-    ):
+    ) -> None:
         self.statenames = statenames
         self.param_names = param_names
         self.covar_names = covar_names
         self.par_trans = par_trans
         self.y_names = y_names or []
-        self.original_func = struct
+        self.original_func = mechanics
 
         # 1. Validation of list inputs
-        for name, lst in [("statenames", statenames), ("param_names", param_names)]:
+        for name, lst in [
+            ("statenames", statenames),
+            ("param_names", param_names),
+            ("covar_names", covar_names),
+        ]:
             if not isinstance(lst, list) or not all(isinstance(s, str) for s in lst):
                 raise ValueError(f"{name} must be a list of strings")
 
         # 2. Align Arguments
-        self.name_mapping = _align_by_type(struct, self.internal_names)
+        self.name_mapping = _align_by_type(mechanics, self.internal_names)
 
         # 3. Validate Logic (Dry Run)
         if validate_logic:
-            dummies = _get_dummies(
-                statenames, param_names, covar_names, y_names, self._is_vectorized
-            )
-            _validate_call(struct, self.name_mapping, dummies, self._validate_output)
+            self._validate_call()
 
         # 4. Create Wrappers
-        self._build_structs(struct)
+        self._build_mechanics()
 
-    def _build_structs(self, struct: Callable) -> None:
+    def _build_mechanics(self) -> None:
         """Create the internal callables, adding a particle axis via vmap."""
-        self.struct = self._make_wrapper(struct)
-        self.struct_pf = jax.vmap(self.struct, self.vmap_axes_pf)
-        self.struct_per = jax.vmap(self.struct, self.vmap_axes_per)
+        self.mechanics = self._make_wrapper()
+        self.mechanics_pf = jax.vmap(self.mechanics, self.vmap_axes_pf)
+        self.mechanics_per = jax.vmap(self.mechanics, self.vmap_axes_per)
 
-    def _validate_output(self, result):
+    def _get_dummies(self) -> dict[str, Any]:
+        """Generate dummy data for validation."""
+        states: dict[str, Any] = (
+            {n: jnp.full((_DUMMY_J,), 0.1) for n in self.statenames}
+            if self._is_vectorized
+            else {n: 0.1 for n in self.statenames}
+        )
+        return {
+            "X_": states,
+            "theta_": {n: 0.1 for n in self.param_names},
+            "covars": {n: 0.1 for n in self.covar_names},
+            "Y_": {n: 0.1 for n in self.y_names},
+            "t": 0.0,
+            "t0": 0.0,
+            "dt": 0.1,
+            "key": jax.random.key(0),
+        }
+
+    def _validate_call(self) -> None:
+        """Generic validator that runs the user function once with dummy data."""
+        dummies = self._get_dummies()
+        try:
+            result = self._call_original(**dummies)
+        except (AttributeError, TypeError) as e:
+            raise TypeError(
+                f"Error running '{self.original_func.__name__}': {e}.\n"
+                "HINT: Check that you are treating inputs as dicts (not arrays) "
+                "and that argument order/types are correct."
+            ) from e
+
+        self._validate_output(result)
+
+    def _prepare_theta(
+        self, theta_arr: jax.Array, should_trans: bool = False, batched: bool = False
+    ) -> dict[str, Any]:
+        """Convert theta array to dict and optionally transform from estimation scale."""
+        pnames, trans = self.param_names, self.par_trans
+        theta_dict: dict[str, Any] = (
+            {n: theta_arr[:, i] for i, n in enumerate(pnames)}
+            if batched
+            else {n: theta_arr[i] for i, n in enumerate(pnames)}
+        )
+        if should_trans and len(pnames) > 0:
+            theta_dict = trans.from_est(theta_dict)
+        return theta_dict
+
+    def _unpack_covars(self, covars: jax.Array | None) -> dict[str, Any]:
+        """Convert covariate array to dict."""
+        if covars is None:
+            return {}
+        return {n: covars[i] for i, n in enumerate(self.covar_names)}
+
+    def _unpack_states(self, X_arr: jax.Array) -> dict[str, Any]:
+        """Convert state array to dict."""
+        return {n: X_arr[i] for i, n in enumerate(self.statenames)}
+
+    def _unpack_obs(self, Y_arr: jax.Array) -> dict[str, Any]:
+        """Convert observation array to dict."""
+        return {n: Y_arr[i] for i, n in enumerate(self.y_names)}
+
+    def _pack_states(self, d: dict[str, Any]) -> jax.Array:
+        """Pack state dictionary values into a 1D array."""
+        return jnp.array([d[n] for n in self.statenames]).reshape(-1)
+
+    def _pack_obs(self, d: dict[str, Any]) -> jax.Array:
+        """Pack observation dictionary values into a 1D array."""
+        return jnp.array([d[n] for n in self.y_names]).reshape(-1)
+
+    def _call_original(self, **internal_kwargs: Any) -> Any:
+        """Call user-supplied mechanics function using mapped argument names."""
+        mapping = self.name_mapping
+        return self.original_func(
+            **{mapping[k]: v for k, v in internal_kwargs.items() if k in mapping}
+        )
+
+    def _validate_dict_output(
+        self,
+        result: Any,
+        required_keys: list[str],
+        component_name: str,
+        key_label: str = "state",
+    ) -> None:
+        """Validate that result is a dict containing all required keys."""
+        if not isinstance(result, dict):
+            raise TypeError(
+                f"{component_name} function must return a dict, got {type(result)}"
+            )
+        missing = set(required_keys) - set(result.keys())
+        if missing:
+            raise ValueError(
+                f"{component_name} function output missing {key_label} keys: {missing}"
+            )
+
+    def _validate_scalar_output(self, result: Any, component_name: str) -> None:
+        """Validate that result is a scalar (Python number or 0-d JAX array)."""
+        is_jax_scalar = (
+            hasattr(result, "shape") or hasattr(result, "__jax_array__")
+        ) and jnp.ndim(result) == 0
+        if not (isinstance(result, (int, float, np.number)) or is_jax_scalar):
+            raise TypeError(
+                f"{component_name} function must return a scalar (float or 0-d array). "
+                f"Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
+            )
+
+    def _validate_output(self, result: Any) -> None:
+        """Validates the output of the user's mechanics function."""
         raise NotImplementedError
 
-    def _make_wrapper(self, user_func):
+    def _make_wrapper(self) -> Callable:
+        """Wraps the user's mechanics function with the internal API."""
         raise NotImplementedError
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return False
         return (
-            self.statenames == other.statenames
-            and self.param_names == other.param_names
-            and self.original_func == other.original_func
+            self.statenames == other.statenames  # type: ignore[attr-defined]
+            and self.param_names == other.param_names  # type: ignore[attr-defined]
+            and self.original_func == other.original_func  # type: ignore[attr-defined]
         )
 
 
@@ -313,7 +363,7 @@ class _RInit(_ModelComponent):
     Defines the initialization process for the state variables at time t0.
 
     Args:
-        struct (Callable): The user-defined initialization function.
+        mechanics (Callable): The user-defined initialization function.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
@@ -321,7 +371,7 @@ class _RInit(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function receives parameters, a PRNG key, covariates, and the initial time.
+    The `mechanics` function receives parameters, a PRNG key, covariates, and the initial time.
     It must return a dictionary mapping state names to their initial values.
 
     **Argument Binding:**
@@ -356,33 +406,24 @@ class _RInit(_ModelComponent):
     vmap_axes_pf = (None, 0, None, None, None)
     vmap_axes_per = (0, 0, None, None, None)
 
-    def _validate_output(self, result):
-        if not isinstance(result, dict):
-            raise TypeError(f"rinit function must return a dict, got {type(result)}")
-        missing = set(self.statenames) - set(result.keys())
-        if missing:
-            raise ValueError(f"rinit function output missing state keys: {missing}")
+    def _validate_output(self, result: Any) -> None:
+        self._validate_dict_output(result, self.statenames, "rinit", "state")
 
-    def _make_wrapper(self, user_func):
-        # Capture variables in closure
-        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
-        mapping, trans = self.name_mapping, self.par_trans
-
-        def wrapped(theta_arr, key, covars, t0, should_trans):
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
-
-            res = user_func(
-                **{
-                    mapping["theta_"]: theta_dict,
-                    mapping["key"]: key,
-                    mapping["covars"]: covars_dict,
-                    mapping["t0"]: t0,
-                }
+    def _make_wrapper(self) -> Callable:
+        def wrapped(
+            theta_arr: jax.Array,
+            key: jax.Array,
+            covars: jax.Array | None,
+            t0: float,
+            should_trans: bool,
+        ) -> jax.Array:
+            res = self._call_original(
+                theta_=self._prepare_theta(theta_arr, should_trans),
+                key=key,
+                covars=self._unpack_covars(covars),
+                t0=t0,
             )
-            return jnp.array([res[n] for n in snames]).reshape(-1)
+            return self._pack_states(res)
 
         return wrapped
 
@@ -392,7 +433,7 @@ class _RProc(_ModelComponent):
     Defines the process model (state transitions) of the system.
 
     Args:
-        struct (Callable): The user-defined stepping function.
+        mechanics (Callable): The user-defined stepping function.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
@@ -403,7 +444,7 @@ class _RProc(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function performs a **single Euler step**. It receives the current state,
+    The `mechanics` function performs a **single Euler step**. It receives the current state,
     parameters, PRNG key, covariates, current time, and step size.
 
     **Argument Binding:** You can define the function arguments in two ways:
@@ -442,16 +483,8 @@ class _RProc(_ModelComponent):
     nstep: int | None
     dt: float | None
     accumvars: tuple[int, ...] | None
-    _max_steps_bound: int | None
-    _struct_pf_dict: Callable
-    _struct_per_dict: Callable
-    _prepare_theta_pf: Callable | None
-    _prepare_theta_per: Callable | None
-    _step_pf: Callable | None
-    _step_per: Callable | None
-    struct_interp: Callable
-    struct_pf_interp: Callable
-    struct_per_interp: Callable
+    mechanics_pf_interp: Callable
+    mechanics_per_interp: Callable
 
     internal_names = ["X_", "theta_", "key", "covars", "t", "dt"]
     vmap_axes_pf = (0, None, 0, None, None, None, None)
@@ -459,7 +492,7 @@ class _RProc(_ModelComponent):
 
     def __init__(
         self,
-        struct: Callable,
+        mechanics: Callable,
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
@@ -469,33 +502,23 @@ class _RProc(_ModelComponent):
         accumvars: tuple[int, ...] | None = None,
         validate_logic: bool = True,
         nstep_array: np.ndarray | None = None,
-        max_steps_bound: int | None = None,
         vectorized: bool | None = None,
-    ):
+    ) -> None:
         if dt is not None and nstep is not None:
             raise ValueError("Only nstep or dt can be provided, not both")
 
         # Set before super().__init__() because validation and wrapper creation
         # both depend on it.
         if vectorized is None:
-            vectorized = bool(getattr(struct, "_pypomp_vectorized", False))
+            vectorized = bool(getattr(mechanics, "_pypomp_vectorized", False))
         self._is_vectorized = vectorized
-
-        super().__init__(
-            struct,
-            statenames,
-            param_names,
-            covar_names,
-            par_trans,
-            validate_logic=validate_logic,
-        )
 
         self.nstep = int(nstep) if nstep is not None else None
         self.dt = float(dt) if dt is not None else None
         self.accumvars = accumvars
-        self._max_steps_bound = None
 
-        # Setup interpolation wrappers
+        # If nstep is given, interpolated functions use it in order to have a fixed
+        # number of steps. This is necessary for train to work.
         if nstep_array is not None:
             nstep_arr = np.asarray(nstep_array)
             all_nstep_same = np.min(nstep_arr) == np.max(nstep_arr)
@@ -504,186 +527,95 @@ class _RProc(_ModelComponent):
             if all_nstep_same:
                 self.nstep = int(np.min(nstep_arr))
 
-        # _max_steps_bound might allow train to work if the step size is dynamic
-        # but bounded. This is not currently implemented.
-        self._max_steps_bound = int(max_steps_bound) if max_steps_bound else None
-
-        # If nstep is given, interpolated functions use it in order to have a fixed
-        # number of steps. This is necessary for train to work.
-        # Both vectorized and default paths thread the state through the sub-step
-        # loop as a dict of columns, using dict-based wrappers directly.
-        pf_step = self._struct_pf_dict
-        per_step = self._struct_per_dict
-        base_step = self._struct_pf_dict
-        self.struct_interp = _time_interp(
-            rproc=base_step,
-            nstep_fixed=self.nstep,
-            statenames=self.statenames,
-            prepare_theta=self._prepare_theta_pf,
-            step_prepared=self._step_pf,
-        )
-        self.struct_pf_interp = _time_interp(
-            rproc=pf_step,
-            nstep_fixed=self.nstep,
-            statenames=self.statenames,
-            prepare_theta=self._prepare_theta_pf,
-            step_prepared=self._step_pf,
-        )
-        self.struct_per_interp = _time_interp(
-            rproc=per_step,
-            nstep_fixed=self.nstep,
-            statenames=self.statenames,
-            prepare_theta=self._prepare_theta_per,
-            step_prepared=self._step_per,
+        super().__init__(
+            mechanics,
+            statenames,
+            param_names,
+            covar_names,
+            par_trans,
+            validate_logic=validate_logic,
         )
 
-    def _validate_output(self, result):
-        if not isinstance(result, dict):
-            raise TypeError(f"rproc function must return a dict, got {type(result)}")
-        missing = set(self.statenames) - set(result.keys())
-        if missing:
-            raise ValueError(f"rproc function output missing state keys: {missing}")
+    def _validate_output(self, result: Any) -> None:
+        self._validate_dict_output(result, self.statenames, "rproc", "state")
 
-    def _make_wrapper(self, user_func: Callable):
-        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
-        mapping, trans = self.name_mapping, self.par_trans
+    def _build_step_fns(
+        self,
+    ) -> tuple[
+        tuple[Callable, Callable],
+        tuple[Callable, Callable],
+    ]:
+        """Build the (step_fn, prepare_theta) pairs for pf and per axes."""
+        snames = self.statenames
+        prepare_pf = partial(self._prepare_theta, batched=False)
+        prepare_per = partial(self._prepare_theta, batched=True)
 
-        def wrapped(X_arr, theta_arr, key, covars, t, dt, should_trans):
-            X_dict = {n: X_arr[i] for i, n in enumerate(snames)}
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
+        if self._is_vectorized:
 
-            res = user_func(
-                **{
-                    mapping["X_"]: X_dict,
-                    mapping["theta_"]: theta_dict,
-                    mapping["key"]: key,
-                    mapping["covars"]: covars_dict,
-                    mapping["t"]: t,
-                    mapping["dt"]: dt,
-                }
-            )
-            return jnp.array([res[n] for n in snames]).reshape(-1)
+            def step_vec(X_dict, theta_dict, key, covars_t, t, dt):
+                J = X_dict[snames[0]].shape[0]
+                covars_dict = self._unpack_covars(covars_t)
+                res = self._call_original(
+                    X_=X_dict,
+                    theta_=theta_dict,
+                    key=key,
+                    covars=covars_dict,
+                    t=t,
+                    dt=dt,
+                )
+                return {n: jnp.broadcast_to(jnp.asarray(res[n]), (J,)) for n in snames}
 
-        return wrapped
+            return (step_vec, prepare_pf), (step_vec, prepare_per)
 
-    def _make_wrapper_dict(self, user_func):
-        """Single-particle wrapper that receives and returns dicts of scalars."""
-        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
-        mapping, trans = self.name_mapping, self.par_trans
-
-        def wrapped(X_dict, theta_arr, key, covars, t, dt, should_trans):
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
-
-            res = user_func(
-                **{
-                    mapping["X_"]: X_dict,
-                    mapping["theta_"]: theta_dict,
-                    mapping["key"]: key,
-                    mapping["covars"]: covars_dict,
-                    mapping["t"]: t,
-                    mapping["dt"]: dt,
-                }
+        def single_step(X_dict, theta_dict, key, covars_dict, t, dt):
+            res = self._call_original(
+                X_=X_dict,
+                theta_=theta_dict,
+                key=key,
+                covars=covars_dict,
+                t=t,
+                dt=dt,
             )
             return {n: res[n] for n in snames}
 
-        return wrapped
+        vmap_pf = jax.vmap(single_step, in_axes=(0, None, 0, None, None, None))
+        vmap_per = jax.vmap(single_step, in_axes=(0, 0, 0, None, None, None))
 
-    def _make_wrapper_vectorized(self, user_func, theta_batched: bool):
-        """
-        Wrapper for an rproc that already handles the particle axis itself.
-
-        Returns three callables:
-        - ``combined``: theta-array signature matching the vmapped wrappers
-          (extracts + transforms theta on every call). Used for `struct_pf` /
-          `struct_per`.
-        - ``prepare_theta``: extracts + transforms theta into a dict, on its own.
-        - ``step``: takes an already-prepared theta dict instead of an array.
-          Pairs with `prepare_theta` so `_time_interp` can prepare theta once
-          per observation interval instead of once per sub-step.
-        """
-        pnames, snames, cnames = self.param_names, self.statenames, self.covar_names
-        mapping, trans = self.name_mapping, self.par_trans
-
-        def prepare_theta(theta_arr, should_trans):
-            if theta_batched:
-                theta_dict = {n: theta_arr[:, i] for i, n in enumerate(pnames)}
-            else:
-                theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            return theta_dict
-
-        def step(X_dict, theta_dict, key, covars, t, dt):
+        def step_pf(X_dict, theta_dict, key, covars_t, t, dt):
             J = X_dict[snames[0]].shape[0]
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
+            step_keys = jax.random.split(key, J)
+            covars_dict = self._unpack_covars(covars_t)
+            return vmap_pf(X_dict, theta_dict, step_keys, covars_dict, t, dt)
 
-            res = user_func(
-                **{
-                    mapping["X_"]: X_dict,
-                    mapping["theta_"]: theta_dict,
-                    mapping["key"]: key,
-                    mapping["covars"]: covars_dict,
-                    mapping["t"]: t,
-                    mapping["dt"]: dt,
-                }
-            )
-            # broadcast_to allows returning a scalar for a state that happens to
-            # be constant across particles, and keeps the fori_loop carry shapes
-            # stable from one sub-step to the next.
-            return {n: jnp.broadcast_to(jnp.asarray(res[n]), (J,)) for n in snames}
+        def step_per(X_dict, theta_dict, key, covars_t, t, dt):
+            J = X_dict[snames[0]].shape[0]
+            step_keys = jax.random.split(key, J)
+            covars_dict = self._unpack_covars(covars_t)
+            return vmap_per(X_dict, theta_dict, step_keys, covars_dict, t, dt)
 
-        def combined(X_dict, theta_arr, key, covars, t, dt, should_trans):
-            theta_dict = prepare_theta(theta_arr, should_trans)
-            return step(X_dict, theta_dict, key, covars, t, dt)
+        return (step_pf, prepare_pf), (step_per, prepare_per)
 
-        return combined, prepare_theta, step
+    def _build_mechanics(self) -> None:
+        """Both vectorized and default paths thread state through sub-step loop."""
+        (step_pf, prepare_pf), (step_per, prepare_per) = self._build_step_fns()
+        self.mechanics_pf_interp = _time_interp(
+            step_pf,
+            nstep_fixed=self.nstep,
+            statenames=self.statenames,
+            prepare_theta=prepare_pf,
+        )
+        self.mechanics_per_interp = _time_interp(
+            step_per,
+            nstep_fixed=self.nstep,
+            statenames=self.statenames,
+            prepare_theta=prepare_per,
+        )
 
-    @staticmethod
-    def _array_adapter(dict_func, snames: list[str]):
-        """Give a dict-based vectorized wrapper the standard array signature."""
-
-        def wrapped(X_arr, theta_arr, key, covars, t, dt, should_trans):
-            X_dict = {n: X_arr[:, i] for i, n in enumerate(snames)}
-            res = dict_func(X_dict, theta_arr, key, covars, t, dt, should_trans)
-            return jnp.stack([res[n] for n in snames], axis=-1)
-
-        return wrapped
-
-    def _build_structs(self, struct: Callable) -> None:
-        if self._is_vectorized:
-            # The user function maps over particles itself, so no vmap is applied.
-            # `_prepare_theta_*`/`_step_*` let `_time_interp` prepare theta once
-            # per observation interval instead of on every sub-step.
-            (
-                self._struct_pf_dict,
-                self._prepare_theta_pf,
-                self._step_pf,
-            ) = self._make_wrapper_vectorized(struct, theta_batched=False)
-            (
-                self._struct_per_dict,
-                self._prepare_theta_per,
-                self._step_per,
-            ) = self._make_wrapper_vectorized(struct, theta_batched=True)
-        else:
-            dict_wrapper = self._make_wrapper_dict(struct)
-            self._struct_pf_dict = jax.vmap(dict_wrapper, self.vmap_axes_pf)
-            self._struct_per_dict = jax.vmap(dict_wrapper, self.vmap_axes_per)
-            self._prepare_theta_pf = self._step_pf = None
-            self._prepare_theta_per = self._step_per = None
-
-        self.struct = self._make_wrapper(struct)
-        self.struct_pf = self._array_adapter(self._struct_pf_dict, self.statenames)
-        self.struct_per = self._array_adapter(self._struct_per_dict, self.statenames)
-
-    def __eq__(self, other):
-        return super().__eq__(other) and (
-            self.nstep == other.nstep
+    def __eq__(self, other: object) -> bool:
+        return (
+            super().__eq__(other)
+            and isinstance(other, _RProc)
+            and self.nstep == other.nstep
             and self.dt == other.dt
             and self.accumvars == other.accumvars
             and self._is_vectorized == other._is_vectorized
@@ -695,7 +627,7 @@ class _DMeas(_ModelComponent):
     Defines the measurement density (likelihood) model.
 
     Args:
-        struct (Callable): The user-defined density function.
+        mechanics (Callable): The user-defined density function.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
@@ -704,7 +636,7 @@ class _DMeas(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function calculates the log-likelihood of the data given the state.
+    The `mechanics` function calculates the log-likelihood of the data given the state.
     **Output:** Must return a **scalar** (float or 0-d JAX array).
 
     **Argument Binding:** You can define the function arguments in two ways:
@@ -742,41 +674,24 @@ class _DMeas(_ModelComponent):
     vmap_axes_pf = (None, 0, None, None, None, None)
     vmap_axes_per = (None, 0, 0, None, None, None)
 
-    def _validate_output(self, result):
-        # Allow Python number OR JAX scalar (0-d array)
-        is_jax_scalar = (
-            hasattr(result, "shape") or hasattr(result, "__jax_array__")
-        ) and jnp.ndim(result) == 0
-        if not (isinstance(result, (int, float, np.number)) or is_jax_scalar):
-            raise TypeError(
-                f"dmeas function must return a scalar (float or 0-d array). Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
-            )
+    def _validate_output(self, result: Any) -> None:
+        self._validate_scalar_output(result, "dmeas")
 
-    def _make_wrapper(self, user_func):
-        pnames, snames, cnames, ynames = (
-            self.param_names,
-            self.statenames,
-            self.covar_names,
-            self.y_names,
-        )
-        mapping, trans = self.name_mapping, self.par_trans
-
-        def wrapped(Y_arr, X_arr, theta_arr, covars, t, should_trans):
-            Y_dict = {n: Y_arr[i] for i, n in enumerate(ynames)}
-            X_dict = {n: X_arr[i] for i, n in enumerate(snames)}
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
-
-            return user_func(
-                **{
-                    mapping["Y_"]: Y_dict,
-                    mapping["X_"]: X_dict,
-                    mapping["theta_"]: theta_dict,
-                    mapping["covars"]: covars_dict,
-                    mapping["t"]: t,
-                }
+    def _make_wrapper(self) -> Callable:
+        def wrapped(
+            Y_arr: jax.Array,
+            X_arr: jax.Array,
+            theta_arr: jax.Array,
+            covars: jax.Array | None,
+            t: float,
+            should_trans: bool,
+        ) -> jax.Array | float:
+            return self._call_original(
+                Y_=self._unpack_obs(Y_arr),
+                X_=self._unpack_states(X_arr),
+                theta_=self._prepare_theta(theta_arr, should_trans),
+                covars=self._unpack_covars(covars),
+                t=t,
             )
 
         return wrapped
@@ -787,7 +702,7 @@ class _RMeas(_ModelComponent):
     Defines the measurement simulation model (observation process).
 
     Args:
-        struct (Callable): The user-defined simulation function.
+        mechanics (Callable): The user-defined simulation function.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
@@ -796,7 +711,7 @@ class _RMeas(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function simulates observations from the current state.
+    The `mechanics` function simulates observations from the current state.
     **Output:** Must return a **dictionary** mapping observation names to their simulated values.
 
     **Argument Binding:** You can define the function arguments in two ways:
@@ -837,18 +752,18 @@ class _RMeas(_ModelComponent):
 
     def __init__(
         self,
-        struct: Callable,
+        mechanics: Callable,
         statenames: list[str],
         param_names: list[str],
         covar_names: list[str],
         par_trans: ParTrans,
         y_names: list[str] | None = None,
         validate_logic: bool = True,
-    ):
+    ) -> None:
         self.ydim = len(y_names) if y_names is not None else 0
 
         super().__init__(
-            struct,
+            mechanics,
             statenames,
             param_names,
             covar_names,
@@ -857,41 +772,26 @@ class _RMeas(_ModelComponent):
             validate_logic=validate_logic,
         )
 
-    def _validate_output(self, result):
-        if not isinstance(result, dict):
-            raise TypeError(f"rmeas function must return a dict, got {type(result)}")
-        missing = set(self.y_names) - set(result.keys())
-        if missing:
-            raise ValueError(
-                f"rmeas function output missing observation keys: {missing}"
+    def _validate_output(self, result: Any) -> None:
+        self._validate_dict_output(result, self.y_names, "rmeas", "observation")
+
+    def _make_wrapper(self) -> Callable:
+        def wrapped(
+            X_arr: jax.Array,
+            theta_arr: jax.Array,
+            key: jax.Array,
+            covars: jax.Array | None,
+            t: float,
+            should_trans: bool,
+        ) -> jax.Array:
+            res = self._call_original(
+                X_=self._unpack_states(X_arr),
+                theta_=self._prepare_theta(theta_arr, should_trans),
+                key=key,
+                covars=self._unpack_covars(covars),
+                t=t,
             )
-
-    def _make_wrapper(self, user_func):
-        pnames, snames, cnames, ynames = (
-            self.param_names,
-            self.statenames,
-            self.covar_names,
-            self.y_names,
-        )
-        mapping, trans = self.name_mapping, self.par_trans
-
-        def wrapped(X_arr, theta_arr, key, covars, t, should_trans):
-            X_dict = {n: X_arr[i] for i, n in enumerate(snames)}
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
-            if should_trans:
-                theta_dict = trans.from_est(theta_dict)
-            covars_dict = {n: covars[i] for i, n in enumerate(cnames)}
-
-            res = user_func(
-                **{
-                    mapping["X_"]: X_dict,
-                    mapping["theta_"]: theta_dict,
-                    mapping["key"]: key,
-                    mapping["covars"]: covars_dict,
-                    mapping["t"]: t,
-                }
-            )
-            return jnp.array([res[n] for n in ynames]).reshape(-1)
+            return self._pack_obs(res)
 
         return wrapped
 
@@ -901,7 +801,7 @@ class _DPrior(_ModelComponent):
     Defines the prior log-density model for parameter values.
 
     Args:
-        struct (Callable): The user-defined prior function.
+        mechanics (Callable): The user-defined prior function.
         statenames (list[str]): List of state variable names.
         param_names (list[str]): List of parameter names.
         covar_names (list[str]): List of covariate names.
@@ -909,7 +809,7 @@ class _DPrior(_ModelComponent):
 
     User Function Structure
     -----------------------
-    The `struct` function calculates the log-prior density given parameter values.
+    The `mechanics` function calculates the log-prior density given parameter values.
     **Output:** Must return a **scalar** (float or 0-d JAX array).
 
     **Argument Binding:** You can define the function arguments in two ways:
@@ -935,34 +835,28 @@ class _DPrior(_ModelComponent):
     vmap_axes_pf = (None, None)
     vmap_axes_per = (0, None)
 
-    def _validate_output(self, result):
-        is_jax_scalar = (
-            hasattr(result, "shape") or hasattr(result, "__jax_array__")
-        ) and jnp.ndim(result) == 0
-        if not (isinstance(result, (int, float, np.number)) or is_jax_scalar):
-            raise TypeError(
-                f"dprior function must return a scalar (float or 0-d array). Got {type(result)} with shape {getattr(result, 'shape', 'N/A')}"
-            )
+    def _validate_output(self, result: Any) -> None:
+        self._validate_scalar_output(result, "dprior")
 
-    def _make_wrapper(self, user_func):
-        pnames = self.param_names
-        mapping, trans = self.name_mapping, self.par_trans
+    def _make_wrapper(self) -> Callable:
+        pnames, trans = self.param_names, self.par_trans
 
-        def _from_est_array(arr):
-            d_in = {n: arr[i] for i, n in enumerate(pnames)}
+        def _from_est_array(arr: jax.Array) -> jax.Array:
+            d_in: dict[str, Any] = {n: arr[i] for i, n in enumerate(pnames)}
             d_out = trans.from_est(d_in)
             return jnp.stack([d_out[n] for n in pnames])
 
-        def wrapped(theta_arr, should_trans=False):
-            theta_dict = {n: theta_arr[i] for i, n in enumerate(pnames)}
+        def wrapped(
+            theta_arr: jax.Array, should_trans: bool = False
+        ) -> jax.Array | float:
+            theta_dict = self._prepare_theta(theta_arr, should_trans)
             if should_trans and len(pnames) > 0:
-                theta_dict = trans.from_est(theta_dict)
                 J = jax.jacobian(_from_est_array)(theta_arr)
                 log_det_J = jnp.linalg.slogdet(J)[1]
             else:
                 log_det_J = 0.0
 
-            log_p = user_func(**{mapping["theta_"]: theta_dict})
+            log_p = self._call_original(theta_=theta_dict)
             return log_p + log_det_J
 
         return wrapped
@@ -975,31 +869,20 @@ def _flat_dprior(params: ParamDict) -> float:
 
 # --- Interpolation Helper
 def _time_interp(
-    rproc: Callable,
+    step_fn: Callable,
     nstep_fixed: int | None,
     statenames: list[str],
     prepare_theta: Callable | None = None,
-    step_prepared: Callable | None = None,
 ) -> Callable:
     """Constructs an interpolated version of rproc.
 
-    Two step paths, chosen by whether `step_prepared` is given:
-    - Vectorized rproc (`step_prepared` given, paired with `prepare_theta`):
-      theta is extracted/transformed into a dict once per observation
-      interval (below, before the sub-step loop) rather than on every
-      sub-step, and a single key is shared across all particles.
-    - Default vmapped rproc (`step_prepared` is None, using `rproc`
-      directly): each particle needs its own key, split once per sub-step.
-
     Args:
-        rproc (Callable): Process simulation callable.
+        step_fn (Callable): Single Euler sub-step simulation callable.
         nstep_fixed (int | None): Fixed number of sub-steps per observation
             interval, or None if specified dynamically at runtime.
         statenames (list[str]): List of state variable names.
         prepare_theta (Callable | None): Optional callable to transform or prepare
             parameters once per observation interval. Defaults to None.
-        step_prepared (Callable | None): Optional vectorized single sub-step
-            simulation callable using prepared parameters. Defaults to None.
 
     Returns:
         Callable: Interpolated version of rproc.
@@ -1014,19 +897,12 @@ def _time_interp(
         theta_: dict[str, jax.Array],
         covars_extended: jax.Array | None,
         dt_array_extended: jax.Array,
-        should_trans: bool,
     ) -> tuple[dict[str, jax.Array], jax.Array, jax.Array, int]:
         X_dict, keys, t, t_idx = inputs
         covars_t = covars_extended[t_idx] if covars_extended is not None else None
         dt = dt_array_extended[t_idx]
         next_key, subkey = jax.random.split(keys)
-        if step_prepared is not None:
-            X_dict = step_prepared(X_dict, theta_, subkey, covars_t, t, dt)
-        else:
-            # Generate per-particle keys for the vmapped rproc with a single split call.
-            J = X_dict[snames[0]].shape[0]
-            step_keys = jax.random.split(subkey, J)
-            X_dict = rproc(X_dict, theta_, step_keys, covars_t, t, dt, should_trans)
+        X_dict = step_fn(X_dict, theta_, subkey, covars_t, t, dt)
         return (X_dict, next_key, t + dt, t_idx + 1)
 
     def _rproc_interp(
@@ -1052,7 +928,7 @@ def _time_interp(
         X_dict = {n: X_[:, i] for i, n in enumerate(snames)}
         nstep = nstep_fixed if nstep_fixed is not None else nstep_dynamic
 
-        if step_prepared is not None and prepare_theta is not None:
+        if prepare_theta is not None:
             theta_ = prepare_theta(theta_, should_trans)
 
         final = jax.lax.fori_loop(
@@ -1063,7 +939,6 @@ def _time_interp(
                 theta_=theta_,
                 covars_extended=covars_extended,
                 dt_array_extended=dt_array_extended,
-                should_trans=should_trans,
             ),
             (X_dict, keys, t, t_idx),
         )

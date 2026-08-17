@@ -2,7 +2,7 @@ import jax
 import numpy as np
 
 import pypomp as pp
-import pypomp.functional as F
+from pypomp.functional.dpop import dpop_train
 
 M = 3
 
@@ -12,7 +12,7 @@ def test_dpop_train_regression(lg_struct, tol, num_regression):
     keys = jax.random.split(key, n_reps)
     eta = pp.LearningRate({name: 0.01 for name in param_names})
 
-    neg_logliks, theta_traces = F.dpop_train(
+    neg_logliks, theta_traces = dpop_train(
         struct,
         theta0,
         J,

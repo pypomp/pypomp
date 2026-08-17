@@ -28,7 +28,6 @@ PanelPomp Class
    ~PanelPomp.pfilter
    ~PanelPomp.mif
    ~PanelPomp.train
-   ~PanelPomp.dpop_train
 
 .. rubric:: Results
 .. autosummary::

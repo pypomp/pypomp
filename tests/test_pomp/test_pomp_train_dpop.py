@@ -42,7 +42,7 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
         ).hyperbolic_decay(0.1, M=M_DEFAULT)
 
     model.results_history.clear()
-    ret = model.dpop_train(
+    ret = model._dpop_train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
@@ -75,7 +75,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     # First run: default theta ordering
     key1 = jax.random.key(123)
     model.results_history.clear()
-    model.dpop_train(
+    model._dpop_train(
         J=J,
         M=M,
         eta=eta,
@@ -95,7 +95,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
 
     # Second run: same random key & hyper-parameters, but permuted theta
     key2 = jax.random.key(123)
-    model.dpop_train(
+    model._dpop_train(
         J=J,
         M=M,
         eta=eta,
@@ -129,10 +129,10 @@ def test_dpop_train_alpha_cooling_one_matches_default(simple_sir_for_dpop):
     )
 
     model.results_history.clear()
-    model.dpop_train(theta=deepcopy(initial_theta), **kwargs)
+    model._dpop_train(theta=deepcopy(initial_theta), **kwargs)
     res_default = model.results_history[-1]
 
-    model.dpop_train(theta=deepcopy(initial_theta), alpha_cooling=1.0, **kwargs)
+    model._dpop_train(theta=deepcopy(initial_theta), alpha_cooling=1.0, **kwargs)
     res_fixed = model.results_history[-1]
 
     np.testing.assert_allclose(

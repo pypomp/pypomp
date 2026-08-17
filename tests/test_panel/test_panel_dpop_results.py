@@ -25,7 +25,7 @@ def dpop_results_module():
         p = deepcopy(panel)
         p.theta = deepcopy(theta)
         p.results_history.clear()
-        p.dpop_train(
+        p._dpop_train(
             J=2,
             M=2,
             eta=0.01,

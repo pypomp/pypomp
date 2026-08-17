@@ -34,7 +34,6 @@ Pomp Class
    ~Pomp.pfilter
    ~Pomp.mif
    ~Pomp.train
-   ~Pomp.dpop_train
    ~Pomp.pmcmc
    ~Pomp.abc
 

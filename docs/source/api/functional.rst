@@ -36,7 +36,7 @@ Differentiable Particle Filtering
 ---------------------------------
 
 These functions are primarily used for gradient-based parameter estimation.
-``mop`` and ``dpop`` are designed to be fully differentiable with respect to the model parameters.
+``mop`` is designed to be fully differentiable with respect to the model parameters.
 
 .. autosummary::
    :toctree: generated/
@@ -44,7 +44,6 @@ These functions are primarily used for gradient-based parameter estimation.
    train
    panel_train
    mop
-   dpop
 
 Utilities
 ---------

@@ -4,6 +4,7 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from pypomp.functional.dpop import dpop, dpop_train
 from tests.helpers.models import lg_panel
 from tests.helpers.params import uniform_rw_sd
 
@@ -47,7 +48,7 @@ def test_dpop_functional(model_setup):
     struct, thetas_array, key, J, n_reps, _ = model_setup
     keys = jax.random.split(key, n_reps)
 
-    results = F.dpop(
+    results = dpop(
         struct, thetas_array, J, alpha=0.5, process_weight_index=0, keys=keys
     )
 
@@ -61,7 +62,7 @@ def test_dpop_train_functional(model_setup):
     M = 2
     eta = pp.LearningRate({name: 0.01 for name in param_names})
 
-    neg_logliks, theta_traces = F.dpop_train(
+    neg_logliks, theta_traces = dpop_train(
         struct,
         thetas_array,
         J,

@@ -35,7 +35,7 @@ def test_panel_dpop_train_all_shared():
     to trace."""
     panel, theta = _build_sir_panel_all_shared_dpop()
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=0.01,
@@ -67,7 +67,7 @@ def test_panel_dpop_train_learning_rate_eta(sir_panel_with_shared_dpop):
     eta = pp.LearningRate({p: 0.01 for p in param_names})
 
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=eta,
@@ -95,7 +95,7 @@ def test_panel_dpop_train_dmeas_none(sir_panel_dpop):
     panel = sir_panel_dpop
     panel.unit_objects["unit1"].dmeas = None
     with pytest.raises(ValueError, match="dmeas cannot be None in PanelPomp units"):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -112,7 +112,7 @@ def test_panel_dpop_train_chunk_size_warns_and_adjusts():
     with pytest.warns(
         UserWarning, match="chunk_size does not divide the number of units"
     ):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -139,7 +139,7 @@ def test_panel_dpop_train_partial_covariates(sir_panel_dpop):
         NotImplementedError,
         match="Some units have covariates, but not all units have covariates",
     ):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -153,7 +153,7 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
     """Comprehensive test checking Adam optimizer, alpha cooling, parameters change, and dimensions."""
     panel = sir_panel_dpop
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=0.01,
@@ -194,7 +194,7 @@ def test_panel_dpop_train_sgd(sir_panel_dpop):
     """Verify SGD optimizer runs successfully."""
     panel = sir_panel_dpop
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=0.01,
@@ -219,7 +219,7 @@ def test_panel_dpop_train_shared_dataframe_and_eta(sir_panel_with_shared_dpop):
     eta_dict["gamma"] = 0.001
 
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=eta_dict,
@@ -254,7 +254,7 @@ def test_panel_dpop_train_shared_dataframe_and_eta(sir_panel_with_shared_dpop):
 def test_panel_dpop_train_adjusts_nondividing_chunk_size(sir_panel_dpop, chunk_size):
     """Verify chunk size gets adjusted when it is invalid."""
     panel = sir_panel_dpop
-    panel.dpop_train(
+    panel._dpop_train(
         J=2,
         M=2,
         eta=0.01,
@@ -280,7 +280,7 @@ def test_panel_dpop_train_multi_replicate(sir_panel_dpop):
     theta = pp.PanelParameters(theta=[deepcopy(base_theta), deepcopy(base_theta)])
 
     J, M = 2, 2
-    panel.dpop_train(
+    panel._dpop_train(
         J=J,
         M=M,
         eta=0.01,
@@ -317,14 +317,14 @@ def test_panel_dpop_train_reproducibility(sir_panel_dpop_module):
     panel1 = deepcopy(panel_orig)
     panel1.results_history.clear()
     panel1.theta = deepcopy(theta)
-    panel1.dpop_train(theta=deepcopy(panel1.theta), **kwargs)
+    panel1._dpop_train(theta=deepcopy(panel1.theta), **kwargs)
     res1 = panel1.results_history[-1]
     assert isinstance(res1, Result)
 
     panel2 = deepcopy(panel_orig)
     panel2.results_history.clear()
     panel2.theta = deepcopy(theta)
-    panel2.dpop_train(theta=deepcopy(panel2.theta), **kwargs)
+    panel2._dpop_train(theta=deepcopy(panel2.theta), **kwargs)
     res2 = panel2.results_history[-1]
     assert isinstance(res2, Result)
 
@@ -336,7 +336,7 @@ def test_panel_dpop_train_reproducibility(sir_panel_dpop_module):
 def test_panel_dpop_train_invalid_J(sir_panel_dpop):
     panel = sir_panel_dpop
     with pytest.raises(ValueError, match="J should be greater than 0"):
-        panel.dpop_train(
+        panel._dpop_train(
             J=0,
             M=2,
             eta=0.01,
@@ -349,7 +349,7 @@ def test_panel_dpop_train_invalid_J(sir_panel_dpop):
 def test_panel_dpop_train_invalid_M(sir_panel_dpop):
     panel = sir_panel_dpop
     with pytest.raises(ValueError, match="M should be greater than 0"):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=0,
             eta=0.01,
@@ -362,7 +362,7 @@ def test_panel_dpop_train_invalid_M(sir_panel_dpop):
 def test_panel_dpop_train_missing_process_weight_state(sir_panel_dpop):
     panel = sir_panel_dpop
     with pytest.raises(ValueError, match="dpop_train requires a process-weight state"):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -375,7 +375,7 @@ def test_panel_dpop_train_missing_process_weight_state(sir_panel_dpop):
 def test_panel_dpop_train_invalid_process_weight_state(sir_panel_dpop):
     panel = sir_panel_dpop
     with pytest.raises(ValueError, match="not found in statenames"):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -392,7 +392,7 @@ def test_panel_dpop_train_invalid_optimizer(sir_panel_dpop):
         ValueError,
         match="Optimizer 'FullMatrixAdam' not supported for panel dpop_train",
     ):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -408,7 +408,7 @@ def test_panel_dpop_train_invalid_theta_type(sir_panel_dpop):
     with pytest.raises(
         TypeError, match="theta must be a PanelParameters instance or None"
     ):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,
@@ -424,7 +424,7 @@ def test_panel_dpop_train_missing_theta_and_self_theta(sir_panel_dpop):
     with pytest.raises(
         ValueError, match="theta must be provided or self.theta must exist"
     ):
-        panel.dpop_train(
+        panel._dpop_train(
             J=2,
             M=2,
             eta=0.01,

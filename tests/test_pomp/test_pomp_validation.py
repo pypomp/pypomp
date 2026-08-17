@@ -227,19 +227,19 @@ def test_dpop_train_validation(base_pomp):
     with pytest.raises(
         ValueError, match="dpop_train requires self.dmeas to be not None"
     ):
-        pomp_no_dmeas.dpop_train(J=5, M=1, eta=eta, process_weight_state="logw")
+        pomp_no_dmeas._dpop_train(J=5, M=1, eta=eta, process_weight_state="logw")
 
     # 2. invalid eta
     with pytest.raises(TypeError, match="eta must be a LearningRate object"):
-        base_pomp.dpop_train(J=5, M=1, eta="not_lr", process_weight_state="logw")
+        base_pomp._dpop_train(J=5, M=1, eta="not_lr", process_weight_state="logw")
 
     # 3. missing process_weight_state
     with pytest.raises(ValueError, match="dpop_train requires a process-weight state"):
-        base_pomp.dpop_train(J=5, M=1, eta=eta, process_weight_state=None)
+        base_pomp._dpop_train(J=5, M=1, eta=eta, process_weight_state=None)
 
     # 4. process_weight_state not in statenames
     with pytest.raises(ValueError, match="not found in statenames"):
-        base_pomp.dpop_train(J=5, M=1, eta=eta, process_weight_state="non_existent")
+        base_pomp._dpop_train(J=5, M=1, eta=eta, process_weight_state="non_existent")
 
     # 5. Test valid call with optimizer='SGD'
     # Add logw to states
@@ -258,7 +258,7 @@ def test_dpop_train_validation(base_pomp):
     )
     pomp_dpop.fresh_key = jax.random.key(1)
     pomp_dpop.results_history.clear()
-    ret = pomp_dpop.dpop_train(
+    ret = pomp_dpop._dpop_train(
         J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD()
     )
     assert ret is None

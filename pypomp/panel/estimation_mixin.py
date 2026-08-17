@@ -795,7 +795,7 @@ class PanelEstimationMixin(Base):
 
             MOP gradients are only well-defined for **continuous-state**
             models.  For discrete-state models, use :meth:`mif` or
-            :meth:`dpop_train` instead.
+            :meth:`_dpop_train` (experimental) instead.
 
         .. note::
 
@@ -992,7 +992,7 @@ class PanelEstimationMixin(Base):
 
         self.results_history.add(result)
 
-    def dpop_train(
+    def _dpop_train(
         self,
         J: int,
         M: int,
@@ -1010,6 +1010,16 @@ class PanelEstimationMixin(Base):
         .. warning::
            This method is experimental.  Its API and behavior are subject to change
            in future releases.
+
+        This method is analogous to :meth:`train` as an optimization algorithm
+        for parameter estimation, but it can handle continuous states.
+        It additionally incorporates a per-interval transition log-weight that
+        is assumed to be stored in one of the state components.
+
+        The process log-weight is expected to be accumulated over a single
+        observation interval by the user-specified process model.  At the
+        beginning of each interval, the corresponding state component should be
+        reset to zero (this is naturally handled by ``accumvars``).
 
         .. note::
 

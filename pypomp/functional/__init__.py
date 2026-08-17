@@ -10,7 +10,6 @@ and :class:`~pypomp.PanelPomp` classes instead.
 """
 
 from .abc import abc
-from .dpop import dpop, dpop_train
 from .mif import mif, panel_mif
 from .mop import mop
 from .pfilter import panel_pfilter, pfilter
@@ -25,8 +24,6 @@ __all__ = [
     "PompStruct",
     "abc",
     "align_params",
-    "dpop",
-    "dpop_train",
     "mif",
     "mop",
     "panel_mif",

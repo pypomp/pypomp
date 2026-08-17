@@ -14,6 +14,7 @@ import xarray as xr
 
 from pypomp import benchmarks
 from pypomp import functional as F
+from pypomp.functional.dpop import dpop_train
 from pypomp.maths import logmeanexp
 from pypomp.proposals import Proposal
 
@@ -467,7 +468,7 @@ class PompEstimationMixin(Base):
 
             MOP gradients are only well-defined for **continuous-state**
             models.  For discrete-state models, use :meth:`mif` or
-            :meth:`dpop_train` instead.
+            :meth:`_dpop_train` (experimental) instead.
 
         .. note::
 
@@ -633,7 +634,7 @@ class PompEstimationMixin(Base):
 
         self.results_history.add(result)
 
-    def dpop_train(
+    def _dpop_train(
         self,
         J: int,
         M: int,
@@ -651,6 +652,16 @@ class PompEstimationMixin(Base):
 
         .. warning::
             This method is experimental. Its API and behavior are subject to change in future releases.
+
+        This method is analogous to :meth:`train` as an optimization algorithm
+        for parameter estimation, but it can handle continuous states.
+        It additionally incorporates a per-interval transition log-weight that
+        is assumed to be stored in one of the state components.
+
+        The process log-weight is expected to be accumulated over a single
+        observation interval by the user-specified process model.  At the
+        beginning of each interval, the corresponding state component should be
+        reset to zero (this is naturally handled by ``accumvars``).
 
         .. note::
 
@@ -740,7 +751,7 @@ class PompEstimationMixin(Base):
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         nLLs, theta_ests = run_jax_batch_sharded(
-            F.dpop_train,
+            dpop_train,
             {1: 0, 8: 0},
             [0, 0],
             self.to_struct(),

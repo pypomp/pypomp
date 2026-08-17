@@ -61,7 +61,7 @@ def dpop(
 
     See Also
     --------
-    pypomp.Pomp.dpop_train : High-level OOP training interface.
+    pypomp.Pomp._dpop_train : High-level OOP training interface.
     pypomp.functional.align_params : Prepare parameter arrays.
     """
     warnings.warn(
@@ -108,6 +108,16 @@ def dpop_train(
 
     Pure-functional implementation intended for users who need to compose
     the algorithm within custom JAX loops or higher-order functions.
+
+    This function is analogous to :func:`pypomp.functional.train` as an
+    optimization algorithm for for parameter estimation, but it can handle
+    continuous states. It additionally incorporates a per-interval transition
+    log-weight that is assumed to be stored in one of the state components.
+
+    The process log-weight is expected to be accumulated over a single
+    observation interval by the user-specified process model.  At the
+    beginning of each interval, the corresponding state component should be
+    reset to zero (this is naturally handled by ``accumvars``).
 
     .. warning::
        This function is experimental.  Its API and behavior are subject to change

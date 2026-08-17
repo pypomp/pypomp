@@ -61,7 +61,7 @@ def test_002d_pfilter(london_002d):
 def test_002d_dpop_train(london_002d):
     eta = pp.LearningRate({name: 0.01 for name in london_002d.canonical_param_names})
     london_002d.results_history.clear()
-    ret = london_002d.dpop_train(
+    ret = london_002d._dpop_train(
         J=DEFAULT_J,
         M=2,
         eta=eta,

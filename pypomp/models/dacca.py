@@ -432,106 +432,10 @@ def _from_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def _rproc_scalar(
-    X_: StateDict,
-    theta_: ParamDict,
-    key: RNGKey,
-    covars: CovarDict,
-    t: TimeFloat,
-    dt: StepSizeFloat,
-):
-    S = X_["S"]
-    I = X_["I"]
-    Y = X_["Y"]
-    deaths = X_["Mn"]
-    q0, q1, q2 = X_["R1"], X_["R2"], X_["R3"]
-    count = X_["count"]
-
-    trend = covars["trend"]
-    dpopdt = covars["dpopdt"]
-    pop = covars["pop"]
-    seas = jnp.array([covars[f"seas{i}"] for i in range(1, 7)])
-
-    gamma = theta_["gamma"]
-    deltaI = theta_["m"]
-    rho = theta_["rho"]
-    eps = theta_["epsilon"]
-    clin = theta_["c"]
-    beta_trend = theta_["beta_trend"]
-    sd_beta = theta_["sigma"]
-    alpha = theta_["alpha"]
-    delta = theta_["delta"]
-    omegas = jnp.stack([theta_[f"omegas{i}"] for i in range(1, 7)], axis=0)
-    bs = jnp.stack([theta_[f"bs{i}"] for i in range(1, 7)], axis=0)
-
-    nrstage = 3
-    std = jnp.sqrt(dt)
-
-    neps = eps * nrstage  # rate
-    pass0 = gamma * I
-    pass1 = q0 * neps
-    pass2 = q1 * neps
-    pass3 = q2 * neps
-
-    # Get current time step values
-    beta = jnp.exp(beta_trend * trend + jnp.dot(seas, bs))
-    omega = jnp.exp(jnp.dot(seas, omegas))
-
-    dw = jax.random.normal(key) * std
-
-    effI = (I / pop) ** alpha
-    births = dpopdt + delta * pop
-    ideaths = delta * I
-    disease = deltaI * I
-    ydeaths = delta * Y
-    wanings = rho * Y
-
-    rdeaths0 = q0 * delta
-    rdeaths1 = q1 * delta
-    rdeaths2 = q2 * delta
-
-    infections = (omega + (beta + sd_beta * dw / dt) * effI) * S
-    sdeaths = delta * S
-
-    S = S + (births - infections - sdeaths + pass3 + wanings) * dt
-    I = I + (clin * infections - disease - ideaths - pass0) * dt
-    Y = Y + ((1 - clin) * infections - ydeaths - wanings) * dt
-
-    q0 = q0 + (pass0 - pass1 - rdeaths0) * dt
-    q1 = q1 + (pass1 - pass2 - rdeaths1) * dt
-    q2 = q2 + (pass2 - pass3 - rdeaths2) * dt
-
-    deaths = deaths + disease * dt
-
-    count = count + (
-        (S < 0) | (I < 0) | (Y < 0) | (deaths < 0) | (q0 < 0) | (q1 < 0) | (q2 < 0)
-    )
-
-    S = jnp.clip(S, 0)
-    I = jnp.clip(I, 0)
-    Y = jnp.clip(Y, 0)
-    q0 = jnp.clip(q0, 0)
-    q1 = jnp.clip(q1, 0)
-    q2 = jnp.clip(q2, 0)
-    deaths = jnp.clip(deaths, 0)
-
-    return {
-        "S": S,
-        "I": I,
-        "Y": Y,
-        "Mn": deaths,
-        "R1": q0,
-        "R2": q1,
-        "R3": q2,
-        "count": count,
-    }
-
-
 def dhaka(
     dt: float | None = 1 / 240,
     nstep: int | None = None,
     gamma: bool = False,
-    _pre_vectorized: bool = True,
 ) -> Pomp:
     """
     Creates a POMP model for the Dhaka cholera data.
@@ -596,7 +500,7 @@ def dhaka(
     if gamma:
         rproc_func = _rproc_gamma
     else:
-        rproc_func = _rproc if _pre_vectorized else _rproc_scalar
+        rproc_func = _rproc
 
     if gamma:
         print(

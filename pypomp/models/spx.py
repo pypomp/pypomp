@@ -94,35 +94,6 @@ def _rproc(
     return {"V": V, "S": S}
 
 
-def _rproc_scalar(
-    X_: StateDict,
-    theta_: ParamDict,
-    key: RNGKey,
-    covars: CovarDict,
-    t: TimeFloat,
-    dt: StepSizeFloat,
-):
-    V, S = X_["V"], X_["S"]
-    mu, kappa, theta_val, xi, rho = (
-        theta_["mu"],
-        theta_["kappa"],
-        theta_["theta"],
-        theta_["xi"],
-        theta_["rho"],
-    )
-    y_prev = covars["y_prev"]
-
-    dZ = random.normal(key)
-    dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
-
-    dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
-    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
-    V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
-
-    V = jnp.maximum(V, 1e-32)
-    return {"V": V, "S": S}
-
-
 def _dmeas(
     Y_: ObservationDict,
     X_: StateDict,
@@ -158,7 +129,7 @@ def _from_est(theta: ParamDict) -> ParamDict:
     }
 
 
-def spx(_pre_vectorized: bool = True):
+def spx() -> Pomp:
     """
     Creates a POMP model for the S&P 500 stock index data.
 
@@ -181,8 +152,6 @@ def spx(_pre_vectorized: bool = True):
     assert isinstance(sp500, pd.DataFrame)
     from pypomp.core.parameters import PompParameters
 
-    rproc_func = _rproc if _pre_vectorized else _rproc_scalar
-
     return Pomp(
         ys=sp500,
         theta=PompParameters(theta),
@@ -190,7 +159,7 @@ def spx(_pre_vectorized: bool = True):
         nstep=1,
         dt=None,
         rinit=_rinit,
-        rproc=rproc_func,
+        rproc=_rproc,
         dmeas=_dmeas,
         covars=covars,
         statenames=statenames,

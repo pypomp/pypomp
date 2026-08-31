@@ -235,21 +235,13 @@ def test_dacca_rmeas(simple):
     assert jnp.isfinite(sim_obs).all()
 
 
-def test_dacca_vectorized_toggle():
-    # Gaussian noise mode
-    m_vec = pp.models.dacca(_pre_vectorized=True)
+def test_dacca_vectorized():
+    # Gaussian noise mode is vectorized
+    m_vec = pp.models.dacca()
     assert m_vec.rproc._is_vectorized is True
     m_vec.pfilter(J=3, key=jax.random.key(1))
 
-    m_unvec = pp.models.dacca(_pre_vectorized=False)
-    assert m_unvec.rproc._is_vectorized is False
-    m_unvec.pfilter(J=3, key=jax.random.key(1))
-
-    # Gamma noise mode is always scalar
-    m_gamma_vec = pp.models.dacca(gamma=True, _pre_vectorized=True)
-    assert m_gamma_vec.rproc._is_vectorized is False
-    m_gamma_vec.pfilter(J=3, key=jax.random.key(1))
-
-    m_gamma_unvec = pp.models.dacca(gamma=True, _pre_vectorized=False)
-    assert m_gamma_unvec.rproc._is_vectorized is False
-    m_gamma_unvec.pfilter(J=3, key=jax.random.key(1))
+    # Gamma noise mode is scalar
+    m_gamma = pp.models.dacca(gamma=True)
+    assert m_gamma.rproc._is_vectorized is False
+    m_gamma.pfilter(J=3, key=jax.random.key(1))

@@ -88,20 +88,11 @@ You can define the function arguments in two ways:
 Manually Vectorized rproc (CPU optimization)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default pypomp applies :func:`jax.vmap` to ``rproc``, so the function above is
-written for a *single* particle. Decorating ``rproc`` with
-:func:`~pypomp.vectorized` disables that vmap: the function is then called once
-per Euler step with every state entry as a ``(J,)`` array, and is responsible for
-all ``J`` particles itself.
+By default, pypomp applies :func:`jax.vmap` to ``rproc``, so the function above is written for a *single* particle.
+Decorating ``rproc`` with :func:`~pypomp.vectorized` disables that vmap: the function is then called once per Euler step with every state entry as a ``(J,)`` array, and is responsible for all ``J`` particles itself.
 
-This is purely a **CPU** performance escape hatch, and it is entirely optional.
-XLA's CPU backend does not vectorize per-particle random number generation across
-the particle batch, so on models with many Euler sub-steps per observation
-(``dacca``, ``measles``) nearly all of the runtime is spent drawing scalar
-variates one particle at a time. Writing ``rproc`` against the whole batch lets
-XLA emit a single batched draw instead. On the ``dacca`` model this is roughly a
-**5x** speedup on CPU. On GPU the default vmapped path already maps particles
-onto threads, so the decorator is not expected to help there.
+This sometimes improves performance on CPU, and it is entirely optional.
+On GPU, the decorator is not expected to make a difference.
 
 **Contract:**
 

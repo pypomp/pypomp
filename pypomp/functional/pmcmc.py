@@ -31,7 +31,7 @@ def pmcmc(
     Runs ``n_chains`` independent particle-MCMC chains in parallel.  Each chain
     starts at the corresponding row of ``thetas_array`` using the corresponding
     PRNG key in ``keys``.  Intended for users who need to compose PMCMC inside
-    larger JAX programs; see :meth:`pypomp.core.pomp.Pomp.pmcmc` for a
+    larger JAX programs; see :meth:`pypomp.core.pomp.Pomp._pmcmc` for a
     higher-level interface.
 
     Parameters

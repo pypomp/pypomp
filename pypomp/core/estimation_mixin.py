@@ -14,7 +14,9 @@ import xarray as xr
 
 from pypomp import benchmarks
 from pypomp import functional as F
+from pypomp.functional.abc import abc
 from pypomp.functional.dpop import dpop_train
+from pypomp.functional.pmcmc import pmcmc
 from pypomp.maths import logmeanexp
 from pypomp.proposals import Proposal
 
@@ -820,7 +822,7 @@ class PompEstimationMixin(Base):
 
         self.results_history.add(result)
 
-    def pmcmc(
+    def _pmcmc(
         self,
         J: int,
         M: int,
@@ -886,7 +888,7 @@ class PompEstimationMixin(Base):
 
         keys = jax.random.split(new_key, n_chains)
 
-        ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
+        ll_jax, lp_jax, theta_jax, accepts_jax = pmcmc(
             struct=self.to_struct(),
             thetas_array=theta_array,
             proposal=proposal,
@@ -942,7 +944,7 @@ class PompEstimationMixin(Base):
         )
         self.results_history.add(result)
 
-    def abc(
+    def _abc(
         self,
         M: int,
         probes: dict[str, Callable],
@@ -1020,7 +1022,7 @@ class PompEstimationMixin(Base):
 
         keys = jax.random.split(new_key, n_chains)
 
-        dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
+        dist_jax, lp_jax, theta_jax, accepts_jax = abc(
             struct=self.to_struct(),
             thetas_array=theta_array,
             proposal=proposal,

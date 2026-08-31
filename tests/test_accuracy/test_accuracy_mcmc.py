@@ -59,7 +59,7 @@ def test_pomp_pmcmc_accuracy():
     ys = lg_1d_ys(model)
     model.theta = _chains(start, 14)
 
-    model.pmcmc(
+    model._pmcmc(
         J=3000,
         M=250,
         proposal=pp.MVNDiagRW({A: 0.25, Q: 0.2, R: 0.2}),
@@ -101,7 +101,7 @@ def test_pomp_abc_accuracy():
         "autocov2": lambda y: jnp.mean(y[obs][2:] * y[obs][:-2]),
     }
 
-    model.abc(
+    model._abc(
         M=30000,
         probes=probes,
         scale={name: 1.0 for name in probes},

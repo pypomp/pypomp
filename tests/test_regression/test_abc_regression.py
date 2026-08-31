@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import pypomp as pp
-import pypomp.functional as F
+from pypomp.functional.abc import abc
 
 M = 3
 
@@ -18,7 +18,7 @@ def test_abc_regression(lg_struct, tol, num_regression):
     }
     scale = {"mean": 10.0, "std": 10.0}
 
-    dist_traces, _, theta_traces, accepts = F.abc(
+    dist_traces, _, theta_traces, accepts = abc(
         struct,
         theta0,
         proposal=prop,

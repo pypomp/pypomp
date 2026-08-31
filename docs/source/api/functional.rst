@@ -29,8 +29,6 @@ Core Algorithms
    mif
    panel_mif
    simulate
-   pmcmc
-   abc
 
 Differentiable Particle Filtering
 ---------------------------------

@@ -1,4 +1,4 @@
-"""Tests for Pomp.abc() -- JIT-compiled Approximate Bayesian Computation."""
+"""Tests for Pomp._abc() -- JIT-compiled Approximate Bayesian Computation."""
 
 import jax
 import jax.numpy as jnp
@@ -48,7 +48,7 @@ def _informative_dprior(params: ParamDict) -> float | jax.Array:
 class TestABC:
     def test_basic_run(self, sir):
         prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
-        sir.abc(
+        sir._abc(
             M=5,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -67,7 +67,7 @@ class TestABC:
 
     def test_with_dprior(self, sir):
         prop = MVNDiagRW({"gamma": 0.1})
-        sir.abc(
+        sir._abc(
             M=5,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -89,7 +89,7 @@ class TestABC:
             return 0.0
 
         sir_default = deepcopy(sir)
-        sir_default.abc(
+        sir_default._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -104,7 +104,7 @@ class TestABC:
         )
 
         sir_explicit = deepcopy(sir)
-        sir_explicit.abc(
+        sir_explicit._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -129,7 +129,7 @@ class TestABC:
         probes = _default_probes()
 
         sir_default = deepcopy(sir)
-        sir_default.abc(
+        sir_default._abc(
             M=3,
             probes=probes,
             epsilon=1e6,
@@ -139,7 +139,7 @@ class TestABC:
         traces_default = _abc_res(sir_default.results_history[-1]).traces_da.values
 
         sir_explicit = deepcopy(sir)
-        sir_explicit.abc(
+        sir_explicit._abc(
             M=3,
             probes=probes,
             scale={name: 1.0 for name in probes},
@@ -153,7 +153,7 @@ class TestABC:
 
     def test_acceptance_rate_in_range(self, sir):
         prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
-        sir.abc(
+        sir._abc(
             M=10,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -180,7 +180,7 @@ class TestABC:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1.abc(
+        sir1._abc(
             M=M,
             probes=probes,
             scale=scale,
@@ -192,7 +192,7 @@ class TestABC:
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2.abc(
+        sir2._abc(
             M=M,
             probes=probes,
             scale=scale,
@@ -208,7 +208,7 @@ class TestABC:
 
     def test_to_dataframe(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -225,7 +225,7 @@ class TestABC:
 
     def test_traces_method(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -239,7 +239,7 @@ class TestABC:
 
     def test_print_summary(self, sir, capsys):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -253,7 +253,7 @@ class TestABC:
 
     def test_with_mvn_rw(self, sir):
         prop = MVNRWFull(np.array([[1.0]]), ["beta1"])
-        sir.abc(
+        sir._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -269,7 +269,7 @@ class TestABC:
             scale_start=2,
             shape_start=2,
         )
-        sir.abc(
+        sir._abc(
             M=6,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -281,7 +281,7 @@ class TestABC:
 
     def test_tight_epsilon_low_acceptance(self, sir):
         prop = MVNDiagRW({"beta1": 10.0})
-        sir.abc(
+        sir._abc(
             M=10,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -295,7 +295,7 @@ class TestABC:
 
     def test_theta_updated_to_final_trace(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=5,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -314,7 +314,7 @@ class TestABC:
         theta_before = pp.PompParameters(theta_input)
         prop = MVNDiagRW({"beta1": 1.0})
 
-        sir.abc(
+        sir._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -346,7 +346,7 @@ class TestABC:
             )
 
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=5,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -369,7 +369,7 @@ class TestABC:
         probes = {"mean": lambda y: jnp.mean(y["Y"])}
         scale = {"mean": 2.0}
 
-        deterministic_meas_pomp.abc(
+        deterministic_meas_pomp._abc(
             M=1,
             probes=probes,
             scale=scale,
@@ -399,7 +399,7 @@ class TestABCMultiChain:
         t3 = dict(sir.theta[0])
         t3["beta1"] = 420.0
         prop = MVNDiagRW({"beta1": 1.0})
-        sir.abc(
+        sir._abc(
             M=5,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -422,7 +422,7 @@ class TestABCValidation:
     def test_invalid_M(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M"):
-            sir.abc(
+            sir._abc(
                 M=0,
                 probes=_default_probes(),
                 scale=_default_scale(),
@@ -434,7 +434,7 @@ class TestABCValidation:
     def test_invalid_epsilon(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="epsilon"):
-            sir.abc(
+            sir._abc(
                 M=5,
                 probes=_default_probes(),
                 scale=_default_scale(),
@@ -446,7 +446,7 @@ class TestABCValidation:
     def test_empty_probes(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="probes"):
-            sir.abc(
+            sir._abc(
                 M=5,
                 probes={},
                 scale={},
@@ -458,7 +458,7 @@ class TestABCValidation:
     def test_scale_keys_mismatch(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="scale keys"):
-            sir.abc(
+            sir._abc(
                 M=5,
                 probes=_default_probes(),
                 scale={"mean": 1.0},  # missing keys
@@ -470,7 +470,7 @@ class TestABCValidation:
     def test_negative_scale(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="must be positive"):
-            sir.abc(
+            sir._abc(
                 M=5,
                 probes={"mean": lambda y: jnp.mean(y["reports"])},
                 scale={"mean": -1.0},
@@ -496,7 +496,7 @@ class TestABCMerge:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1.abc(
+        sir1._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -509,7 +509,7 @@ class TestABCMerge:
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2.abc(
+        sir2._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -534,7 +534,7 @@ class TestABCMerge:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1.abc(
+        sir1._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),
@@ -547,7 +547,7 @@ class TestABCMerge:
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2.abc(
+        sir2._abc(
             M=3,
             probes=_default_probes(),
             scale=_default_scale(),

@@ -4,7 +4,9 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from pypomp.functional.abc import abc
 from pypomp.functional.dpop import dpop, dpop_train
+from pypomp.functional.pmcmc import pmcmc
 from tests.helpers.models import lg_panel
 from tests.helpers.params import uniform_rw_sd
 
@@ -445,7 +447,7 @@ def test_pmcmc_functional(model_setup):
     M = 2
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
-    ll_traces, lp_traces, theta_traces, accepts = F.pmcmc(
+    ll_traces, lp_traces, theta_traces, accepts = pmcmc(
         struct,
         thetas_array,
         proposal=prop,
@@ -474,7 +476,7 @@ def test_abc_functional(model_setup):
     }
     scale = {"mean": 10.0, "std": 10.0}
 
-    dist_traces, lp_traces, theta_traces, accepts = F.abc(
+    dist_traces, lp_traces, theta_traces, accepts = abc(
         struct,
         thetas_array,
         proposal=prop,
@@ -502,7 +504,7 @@ def test_abc_functional_scale_defaults_to_one(model_setup):
         "std": lambda y: jnp.std(y["Y1"]),
     }
 
-    default_traces = F.abc(
+    default_traces = abc(
         struct,
         thetas_array,
         proposal=prop,
@@ -512,7 +514,7 @@ def test_abc_functional_scale_defaults_to_one(model_setup):
         keys=keys,
     )
 
-    explicit_traces = F.abc(
+    explicit_traces = abc(
         struct,
         thetas_array,
         proposal=prop,
@@ -553,14 +555,14 @@ def test_pmcmc_and_abc_functional_par_trans():
     keys = jax.random.split(key, n_reps)
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
-    _, _, theta_traces_pmcmc, _ = F.pmcmc(
+    _, _, theta_traces_pmcmc, _ = pmcmc(
         struct, thetas_array, proposal=prop, M=1, J=5, keys=keys
     )
     assert jnp.allclose(theta_traces_pmcmc[0, 0, :], theta_val[0])
 
     probes = {"mean": lambda y: jnp.mean(y["Y1"])}
 
-    _, _, theta_traces_abc, _ = F.abc(
+    _, _, theta_traces_abc, _ = abc(
         struct,
         thetas_array,
         proposal=prop,
@@ -581,7 +583,7 @@ def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
     def raw_dprior(params: pp.types.ParamDict) -> float:
         return 0.0
 
-    _, lp_traces, _, _ = F.pmcmc(
+    _, lp_traces, _, _ = pmcmc(
         struct,
         thetas_array,
         proposal=prop,
@@ -594,7 +596,7 @@ def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
     assert jnp.all(jnp.isfinite(lp_traces))
 
     probes = {"mean": lambda y: jnp.mean(y["Y1"])}
-    _, lp_traces_abc, _, _ = F.abc(
+    _, lp_traces_abc, _, _ = abc(
         struct,
         thetas_array,
         proposal=prop,

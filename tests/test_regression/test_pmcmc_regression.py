@@ -2,7 +2,7 @@ import jax
 import numpy as np
 
 import pypomp as pp
-import pypomp.functional as F
+from pypomp.functional.pmcmc import pmcmc
 
 M = 3
 
@@ -12,7 +12,7 @@ def test_pmcmc_regression(lg_struct, tol, num_regression):
     keys = jax.random.split(key, n_reps)
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
-    ll_traces, _, theta_traces, accepts = F.pmcmc(
+    ll_traces, _, theta_traces, accepts = pmcmc(
         struct, theta0, proposal=prop, M=M, J=J, thresh=0.0, keys=keys
     )
 

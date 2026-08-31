@@ -34,8 +34,6 @@ Pomp Class
    ~Pomp.pfilter
    ~Pomp.mif
    ~Pomp.train
-   ~Pomp.pmcmc
-   ~Pomp.abc
 
 .. rubric:: Results
 .. autosummary::

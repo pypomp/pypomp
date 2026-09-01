@@ -28,6 +28,7 @@ Random Walk Standard Deviation
    ~RWSigma.cosine_cooling
    ~RWSigma.hyperbolic_cooling
    ~RWSigma.custom_cooling
+   ~RWSigma.cooling_factor
    ~RWSigma.copy
    ~RWSigma.cooled
 

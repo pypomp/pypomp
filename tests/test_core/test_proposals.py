@@ -41,9 +41,9 @@ def test_mvndiagrw_step():
     prop = pp.MVNDiagRW({"a": 0.1, "b": 0.2})
     theta = jnp.array([1.0, 2.0])
     key = jax.random.key(0)
-    state = prop.init_state(theta)
+    state = prop._init_state(theta)
     assert state == ()
-    proposed, new_state = prop.step(state, theta, key, 0, 0)
+    proposed, new_state = prop._step(state, theta, key, 0, 0)
     assert proposed.shape == theta.shape
     assert new_state == ()
     # Deterministic given the key: matches a manual normal draw.
@@ -54,7 +54,7 @@ def test_mvndiagrw_step():
 
 def test_mvndiagrw_canonicalize():
     prop = pp.MVNDiagRW({"a": 0.1, "b": 0.2})
-    canon = prop.canonicalize(["b", "a", "c"])
+    canon = prop._canonicalize(["b", "a", "c"])
     assert canon.param_names == ("b", "a", "c")
     assert np.allclose(canon.sd_arr, [0.2, 0.1, 0.0])
 
@@ -62,7 +62,7 @@ def test_mvndiagrw_canonicalize():
 def test_mvndiagrw_canonicalize_unknown_param_raises():
     prop = pp.MVNDiagRW({"a": 0.1, "z": 0.2})
     with pytest.raises(ValueError, match="Proposal parameter 'z' not in model"):
-        prop.canonicalize(["a", "b"])
+        prop._canonicalize(["a", "b"])
 
 
 def test_mvndiagrw_pytree_roundtrip():
@@ -112,9 +112,9 @@ def test_mvnrwfull_step():
     prop = pp.MVNRWFull(cov, ["a", "b"])
     theta = jnp.array([1.0, 2.0])
     key = jax.random.key(0)
-    state = prop.init_state(theta)
+    state = prop._init_state(theta)
     assert state == ()
-    proposed, new_state = prop.step(state, theta, key, 0, 0)
+    proposed, new_state = prop._step(state, theta, key, 0, 0)
     assert proposed.shape == theta.shape
     assert new_state == ()
     z = jax.random.normal(key, shape=theta.shape)
@@ -125,7 +125,7 @@ def test_mvnrwfull_step():
 def test_mvnrwfull_canonicalize():
     cov = np.array([[0.04, 0.01], [0.01, 0.09]])
     prop = pp.MVNRWFull(cov, ["a", "b"])
-    canon = prop.canonicalize(["b", "a", "c"])
+    canon = prop._canonicalize(["b", "a", "c"])
     assert canon.param_names == ("b", "a", "c")
     # Reordered Cholesky factor should reconstruct the reordered covariance.
     full_chol = np.asarray(canon.chol)
@@ -146,7 +146,7 @@ def test_mvnrwfull_canonicalize_unknown_row_param_raises():
     cov = np.eye(2) * 0.01
     prop = pp.MVNRWFull(cov, ["z", "a"])
     with pytest.raises(ValueError, match="Proposal parameter 'z' not in model"):
-        prop.canonicalize(["a", "b"])
+        prop._canonicalize(["a", "b"])
 
 
 def test_mvnrwfull_canonicalize_unknown_col_param_raises():
@@ -155,7 +155,7 @@ def test_mvnrwfull_canonicalize_unknown_col_param_raises():
     cov = np.eye(2) * 0.01
     prop = pp.MVNRWFull(cov, ["a", "z"])
     with pytest.raises(ValueError, match="Proposal parameter 'z' not in model"):
-        prop.canonicalize(["a", "b"])
+        prop._canonicalize(["a", "b"])
 
 
 def test_mvnrwfull_pytree_roundtrip():
@@ -250,14 +250,14 @@ def test_mvnrwadaptive_eq():
 def test_mvnrwadaptive_init_state_and_step():
     prop = pp.MVNRWAdaptive(rw_sd={"a": 0.1, "b": 0.2})
     theta = jnp.array([1.0, 2.0])
-    state = prop.init_state(theta)
+    state = prop._init_state(theta)
     assert np.allclose(state.scaling, 1.0)
     assert np.allclose(state.theta_mean, [0.0, 0.0])
     assert np.allclose(state.covmat_emp, np.zeros((2, 2)))
     assert np.allclose(state.initialized, 0.0)
 
     key = jax.random.key(0)
-    proposed, new_state = prop.step(state, theta, key, n=1, accepts=0)
+    proposed, new_state = prop._step(state, theta, key, n=1, accepts=0)
     assert proposed.shape == theta.shape
     # theta_mean is seeded with theta on the very first call.
     assert np.allclose(new_state.theta_mean, theta)
@@ -267,7 +267,7 @@ def test_mvnrwadaptive_init_state_and_step():
     # already-initialized branch of the lazy seeding, and phase-1 scaling
     # once n exceeds scale_start).
     key2 = jax.random.key(1)
-    proposed2, new_state2 = prop.step(new_state, proposed, key2, n=250, accepts=5)
+    proposed2, new_state2 = prop._step(new_state, proposed, key2, n=250, accepts=5)
     assert proposed2.shape == theta.shape
     assert new_state2.initialized == 1.0
 
@@ -276,11 +276,11 @@ def test_mvnrwadaptive_step_phase2():
     """Once accepts >= shape_start, the empirical covariance branch is used."""
     prop = pp.MVNRWAdaptive(rw_sd={"a": 0.1, "b": 0.2}, shape_start=1, scale_start=1)
     theta = jnp.array([1.0, 2.0])
-    state = prop.init_state(theta)
+    state = prop._init_state(theta)
     key = jax.random.key(0)
-    state = prop.step(state, theta, key, n=1, accepts=0)[1]
+    state = prop._step(state, theta, key, n=1, accepts=0)[1]
     # Second step has accepts >= shape_start=1, triggering phase 2 covariance.
-    proposed, new_state = prop.step(state, theta, jax.random.key(1), n=2, accepts=1)
+    proposed, new_state = prop._step(state, theta, jax.random.key(1), n=2, accepts=1)
     assert proposed.shape == theta.shape
     assert new_state.initialized == 1.0
 
@@ -289,7 +289,7 @@ def test_mvnrwadaptive_canonicalize():
     prop = pp.MVNRWAdaptive(
         rw_var=np.array([[0.04, 0.01], [0.01, 0.09]]), param_names=["a", "b"]
     )
-    canon = prop.canonicalize(["b", "a", "c"])
+    canon = prop._canonicalize(["b", "a", "c"])
     assert canon.param_names == ("b", "a", "c")
     assert canon.scale_start == prop.scale_start
     assert canon.scale_cooling == prop.scale_cooling
@@ -310,7 +310,7 @@ def test_mvnrwadaptive_canonicalize_unknown_row_param_raises():
     # Unknown name in the first row position -> outer (i_local) check.
     prop = pp.MVNRWAdaptive(rw_sd={"z": 0.1, "a": 0.2})
     with pytest.raises(ValueError, match="Proposal parameter 'z' not in model"):
-        prop.canonicalize(["a", "b"])
+        prop._canonicalize(["a", "b"])
 
 
 def test_mvnrwadaptive_canonicalize_unknown_col_param_raises():
@@ -318,7 +318,7 @@ def test_mvnrwadaptive_canonicalize_unknown_col_param_raises():
     # inner (j_local) check.
     prop = pp.MVNRWAdaptive(rw_sd={"a": 0.1, "z": 0.2})
     with pytest.raises(ValueError, match="Proposal parameter 'z' not in model"):
-        prop.canonicalize(["a", "b"])
+        prop._canonicalize(["a", "b"])
 
 
 def test_mvnrwadaptive_pytree_roundtrip():

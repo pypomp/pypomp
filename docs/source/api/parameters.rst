@@ -34,6 +34,8 @@ Parameters
    ~PanelParameters.params
    ~PanelParameters.set_params
    ~PanelParameters.num_replicates
+   ~PanelParameters.num_params
+   ~PanelParameters.from_arrays
    ~PanelParameters.get_param_names
    ~PanelParameters.get_shared_param_names
    ~PanelParameters.get_unit_param_names

@@ -20,21 +20,27 @@ def arma(
     log_ys: bool = False,
     suppress_warnings: bool = True,
 ) -> float:
-    """
-    Fits an ARIMA model to the data and returns the estimated log-likelihood.
+    """Fit an ARIMA model to the data and return the estimated log-likelihood.
 
-    If 'ys' contains multiple columns, it fits independent ARMA models to each
+    If ``ys`` contains multiple columns, it fits independent ARMA models to each
     column and returns the sum of the log likelihoods.
 
-    Args:
-        ys (pd.DataFrame): The observed data.
-        order (tuple, optional): The (p, d, q) order of the ARIMA model. Defaults to (1, 0, 1).
-        log_ys (bool, optional): If True, fits the model to log(y+1). Defaults to False.
-        suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels
-            and issues a summary warning instead. Defaults to True.
+    Parameters
+    ----------
+    ys : pd.DataFrame
+        The observed data.
+    order : tuple of (int, int, int), default (1, 0, 1)
+        The (p, d, q) order of the ARIMA model.
+    log_ys : bool, default False
+        If True, fits the model to log(y + 1).
+    suppress_warnings : bool, default True
+        If True, suppresses individual warnings from statsmodels and issues a
+        summary warning instead.
 
-    Returns:
-        float: The sum of the log-likelihoods from the fitted models.
+    Returns
+    -------
+    float
+        The sum of the log-likelihoods from the fitted models.
     """
     _check_statsmodels()
     import warnings
@@ -81,22 +87,27 @@ def arma(
 def negbin(
     ys: pd.DataFrame, autoregressive: bool = False, suppress_warnings: bool = True
 ) -> float:
-    """
-    Fits a Negative Binomial model to the data and returns the log-likelihood.
+    """Fit a Negative Binomial model to the data and return the log-likelihood.
 
-    If 'ys' contains multiple columns, it fits independent models to each
+    If ``ys`` contains multiple columns, it fits independent models to each
     column and returns the sum of the log likelihoods.
 
-    Args:
-        ys (pd.DataFrame): The observed data.
-        autoregressive (bool, optional): If True, fits an AR(1) model where
-            Y_n | Y_{n-1} ~ NB(a + b*Y_{n-1}, size). If False (default),
-            fits an iid Negative Binomial model.
-        suppress_warnings (bool, optional): If True, suppresses individual warnings from statsmodels/optimization
-            and issues a summary warning instead. Defaults to True.
+    Parameters
+    ----------
+    ys : pd.DataFrame
+        The observed data.
+    autoregressive : bool, default False
+        If True, fits an AR(1) model where
+        :math:`Y_n \\mid Y_{n-1} \\sim \\text{NB}(a + b Y_{n-1}, \\text{size})`.
+        If False, fits an iid Negative Binomial model.
+    suppress_warnings : bool, default True
+        If True, suppresses individual warnings from statsmodels/optimization
+        and issues a summary warning instead.
 
-    Returns:
-        float: The sum of the log-likelihoods from the fitted models.
+    Returns
+    -------
+    float
+        The sum of the log-likelihoods from the fitted models.
     """
     _check_statsmodels()
     import warnings

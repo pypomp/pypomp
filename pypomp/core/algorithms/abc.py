@@ -64,7 +64,7 @@ def _abc_internal(
     dist0 = sim_distance_fn(theta_arr, init_sim_key)
     lp0 = context.dprior(theta_arr, SHOULD_TRANS)
 
-    prop_state0 = proposal.init_state(theta_arr)
+    prop_state0 = proposal._init_state(theta_arr)
 
     init_carry = (
         theta_arr,
@@ -114,7 +114,7 @@ def _abc_step(
     key, prop_key, sim_key, accept_key = jax.random.split(key, 4)
 
     # 2. Draw a proposal theta_prop from the proposal distribution.
-    theta_prop, new_prop_state = proposal.step(
+    theta_prop, new_prop_state = proposal._step(
         prop_state, theta_cur, prop_key, n, accepts
     )
     lp_prop = context.dprior(theta_prop, SHOULD_TRANS)

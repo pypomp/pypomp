@@ -444,15 +444,33 @@ class RWSigma:
         return iter(self.param_names)
 
     def keys(self):
+        """Return a view of parameter names."""
         return self.sigmas.keys()
 
     def values(self):
+        """Return a view of parameter random-walk standard deviations."""
         return self.sigmas.values()
 
     def items(self):
+        """Return a view of (parameter name, standard deviation) pairs."""
         return self.sigmas.items()
 
     def get(self, param_name: str, default: float | None = None) -> float | None:
+        """Return the random-walk standard deviation for a parameter.
+
+        Parameters
+        ----------
+        param_name : str
+            Parameter name to look up.
+        default : float or None, optional
+            Value to return if ``param_name`` is not in the configuration.
+            Defaults to ``None``.
+
+        Returns
+        -------
+        float or None
+            Random-walk standard deviation or ``default``.
+        """
         if param_name in self.param_names:
             return self[param_name]
         return default

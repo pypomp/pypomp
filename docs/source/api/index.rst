@@ -42,6 +42,7 @@ Utilities
 
    maths
    random
+   benchmarks
    mcap
    types
 

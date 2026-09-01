@@ -63,7 +63,7 @@ def _pmcmc_internal(
     loglik0 = run_pfilter_fn(theta_arr, init_pf_key)
     log_prior0 = context.dprior(theta_arr, SHOULD_TRANS)
 
-    prop_state0 = proposal.init_state(theta_arr)
+    prop_state0 = proposal._init_state(theta_arr)
 
     init_carry = (
         theta_arr,  # current accepted theta
@@ -111,7 +111,7 @@ def _pmcmc_step(
     key, prop_key, pf_key, accept_key = jax.random.split(key, 4)
 
     # 1. Propose (and update proposal state)
-    theta_prop, new_prop_state = proposal.step(
+    theta_prop, new_prop_state = proposal._step(
         prop_state, theta_cur, prop_key, n, accepts
     )
 

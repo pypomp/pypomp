@@ -106,7 +106,7 @@ def abc(
         direction="to_est",
     )
 
-    proposal = proposal.canonicalize(struct.param_names)
+    proposal = proposal._canonicalize(struct.param_names)
 
     dprior_fn = resolve_dprior(dprior, struct)
     ydim = int(struct.ys.shape[1])

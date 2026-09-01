@@ -4,12 +4,12 @@ JIT-compatible MCMC proposal distributions for use with PMCMC and ABC.
 Each proposal is a frozen dataclass registered as a JAX PyTree so it can flow
 through ``jax.lax.scan`` and ``jax.vmap``.  Proposals expose three methods:
 
-* ``init_state(theta_arr)`` returns the initial scan-carried state (a PyTree).
+* ``_init_state(theta_arr)`` returns the initial scan-carried state (a PyTree).
   For stateless proposals this is an empty container.
-* ``step(state, theta_arr, key, n, accepts)`` is a pure JAX function that
+* ``_step(state, theta_arr, key, n, accepts)`` is a pure JAX function that
   returns ``(theta_proposed, new_state)``.  All inputs/outputs are
   ``jax.Array``; no Python branching on traced values.
-* ``canonicalize(canonical_names)`` returns a new proposal instance expanded
+* ``_canonicalize(canonical_names)`` returns a new proposal instance expanded
   and reordered to match the model's full canonical parameter vector.
 
 Three proposals are provided, following pomp (R):
@@ -38,11 +38,11 @@ import numpy as np
 class Proposal(Protocol):
     """Protocol defining the interface for MCMC proposal distributions."""
 
-    def init_state(self, theta_arr: jax.Array) -> Any:
+    def _init_state(self, theta_arr: jax.Array) -> Any:
         """Initialize carried state for MCMC scan loop."""
         ...
 
-    def step(
+    def _step(
         self,
         state: Any,
         theta_arr: jax.Array,
@@ -53,7 +53,7 @@ class Proposal(Protocol):
         """Generate a proposed parameter vector and updated state."""
         ...
 
-    def canonicalize(self, canonical_names: Sequence[str]) -> Proposal:
+    def _canonicalize(self, canonical_names: Sequence[str]) -> Proposal:
         """Canonicalize proposal to match full model parameter vector."""
         ...
 
@@ -106,11 +106,11 @@ class MVNDiagRW:
             np.asarray(self.sd_arr), np.asarray(other.sd_arr)
         )
 
-    def init_state(self, theta_arr: jax.Array) -> tuple:
+    def _init_state(self, theta_arr: jax.Array) -> tuple:
         """Initialize carried state (empty tuple for stateless proposal)."""
         return ()
 
-    def step(
+    def _step(
         self,
         state: tuple,
         theta_arr: jax.Array,
@@ -122,7 +122,7 @@ class MVNDiagRW:
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + z * self.sd_arr, state
 
-    def canonicalize(self, canonical_names: Sequence[str]) -> MVNDiagRW:
+    def _canonicalize(self, canonical_names: Sequence[str]) -> MVNDiagRW:
         """Expand and reorder standard deviations to match canonical parameter names."""
         names = tuple(canonical_names)
         d = len(names)
@@ -188,11 +188,11 @@ class MVNRWFull:
             np.asarray(self.chol), np.asarray(other.chol)
         )
 
-    def init_state(self, theta_arr: jax.Array) -> tuple:
+    def _init_state(self, theta_arr: jax.Array) -> tuple:
         """Initialize carried state (empty tuple for stateless proposal)."""
         return ()
 
-    def step(
+    def _step(
         self,
         state: tuple,
         theta_arr: jax.Array,
@@ -204,7 +204,7 @@ class MVNRWFull:
         z = jax.random.normal(key, shape=theta_arr.shape)
         return theta_arr + self.chol @ z, state
 
-    def canonicalize(self, canonical_names: Sequence[str]) -> MVNRWFull:
+    def _canonicalize(self, canonical_names: Sequence[str]) -> MVNRWFull:
         """Expand and reorder Cholesky factor to match canonical parameter names."""
         names = tuple(canonical_names)
         d = len(names)
@@ -392,7 +392,7 @@ class MVNRWAdaptive:
             )
         )
 
-    def init_state(self, theta_arr: jax.Array) -> AdaptiveState:
+    def _init_state(self, theta_arr: jax.Array) -> AdaptiveState:
         """Initialize adaptive state tracking running mean, empirical covariance, and scale."""
         d = theta_arr.shape[-1]
         dt = theta_arr.dtype
@@ -403,7 +403,7 @@ class MVNRWAdaptive:
             initialized=jnp.asarray(0.0, dtype=dt),
         )
 
-    def step(
+    def _step(
         self,
         state: AdaptiveState,
         theta_arr: jax.Array,
@@ -465,7 +465,7 @@ class MVNRWAdaptive:
         )
         return theta_proposed, new_state
 
-    def canonicalize(self, canonical_names: Sequence[str]) -> MVNRWAdaptive:
+    def _canonicalize(self, canonical_names: Sequence[str]) -> MVNRWAdaptive:
         """Expand and reorder initial covariance matrix to match canonical parameter names."""
         names = tuple(canonical_names)
         d = len(names)

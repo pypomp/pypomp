@@ -307,17 +307,34 @@ class LearningRate:
         return iter(self.param_names)
 
     def keys(self):
+        """Return a view of parameter names."""
         return self.rates.keys()
 
     def values(self):
+        """Return a view of parameter learning rates."""
         return self.rates.values()
 
     def items(self):
+        """Return a view of (parameter name, learning rate) pairs."""
         return self.rates.items()
 
     def get(
         self, param_name: str, default: float | np.ndarray | None = None
     ) -> float | np.ndarray | None:
+        """Return the learning rate for a parameter.
+
+        Parameters
+        ----------
+        param_name : str
+            Parameter name to look up.
+        default : float, np.ndarray, or None, optional
+            Value to return if ``param_name`` is not found. Defaults to ``None``.
+
+        Returns
+        -------
+        float, np.ndarray, or None
+            Learning rate value/schedule or ``default``.
+        """
         if param_name in self.param_names:
             return self[param_name]
         return default

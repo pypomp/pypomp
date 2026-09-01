@@ -27,10 +27,10 @@ class _FixedShiftProposal:
     shift: jax.Array
     param_names: tuple[str, ...]
 
-    def init_state(self, theta_arr: jax.Array) -> tuple:
+    def _init_state(self, theta_arr: jax.Array) -> tuple:
         return ()
 
-    def step(
+    def _step(
         self,
         state: tuple,
         theta_arr: jax.Array,
@@ -40,7 +40,7 @@ class _FixedShiftProposal:
     ) -> tuple[jax.Array, tuple]:
         return theta_arr + self.shift, state
 
-    def canonicalize(self, canonical_names):
+    def _canonicalize(self, canonical_names):
         # Fixed shift is already aligned to the model's parameter vector.
         return self
 
@@ -74,8 +74,8 @@ class TestProposals:
         assert isinstance(prop, MVNDiagRW)
         assert prop.param_names == ("beta1", "gamma")
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
-        new_theta, new_state = prop.step(
+        state = prop._init_state(theta)
+        new_theta, new_state = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert new_theta.shape == theta.shape
@@ -94,8 +94,8 @@ class TestProposals:
         prop = MVNRWFull(rw_var, param_names=["beta1", "gamma"])
         assert isinstance(prop, MVNRWFull)
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
-        new_theta, _ = prop.step(
+        state = prop._init_state(theta)
+        new_theta, _ = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert not jnp.array_equal(new_theta, theta)
@@ -109,10 +109,10 @@ class TestProposals:
             MVNRWFull(np.eye(2), ["a", "b", "c"])
 
     def test_canonicalize_mvn_rw_freezes_missing_parameters(self):
-        prop = MVNRWFull(np.array([[1.0]]), ["beta1"]).canonicalize(["beta1", "gamma"])
+        prop = MVNRWFull(np.array([[1.0]]), ["beta1"])._canonicalize(["beta1", "gamma"])
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
-        new_theta, _ = prop.step(
+        state = prop._init_state(theta)
+        new_theta, _ = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert new_theta[0] != theta[0]
@@ -122,8 +122,8 @@ class TestProposals:
         prop = MVNRWAdaptive(rw_sd={"beta1": 1.0, "gamma": 0.1})
         assert isinstance(prop, MVNRWAdaptive)
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
-        new_theta, new_state = prop.step(
+        state = prop._init_state(theta)
+        new_theta, new_state = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert new_theta.shape == theta.shape
@@ -133,17 +133,17 @@ class TestProposals:
         rw_var = np.array([[1.0]])
         prop = MVNRWAdaptive(rw_var=rw_var, param_names=["beta1"])
         theta = jnp.array([400.0])
-        state = prop.init_state(theta)
-        new_theta, _ = prop.step(
+        state = prop._init_state(theta)
+        new_theta, _ = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert new_theta[0] != theta[0]
 
     def test_canonicalize_mvn_rw_adaptive_freezes_missing_parameters(self):
-        prop = MVNRWAdaptive(rw_sd={"beta1": 1.0}).canonicalize(["beta1", "gamma"])
+        prop = MVNRWAdaptive(rw_sd={"beta1": 1.0})._canonicalize(["beta1", "gamma"])
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
-        new_theta, _ = prop.step(
+        state = prop._init_state(theta)
+        new_theta, _ = prop._step(
             state, theta, jax.random.key(0), jnp.int32(1), jnp.int32(0)
         )
         assert new_theta[0] != theta[0]
@@ -157,12 +157,12 @@ class TestProposals:
         """All proposals must work inside jax.lax.scan."""
         prop = MVNRWAdaptive(rw_sd={"beta1": 0.5, "gamma": 0.05})
         theta = jnp.array([400.0, 26.0])
-        state = prop.init_state(theta)
+        state = prop._init_state(theta)
 
         def body(carry, n):
             theta, st, key = carry
             key, sub = jax.random.split(key)
-            new_t, new_st = prop.step(st, theta, sub, n, n // 2)
+            new_t, new_st = prop._step(st, theta, sub, n, n // 2)
             return (new_t, new_st, key), new_t
 
         init = (theta, state, jax.random.key(0))

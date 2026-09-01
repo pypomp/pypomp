@@ -19,3 +19,4 @@ Learning Rate
    ~LearningRate.cosine_decay
    ~LearningRate.geometric_decay
    ~LearningRate.linear_decay
+   ~LearningRate.hyperbolic_decay

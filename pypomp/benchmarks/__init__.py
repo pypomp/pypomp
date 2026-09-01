@@ -1,3 +1,7 @@
+"""
+Baseline statistical benchmarks (ARMA, negative binomial).
+"""
+
 from . import base
 
 arma = base.arma

@@ -78,7 +78,7 @@ def pmcmc(
         struct.param_names,
         direction="to_est",
     )
-    proposal = proposal.canonicalize(struct.param_names)
+    proposal = proposal._canonicalize(struct.param_names)
     dprior_fn = resolve_dprior(dprior, struct)
     context = PmcmcContext.from_struct(
         struct=struct,

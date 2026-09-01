@@ -15,7 +15,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, lax
+from jax import lax
 from jax._src import dtypes
 from jax.scipy.stats import norm
 
@@ -27,13 +27,13 @@ from ._dtype_helpers import (
 
 @partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def fast_multinomial(
-    key: Array,
-    n: Array,
-    p: Array,
+    key: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
     order: int = 2,
     exact_max: int = 5,
     dtype: np.dtype | None = None,
-) -> Array:
+) -> jax.Array:
     """Sample multinomial random variates using a GPU-optimized inverse CDF algorithm.
 
     Generates multinomial counts by sequentially sampling binomial
@@ -129,13 +129,13 @@ def fast_multinomial(
 
 @partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def fast_binomial(
-    key: Array,
-    n: Array,
-    p: Array,
+    key: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
     order: int = 2,
     exact_max: int = 5,
     dtype: np.dtype | None = None,
-) -> Array:
+) -> jax.Array:
     """Sample binomial random variates using a GPU-optimized inverse CDF algorithm.
 
     Generates binomial counts with parameters ``(n, p)`` using an
@@ -150,45 +150,39 @@ def fast_binomial(
     key : jax.Array
         JAX PRNG key.
     n : jax.Array
-        Number of Bernoulli trials.
+        Number of trials.  Must be non-negative.  Broadcast-compatible
+        with ``p``.
     p : jax.Array
-        Success probability in ``[0, 1]``.
+        Success probability per trial, in ``[0, 1]``.  Broadcast-compatible
+        with ``n``.
     order : int, optional
-        Order of the beta-function approximation (0, 1, or 2).  Defaults
-        to ``2`` (most accurate).
+        Asymptotic expansion order (0, 1, or 2).  Higher orders give
+        greater accuracy for large ``n``.  Defaults to ``2``.
     exact_max : int, optional
-        Maximum iterations for the bottom-up exact inverse CDF stage.
-        Defaults to ``5``.
+        Threshold below which the exact inverse CDF is used instead of the
+        asymptotic expansion.  Defaults to ``5``.
     dtype : np.dtype or None, optional
-        Output dtype (float or integer).  Defaults to ``float64`` if
-        ``jax_enable_x64=True``, otherwise ``float32``.  Integer dtypes
-        return ``-1`` for invalid inputs.
+        Integer dtype for the output.  Defaults to ``jnp.int32`` (or
+        ``jnp.int64`` if JAX 64-bit mode is active).
 
     Returns
     -------
     jax.Array
-        Binomial samples with the broadcast shape of ``n`` and ``p`` and
-        the specified ``dtype``.
+        Array of binomial counts with the broadcast shape of ``n`` and ``p``.
 
-    Notes
-    -----
-    For speed and accuracy metrics, see the `Quant Tests <https://pypomp.github.io/
-    quant/tests/samplers/test.html>`_.
+    References
+    ----------
+    .. [1] Giles, Mike, and Casper Beentjes. "Approximation of an Inverse
+       of the Incomplete Beta Function." *arXiv preprint arXiv:2407.13576*
+       (2024). https://arxiv.org/abs/2407.13576.
 
     Examples
     --------
     >>> import jax
-    >>> import jax.numpy as jnp
-    >>> from pypomp.random import fast_binomial
-    >>> fast_binomial(jax.random.key(0), n=jnp.array(10), p=jnp.array(0.3))
+    >>> from pypomp.random.binom import fast_binomial
+    >>> key = jax.random.key(0)
+    >>> fast_binomial(key, n=10, p=0.3)
     Array(3., dtype=float32)
-
-    References
-    ----------
-    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
-       Inverse of the Incomplete Beta Function." In *Mathematical Software
-       – ICMS 2024*, vol. 14749. Springer, 2024.
-       https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None
@@ -235,13 +229,13 @@ def fast_binomial(
 
 @partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
 def binominv(
-    u: Array,
-    n: Array,
-    p: Array,
+    u: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
     exact_max: int = 5,
     order: int = 2,
     dtype: np.dtype | None = None,
-) -> Array:
+) -> jax.Array:
     """Compute the approximate inverse binomial CDF using JAX primitives.
 
     Vectorised implementation using the normal asymptotic expansion
@@ -394,13 +388,13 @@ def binominv(
 
 
 def _binom_bottom_up(
-    u: Array,
-    n: Array,
-    p: Array,
-    approx: Array,
+    u: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
+    approx: jax.Array,
     dtype,
     max_k: int = 20,
-) -> Array:
+) -> jax.Array:
     """
     Compute the exact inverse CDF for small k by accumulating the binomial CDF.
     Includes protection against numerical stalling in the tail.
@@ -452,16 +446,16 @@ def _binom_bottom_up(
 
 
 def _q_n0(
-    u: Array,
-    n: Array,
-    p: Array,
-    q: Array,
-    w: Array,
-    w2: Array,
-    np_: Array,
-    sqrt_npq: Array,
-    pq: Array,
-) -> Array:
+    u: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
+    q: jax.Array,
+    w: jax.Array,
+    w2: jax.Array,
+    np_: jax.Array,
+    sqrt_npq: jax.Array,
+    pq: jax.Array,
+) -> jax.Array:
     """
     Computes the Q_N0 approximation (Order 0) from Giles and Beentjes (2024).
 
@@ -471,16 +465,16 @@ def _q_n0(
 
 
 def _q_n1(
-    u: Array,
-    n: Array,
-    p: Array,
-    q: Array,
-    w: Array,
-    w2: Array,
-    np_: Array,
-    sqrt_npq: Array,
-    pq: Array,
-) -> Array:
+    u: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
+    q: jax.Array,
+    w: jax.Array,
+    w2: jax.Array,
+    np_: jax.Array,
+    sqrt_npq: jax.Array,
+    pq: jax.Array,
+) -> jax.Array:
     """
     Computes the Q_N1 approximation (Order 1) from Giles and Beentjes (2024).
 
@@ -496,16 +490,16 @@ def _q_n1(
 
 
 def _q_n2(
-    u: Array,
-    n: Array,
-    p: Array,
-    q: Array,
-    w: Array,
-    w2: Array,
-    np_: Array,
-    sqrt_npq: Array,
-    pq: Array,
-) -> Array:
+    u: jax.Array,
+    n: jax.Array,
+    p: jax.Array,
+    q: jax.Array,
+    w: jax.Array,
+    w2: jax.Array,
+    np_: jax.Array,
+    sqrt_npq: jax.Array,
+    pq: jax.Array,
+) -> jax.Array:
     """
     Computes the Q_N2 approximation (Order 2) from Giles and Beentjes (2024).
 

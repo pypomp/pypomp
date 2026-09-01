@@ -9,7 +9,6 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
 from jax._src import dtypes
 
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
@@ -28,16 +27,16 @@ from .poisson import fast_poisson
     ],
 )
 def fast_nbinomial(
-    key: Array,
-    n: Array,
-    p: Array | None = None,
-    mu: Array | None = None,
+    key: jax.Array,
+    n: jax.Array,
+    p: jax.Array | None = None,
+    mu: jax.Array | None = None,
     dtype: np.dtype | None = None,
     gamma_newton_loops: int = 3,
     poisson_newton_loops: int = 5,
     poisson_inverse_cdf_loops: int = 20,
     gamma_adjustment_size: int = 3,
-) -> Array:
+) -> jax.Array:
     """Sample Negative Binomial random variates using a GPU-optimized algorithm.
 
     Draws from NB(n, p) (number of failures before ``n`` successes) via a
@@ -127,8 +126,8 @@ def fast_nbinomial(
         invalid = (n <= 0.0) | (mu < 0.0) | jnp.isnan(n) | jnp.isnan(mu)
         scale = mu / jnp.maximum(n, jnp.finfo(float_dtype).tiny)
 
-    safe_n: Array = jnp.where(invalid, 1.0, n)
-    safe_scale: Array = jnp.where(invalid, 1.0, scale)
+    safe_n: jax.Array = jnp.where(invalid, 1.0, n)
+    safe_scale: jax.Array = jnp.where(invalid, 1.0, scale)
 
     key_gamma, key_poisson = jax.random.split(key)
 
@@ -147,7 +146,7 @@ def fast_nbinomial(
         if dtypes.issubdtype(dtype, np.int64) or dtypes.issubdtype(dtype, np.float64)
         else jnp.int32
     )
-    x: Array = fast_poisson(
+    x: jax.Array = fast_poisson(
         key_poisson,
         lam,
         dtype=poisson_dtype,
@@ -157,10 +156,10 @@ def fast_nbinomial(
     x = jnp.where(lam == 0.0, 0, x)
 
     if dtypes.issubdtype(dtype, np.floating):
-        res: Array = x.astype(dtype)
+        res: jax.Array = x.astype(dtype)
         res = jnp.where(invalid, jnp.nan, res)
     else:
-        res: Array = x.astype(dtype)
+        res: jax.Array = x.astype(dtype)
         # For integer dtype, follow the convention of returning -1 for invalid inputs
         res = jnp.where(invalid, -1, res)
 

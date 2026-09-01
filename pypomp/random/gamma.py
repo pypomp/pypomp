@@ -11,7 +11,6 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
 from jax._src import dtypes
 from jax.scipy.special import ndtri
 
@@ -115,11 +114,11 @@ def fast_gamma(
 
 @partial(jax.jit, static_argnames=["dtype", "newton_steps"])
 def gammainv(
-    u: Array,
-    alpha: Array,
+    u: jax.Array,
+    alpha: jax.Array,
     dtype: np.dtype | None = None,
     newton_steps: int = 3,
-) -> Array:
+) -> jax.Array:
     """Compute the approximate inverse Gamma CDF using JAX primitives.
 
     Vectorised implementation following the asymptotic inversion method
@@ -240,7 +239,7 @@ _LAM_GUESS_COEFFS: tuple[float, ...] = (
 _LAM_GUESS_COEFFS_ARR = np.array(_LAM_GUESS_COEFFS, dtype=np.float64)
 
 
-def _solve_lambda_from_eta(eta: Array, dtype, newton_steps: int = 3) -> Array:
+def _solve_lambda_from_eta(eta: jax.Array, dtype, newton_steps: int = 3) -> jax.Array:
     """
     Inverts the relation 1/2 * eta^2 = lambda - 1 - ln(lambda) in log-space.
 
@@ -342,7 +341,9 @@ _E3_COEFFS_ARR = np.array(_E3_COEFFS, dtype=np.float64)
 _E4_COEFFS_ARR = np.array(_E4_COEFFS, dtype=np.float64)
 
 
-def _compute_epsilon(eta: Array, dtype) -> tuple[Array, Array, Array, Array]:
+def _compute_epsilon(
+    eta: jax.Array, dtype
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Computes epsilon_1 through epsilon_4 using Horner's method.
     """

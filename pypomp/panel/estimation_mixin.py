@@ -97,7 +97,7 @@ class PanelEstimationMixin(Base):
 
     def _dataframe_to_array_canonical(
         self, df: pd.DataFrame, param_names: list[str], column_name: str
-    ) -> jnp.ndarray:
+    ) -> jax.Array:
         ordered_values = [df.loc[name, column_name] for name in param_names]
         return jnp.array(ordered_values, dtype=float)
 
@@ -208,45 +208,45 @@ class PanelEstimationMixin(Base):
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: Literal[False] = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
     ) -> Base: ...
 
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Base:
         """Simulate latent states and observations from the panel model.
 
         Parameters
         ----------
-        key : jax.Array or None, optional
-            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        nsim : int, optional
+            Number of simulations to run per replicate.  Defaults to ``1``.
         theta : PanelParameters or None, optional
             Parameters to simulate from.  If ``None``, defaults to ``self.theta``.
         times : jax.Array or None, optional
             Times at which to simulate the model.  If ``None``, defaults to
             the times coordinate of the data.
-        nsim : int, optional
-            Number of simulations to run per replicate.  Defaults to ``1``.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
         as_pomp : bool, optional
             If ``True``, return a new ``PanelPomp`` object containing the
             simulated observations for the first parameter replicate and

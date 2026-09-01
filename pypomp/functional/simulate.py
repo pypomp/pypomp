@@ -7,10 +7,10 @@ from .structs import PompStruct
 
 def simulate(
     struct: PompStruct,
-    thetas_array: jax.Array,
     nsim: int,
-    keys: jax.Array,
+    thetas_array: jax.Array,
     times: jax.Array | None = None,
+    keys: jax.Array | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """Simulate latent states and observations from a POMP model struct.
 
@@ -26,15 +26,15 @@ def simulate(
     struct : PompStruct
         Compiled structural representation of the POMP model.  Obtain via
         :meth:`~pypomp.Pomp.to_struct`.
+    nsim : int
+        Number of independent simulation replicates.
     thetas_array : jax.Array
         Parameter array of shape ``(n_reps, n_params)`` on the natural
         scale.  Must be aligned with ``struct.param_names``.
-    nsim : int
-        Number of independent simulation replicates.
-    keys : jax.Array
-        Random keys of shape ``(n_reps, ...)``.
     times : jax.Array or None, optional
         Custom observation times.  Defaults to ``struct.times``.
+    keys : jax.Array or None, optional
+        Random keys of shape ``(n_reps, ...)``.
 
     Returns
     -------
@@ -54,6 +54,8 @@ def simulate(
     pypomp.Pomp.simulate : Object-oriented interface.
     align_params : Parameter alignment utility.
     """
+    if keys is None:
+        raise ValueError("keys must be provided to functional simulate.")
 
     _times = struct.times if times is None else times
     ydim = struct.ys.shape[1] if struct.ys is not None else 1

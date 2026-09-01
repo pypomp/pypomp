@@ -16,7 +16,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, lax
+from jax import lax
 from jax._src import dtypes
 from jax.scipy import special as jsp_special
 
@@ -27,12 +27,12 @@ from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dt
     jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
 )
 def fast_poisson(
-    key: Array,
-    lam: Array,
+    key: jax.Array,
+    lam: jax.Array,
     dtype: np.dtype | None = None,
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
-) -> Array:
+) -> jax.Array:
     """Sample Poisson random variates using a GPU-optimized inverse CDF algorithm.
 
     Generates Poisson-distributed integers with rate ``lam`` using an
@@ -133,12 +133,12 @@ def fast_poisson(
     jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
 )
 def poissoninv(
-    u: Array,
-    lam: Array,
+    u: jax.Array,
+    lam: jax.Array,
     dtype: np.dtype | None = None,
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
-) -> Array:
+) -> jax.Array:
     """Compute the approximate inverse Poisson CDF using JAX primitives.
 
     Vectorised implementation of the inverse CDF for the Poisson
@@ -226,7 +226,7 @@ def poissoninv(
     return res.astype(dtype)
 
 
-def _central_region(s: Array, lam: Array, dtype) -> Array:
+def _central_region(s: jax.Array, lam: jax.Array, dtype) -> jax.Array:
     # Cast coefficients to the working dtype
     rm_coeffs = _RM_COEFFS_ARR.astype(dtype)
     t_coeffs = _T_COEFFS_ARR.astype(dtype)
@@ -242,7 +242,9 @@ def _central_region(s: Array, lam: Array, dtype) -> Array:
     return jnp.floor(total)
 
 
-def _newton_region(s: Array, lam: Array, dtype, max_newton_loops: int) -> Array:
+def _newton_region(
+    s: jax.Array, lam: jax.Array, dtype, max_newton_loops: int
+) -> jax.Array:
     r = jnp.maximum(0.1, 1.0 + s)
     r_prev = r
     first = jnp.array(True, dtype=jnp.bool_)
@@ -279,7 +281,9 @@ def _newton_region(s: Array, lam: Array, dtype, max_newton_loops: int) -> Array:
     return jnp.floor(x)
 
 
-def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array:
+def _bottom_up(
+    u: jax.Array, lam: jax.Array, dtype, max_inverse_cdf_loops: int
+) -> jax.Array:
     lami = 1.0 / lam
 
     t0 = jnp.exp(0.5 * lam)
@@ -287,8 +291,8 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
     s0 = 1.0 - t0 * (u * t0) + del0
 
     def _find_quantile(
-        x_init: Array, s0: Array, del0: Array, lami: Array
-    ) -> tuple[Array, Array, Array]:
+        x_init: jax.Array, s0: jax.Array, del0: jax.Array, lami: jax.Array
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
 
         x = x_init
         s = s0
@@ -322,7 +326,7 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
     x_init = jnp.array(0.0, dtype=dtype)
     x, s, delta = _find_quantile(x_init, s0, del0, lami)
 
-    def _top_down_branch(state: tuple[Array, Array]) -> Array:
+    def _top_down_branch(state: tuple[jax.Array, jax.Array]) -> jax.Array:
         x_val, delta_val = state
         one = jnp.array(1.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
@@ -363,12 +367,12 @@ def _bottom_up(u: Array, lam: Array, dtype, max_inverse_cdf_loops: int) -> Array
 
 
 def _poissoninv_scalar(
-    u: Array,
-    lam: Array,
+    u: jax.Array,
+    lam: jax.Array,
     dtype,
     max_newton_loops: int = 5,
     max_inverse_cdf_loops: int = 20,
-) -> Array:
+) -> jax.Array:
     u = jnp.asarray(u, dtype=dtype)
     lam = jnp.asarray(lam, dtype=dtype)
 
@@ -380,13 +384,13 @@ def _poissoninv_scalar(
     lam_invalid = lam <= zero
     lam_safe = jnp.where(lam_invalid, one, lam)
 
-    def large_lambda_case(_: Any) -> Array:
+    def large_lambda_case(_: Any) -> jax.Array:
         s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
 
-        def central(_: Any) -> Array:
+        def central(_: Any) -> jax.Array:
             return _central_region(s, lam_safe, dtype)
 
-        def non_central(_: Any) -> Array:
+        def non_central(_: Any) -> jax.Array:
             return lax.cond(
                 s > -sqrt2,
                 lambda __: _newton_region(s, lam_safe, dtype, max_newton_loops),
@@ -405,18 +409,18 @@ def _poissoninv_scalar(
         )
 
     large_lambda = lam_safe > jnp.array(4.0, dtype=dtype)
-    x_large: Array = lax.cond(
+    x_large: jax.Array = lax.cond(
         large_lambda,
         large_lambda_case,
         lambda _: x0,
         operand=zero,
     )
 
-    def bottom_up_branch(_: Any) -> Array:
+    def bottom_up_branch(_: Any) -> jax.Array:
         return _bottom_up(u, lam_safe, dtype, max_inverse_cdf_loops)
 
     bottom_up = x_large <= jnp.array(10.0, dtype=dtype)
-    x: Array = lax.cond(
+    x: jax.Array = lax.cond(
         bottom_up,
         bottom_up_branch,
         lambda _: x_large,

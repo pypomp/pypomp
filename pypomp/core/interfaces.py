@@ -66,30 +66,30 @@ class PompInterface(Protocol):
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: Literal[False] = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
     ) -> Any: ...
 
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Any: ...
 

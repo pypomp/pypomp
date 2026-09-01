@@ -19,9 +19,9 @@ from pypomp.random.binom import fast_multinomial as fast_rmultinomial
 
 
 def _euler_multinomial_probs(
-    rates: jnp.ndarray,
+    rates: jax.Array,
     dt: float,
-) -> jnp.ndarray:
+) -> jax.Array:
     """
     Compute multinomial probabilities for an Euler CTMC step.
 

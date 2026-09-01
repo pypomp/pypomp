@@ -2,7 +2,6 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 import jax
-import jax.numpy as jnp
 
 from ..core.par_trans import ParTrans
 
@@ -17,17 +16,17 @@ class PompStruct(NamedTuple):
 
     Attributes
     ----------
-    ys : jnp.ndarray
+    ys : jax.Array
         Observation array of shape ``(n_times, n_obs)``.
-    dt_array_extended : jnp.ndarray
+    dt_array_extended : jax.Array
         Integration step sizes, extended to include the step from ``t0`` to ``t1``.
-    nstep_array : jnp.ndarray
+    nstep_array : jax.Array
         Number of integration steps per observation interval.
     t0 : float
         Initial time.
-    times : jnp.ndarray
+    times : jax.Array
         Observation times of shape ``(n_times,)``.
-    covars_extended : jnp.ndarray or None
+    covars_extended : jax.Array or None
         Covariate array interpolated onto the integration grid, or
         ``None`` if no covariates are used.
     accumvars : tuple of int or None
@@ -61,12 +60,12 @@ class PompStruct(NamedTuple):
     pypomp.Pomp.to_struct : Construct a PompStruct from a Pomp model.
     """
 
-    ys: jnp.ndarray
-    dt_array_extended: jnp.ndarray
-    nstep_array: jnp.ndarray
+    ys: jax.Array
+    dt_array_extended: jax.Array
+    nstep_array: jax.Array
     t0: float
-    times: jnp.ndarray
-    covars_extended: jnp.ndarray | None
+    times: jax.Array
+    covars_extended: jax.Array | None
     accumvars: tuple[int, ...] | None
     rinit_pf: Callable
     rproc_pf: Callable
@@ -162,12 +161,12 @@ class PanelPompStruct(NamedTuple):
     JAX algorithms for panel models (like panel_mif, panel_train) purely functionally.
     """
 
-    ys_per_unit: jnp.ndarray
-    dt_array_extended: jnp.ndarray
-    nstep_array: jnp.ndarray
+    ys_per_unit: jax.Array
+    dt_array_extended: jax.Array
+    nstep_array: jax.Array
     t0: float
-    times: jnp.ndarray
-    covars_per_unit: jnp.ndarray | None
+    times: jax.Array
+    covars_per_unit: jax.Array | None
     accumvars: tuple[int, ...] | None
     rinit_pf: Callable
     rproc_pf: Callable
@@ -180,7 +179,7 @@ class PanelPompStruct(NamedTuple):
     param_names: list[str]
     shared_param_names: list[str]
     unit_param_names: list[str]
-    unit_param_permutations: jnp.ndarray
+    unit_param_permutations: jax.Array
     unit_names: list[str]
 
 

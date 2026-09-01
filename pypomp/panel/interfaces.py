@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol, overload
 
 import jax
-import jax.numpy as jnp
 import pandas as pd
 
 from ..core.parameters import PanelParameters
@@ -32,7 +31,7 @@ class PanelPompInterface(Protocol):
     ) -> None: ...
     def _dataframe_to_array_canonical(
         self, df: pd.DataFrame, param_names: list[str], column_name: str
-    ) -> jnp.ndarray: ...
+    ) -> jax.Array: ...
 
     def get_unit_names(self) -> list[str]: ...
     def to_struct(self) -> PanelPompStruct: ...
@@ -40,30 +39,30 @@ class PanelPompInterface(Protocol):
     @overload
     def simulate(
         self,
-        key: jax.Array,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: Literal[False] = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
     @overload
     def simulate(
         self,
-        key: jax.Array,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
     ) -> Any: ...
 
     def simulate(
         self,
-        key: jax.Array,
+        nsim: int = 1,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Any: ...
 

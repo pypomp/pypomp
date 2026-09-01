@@ -115,10 +115,10 @@ def test_simulate_parity(lg):
     keys = jax.random.split(_derive_new_key(key), theta_array.shape[0])
     X_sims, Y_sims = F.simulate(
         model.to_struct(),
-        theta_array,
         nsim,
-        keys,
+        theta_array,
         times=jnp.array(model.ys.index),
+        keys=keys,
     )
 
     # _to_long flattens (n_theta, n_sim, n_time, n_feat) row-major, so the

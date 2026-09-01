@@ -1056,30 +1056,30 @@ class PompEstimationMixin(Base):
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: Literal[False] = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
     @overload
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
     ) -> Pomp: ...
 
     def simulate(
         self,
-        key: jax.Array | None = None,
+        nsim: int = 1,
         theta: PompParameters | None = None,
         times: jax.Array | None = None,
-        nsim: int = 1,
+        key: jax.Array | None = None,
         as_pomp: bool = False,
     ) -> tuple[pd.DataFrame, pd.DataFrame] | Pomp:
         """Simulate latent states and observations from the POMP model.
@@ -1091,16 +1091,16 @@ class PompEstimationMixin(Base):
 
         Parameters
         ----------
-        key : jax.Array or None, optional
-            JAX random key.  Defaults to :attr:`fresh_key`.
+        nsim : int, optional
+            Number of independent simulation replicates per parameter set.
+            Defaults to ``1``.
         theta : PompParameters or None, optional
             Parameter set(s) to simulate from.  Defaults to :attr:`theta`.
         times : jax.Array or None, optional
             Observation times at which to simulate.  Defaults to the
             original ``ys`` index.
-        nsim : int, optional
-            Number of independent simulation replicates per parameter set.
-            Defaults to ``1``.
+        key : jax.Array or None, optional
+            JAX random key.  Defaults to :attr:`fresh_key`.
         as_pomp : bool, optional
             If ``True``, return a deep copy of this model with its ``ys``
             replaced by one simulation from the first parameter set.
@@ -1151,10 +1151,10 @@ class PompEstimationMixin(Base):
         times_array = jnp.array(self.ys.index) if times is None else times
         X_sims_jax, Y_sims_jax = F.simulate(
             self.to_struct(),
-            thetas_array,
             nsim,
-            keys,
+            thetas_array,
             times=times_array,
+            keys=keys,
         )
         X_sims, Y_sims = jax.device_get((X_sims_jax, Y_sims_jax))
         del X_sims_jax, Y_sims_jax

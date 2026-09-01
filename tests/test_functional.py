@@ -138,7 +138,7 @@ def test_simulate_functional(model_setup):
     nsim = 3
     keys = jax.random.split(key, n_reps)
 
-    X_sims, Y_sims = F.simulate(struct, thetas_array, nsim, keys)
+    X_sims, Y_sims = F.simulate(struct, nsim, thetas_array, keys=keys)
 
     n_times = len(struct.times)
     n_states = X_sims.shape[-1]

@@ -9,7 +9,7 @@ def test_simulate_regression(lg_struct, tol, num_regression):
     keys = jax.random.split(key, n_reps)
     nsim = 1
 
-    X_sims, Y_sims = F.simulate(struct, theta0, nsim, keys)
+    X_sims, Y_sims = F.simulate(struct, nsim, theta0, keys=keys)
 
     num_regression.check(
         {

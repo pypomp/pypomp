@@ -10,7 +10,7 @@ import pypomp as pp
 @pytest.fixture(scope="module")
 def simple_setup():
     # Set default values for tests
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     a = 0.5
     sigmas = {name: 0.02 for name in LG.canonical_param_names}
     # The last parameter is deliberately left unperturbed;

@@ -276,8 +276,7 @@ def sir(
     R_0: float | None = None,
     t0: float = 0.0,
     times: np.ndarray | None = None,
-    seed: int = 329343545,
-    delta_t: float = 1 / 52 / 20,
+    key: jax.Array | None = None,
 ) -> Pomp:
     """Create a Pomp object for the SIR model with seasonal forcing.
     Supports DPOP through the logw state variable.
@@ -308,10 +307,8 @@ def sir(
         Initial time. Default is 0.0.
     times : np.ndarray or None, optional
         Observation times. Default is None (weekly times over 4 years).
-    seed : int, optional
-        Random seed. Default is 329343545.
-    delta_t : float, optional
-        Euler step size. Default is 1 / 52 / 20.
+    key : jax.Array or None, optional
+        JAX random key for data simulation. Uses jax.random.key(1) if None.
     """
     if R_0 is None:
         R_0 = 1.0 - S_0 - I_0
@@ -357,7 +354,8 @@ def sir(
         covars=covars,
     )
 
-    key = jax.random.key(seed)
+    if key is None:
+        key = jax.random.key(1)
     sim_pomp = sir_temp.simulate(key=key, nsim=1, as_pomp=True)
 
     return sim_pomp

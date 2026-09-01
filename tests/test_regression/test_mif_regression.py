@@ -19,7 +19,7 @@ def test_mif_regression(lg_struct, tol, num_regression):
     thetas_mif = jnp.repeat(theta0[:, jnp.newaxis, :], J, axis=1)
 
     logliks_M, thetas_traces_Md, _ = F.mif(
-        struct, thetas_mif, rw_sd, M=M, J=J, thresh=0.0, keys=keys, n_monitors=0
+        struct, thetas_mif, J, M, rw_sd, keys, thresh=0.0, n_monitors=0
     )
 
     num_regression.check(
@@ -46,11 +46,11 @@ def test_mif_full_trace_regression(lg_struct_multi, tol, num_regression):
     logliks_M, thetas_traces_Md, _ = F.mif(
         struct,
         thetas_mif,
+        J,
+        TRACE_M,
         rw_sd,
-        M=TRACE_M,
-        J=J,
+        keys,
         thresh=0.0,
-        keys=keys,
         n_monitors=1,
     )
 
@@ -76,7 +76,7 @@ def test_sir_mif_regression(sir_struct, tol, num_regression):
     thetas_mif = jnp.repeat(theta0[:, jnp.newaxis, :], J, axis=1)
 
     logliks_M, thetas_traces_Md, _ = F.mif(
-        struct, thetas_mif, rw_sd, M=2, J=J, thresh=0.0, keys=keys, n_monitors=1
+        struct, thetas_mif, J, 2, rw_sd, keys, thresh=0.0, n_monitors=1
     )
 
     num_regression.check(

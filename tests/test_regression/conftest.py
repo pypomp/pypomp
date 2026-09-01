@@ -22,7 +22,7 @@ import pypomp as pp
 @pytest.fixture(scope="module")
 def lg_struct():
     """(struct, theta0, key, J, n_reps, param_names) for a 1-D LG model."""
-    model = pp.models.LG(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
+    model = pp.models.lg(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
     struct = model.to_struct()
     param_names = model.canonical_param_names
     theta0 = model.theta.to_jax_array(param_names)
@@ -35,7 +35,7 @@ def lg_struct():
 @pytest.fixture(scope="module")
 def lg_struct_multi():
     """(struct, thetas, key, J, n_reps, param_names) with two distinct thetas."""
-    model = pp.models.LG(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
+    model = pp.models.lg(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
     struct = model.to_struct()
     param_names = model.canonical_param_names
     theta0 = model.theta.to_jax_array(param_names)
@@ -52,7 +52,7 @@ def sir_struct():
     Non-Gaussian and discrete-valued, with accumulator variables that reset at
     every observation time.
     """
-    model = pp.models.sir(times=np.arange(1, 6) / 52.0, seed=11)
+    model = pp.models.sir(times=np.arange(1, 6) / 52.0, key=jax.random.key(11))
     struct = model.to_struct()
     param_names = model.canonical_param_names
     theta0 = model.theta.to_jax_array(param_names)
@@ -62,8 +62,8 @@ def sir_struct():
 @pytest.fixture(scope="module")
 def lg_panel_struct():
     """(struct, shared0, unit0, shared_names, unit_names, key, J, n_reps)."""
-    lg1 = pp.models.LG(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
-    lg2 = pp.models.LG(A=np.array([[0.9]]), T=4, key=jax.random.key(1))
+    lg1 = pp.models.lg(A=np.array([[0.9]]), T=4, key=jax.random.key(0))
+    lg2 = pp.models.lg(A=np.array([[0.9]]), T=4, key=jax.random.key(1))
     lg1.par_trans = pp.ParTrans()
     lg2.par_trans = pp.ParTrans()
 
@@ -86,7 +86,7 @@ def lg_panel_struct():
     )
 
     panel = pp.PanelPomp(
-        Pomp_dict={"unit1": lg1, "unit2": lg2},
+        pomp_dict={"unit1": lg1, "unit2": lg2},
         theta=pp.PanelParameters(
             [{"shared": shared_params, "unit_specific": unit_specific_params}]
         ),

@@ -12,7 +12,7 @@ from tests.helpers.assertions import pickle_roundtrip
 
 @pytest.fixture(scope="module")
 def setup_module():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names},
         init_names=[],
@@ -257,7 +257,7 @@ def test_diagnostics(neapolitan_setup):
 
 def test_merge(setup):
     p = setup
-    LG1, LG2 = pp.models.LG(), pp.models.LG()
+    LG1, LG2 = pp.models.lg(), pp.models.lg()
     k1, k2 = jax.random.split(p["key"])
 
     for obj, k in [(LG1, k1), (LG2, k2)]:

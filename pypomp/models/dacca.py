@@ -435,7 +435,7 @@ def _from_est(theta: ParamDict) -> ParamDict:
 def dhaka(
     dt: float | None = 1 / 240,
     nstep: int | None = None,
-    gamma: bool = False,
+    gamma_noise: bool = False,
 ) -> Pomp:
     """
     Creates a POMP model for the Dhaka cholera data.
@@ -452,7 +452,7 @@ def dhaka(
     nstep : int, optional
         Number of sub-steps per observation interval for the process model.
         If None, uses Euler discretization with the specified step size. nstep and dt cannot both be not None.
-    gamma : bool, optional
+    gamma_noise : bool, optional
         Indicator for whether gamma white noise should be used in place of Gaussian noise.
         This corresponds to a large-population approximation of an overdispersed death process.
 
@@ -497,15 +497,10 @@ def dhaka(
        (2008): 877–880. https://doi.org/10.1038/nature07084.
     """
 
-    if gamma:
+    if gamma_noise:
         rproc_func = _rproc_gamma
     else:
         rproc_func = _rproc
-
-    if gamma:
-        print(
-            "Warning: Using overdispersed gamma white noise. Ensure this is intended behavior."
-        )
 
     if nstep is not None and dt is not None:
         raise ValueError("Cannot specify both dt and nstep")

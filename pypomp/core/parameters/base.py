@@ -69,7 +69,7 @@ class ParameterSet(ABC):
         return len(self.get_param_names())
 
     def get_param_names(self) -> list[str]:
-        """Return the list of parameter names contained in this set."""
+        """Return the list of parameter names contained in this set in canonical insertion order."""
         shared = (
             list(self._data["shared"].coords["parameter"].values)
             if "shared" in self._data
@@ -80,7 +80,7 @@ class ParameterSet(ABC):
             if "unit_specific" in self._data
             else []
         )
-        return sorted(set(shared + unit_spec))
+        return list(dict.fromkeys(shared + unit_spec))
 
     def __len__(self) -> int:
         """Return the number of parameter sets/replicates."""

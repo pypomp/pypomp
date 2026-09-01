@@ -20,11 +20,11 @@ def test_panel_mif_regression(lg_panel_struct, tol, num_regression):
         struct,
         shared_mif,
         unit_mif,
+        J,
+        M,
         rw_sd,
-        M=M,
-        J=J,
+        keys,
         thresh=0.0,
-        keys=keys,
         n_monitors=0,
     )
 

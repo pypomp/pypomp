@@ -40,10 +40,10 @@ def test_sir_pfilter(sir_default):
 
 
 def test_sir_construct_explicit_args():
-    # Passing R_0 and times explicitly exercises the non-default branches
+    # Passing R_0, times, and key explicitly exercises non-default branches
     # in the constructor.
     times = np.linspace(0.05, 0.4, 8)
-    sir = pp.models.sir(R_0=0.5, times=times, t0=0.0)
+    sir = pp.models.sir(R_0=0.5, times=times, t0=0.0, key=jax.random.key(123))
     assert isinstance(sir, pp.Pomp)
     assert len(sir.ys) == len(times)
 

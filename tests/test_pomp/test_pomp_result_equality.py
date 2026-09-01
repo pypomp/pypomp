@@ -11,7 +11,7 @@ from pypomp.core.results import Result
 
 @pytest.fixture(scope="module")
 def lg_with_mif_result():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names}, init_names=[]
     ).geometric_cooling(0.5)
@@ -24,7 +24,7 @@ def lg_with_mif_result():
 
 @pytest.fixture(scope="module")
 def lg_with_train_result():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     eta = pp.LearningRate({n: 0.01 for n in LG.canonical_param_names})
     LG.train(J=2, M=2, eta=eta, optimizer=pp.SGD(), key=jax.random.key(0))
     res = LG.results_history[-1]

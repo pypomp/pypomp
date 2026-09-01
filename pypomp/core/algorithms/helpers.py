@@ -590,10 +590,10 @@ def run_jax_batch_sharded(
         >>> import jax
         >>> import pypomp as pp
         >>>
-        >>> LG = pp.models.LG()
+        >>> model = pp.models.lg()
         >>> # If we run 10 replicates, run_jax_batch_sharded executes them in parallel
         >>> # batches of 4 (i.e., batches of [4, 4, 4] where the last 2 replicates are padded).
-        >>> LG.pfilter(J=1000, reps=10)
+        >>> model.pfilter(J=1000, reps=10)
 
         **Example 2: Direct call to run_jax_batch_sharded**
         We can run a custom sharded function across devices. Here is a simple example using 4 CPU cores:

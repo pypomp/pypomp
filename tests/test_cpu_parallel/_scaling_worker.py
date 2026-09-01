@@ -21,7 +21,7 @@ def _configure_devices(devices: int) -> None:
 def _build_pomp_worker(cfg: dict):
     import pypomp as pp
 
-    model = pp.models.LG(T=cfg["T"])
+    model = pp.models.lg(T=cfg["T"])
     base = dict(model.theta[0])
     theta = pp.PompParameters(
         [
@@ -37,7 +37,7 @@ def _build_panel_worker(cfg: dict):
 
     import pypomp as pp
 
-    units = {f"unit{i + 1}": pp.models.LG(T=cfg["T"]) for i in range(cfg["n_units"])}
+    units = {f"unit{i + 1}": pp.models.lg(T=cfg["T"]) for i in range(cfg["n_units"])}
     pnames = next(iter(units.values())).canonical_param_names
     base_df = pd.DataFrame(
         {name: [u.theta[0][p] for p in pnames] for name, u in units.items()},
@@ -49,7 +49,7 @@ def _build_panel_worker(cfg: dict):
             for i in range(cfg["n_param_sets"])
         ]
     )
-    model = pp.PanelPomp(Pomp_dict=units, theta=theta)
+    model = pp.PanelPomp(pomp_dict=units, theta=theta)
     return model, theta
 
 

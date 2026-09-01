@@ -254,7 +254,9 @@ class PanelParameters(ParameterSet):
         )
         self._logLik = self._logLik_unit.sum(axis=1)
         self._canonical_param_names = list(
-            set(self._canonical_shared_param_names + self._canonical_unit_param_names)
+            dict.fromkeys(
+                self._canonical_shared_param_names + self._canonical_unit_param_names
+            )
         )
 
     @staticmethod

@@ -40,7 +40,7 @@ def london():
     theta = BASE_THETA.copy()
     del theta["mu"]
     del theta["alpha"]
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(theta),
         clean=True,
@@ -77,7 +77,7 @@ def default_rw_sd():
 @pytest.fixture(scope="function")
 def london_003():
     theta = BASE_THETA.copy()
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(theta),
         model="003",
@@ -113,7 +113,7 @@ def london_003():
 )
 def test_other_models(model, theta):
     key = jax.random.key(0)
-    mod_obj = pp.models.UKMeasles.Pomp(
+    mod_obj = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(theta),
         model=model,
@@ -201,7 +201,7 @@ def test_measles_invalid_interp_method():
     del theta["mu"]
     del theta["alpha"]
     with pytest.raises(ValueError, match="interp_method invalid_method not recognized"):
-        pp.models.UKMeasles.Pomp(
+        pp.models.UKMeasles.pomp(
             unit="London",
             theta=pp.PompParameters(theta),
             interp_method="invalid_method",  # type: ignore
@@ -223,7 +223,7 @@ def test_measles_covariates_r_alignment():
     del theta["alpha"]
 
     for unit in ["London", "Halesworth"]:
-        measles = pp.models.UKMeasles.Pomp(
+        measles = pp.models.UKMeasles.pomp(
             unit=unit,
             theta=pp.PompParameters(theta),
             clean=True,
@@ -265,7 +265,7 @@ def test_measles_panel_pomp():
     unit_specific = AK_mles[["London", "Hastings"]]
     theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
 
-    panel = pp.models.UKMeasles.PanelPomp(
+    panel = pp.models.UKMeasles.panel_pomp(
         units=["London", "Hastings"],
         theta=theta,
         clean=True,
@@ -346,7 +346,7 @@ def test_measles_linear_interp_method():
     theta = BASE_THETA.copy()
     del theta["mu"]
     del theta["alpha"]
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(theta),
         clean=True,
@@ -368,7 +368,7 @@ def test_measles_pomp_missing_params():
     del theta["mu"]
     del theta["alpha"]
     with pytest.raises(ValueError, match="Missing required parameters"):
-        pp.models.UKMeasles.Pomp(
+        pp.models.UKMeasles.pomp(
             unit="London",
             theta=pp.PompParameters(theta),
             model="002",
@@ -378,7 +378,7 @@ def test_measles_pomp_missing_params():
 def test_measles_panelpomp_theta_type_error():
     """PanelPomp should reject a theta that isn't a PanelParameters instance."""
     with pytest.raises(TypeError, match="theta must be a PanelParameters instance"):
-        pp.models.UKMeasles.PanelPomp(
+        pp.models.UKMeasles.panel_pomp(
             units=["London"],
             theta={"shared": None, "unit_specific": None},  # type: ignore
         )
@@ -392,7 +392,7 @@ def test_measles_panelpomp_missing_params():
     theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
 
     with pytest.raises(ValueError, match="Missing required parameters for unit"):
-        pp.models.UKMeasles.PanelPomp(
+        pp.models.UKMeasles.panel_pomp(
             units=["London"],
             theta=theta,
             model="002",
@@ -422,7 +422,7 @@ def test_measles_panelpomp_shared_params():
         theta=[{"shared": shared_df, "unit_specific": specific_df}]
     )
 
-    panel = pp.models.UKMeasles.PanelPomp(
+    panel = pp.models.UKMeasles.panel_pomp(
         units=["London", "Hastings"],
         theta=panel_theta,
         clean=True,
@@ -441,7 +441,7 @@ def test_measles_panelpomp_single_unit_std_fallback():
     unit_specific = AK_mles[["London"]]
     theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
 
-    panel = pp.models.UKMeasles.PanelPomp(
+    panel = pp.models.UKMeasles.panel_pomp(
         units=["London"],
         theta=theta,
         clean=True,
@@ -468,7 +468,7 @@ def test_measles_panelpomp_zero_std_fallback(monkeypatch):
     unit_specific = AK_mles[["London", "Hastings"]]
     theta = pp.PanelParameters(theta=[{"shared": None, "unit_specific": unit_specific}])
 
-    panel = pp.models.UKMeasles.PanelPomp(
+    panel = pp.models.UKMeasles.panel_pomp(
         units=["London", "Hastings"],
         theta=theta,
         clean=True,
@@ -529,7 +529,7 @@ def test_measles_log_pop_1950_fallback(monkeypatch):
     del theta["mu"]
     del theta["alpha"]
 
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="TestTown",
         theta=pp.PompParameters(theta),
         model="001b",

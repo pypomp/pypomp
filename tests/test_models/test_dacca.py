@@ -115,7 +115,7 @@ def test_dhaka_alias():
 
 def test_dacca_gamma_noise():
     """Verify that using gamma process noise works and runs basic pfilter."""
-    dacca_gamma = pp.models.dacca(gamma=True)
+    dacca_gamma = pp.models.dacca(gamma_noise=True)
     assert dacca_gamma.rproc.original_func.__name__ == "_rproc_gamma"
     dacca_gamma.pfilter(J=5, key=jax.random.key(1))
     logLiks = dacca_gamma.results_history[-1].logLiks  # type: ignore
@@ -242,6 +242,6 @@ def test_dacca_vectorized():
     m_vec.pfilter(J=3, key=jax.random.key(1))
 
     # Gamma noise mode is scalar
-    m_gamma = pp.models.dacca(gamma=True)
+    m_gamma = pp.models.dacca(gamma_noise=True)
     assert m_gamma.rproc._is_vectorized is False
     m_gamma.pfilter(J=3, key=jax.random.key(1))

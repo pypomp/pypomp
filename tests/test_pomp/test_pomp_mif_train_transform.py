@@ -16,7 +16,7 @@ from pypomp.types import ParamDict
 def simple_pomp_with_transform():
     """Create a simple POMP model with parameter transformation."""
     # Simple linear Gaussian model
-    LG = pp.models.LG()
+    LG = pp.models.lg()
 
     # Define transformations that log-transform positive parameters
     def to_est(theta: ParamDict) -> ParamDict:

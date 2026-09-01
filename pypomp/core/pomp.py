@@ -99,12 +99,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     covars : pd.DataFrame or None, optional
         Time-varying covariate data frame.  The index must contain numeric
         covariate times.  Interpolated to the integration grid at runtime.
-    validate_logic : bool, optional
-        Whether to validate model component function signatures and logic
-        at construction time.  Defaults to ``True``.
     order : str, optional
         Covariate interpolation method: ``"linear"`` (default) or
         ``"constant"`` (left-step).
+    validate_logic : bool, optional
+        Whether to validate model component function signatures and logic
+        at construction time.  Defaults to ``True``.
 
     Examples
     --------
@@ -217,8 +217,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         dt: float | None = None,
         accumvars: tuple[str, ...] | list[str] | None = None,
         covars: pd.DataFrame | None = None,
-        validate_logic: bool = True,
         order: str = "linear",
+        validate_logic: bool = True,
     ):
         if not isinstance(ys, pd.DataFrame):
             raise TypeError("ys must be a pandas DataFrame")
@@ -238,13 +238,15 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 "statenames must be provided as a list of state variable names"
             )
 
-        if not isinstance(statenames, list) or not all(
+        if not isinstance(statenames, (list, tuple)) or not all(
             isinstance(name, str) for name in statenames
         ):
             raise ValueError("statenames must be a tuple or list of strings")
 
         if accumvars is not None:
-            if not all(isinstance(name, str) for name in accumvars):
+            if not isinstance(accumvars, (list, tuple)) or not all(
+                isinstance(name, str) for name in accumvars
+            ):
                 raise ValueError("accumvars must be a tuple or list of strings")
             if not all(name in statenames for name in accumvars):
                 raise ValueError("all accumvars must be in statenames")

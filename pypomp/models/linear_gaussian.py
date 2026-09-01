@@ -9,7 +9,7 @@ The model is
     Y_t    &\\sim N(C X_t, R)
 
 for a state of dimension ``dx`` and an observation of dimension ``dy``. Both
-dimensions are inferred from the shapes of the arrays passed to :func:`LG`, so
+dimensions are inferred from the shapes of the arrays passed to :func:`lg`, so
 1-D, 2-D, or higher-dimensional variants are all available from the same
 constructor.
 
@@ -334,7 +334,7 @@ def _infer_dims(
     return dx, dy
 
 
-def LG(
+def lg(
     T: int = 4,
     A: np.ndarray | None = None,
     C: np.ndarray | None = None,
@@ -374,7 +374,7 @@ def LG(
         These values enter ``theta`` as ``X0_1 ... X0_{dx}`` and so are
         estimable.
     key : jax.Array, optional
-        The random key used to generate the data.
+        The random key used to generate the data. Uses jax.random.key(1) if None.
 
     Returns
     -------
@@ -383,10 +383,10 @@ def LG(
 
     Examples
     --------
-    >>> LG()                                  # 2-D state, 2-D observation
-    >>> LG(A=np.array([[0.9]]))               # 1-D
-    >>> LG(A=np.eye(3), C=np.eye(2, 3))       # 3-D state, 2-D observation
-    >>> LG(X0=np.array([5.0, -5.0]))          # start away from the origin
+    >>> lg()                                  # 2-D state, 2-D observation
+    >>> lg(A=np.array([[0.9]]))               # 1-D
+    >>> lg(A=np.eye(3), C=np.eye(2, 3))       # 3-D state, 2-D observation
+    >>> lg(X0=np.array([5.0, -5.0]))          # start away from the origin
     """
     if key is None:
         key = jax.random.key(1)
@@ -431,7 +431,7 @@ def LG(
 
     from pypomp.core.parameters import PompParameters
 
-    LG_obj_temp = Pomp(
+    lg_obj_temp = Pomp(
         rinit=_rinit,
         rproc=_rproc,
         dmeas=_dmeas,
@@ -445,7 +445,7 @@ def LG(
         statenames=_statenames(dx),
         par_trans=ParTrans(to_est=_to_est, from_est=_from_est),
     )
-    LG_obj = LG_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
-    assert isinstance(LG_obj, Pomp)
+    lg_obj = lg_obj_temp.simulate(key=key, nsim=1, as_pomp=True)
+    assert isinstance(lg_obj, Pomp)
 
-    return LG_obj
+    return lg_obj

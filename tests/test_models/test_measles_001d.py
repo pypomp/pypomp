@@ -30,7 +30,7 @@ DEFAULT_KEY = jax.random.key(1)
 
 @pytest.fixture(scope="module")
 def london_001d():
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(BASE_THETA_001D.copy()),
         clean=True,

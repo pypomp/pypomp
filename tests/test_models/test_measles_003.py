@@ -201,7 +201,7 @@ def london_003():
     import pypomp as pp
 
     theta = BASE_THETA_003.copy()
-    measles = pp.models.UKMeasles.Pomp(
+    measles = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(theta),
         model="003",

@@ -208,7 +208,7 @@ class PanelEstimationMixin(Base):
     @overload
     def simulate(
         self,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
@@ -218,7 +218,7 @@ class PanelEstimationMixin(Base):
     @overload
     def simulate(
         self,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
@@ -228,7 +228,7 @@ class PanelEstimationMixin(Base):
 
     def simulate(
         self,
-        key: jax.Array,
+        key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         times: jax.Array | None = None,
         nsim: int = 1,
@@ -238,8 +238,8 @@ class PanelEstimationMixin(Base):
 
         Parameters
         ----------
-        key : jax.Array
-            JAX random key.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
         theta : PanelParameters or None, optional
             Parameters to simulate from.  If ``None``, defaults to ``self.theta``.
         times : jax.Array or None, optional
@@ -269,6 +269,7 @@ class PanelEstimationMixin(Base):
             nsim = 1
 
         theta = self._prepare_theta_input(theta)
+        active_key, _ = self._update_fresh_key(key)
 
         X_sims_list = []
         Y_sims_list = []
@@ -278,7 +279,7 @@ class PanelEstimationMixin(Base):
             from ..core.parameters import PompParameters
 
             theta_obj = PompParameters(theta_list)
-            key, subkey = jax.random.split(key)
+            active_key, subkey = jax.random.split(active_key)
             result = obj.simulate(
                 key=subkey,
                 theta=theta_obj,
@@ -293,28 +294,28 @@ class PanelEstimationMixin(Base):
                 new_unit_objects[unit] = result
             else:
                 assert isinstance(result, tuple)
-                X_sims, Y_sims = result
-                X_sims.insert(0, "unit", unit)
-                Y_sims.insert(0, "unit", unit)
-                X_sims_list.append(X_sims)
-                Y_sims_list.append(Y_sims)
+                x_df, y_df = result
+                x_df.insert(0, "unit", unit)
+                y_df.insert(0, "unit", unit)
+                X_sims_list.append(x_df)
+                Y_sims_list.append(y_df)
 
         if as_pomp:
-            panel_copy = deepcopy(self)
-            panel_copy.unit_objects = new_unit_objects
-            panel_copy.theta = theta.subset([0])
-            return panel_copy
+            new_model = deepcopy(self)
+            new_model.unit_objects = new_unit_objects
+            new_model.theta = theta.subset([0])
+            return new_model
 
-        X_sims_long = pd.concat(X_sims_list)
-        Y_sims_long = pd.concat(Y_sims_list)
+        X_sims_long = pd.concat(X_sims_list, ignore_index=True)
+        Y_sims_long = pd.concat(Y_sims_list, ignore_index=True)
 
         return X_sims_long, Y_sims_long
 
     def probe(
         self,
         probes: dict[str, Callable[[dict[str, jax.Array]], float]],
-        key: jax.Array,
         nsim: int = 100,
+        key: jax.Array | None = None,
         theta: PanelParameters | None = None,
     ) -> pd.DataFrame:
         """Evaluate probe statistics on real and simulated data for each unit.
@@ -326,10 +327,10 @@ class PanelEstimationMixin(Base):
             take a dict mapping each observation name to a ``(n_obs,)`` JAX
             array of observations for a single unit and return a scalar
             float, e.g. ``{"mean": lambda y: jnp.mean(y["cases"])}``.
-        key : jax.Array
-            JAX random key.
         nsim : int, optional
             Number of simulations to run per replicate.  Defaults to ``100``.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
         theta : PanelParameters or None, optional
             Parameters to simulate from.  If ``None``, defaults to ``self.theta``.
 
@@ -604,6 +605,7 @@ class PanelEstimationMixin(Base):
         thresh: float = 0.0,
         n_monitors: int = 0,
         block: bool = True,
+        track_time: bool = True,
     ) -> None:
         """Estimate parameters using the (Marginalized) Panel Iterated Filtering (MPIF/PIF) algorithm.
 
@@ -630,6 +632,9 @@ class PanelEstimationMixin(Base):
         block : bool, optional
             Whether to use block updates (MPIF).  If ``False``, uses standard PIF.
             Defaults to ``True``.
+        track_time : bool, optional
+            Whether to record wall-clock execution time.  Defaults to
+            ``True``.
 
         Returns
         -------
@@ -693,13 +698,13 @@ class PanelEstimationMixin(Base):
             struct,
             shared_array,
             unit_array,
-            rw_sd,
-            M,
             J,
+            M,
+            rw_sd,
             keys,
             thresh,
-            n_monitors,
             block,
+            n_monitors,
         )
 
         shared_traces = (
@@ -747,8 +752,13 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
+        if track_time is True:
+            execution_time = time.time() - start_time
+        else:
+            execution_time = None
+
         result = build_panel_mif_result(
-            execution_time=time.time() - start_time,
+            execution_time=execution_time,
             key=old_key,
             theta=theta_for_result,
             shared_traces=shared_da,
@@ -777,12 +787,13 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate,
-        chunk_size: int = 1,
-        optimizer: Optimizer | None = None,
-        alpha: float = 0.97,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
+        optimizer: Optimizer | None = None,
+        alpha: float = 0.97,
         alpha_cooling: float = 1.0,
+        chunk_size: int = 1,
+        track_time: bool = True,
     ) -> None:
         """Estimate parameters using MOP-based gradient-descent optimization.
 
@@ -815,20 +826,23 @@ class PanelEstimationMixin(Base):
             Number of training iterations (gradient steps).
         eta : LearningRate
             Learning rates per parameter.
-        chunk_size : int, optional
-            Number of units to process in parallel per gradient step.  Defaults
-            to ``1``.
-        optimizer : Optimizer, optional
-            Optimizer configuration object.  Defaults to ``Adam()``.
-        alpha : float, optional
-            MOP discount factor.  Defaults to ``0.97``.
         key : jax.Array or None, optional
             JAX random key.  If ``None``, uses the model's ``fresh_key``.
         theta : PanelParameters or None, optional
             Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
+        optimizer : Optimizer, optional
+            Optimizer configuration object.  Defaults to ``Adam()``.
+        alpha : float, optional
+            MOP discount factor.  Defaults to ``0.97``.
         alpha_cooling : float, optional
             Cooling factor for the MOP discount factor ``alpha`` using cosine decay.
             Defaults to ``1.0``.
+        chunk_size : int, optional
+            Number of units to process in parallel per gradient step.  Defaults
+            to ``1``.
+        track_time : bool, optional
+            Whether to record wall-clock execution time.  Defaults to
+            ``True``.
 
         Returns
         -------
@@ -894,17 +908,17 @@ class PanelEstimationMixin(Base):
             unit_history_natural,
         ) = run_jax_batch_sharded(
             F.panel_train,
-            {1: 0, 2: 0, 8: 0},
+            {1: 0, 2: 0, 6: 0},
             [0, 0, 0],
             struct,
             shared_array,
             unit_array,
             J,
-            optimizer,
             M,
             eta,
-            alpha,
             keys,
+            optimizer,
+            alpha,
             alpha_cooling,
             chunk_size,
         )
@@ -969,7 +983,7 @@ class PanelEstimationMixin(Base):
         )
 
         result = build_panel_train_result(
-            execution_time=time.time() - start_time,
+            execution_time=time.time() - start_time if track_time else np.nan,
             key=old_key,
             theta=theta_for_result,
             shared_traces=shared_da,

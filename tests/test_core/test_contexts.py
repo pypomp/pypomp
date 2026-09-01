@@ -11,6 +11,7 @@ directly instead, since they are a real internal safety net worth having
 correct even if nothing currently reaches them.
 """
 
+import jax
 import jax.numpy as jnp
 import pytest
 
@@ -19,21 +20,21 @@ from pypomp.core.algorithms.contexts import AbcContext, ModelFns, PmcmcContext
 
 
 def test_modelfns_pf_requires_dmeas_pf():
-    pomp = pp.models.sir(seed=42)
+    pomp = pp.models.sir(key=jax.random.key(12345))
     struct = pomp.to_struct()._replace(dmeas_pf=None)
     with pytest.raises(ValueError, match="dmeasure \\(dmeas_pf\\) is required"):
         ModelFns.pf(struct)
 
 
 def test_modelfns_per_requires_dmeas_per():
-    pomp = pp.models.sir(seed=42)
+    pomp = pp.models.sir(key=jax.random.key(12345))
     struct = pomp.to_struct()._replace(dmeas_per=None)
     with pytest.raises(ValueError, match="dmeasure \\(dmeas_per\\) is required"):
         ModelFns.per(struct)
 
 
 def test_abccontext_requires_rmeas_pf():
-    pomp = pp.models.sir(seed=42)
+    pomp = pp.models.sir(key=jax.random.key(12345))
     struct = pomp.to_struct()._replace(rmeas_pf=None)
     with pytest.raises(ValueError, match="abc requires struct.rmeas_pf"):
         AbcContext.from_struct(
@@ -46,7 +47,7 @@ def test_abccontext_requires_rmeas_pf():
 
 
 def test_abccontext_requires_dprior():
-    pomp = pp.models.sir(seed=42)
+    pomp = pp.models.sir(key=jax.random.key(12345))
     struct = pomp.to_struct()
     assert struct.dprior_pf is None
     with pytest.raises(ValueError, match="dprior is required for ABC"):
@@ -61,7 +62,7 @@ def test_abccontext_requires_dprior():
 
 
 def test_pmcmccontext_requires_dprior():
-    pomp = pp.models.sir(seed=42)
+    pomp = pp.models.sir(key=jax.random.key(12345))
     struct = pomp.to_struct()
     assert struct.dprior_pf is None
     with pytest.raises(ValueError, match="dprior is required for PMCMC"):

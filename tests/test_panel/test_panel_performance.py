@@ -66,7 +66,7 @@ def test_performance_comprehensive():
 
     # Create panel
     panel = pp.PanelPomp(
-        Pomp_dict=pomp_objects,
+        pomp_dict=pomp_objects,
         theta=pp.PanelParameters(
             [{"shared": shared_params, "unit_specific": unit_specific_params}]
         ),

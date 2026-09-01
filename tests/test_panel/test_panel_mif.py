@@ -181,7 +181,7 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     )
 
     panel_shared = pp.PanelPomp(
-        Pomp_dict={"London": london},
+        pomp_dict={"London": london},
         theta=pp.PanelParameters({"shared": shared_df, "unit_specific": specific_df}),
     )
 
@@ -193,7 +193,7 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     )
 
     panel_specific = pp.PanelPomp(
-        Pomp_dict={"London": london},
+        pomp_dict={"London": london},
         theta=pp.PanelParameters({"shared": None, "unit_specific": all_specific_df}),
     )
 

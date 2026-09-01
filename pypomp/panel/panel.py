@@ -27,7 +27,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
     Parameters
     ----------
-    Pomp_dict : dict of str to Pomp
+    pomp_dict : dict of str to Pomp
         Mapping from unit names to :class:`~pypomp.Pomp` objects.
     theta : PanelParameters
         A :class:`~pypomp.core.parameters.PanelParameters` object containing
@@ -54,14 +54,14 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
     def __init__(
         self,
-        Pomp_dict: dict[str, Pomp],
+        pomp_dict: dict[str, Pomp],
         theta: PanelParameters,
     ):
         if not isinstance(theta, PanelParameters):
             raise TypeError("theta must be a PanelParameters instance")
         self._theta = theta
 
-        self.unit_objects = Pomp_dict
+        self.unit_objects = pomp_dict
         self.results_history = ResultsHistory()
         self.fresh_key = None
         self.metadata = ModelMetadata()

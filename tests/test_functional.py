@@ -13,7 +13,7 @@ from tests.helpers.params import uniform_rw_sd
 
 @pytest.fixture(scope="function")
 def model_setup():
-    model = pp.models.LG()
+    model = pp.models.lg()
     struct = model.to_struct()
     key = jax.random.key(1)
     J = 5
@@ -92,12 +92,12 @@ def test_train_functional(model_setup):
         struct,
         thetas_array,
         J,
+        M,
+        eta,
+        keys,
         optimizer=pp.Adam(scale=False, ls=False, c=0.0, max_ls_itn=1),
-        M=M,
-        eta=eta,
         thresh=0.0,
         alpha=0.0,
-        keys=keys,
         alpha_cooling=1.0,
         n_monitors=1,
     )
@@ -120,11 +120,11 @@ def test_mif_functional(model_setup):
     logliks_M, thetas_traces_Md, final_theta_Jd = F.mif(
         struct,
         thetas_mif,
+        J,
+        M,
         rw_sd,
-        M=M,
-        J=J,
+        keys,
         thresh=0.0,
-        keys=keys,
         n_monitors=0,
     )
 
@@ -160,7 +160,7 @@ def panel_setup():
         unit_scales=[0.8, 1.2],
         par_trans=pp.ParTrans(),
     )
-    theta_base = pp.models.LG().theta.params(as_list=True)[0]
+    theta_base = pp.models.lg().theta.params(as_list=True)[0]
 
     struct = panel.to_struct()
 
@@ -220,11 +220,11 @@ def test_panel_mif_functional(panel_setup):
         struct,
         shared_mif,
         unit_mif,
+        J,
+        M,
         rw_sd,
-        M=M,
-        J=J,
+        keys,
         thresh=0.0,
-        keys=keys,
         n_monitors=0,
     )
 
@@ -248,12 +248,12 @@ def test_panel_train_functional(panel_setup):
         struct,
         shared_array,
         unit_array,
-        J=J,
+        J,
+        M,
+        eta,
+        keys,
         optimizer=pp.Adam(),
-        M=M,
-        eta=eta,
         alpha=0.97,
-        keys=keys,
         alpha_cooling=1.0,
         chunk_size=1,
     )
@@ -277,12 +277,12 @@ def test_panel_train_functional_unsupported_optimizer(panel_setup):
             struct,
             shared_array,
             unit_array,
-            J=J,
+            J,
+            M,
+            eta,
+            keys,
             optimizer=pp.Newton(),
-            M=M,
-            eta=eta,
             alpha=0.97,
-            keys=keys,
             alpha_cooling=1.0,
             chunk_size=1,
         )
@@ -301,12 +301,12 @@ def test_panel_train_functional_scale_and_clip(panel_setup):
         struct,
         shared_array,
         unit_array,
-        J=J,
+        J,
+        M,
+        eta,
+        keys,
         optimizer=pp.SGD(scale=True, clip_norm=1.0),
-        M=M,
-        eta=eta,
         alpha=0.97,
-        keys=keys,
         alpha_cooling=1.0,
         chunk_size=1,
     )
@@ -530,7 +530,7 @@ def test_abc_functional_scale_defaults_to_one(model_setup):
 
 
 def test_pmcmc_and_abc_functional_par_trans():
-    model = pp.models.LG()
+    model = pp.models.lg()
     param_names = model.canonical_param_names
     first_param = param_names[0]
 

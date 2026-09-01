@@ -17,7 +17,7 @@ def simple_sir_for_dpop():
     Build a small SIR Pomp model for testing the DPOP optimizers.
     """
     # Mirror the shrinkage in test_pomp_dpop.py::simple_sir to keep setup fast.
-    model = pp.models.sir(delta_t=0.1, times=np.array([0.2, 0.4]))
+    model = pp.models.sir(times=np.array([0.2, 0.4]))
     return model
 
 

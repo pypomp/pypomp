@@ -15,11 +15,11 @@ def measles_panel_setup_pomps_module():
     AK_mles = pp.models.UKMeasles.AK_mles()
     london_theta = {str(k): float(v) for k, v in AK_mles["London"].items()}
     hastings_theta = {str(k): float(v) for k, v in AK_mles["Hastings"].items()}
-    london = pp.models.UKMeasles.Pomp(
+    london = pp.models.UKMeasles.pomp(
         unit="London",
         theta=pp.PompParameters(london_theta),
     )
-    hastings = pp.models.UKMeasles.Pomp(
+    hastings = pp.models.UKMeasles.pomp(
         unit="Hastings",
         theta=pp.PompParameters(hastings_theta),
     )
@@ -49,7 +49,7 @@ def measles_panel_setup_some_shared_module(
         * 2
     )
     panel = pp.PanelPomp(
-        Pomp_dict={"London": london, "Hastings": hastings},
+        pomp_dict={"London": london, "Hastings": hastings},
         theta=theta,
     )
     assert panel.theta is not None

@@ -30,7 +30,7 @@ X0 = 0.0
 
 def lg_1d(a: float, q: float, r: float, T: int, key: jax.Array) -> pp.Pomp:
     """A 1-D LG model whose data is generated at the given parameters."""
-    return pp.models.LG(
+    return pp.models.lg(
         T=T,
         A=np.array([[a]]),
         C=np.array([[1.0]]),
@@ -117,7 +117,7 @@ def lg_1d_panel(
     )
 
     panel = pp.PanelPomp(
-        Pomp_dict=pomps,
+        pomp_dict=pomps,
         theta=pp.PanelParameters([{"shared": shared_df, "unit_specific": unit_df}]),
     )
     return panel, ys_by_unit

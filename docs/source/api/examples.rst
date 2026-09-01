@@ -9,7 +9,7 @@ Pypomp includes several example models:
    :toctree: generated/
 
    ~dhaka
-   ~LG
+   ~lg
    ~sir
    ~spx
    ~UKMeasles

@@ -37,7 +37,7 @@ def _trace(result, variable: str) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def lg_module():
-    return pp.models.LG(A=np.array([[0.9]]), T=5, key=jax.random.key(0))
+    return pp.models.lg(A=np.array([[0.9]]), T=5, key=jax.random.key(0))
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ def test_mif_parity(lg):
     keys = jax.random.split(_derive_new_key(key), theta_array.shape[0])
     theta_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
     logliks, theta_traces, _ = F.mif(
-        model.to_struct(), theta_3d, rw_sd, M=M, J=J, thresh=0.0, keys=keys
+        model.to_struct(), theta_3d, J, M, rw_sd, keys, thresh=0.0
     )
 
     # Iteration 0 holds the starting theta, so its loglik is NaN by construction.
@@ -152,13 +152,13 @@ def test_train_parity(lg):
         model.to_struct(),
         theta_array_est,
         J,
+        M,
+        eta,
+        keys,
         optimizer=optimizer,
-        M=M,
-        eta=eta,
-        thresh=0.0,
         alpha=0.0,
-        keys=keys,
         alpha_cooling=1.0,
+        thresh=0.0,
         n_monitors=1,
     )
 

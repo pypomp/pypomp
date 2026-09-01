@@ -9,7 +9,7 @@ import pypomp as pp
 
 @pytest.fixture(scope="function")
 def simple_pomp():
-    return pp.models.LG()
+    return pp.models.lg()
 
 
 def test_pomp_probe_structure(simple_pomp):

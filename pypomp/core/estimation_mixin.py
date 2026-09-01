@@ -378,9 +378,9 @@ class PompEstimationMixin(Base):
             [0, 0, 0],
             self.to_struct(),
             theta_array_3d,
-            rw_sd,
-            M,
             J,
+            M,
+            rw_sd,
             keys,
             thresh,
             n_monitors,
@@ -400,12 +400,14 @@ class PompEstimationMixin(Base):
             [nans, logliks], axis=1
         )  # shape: (n_reps, M+1)
 
-        trace_data = np.concatenate(
-            [logliks_with_nan[:, :, np.newaxis], theta_traces], axis=-1
-        )
-
         traces_da = xr.DataArray(
-            trace_data,
+            np.concatenate(
+                [
+                    logliks_with_nan[:, :, np.newaxis],
+                    theta_traces,
+                ],
+                axis=-1,
+            ),
             dims=["theta_idx", "iteration", "variable"],
             coords={
                 "theta_idx": np.arange(n_reps),
@@ -414,17 +416,17 @@ class PompEstimationMixin(Base):
             },
         )
 
-        final_thetas_mean = theta_traces[:, M, :]  # shape: (n_reps, n_params)
-
-        final_theta_da = xr.DataArray(
-            final_thetas_mean,
-            dims=["theta_idx", "parameter"],
-            coords={
-                "theta_idx": np.arange(n_reps),
-                "parameter": param_names,
-            },
+        self.theta = PompParameters(
+            xr.DataArray(
+                theta_traces[:, -1, :],
+                dims=["theta_idx", "parameter"],
+                coords={
+                    "theta_idx": np.arange(n_reps),
+                    "parameter": param_names,
+                },
+            ),
+            logLik=logliks[:, -1],
         )
-        self.theta = PompParameters(final_theta_da, logLik=logliks)
 
         if track_time is True:
             execution_time = time.time() - start_time
@@ -543,9 +545,8 @@ class PompEstimationMixin(Base):
         >>> model.results()
         """
         start_time = time.time()
-        optimizer = optimizer or Adam()
         thresh = float(max(0.0, thresh))
-
+        optimizer = optimizer or Adam()
         theta_obj_in = deepcopy(self._prepare_theta_input(theta))
         theta_obj_for_result = deepcopy(theta_obj_in)
 
@@ -567,16 +568,16 @@ class PompEstimationMixin(Base):
 
         nLLs, theta_ests = run_jax_batch_sharded(
             F.train,
-            {1: 0, 7: 0},
+            {1: 0, 5: 0},
             [0, 0],
             self.to_struct(),
             theta_array,
             J,
-            optimizer,
             M,
             eta,
-            alpha,
             keys,
+            optimizer,
+            alpha,
             alpha_cooling,
             thresh,
             n_monitors,

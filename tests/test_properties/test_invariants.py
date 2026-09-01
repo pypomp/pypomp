@@ -23,7 +23,7 @@ J = 6
 
 @pytest.fixture(scope="module")
 def lg_module():
-    return pp.models.LG(A=np.array([[0.9]]), T=5, key=jax.random.key(0))
+    return pp.models.lg(A=np.array([[0.9]]), T=5, key=jax.random.key(0))
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def test_sir_simulate_state_invariants():
     SIR rather than LG because LG has no accumulator variables and no
     non-negativity constraint to violate.
     """
-    model = pp.models.sir(times=np.arange(1, 6) / 52.0, seed=11)
+    model = pp.models.sir(times=np.arange(1, 6) / 52.0, key=jax.random.key(11))
     states, obs = model.simulate(nsim=3, key=jax.random.key(SEED))
 
     obs_values = obs.drop(columns=["theta_idx", "sim", "time"]).to_numpy()

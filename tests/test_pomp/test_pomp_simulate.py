@@ -7,7 +7,7 @@ import pypomp as pp
 
 @pytest.fixture(scope="function")
 def simple():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     return LG
 
 

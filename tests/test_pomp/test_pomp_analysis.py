@@ -7,7 +7,7 @@ import pypomp as pp
 def test_plot_traces_happy_path():
     pytest.importorskip("plotly")
 
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     rw_sd = pp.RWSigma(
         sigmas={n: 0.02 for n in LG.canonical_param_names}, init_names=[]
     ).geometric_cooling(a=0.5)
@@ -20,7 +20,7 @@ def test_plot_traces_happy_path():
 
 
 def test_plot_traces_empty_history():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     with pytest.warns(UserWarning, match="No trace data to plot."):
         result = LG.plot_traces(show=False)
     assert result is None
@@ -29,7 +29,7 @@ def test_plot_traces_empty_history():
 def test_plot_simulations_happy_path():
     pytest.importorskip("plotly")
 
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     key = jax.random.key(1)
 
     # Test lines mode

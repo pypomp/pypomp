@@ -304,7 +304,7 @@ class UKMeasles:
         ].T
 
     @classmethod
-    def Pomp(
+    def pomp(
         cls,
         unit: str,
         theta: PompParameters,
@@ -313,7 +313,7 @@ class UKMeasles:
         first_year: int = 1950,
         last_year: int = 1963,
         dt: float = 1 / 365.25,
-        clean=False,
+        clean: bool = False,
     ):
         """
         Returns a Pomp object for the UK Measles data.
@@ -431,7 +431,7 @@ class UKMeasles:
         )
 
     @classmethod
-    def PanelPomp(
+    def panel_pomp(
         cls,
         units: list[str],
         theta: PanelParameters,
@@ -496,7 +496,7 @@ class UKMeasles:
 
             unit_theta = PompParameters(unit_theta_dict)
 
-            pomp_dict[unit] = cls.Pomp(
+            pomp_dict[unit] = cls.pomp(
                 unit=unit,
                 theta=unit_theta,
                 model=model,
@@ -525,4 +525,4 @@ class UKMeasles:
             std_val = (log_pops[unit] - mean_log_pop) / sd_log_pop
             pomp_obj.covars["std_log_pop_1950"] = std_val
 
-        return PanelPomp(Pomp_dict=pomp_dict, theta=theta)
+        return PanelPomp(pomp_dict=pomp_dict, theta=theta)

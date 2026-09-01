@@ -107,7 +107,7 @@ def test_lg_get_thetas_recovers_covariances():
     # must reconstruct the original covariance.
     Q_in = np.array([[0.04, 0.01], [0.01, 0.09]])
     R_in = np.array([[0.5, -0.2], [-0.2, 0.3]])
-    model = pp.models.LG(Q=Q_in, R=R_in)
+    model = pp.models.lg(Q=Q_in, R=R_in)
 
     A, C, Q, R, X0 = _get_thetas(_theta_of(model))
 
@@ -127,25 +127,25 @@ def test_lg_covariance_validation():
     valid_cov = np.array([[1.0, 0.2], [0.2, 1.0]])
 
     with pytest.raises(ValueError, match="Covariance matrix Q must be symmetric"):
-        pp.models.LG(Q=asymmetric_cov)
+        pp.models.lg(Q=asymmetric_cov)
 
     with pytest.raises(ValueError, match="Covariance matrix R must be symmetric"):
-        pp.models.LG(R=asymmetric_cov)
+        pp.models.lg(R=asymmetric_cov)
 
     # Positive-definite check
     non_pd_cov = np.array([[1.0, 2.0], [2.0, 1.0]])  # determinant is 1 - 4 = -3 < 0
     with pytest.raises(
         ValueError, match="Covariance matrix Q must be positive-definite"
     ):
-        pp.models.LG(Q=non_pd_cov)
+        pp.models.lg(Q=non_pd_cov)
 
     with pytest.raises(
         ValueError, match="Covariance matrix R must be positive-definite"
     ):
-        pp.models.LG(R=non_pd_cov)
+        pp.models.lg(R=non_pd_cov)
 
     # Valid matrices should pass without errors
-    LG_obj = pp.models.LG(Q=valid_cov, R=valid_cov)
+    LG_obj = pp.models.lg(Q=valid_cov, R=valid_cov)
     assert isinstance(LG_obj, pp.Pomp)
 
 
@@ -153,7 +153,7 @@ def test_lg_covariance_validation():
 
 
 def test_lg_defaults_are_two_dimensional():
-    model = pp.models.LG()
+    model = pp.models.lg()
     assert model.statenames == ["X1", "X2"]
     assert list(model.ys.columns) == ["Y1", "Y2"]
     assert list(model.canonical_param_names) == [
@@ -193,7 +193,7 @@ def test_lg_generated_defaults_are_positive_definite(d):
 
 
 def test_lg_one_dimensional():
-    model = pp.models.LG(A=np.array([[0.9]]))
+    model = pp.models.lg(A=np.array([[0.9]]))
 
     assert model.statenames == ["X1"]
     assert list(model.ys.columns) == ["Y1"]
@@ -203,7 +203,7 @@ def test_lg_one_dimensional():
 
 def test_lg_state_and_observation_dims_may_differ():
     # 3-D state observed through a 2-D measurement.
-    model = pp.models.LG(A=np.eye(3) * 0.9, C=np.eye(2, 3))
+    model = pp.models.lg(A=np.eye(3) * 0.9, C=np.eye(2, 3))
 
     assert model.statenames == ["X1", "X2", "X3"]
     assert list(model.ys.columns) == ["Y1", "Y2"]
@@ -219,11 +219,11 @@ def test_lg_state_and_observation_dims_may_differ():
 @pytest.mark.parametrize(
     "build",
     [
-        lambda: pp.models.LG(A=np.eye(3) * 0.5),
-        lambda: pp.models.LG(Q=np.eye(3) * 0.01),
-        lambda: pp.models.LG(X0=np.zeros(3)),
-        lambda: pp.models.LG(C=np.eye(3)),
-        lambda: pp.models.LG(R=np.eye(3) * 0.1),
+        lambda: pp.models.lg(A=np.eye(3) * 0.5),
+        lambda: pp.models.lg(Q=np.eye(3) * 0.01),
+        lambda: pp.models.lg(X0=np.zeros(3)),
+        lambda: pp.models.lg(C=np.eye(3)),
+        lambda: pp.models.lg(R=np.eye(3) * 0.1),
     ],
     ids=["A", "Q", "X0", "C", "R"],
 )
@@ -236,27 +236,27 @@ def test_lg_dimension_inferred_from_each_argument(build):
 
 def test_lg_inconsistent_dimensions_raise():
     with pytest.raises(ValueError, match="Inconsistent state dimension"):
-        pp.models.LG(A=np.eye(3) * 0.5, Q=np.eye(2) * 0.01)
+        pp.models.lg(A=np.eye(3) * 0.5, Q=np.eye(2) * 0.01)
 
     with pytest.raises(ValueError, match="Inconsistent state dimension"):
-        pp.models.LG(A=np.eye(3) * 0.5, X0=np.zeros(2))
+        pp.models.lg(A=np.eye(3) * 0.5, X0=np.zeros(2))
 
     with pytest.raises(ValueError, match="Inconsistent observation dimension"):
-        pp.models.LG(C=np.eye(2, 3), R=np.eye(3) * 0.1)
+        pp.models.lg(C=np.eye(2, 3), R=np.eye(3) * 0.1)
 
 
 def test_lg_shape_validation():
     with pytest.raises(ValueError, match="A must be a square 2-D array"):
-        pp.models.LG(A=np.zeros((2, 3)))
+        pp.models.lg(A=np.zeros((2, 3)))
 
     with pytest.raises(ValueError, match="X0 must be a 1-D array"):
-        pp.models.LG(X0=np.zeros((2, 1)))
+        pp.models.lg(X0=np.zeros((2, 1)))
 
 
 def test_lg_dimension_cap():
     d = MAX_DIM + 1
     with pytest.raises(ValueError, match=f"LG supports dimensions up to {MAX_DIM}"):
-        pp.models.LG(A=np.eye(d) * 0.5)
+        pp.models.lg(A=np.eye(d) * 0.5)
 
 
 # --- Starting position ------------------------------------------------------
@@ -264,7 +264,7 @@ def test_lg_dimension_cap():
 
 def test_lg_starting_position_is_used():
     X0 = np.array([50.0, -50.0])
-    model = pp.models.LG(X0=X0, T=1)
+    model = pp.models.lg(X0=X0, T=1)
 
     theta = _theta_of(model)
     assert theta["X0_1"] == 50.0
@@ -283,7 +283,7 @@ def test_lg_starting_position_is_used():
 
 
 def test_lg_starting_position_defaults_to_origin():
-    model = pp.models.LG()
+    model = pp.models.lg()
     theta = _theta_of(model)
     assert theta["X0_1"] == 0.0
     assert theta["X0_2"] == 0.0
@@ -315,7 +315,7 @@ def _kalman_loglik(
 
 def test_lg_pfilter_matches_kalman_filter_in_one_dimension():
     a, c, q, r = 0.9, 1.0, 0.25, 0.5
-    model = pp.models.LG(
+    model = pp.models.lg(
         T=20,
         A=np.array([[a]]),
         C=np.array([[c]]),

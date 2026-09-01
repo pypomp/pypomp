@@ -15,9 +15,9 @@ from .structs import PanelPompStruct, PompStruct
 def mif(
     struct: PompStruct,
     thetas_array: jax.Array,
-    rw_sd: RWSigma,
-    M: int,
     J: int,
+    M: int,
+    rw_sd: RWSigma,
     keys: jax.Array,
     thresh: float = 0.0,
     n_monitors: int = 0,
@@ -40,12 +40,12 @@ def mif(
     thetas_array : jax.Array
         Initial parameter array of shape ``(n_reps, J, n_params)`` on the
         natural scale.  Must be aligned with ``struct.param_names``.
-    rw_sd : RWSigma
-        Random-walk standard deviations and cooling schedule.
-    M : int
-        Number of IF2 iterations.
     J : int
         Number of particles.
+    M : int
+        Number of IF2 iterations.
+    rw_sd : RWSigma
+        Random-walk standard deviations and cooling schedule.
     keys : jax.Array
         Random keys of shape ``(n_reps, ...)``.
     thresh : float, optional
@@ -59,7 +59,7 @@ def mif(
     tuple of (jax.Array, jax.Array, jax.Array)
         - Log-likelihood history of shape ``(n_reps, M)``.
         - Parameter trace history of shape ``(n_reps, M+1, n_params)``
-          on the natural scale.
+        - on the natural scale.
         - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
           natural scale.
 
@@ -126,13 +126,13 @@ def panel_mif(
     struct: PanelPompStruct,
     shared_array: jax.Array,  # (n_reps, J, n_shared) on natural scale
     unit_array: jax.Array,  # (n_reps, J, U, n_spec) on natural scale
-    rw_sd: RWSigma,
-    M: int,
     J: int,
+    M: int,
+    rw_sd: RWSigma,
     keys: jax.Array,
     thresh: float = 0.0,
-    n_monitors: int = 0,
     block: bool = True,
+    n_monitors: int = 0,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Estimate panel POMP parameters using Panel Iterated Filtering.
 
@@ -155,22 +155,22 @@ def panel_mif(
     unit_array : jax.Array
         Swarm of initial unit-specific parameters of shape
         ``(n_reps, J, U, n_spec)`` on the natural scale.
+    J : int
+        Number of particles.
+    M : int
+        Number of iterated filtering iterations.
     rw_sd : RWSigma
         Random-walk standard deviations and cooling schedule.  Reordered
         internally to ``struct.param_names`` order, so any order may be passed.
-    M : int
-        Number of iterated filtering iterations.
-    J : int
-        Number of particles.
     keys : jax.Array
         Random keys of shape ``(n_reps, ...)``.
     thresh : float, optional
         Resampling threshold.  Defaults to ``0.0``.
+    block : bool, optional
+        Whether to use block updates (MPIF).  Defaults to ``True``.
     n_monitors : int, optional
         Number of monitor runs to perform at each iteration.  Defaults to
         ``0``.
-    block : bool, optional
-        Whether to use block updates (MPIF).  Defaults to ``True``.
 
     Returns
     -------

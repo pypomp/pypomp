@@ -22,7 +22,7 @@ from tests.helpers.dummy import dummy_pomp
 @pytest.fixture(scope="module")
 def sir_module():
     """Build a SIR Pomp once per module."""
-    model = pp.models.sir(seed=42)
+    model = pp.models.sir(key=jax.random.key(12345))
     theta = model.theta
     return model, theta
 

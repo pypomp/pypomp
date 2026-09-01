@@ -7,7 +7,7 @@ from ..core.algorithms.train import (
     _vmapped_train_internal,
 )
 from ..core.learning_rate import LearningRate
-from ..core.optimizer import Optimizer
+from ..core.optimizer import Adam, Optimizer
 from .structs import PanelPompStruct, PompStruct
 
 
@@ -15,11 +15,11 @@ def train(
     struct: PompStruct,
     thetas_array: jax.Array,
     J: int,
-    optimizer: Optimizer,
     M: int,
     eta: LearningRate,
-    alpha: float | jax.Array,
     keys: jax.Array,
+    optimizer: Optimizer | None = None,
+    alpha: float | jax.Array = 0.97,
     alpha_cooling: float = 1.0,
     thresh: float = 0.0,
     n_monitors: int = 1,
@@ -54,17 +54,17 @@ def train(
         natural scale.  Must be aligned with ``struct.param_names``.
     J : int
         Number of particles.
-    optimizer : Optimizer
-        Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
-        :class:`~pypomp.SGD`).
     M : int
         Maximum number of gradient steps.
     eta : LearningRate
         Per-parameter learning rates as a :class:`~pypomp.LearningRate` instance.
-    alpha : float or jax.Array
-        MOP discount factor.
     keys : jax.Array
         Random keys of shape ``(n_reps, ...)``.
+    optimizer : Optimizer or None, optional
+        Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
+        :class:`~pypomp.SGD`).  Defaults to ``Adam()``.
+    alpha : float or jax.Array, optional
+        MOP discount factor.  Defaults to ``0.97``.
     alpha_cooling : float, optional
         Cosine cooling multiplier for ``alpha``.  Defaults to ``1.0``.
     thresh : float, optional
@@ -95,6 +95,7 @@ def train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    optimizer = optimizer or Adam()
     eta_array = eta.to_array(struct.param_names, M)
 
     context = TrainContext.from_train_struct(
@@ -114,12 +115,12 @@ def panel_train(
     shared_array: jax.Array,  # (n_reps, n_shared) on natural scale
     unit_array: jax.Array,  # (n_reps, U, n_spec) on natural scale
     J: int,
-    optimizer: Optimizer,
     M: int,
     eta: LearningRate,
-    alpha: float,
     keys: jax.Array,
-    alpha_cooling: float,
+    optimizer: Optimizer | None = None,
+    alpha: float = 0.97,
+    alpha_cooling: float = 1.0,
     chunk_size: int = 1,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Optimize panel POMP parameters via a differentiable particle filter (MOP).
@@ -150,19 +151,19 @@ def panel_train(
         on the natural scale.
     J : int
         Number of particles.
-    optimizer : Optimizer
-        Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
-        :class:`~pypomp.SGD`, :class:`~pypomp.Newton`).
     M : int
         Number of iterations.
     eta : LearningRate
         Learning rates object containing rates for shared and unit-specific parameters.
-    alpha : float
-        Discount factor for MOP updates.
     keys : jax.Array
         Random keys of shape ``(n_reps, M, U, ...)``.
-    alpha_cooling : float
-        Cooling factor for discount factor alpha.
+    optimizer : Optimizer or None, optional
+        Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
+        :class:`~pypomp.SGD`, :class:`~pypomp.Newton`).  Defaults to ``Adam()``.
+    alpha : float, optional
+        Discount factor for MOP updates.  Defaults to ``0.97``.
+    alpha_cooling : float, optional
+        Cooling factor for discount factor alpha.  Defaults to ``1.0``.
     chunk_size : int, optional
         Number of units to process per gradient step.  Defaults to ``1``.
 
@@ -194,6 +195,7 @@ def panel_train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    optimizer = optimizer or Adam()
     eta_shared = (
         eta.to_array(struct.shared_param_names, M)
         if struct.shared_param_names

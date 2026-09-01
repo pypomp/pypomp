@@ -13,7 +13,7 @@ def simple_panel():
     panel = lg_panel(
         sharing="some",
         shared_names=[
-            n for n in pp.models.LG().canonical_param_names if n.startswith(("A", "C"))
+            n for n in pp.models.lg().canonical_param_names if n.startswith(("A", "C"))
         ],
     )
 

@@ -7,6 +7,7 @@ result without disturbing other tests.
 from collections.abc import Sequence
 from typing import Literal
 
+import jax
 import numpy as np
 import pandas as pd
 
@@ -98,7 +99,7 @@ def _panel(
         names, sharing, default_shared if shared_names is None else shared_names
     )
     theta = _panel_theta(pomps, shared, unit_specific, n_reps, unit_scales)
-    return pp.PanelPomp(Pomp_dict=pomps, theta=theta)
+    return pp.PanelPomp(pomp_dict=pomps, theta=theta)
 
 
 def lg_panel(
@@ -117,7 +118,7 @@ def lg_panel(
     Shared starting values are the mean of the per-unit values, and
     ``unit_scales`` spreads the unit-specific ones apart.
     """
-    pomps = {name: pp.models.LG() for name in _unit_names(n_units)}
+    pomps = {name: pp.models.lg() for name in _unit_names(n_units)}
     return _panel(
         pomps, sharing, n_reps, LG_SHARED_NAMES, shared_names, unit_scales, par_trans
     )
@@ -141,7 +142,7 @@ def sir_panel(
     if seeds is None:
         seeds = [100 * (i + 1) for i in range(n_units)]
     pomps = {
-        name: pp.models.sir(times=times, seed=seeds[i])
+        name: pp.models.sir(times=times, key=jax.random.key(seeds[i]))
         for i, name in enumerate(_unit_names(n_units))
     }
     return _panel(pomps, sharing, n_reps, SIR_SHARED_NAMES, shared_names)

@@ -16,13 +16,13 @@ def test_train_regression(lg_struct, tol, num_regression):
         struct,
         theta0,
         J,
+        M,
+        eta,
+        keys,
         optimizer=pp.Adam(scale=False, ls=False, c=0.0, max_ls_itn=1),
-        M=M,
-        eta=eta,
-        thresh=0.0,
         alpha=0.0,
-        keys=keys,
         alpha_cooling=1.0,
+        thresh=0.0,
         n_monitors=1,
     )
 

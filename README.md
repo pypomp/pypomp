@@ -36,7 +36,7 @@ import jax
 import pypomp as pp
 
 # 1. Initialize a built-in Linear Gaussian model with 50 time steps
-model = pp.models.LG(T=50)
+model = pp.models.lg(T=50)
 
 # 2. Run the particle filter with J=1000 particles
 key = jax.random.key(1)

@@ -7,12 +7,12 @@ import pypomp as pp
 
 @pytest.fixture
 def simple_pomp():
-    LG_obj = pp.models.LG()
+    lg_obj = pp.models.lg()
     key = jax.random.key(123)
     J = 10
     reps = 3
-    LG_obj.pfilter(J=J, key=key, reps=reps, CLL=True, ESS=True)
-    return LG_obj, reps
+    lg_obj.pfilter(J=J, key=key, reps=reps, CLL=True, ESS=True)
+    return lg_obj, reps
 
 
 def test_pomp_cll(simple_pomp):

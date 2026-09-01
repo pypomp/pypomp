@@ -9,7 +9,7 @@ import pypomp as pp
 
 @pytest.fixture(scope="module")
 def simple_setup_module():
-    LG = pp.models.LG()
+    LG = pp.models.lg()
     key = jax.random.key(111)
     J = 3
     return LG, key, J

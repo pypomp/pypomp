@@ -605,7 +605,6 @@ class PanelEstimationMixin(Base):
         thresh: float = 0.0,
         n_monitors: int = 0,
         block: bool = True,
-        track_time: bool = True,
     ) -> None:
         """Estimate parameters using the (Marginalized) Panel Iterated Filtering (MPIF/PIF) algorithm.
 
@@ -632,9 +631,6 @@ class PanelEstimationMixin(Base):
         block : bool, optional
             Whether to use block updates (MPIF).  If ``False``, uses standard PIF.
             Defaults to ``True``.
-        track_time : bool, optional
-            Whether to record wall-clock execution time.  Defaults to
-            ``True``.
 
         Returns
         -------
@@ -707,10 +703,15 @@ class PanelEstimationMixin(Base):
             n_monitors,
         )
 
-        shared_traces = (
-            np.array(shared_traces_jax) if shared_traces_jax is not None else None
+        shared_traces, unit_traces = jax.device_get(
+            (shared_traces_jax, unit_traces_jax)
         )
-        unit_traces = np.array(unit_traces_jax) if unit_traces_jax is not None else None
+        del (
+            shared_traces_jax,
+            unit_traces_jax,
+            final_shared_swarm_jax,
+            final_unit_swarm_jax,
+        )
 
         if shared_traces is None:
             if unit_traces is None:
@@ -752,10 +753,7 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
-        if track_time is True:
-            execution_time = time.time() - start_time
-        else:
-            execution_time = None
+        execution_time = time.time() - start_time
 
         result = build_panel_mif_result(
             execution_time=execution_time,
@@ -793,7 +791,6 @@ class PanelEstimationMixin(Base):
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
         chunk_size: int = 1,
-        track_time: bool = True,
     ) -> None:
         """Estimate parameters using MOP-based gradient-descent optimization.
 
@@ -840,9 +837,6 @@ class PanelEstimationMixin(Base):
         chunk_size : int, optional
             Number of units to process in parallel per gradient step.  Defaults
             to ``1``.
-        track_time : bool, optional
-            Whether to record wall-clock execution time.  Defaults to
-            ``True``.
 
         Returns
         -------
@@ -903,9 +897,9 @@ class PanelEstimationMixin(Base):
 
         struct = self.to_struct()
         (
-            logliks_history,
-            shared_history_natural,
-            unit_history_natural,
+            logliks_history_jax,
+            shared_history_natural_jax,
+            unit_history_natural_jax,
         ) = run_jax_batch_sharded(
             F.panel_train,
             {1: 0, 2: 0, 6: 0},
@@ -921,6 +915,23 @@ class PanelEstimationMixin(Base):
             alpha,
             alpha_cooling,
             chunk_size,
+        )
+
+        (
+            logliks_history,
+            shared_history_natural,
+            unit_history_natural,
+        ) = jax.device_get(
+            (
+                logliks_history_jax,
+                shared_history_natural_jax,
+                unit_history_natural_jax,
+            )
+        )
+        del (
+            logliks_history_jax,
+            shared_history_natural_jax,
+            unit_history_natural_jax,
         )
 
         shared_traces = None
@@ -983,7 +994,7 @@ class PanelEstimationMixin(Base):
         )
 
         result = build_panel_train_result(
-            execution_time=time.time() - start_time if track_time else np.nan,
+            execution_time=time.time() - start_time,
             key=old_key,
             theta=theta_for_result,
             shared_traces=shared_da,
@@ -1208,9 +1219,9 @@ class PanelEstimationMixin(Base):
         keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
 
         (
-            logliks_history,
-            shared_history,
-            unit_history,
+            logliks_history_jax,
+            shared_history_jax,
+            unit_history_jax,
         ) = _vmapped_panel_dpop_train_internal(
             shared_array,
             unit_array,
@@ -1239,6 +1250,18 @@ class PanelEstimationMixin(Base):
             process_weight_index,
             ntimes,
         )
+
+        (
+            logliks_history,
+            shared_history,
+            unit_history,
+        ) = jax.device_get((logliks_history_jax, shared_history_jax, unit_history_jax))
+        del (
+            logliks_history_jax,
+            shared_history_jax,
+            unit_history_jax,
+        )
+
         logliks_trace = -np.array(logliks_history)
 
         shared_history_arr = np.array(shared_history) if len(shared_index) > 0 else None

@@ -111,7 +111,6 @@ class PompEstimationMixin(Base):
         ESS: bool = False,
         filter_mean: bool = False,
         prediction_mean: bool = False,
-        track_time: bool = True,
     ) -> None:
         """Evaluate the log-likelihood via the bootstrap particle filter.
 
@@ -150,9 +149,6 @@ class PompEstimationMixin(Base):
         prediction_mean : bool, optional
             Whether to compute and store the predicted state mean at each
             observation time.  Defaults to ``False``.
-        track_time : bool, optional
-            Whether to record wall-clock execution time.  Defaults to
-            ``True``.
 
         Returns
         -------
@@ -213,10 +209,7 @@ class PompEstimationMixin(Base):
         logLiks = results["logLik"]
         logLik_da = xr.DataArray(logLiks, dims=["theta_idx", "rep"])
 
-        if track_time is True:
-            execution_time = time.time() - start_time
-        else:
-            execution_time = None
+        execution_time = time.time() - start_time
 
         CLL_da = None
         ESS_da = None
@@ -282,7 +275,6 @@ class PompEstimationMixin(Base):
         theta: PompParameters | None = None,
         thresh: float = 0.0,
         n_monitors: int = 0,
-        track_time: bool = True,
     ) -> None:
         """Estimate parameters via the Iterated Filtering 2 (IF2) algorithm.
 
@@ -317,9 +309,6 @@ class PompEstimationMixin(Base):
             Number of unperturbed particle filter runs to average for the
             log-likelihood monitor at each iteration.  Defaults to ``0``
             (uses the log-likelihood from the perturbed filter directly).
-        track_time : bool, optional
-            Whether to record wall-clock execution time.  Defaults to
-            ``True``.
 
         Returns
         -------
@@ -428,10 +417,7 @@ class PompEstimationMixin(Base):
             logLik=logliks[:, -1],
         )
 
-        if track_time is True:
-            execution_time = time.time() - start_time
-        else:
-            execution_time = None
+        execution_time = time.time() - start_time
 
         result = build_mif_result(
             execution_time=execution_time,
@@ -459,7 +445,6 @@ class PompEstimationMixin(Base):
         thresh: float = 0.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
-        track_time: bool = True,
     ) -> None:
         """Optimize parameters via a differentiable particle filter (MOP).
 
@@ -516,9 +501,6 @@ class PompEstimationMixin(Base):
             Number of unperturbed particle filter runs to average for the
             log-likelihood monitor.  Defaults to ``1``. Using more than 1 monitor
             increases computation time but can lead to more stable estimates.
-        track_time : bool, optional
-            Whether to record wall-clock execution time.  Defaults to
-            ``True``.
 
         Returns
         -------
@@ -566,7 +548,7 @@ class PompEstimationMixin(Base):
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        nLLs, theta_ests = run_jax_batch_sharded(
+        nLLs_jax, theta_ests_jax = run_jax_batch_sharded(
             F.train,
             {1: 0, 5: 0},
             [0, 0],
@@ -583,8 +565,11 @@ class PompEstimationMixin(Base):
             n_monitors,
         )
 
+        nLLs, theta_ests = jax.device_get((nLLs_jax, theta_ests_jax))
+        del nLLs_jax, theta_ests_jax
+
         theta_ests_natural = self.par_trans._transform_array(
-            np.asarray(theta_ests),
+            theta_ests,
             self.canonical_param_names,
             direction="from_est",
         )
@@ -615,11 +600,7 @@ class PompEstimationMixin(Base):
         )
         self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
 
-        if track_time is True:
-            nLLs.block_until_ready()
-            execution_time = time.time() - start_time
-        else:
-            execution_time = None
+        execution_time = time.time() - start_time
 
         result = build_train_result(
             execution_time=execution_time,
@@ -648,7 +629,6 @@ class PompEstimationMixin(Base):
         process_weight_state: str | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-        track_time: bool = True,
     ) -> None:
         """
         Optimizes model parameters using the DPOP differentiable particle filter and gradient-based methods.
@@ -699,8 +679,6 @@ class PompEstimationMixin(Base):
             Random key. If None, uses ``self.fresh_key``.
         theta : PompParameters, default None
             Optional initial parameter(s). Defaults to self.theta.
-        track_time : bool, default True
-            Whether to record wall-clock execution time.
 
         Returns
         -------
@@ -753,7 +731,7 @@ class PompEstimationMixin(Base):
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        nLLs, theta_ests = run_jax_batch_sharded(
+        nLLs_jax, theta_ests_jax = run_jax_batch_sharded(
             dpop_train,
             {1: 0, 8: 0},
             [0, 0],
@@ -769,8 +747,11 @@ class PompEstimationMixin(Base):
             alpha_cooling,
         )
 
+        nLLs, theta_ests = jax.device_get((nLLs_jax, theta_ests_jax))
+        del nLLs_jax, theta_ests_jax
+
         theta_ests_natural = self.par_trans._transform_array(
-            np.asarray(theta_ests),
+            theta_ests,
             self.canonical_param_names,
             direction="from_est",
         )
@@ -801,11 +782,7 @@ class PompEstimationMixin(Base):
         )
         self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
 
-        if track_time is True:
-            nLLs.block_until_ready()
-            execution_time = time.time() - start_time
-        else:
-            execution_time = None
+        execution_time = time.time() - start_time
 
         result = build_dpop_train_result(
             execution_time=execution_time,
@@ -832,7 +809,6 @@ class PompEstimationMixin(Base):
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
         thresh: float = 0.0,
-        track_time: bool = True,
     ) -> None:
         """
         Particle Markov chain Monte Carlo (PMMH) for Bayesian parameter inference.
@@ -859,8 +835,6 @@ class PompEstimationMixin(Base):
             Starting parameter values. Defaults to :attr:`theta`.
         thresh : float, default 0.0
             Adaptive resampling threshold passed to the particle filter.
-        track_time : bool, default True
-            Whether to record execution time.
 
         Returns
         -------
@@ -903,6 +877,7 @@ class PompEstimationMixin(Base):
         ll_traces, lp_traces, theta_traces, accepts = jax.device_get(
             (ll_jax, lp_jax, theta_jax, accepts_jax)
         )
+        del ll_jax, lp_jax, theta_jax, accepts_jax
 
         trace_vars = ["logLik", "log_prior"] + list(canonical_names)
         trace_data = np.concatenate(
@@ -933,7 +908,7 @@ class PompEstimationMixin(Base):
         )
         self.theta = PompParameters(final_theta_da, logLik=ll_traces[:, -1])
 
-        execution_time = time.time() - start_time if track_time else None
+        execution_time = time.time() - start_time
         result = build_pmcmc_result(
             execution_time=execution_time,
             key=old_key,
@@ -955,7 +930,6 @@ class PompEstimationMixin(Base):
         dprior: Callable | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
-        track_time: bool = True,
     ) -> None:
         r"""
         Approximate Bayesian Computation with a Metropolis-Hastings outer loop.
@@ -993,8 +967,6 @@ class PompEstimationMixin(Base):
             JAX PRNG key. Defaults to :attr:`fresh_key`.
         theta : PompParameters, optional
             Starting parameter values. Defaults to :attr:`theta`.
-        track_time : bool, default True
-            Whether to record execution time.
 
         Returns
         -------
@@ -1038,6 +1010,7 @@ class PompEstimationMixin(Base):
         dist_traces, lp_traces, theta_traces, accepts = jax.device_get(
             (dist_jax, lp_jax, theta_jax, accepts_jax)
         )
+        del dist_jax, lp_jax, theta_jax, accepts_jax
 
         trace_vars = ["distance", "log_prior"] + list(canonical_names)
         trace_data = np.concatenate(
@@ -1068,7 +1041,7 @@ class PompEstimationMixin(Base):
         )
         self.theta = PompParameters(final_theta_da)
 
-        execution_time = time.time() - start_time if track_time else None
+        execution_time = time.time() - start_time
         result = build_abc_result(
             execution_time=execution_time,
             key=old_key,
@@ -1176,13 +1149,15 @@ class PompEstimationMixin(Base):
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, thetas_array.shape[0])
         times_array = jnp.array(self.ys.index) if times is None else times
-        X_sims, Y_sims = F.simulate(
+        X_sims_jax, Y_sims_jax = F.simulate(
             self.to_struct(),
             thetas_array,
             nsim,
             keys,
             times=times_array,
         )
+        X_sims, Y_sims = jax.device_get((X_sims_jax, Y_sims_jax))
+        del X_sims_jax, Y_sims_jax
 
         def _to_long(
             arr: jax.Array | np.ndarray,

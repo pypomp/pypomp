@@ -178,20 +178,20 @@ def dmeas_continuous(Y_, X_, theta_, covars=None, t=None):
 LOG_SQRT_2PI = 0.5 * jnp.log(2.0 * jnp.pi)
 
 
-def _log_phi(z):
+def _log_phi(z: jax.Array) -> jax.Array:
     return -0.5 * z * z - LOG_SQRT_2PI
 
 
-def log_cdf_single(z):
+def log_cdf_single(z: jax.Array) -> jax.Array:
     return log_cdf_diff(z, -jnp.inf)
 
 
-def _log_sub_exp_stable(a, b):
+def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
     return a + jnp.log1p(-jnp.exp(b - a))
 
 
 @jax.custom_jvp
-def log_cdf_diff(zh, zl):
+def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
     a = log_ndtr(zh)
     b = log_ndtr(zl)
     hi = jnp.maximum(a, b)

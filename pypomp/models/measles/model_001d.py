@@ -24,18 +24,18 @@ from pypomp.types import ParamDict
 LOG_SQRT_2PI = 0.5 * jnp.log(2.0 * jnp.pi)
 
 
-def _log_phi(z):
+def _log_phi(z: jax.Array) -> jax.Array:
     """log φ(z) for standard normal density"""
     return -0.5 * z * z - LOG_SQRT_2PI
 
 
-def _log_sub_exp_stable(a, b):
+def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
     """Stable log(exp(a) - exp(b)) assuming a >= b"""
     return a + jnp.log1p(-jnp.exp(b - a))
 
 
 @jax.custom_jvp
-def log_cdf_diff(zh, zl):
+def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
     """log(Φ(zh) - Φ(zl)) with custom JVP for gradient stability"""
     a = log_ndtr(zh)
     b = log_ndtr(zl)
@@ -73,7 +73,7 @@ def _log_cdf_diff_jvp(primals, tangents):
     return y, dy
 
 
-def log_cdf_single(z):
+def log_cdf_single(z: jax.Array) -> jax.Array:
     """log Φ(z)，使用相同的 stable JVP 路径"""
     return log_cdf_diff(z, -jnp.inf)
 
@@ -249,7 +249,7 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     # jnp.where computes BOTH branches, so NaN in y propagates to gradient
     # By replacing NaN with 0 first, z computation stays finite
     y_is_nan = jnp.isnan(y_raw)
-    y = jnp.array(jnp.where(y_is_nan, 0.0, y_raw))
+    y = jnp.where(y_is_nan, 0.0, y_raw)
 
     # Mean and variance
     Cpos = jnp.maximum(C, 0.0)

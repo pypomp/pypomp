@@ -4,13 +4,11 @@ This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-from loess.loess_1d import loess_1d  # pyright: ignore[reportMissingImports]
 from scipy.stats import chi2
 
 FloatArray = npt.NDArray[np.floating[Any]]
@@ -29,7 +27,30 @@ def _loess_smooth_1d(
     *,
     span: float = 0.75,
     degree: int = 2,
+    max_iter: int = 10,
 ) -> FloatArray:
+    """Perform 1D LOESS smoothing on a grid following Cleveland (1979).
+
+    Parameters
+    ----------
+    x : FloatArray
+        Predictor values.
+    y : FloatArray
+        Response values.
+    grid : FloatArray
+        Evaluation points at which to compute the smoothed values.
+    span : float, optional
+        Fraction of points to include in the local neighborhood. Defaults to ``0.75``.
+    degree : int, optional
+        Degree of the local polynomial (1 for linear, 2 for quadratic). Defaults to ``2``.
+    max_iter : int, optional
+        Maximum number of robust bisquare iterations. Defaults to ``10``.
+
+    Returns
+    -------
+    FloatArray
+        Smoothed response values evaluated at ``grid``.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     grid = np.asarray(grid, dtype=float)
@@ -42,42 +63,64 @@ def _loess_smooth_1d(
         # degenerate predictor: return flat line at mean(y)
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
-    try:
-        with np.errstate(divide="ignore", invalid="ignore"):
-            res = loess_1d(
-                x,
-                y,
-                xnew=grid,
-                degree=int(degree),
-                frac=float(span),
-                rotate=False,
-            )
-    except np.linalg.LinAlgError:
-        # loess_1d can fail with LinAlgError if the internal robust iterations
-        # encounter mad=0 (perfect fit), leading to inf weights that clip to 0.
-        # Retrying with a large sigy forces it to bypass mad-based scaling and use
-        # robust weights of 1.0.
-        # When sigy is large, the biweight uu is essentially 0.0, resulting in robust
-        # weights of 1.0. This effectively bypasses robust downweighting and performs
-        # standard locally-weighted least squares (which is the default behavior in R's
-        # pomp package, i.e., family = "gaussian").
-        warnings.warn(
-            "LinAlgError in loess_1d, retrying with 1e10 sigy",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        res = loess_1d(
-            x,
-            y,
-            xnew=grid,
-            degree=int(degree),
-            frac=float(span),
-            rotate=False,
-            sigy=np.full_like(y, 1e10),
-        )
+    n = len(x)
+    npoints = int(np.ceil(span * n))
+    npoints = max(degree + 1, min(n, npoints))
 
-    y_sm = res[1]
-    return y_sm.astype(float, copy=False)
+    deg = int(degree)
+    deg_powers = np.arange(deg + 1)
+    y_sm = np.empty_like(grid, dtype=float)
+
+    for j, xj in enumerate(grid):
+        dist = np.abs(x - xj)
+        w_idx = np.argsort(dist)[:npoints]
+        xw = x[w_idx]
+        yw = y[w_idx]
+        dw = dist[w_idx]
+
+        max_d = dw[-1]
+        if max_d > 0.0:
+            dist_weights = (1.0 - (dw / max_d) ** 3) ** 3
+        else:
+            dist_weights = np.ones_like(dw)
+
+        A = xw[:, None] ** deg_powers
+        sqw = np.sqrt(dist_weights)
+        coef, _, _, _ = np.linalg.lstsq(A * sqw[:, None], yw * sqw, rcond=None)
+        yfit = A @ coef
+
+        bad = None
+        for _ in range(max_iter):
+            aerr = np.abs(yfit - yw)
+            mad = float(np.median(aerr))
+            if mad == 0.0:
+                break
+            uu = (aerr / (6.0 * mad)) ** 2
+            uu = np.clip(uu, 0.0, 1.0)
+            biweights = (1.0 - uu) ** 2
+            tot_weights = dist_weights * biweights
+
+            if np.all(tot_weights == 0.0):
+                break
+
+            sqw_tot = np.sqrt(tot_weights)
+            try:
+                coef, _, _, _ = np.linalg.lstsq(
+                    A * sqw_tot[:, None], yw * sqw_tot, rcond=None
+                )
+                yfit = A @ coef
+            except np.linalg.LinAlgError:
+                break
+
+            bad_old = bad
+            bad = biweights < 0.34
+            if bad_old is not None and np.array_equal(bad_old, bad):
+                break
+
+        a_xj = xj**deg_powers
+        y_sm[j] = float(a_xj @ coef)
+
+    return y_sm
 
 
 def _fit_local_quadratic(

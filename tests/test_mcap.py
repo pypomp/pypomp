@@ -160,16 +160,14 @@ def test_mcap_r_comparison():
     assert abs(result.se_total - 0.35655129) < 0.1
 
 
-def test_mcap_loess_linalg_error_fallback():
+def test_mcap_loess_zero_mad_subset():
     # Construct input data that triggers mad = 0 (perfect fit in local window)
-    # leading to LinAlgError in standard loess_1d robust iterations.
+    # in standard robust iterations.
     x = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
     y = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0])
 
-    # Calling mcap on this should trigger the fallback, raise the RuntimeWarning,
-    # and produce a valid, non-degenerate smoothed profile.
-    with pytest.warns(RuntimeWarning, match="LinAlgError in loess_1d"):
-        result = mcap(x, y, span=0.75, loess_degree=1)
+    # Calling mcap on this should produce a valid, non-degenerate smoothed profile.
+    result = mcap(x, y, span=0.75, loess_degree=1)
 
     # Verify the smoothed profile is NOT degenerate (all zeroes)
     assert not np.allclose(result.fit["smoothed"], 0.0)

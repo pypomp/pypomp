@@ -1,5 +1,4 @@
 import os
-import pickle
 from typing import Literal
 
 import numpy as np
@@ -155,7 +154,6 @@ class UKMeasles:
 
     _module_dir = os.path.dirname(os.path.abspath(__file__))
     _data_dir = os.path.join(_module_dir, os.pardir, os.pardir, "data/uk_measles")
-    _data_file = os.path.join(_data_dir, "uk_measles.pkl")
     _data = None
     _MODELS = {
         "001": m001,
@@ -175,8 +173,19 @@ class UKMeasles:
     @classmethod
     def _get_data(cls):
         if cls._data is None:
-            with open(cls._data_file, "rb") as f:
-                cls._data = pickle.load(f)
+            measles_path = os.path.join(cls._data_dir, "measles.csv.gz")
+            demog_path = os.path.join(cls._data_dir, "demog.csv")
+            coord_path = os.path.join(cls._data_dir, "coord.csv")
+
+            measles = pd.read_csv(measles_path, parse_dates=["date"])
+            demog = pd.read_csv(demog_path)
+            coord = pd.read_csv(coord_path)
+
+            cls._data = {
+                "measles": measles,
+                "demog": demog,
+                "coord": coord,
+            }
         return cls._data
 
     @classmethod
@@ -392,10 +401,10 @@ class UKMeasles:
         # Add log(pop_1950) as constant covariate for iota log-log linear models
         pop_1950_row = demog.loc[demog["year"] == 1950, "pop"]
         if len(pop_1950_row) > 0:
-            covar_df["log_pop_1950"] = np.log(float(pop_1950_row.values[0]))
+            covar_df["log_pop_1950"] = np.log(float(pop_1950_row.to_numpy()[0]))
         else:
             # Fallback: use earliest available year
-            covar_df["log_pop_1950"] = np.log(float(demog["pop"].iloc[0]))
+            covar_df["log_pop_1950"] = np.log(float(demog["pop"].to_numpy()[0]))
 
         # Placeholder for standardized log(pop_1950); must be overwritten
         # at the panel level with correct z-score across all units.

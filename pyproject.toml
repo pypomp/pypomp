@@ -33,7 +33,6 @@ dependencies = [
     "xarray",
     "scipy",
     "typing_extensions",
-    "loess",
     "cloudpickle"
 ]
 
@@ -84,7 +83,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "loess.*",
     "statsmodels.*",
     "matplotlib.*"
 ]

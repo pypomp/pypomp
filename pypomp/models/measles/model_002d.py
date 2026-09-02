@@ -56,8 +56,8 @@ def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
 @jax.custom_jvp
 def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
     """log(Φ(zh) - Φ(zl)) with custom JVP for gradient stability"""
-    a = log_ndtr(zh)
-    b = log_ndtr(zl)
+    a: jax.Array = log_ndtr(zh)
+    b: jax.Array = log_ndtr(zl)
     hi = jnp.maximum(a, b)
     lo = jnp.minimum(a, b)
     return _log_sub_exp_stable(hi, lo)

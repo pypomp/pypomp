@@ -37,8 +37,8 @@ def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
 @jax.custom_jvp
 def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
     """log(Φ(zh) - Φ(zl)) with custom JVP for gradient stability"""
-    a = log_ndtr(zh)
-    b = log_ndtr(zl)
+    a: jax.Array = log_ndtr(zh)
+    b: jax.Array = log_ndtr(zl)
     hi = jnp.maximum(a, b)
     lo = jnp.minimum(a, b)
     return _log_sub_exp_stable(hi, lo)
@@ -54,12 +54,12 @@ def _log_cdf_diff_jvp(primals, tangents):
 
     LOG_MAX = jnp.log(jnp.finfo(zh.dtype).max)
 
-    # 计算 log-space 梯度
+    # Compute log-space gradients
     diff_h = lphi_h - y
     diff_l = lphi_l - y
 
-    # 处理 y=-inf 退化情况（当 zh≈zl 时）
-    # diff = lphi - (-inf) = +inf，需要映射到 -LOG_MAX 使 exp() → 0
+    # Handle y=-inf degenerate case (when zh ≈ zl)
+    # diff = lphi - (-inf) = +inf, needs to be mapped to -LOG_MAX so that exp() → 0
     safe_diff_h = jnp.where(
         jnp.isfinite(diff_h), jnp.clip(diff_h, -LOG_MAX, LOG_MAX), -LOG_MAX
     )
@@ -74,7 +74,7 @@ def _log_cdf_diff_jvp(primals, tangents):
 
 
 def log_cdf_single(z: jax.Array) -> jax.Array:
-    """log Φ(z)，使用相同的 stable JVP 路径"""
+    """log Φ(z), using the same stable JVP path"""
     return log_cdf_diff(z, -jnp.inf)
 
 

@@ -4,7 +4,7 @@ import time
 import warnings
 from collections.abc import Callable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import jax
 import jax.numpy as jnp
@@ -103,6 +103,7 @@ class PompEstimationMixin(Base):
     def pfilter(
         self,
         J: int,
+        *,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
         thresh: float = 0.0,
@@ -271,6 +272,7 @@ class PompEstimationMixin(Base):
         J: int,
         M: int,
         rw_sd: RWSigma,
+        *,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
         thresh: float = 0.0,
@@ -438,6 +440,7 @@ class PompEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate,
+        *,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
         optimizer: Optimizer | None = None,
@@ -623,6 +626,7 @@ class PompEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate,
+        *,
         optimizer: Optimizer | None = None,
         alpha: float = 0.8,
         alpha_cooling: float = 1.0,
@@ -805,6 +809,7 @@ class PompEstimationMixin(Base):
         J: int,
         M: int,
         proposal: Proposal,
+        *,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,
@@ -867,8 +872,8 @@ class PompEstimationMixin(Base):
             struct=self.to_struct(),
             thetas_array=theta_array,
             proposal=proposal,
-            M=M,
             J=J,
+            M=M,
             thresh=thresh,
             keys=keys,
             dprior=dprior,
@@ -926,6 +931,7 @@ class PompEstimationMixin(Base):
         probes: dict[str, Callable],
         epsilon: float,
         proposal: Proposal,
+        *,
         scale: dict[str, float] | None = None,
         dprior: Callable | None = None,
         key: jax.Array | None = None,
@@ -1196,13 +1202,14 @@ class PompEstimationMixin(Base):
             pomp_copy = deepcopy(self)
             pomp_copy.ys = simulated_ys
             pomp_copy.theta = theta_obj_in.subset([0])
-            return cast(Any, pomp_copy)
+            return cast("Pomp", pomp_copy)
 
         return X_sims_long, Y_sims_long
 
     def probe(
         self,
         probes: dict[str, Callable[[dict[str, jax.Array]], float]],
+        *,
         nsim: int = 100,
         key: jax.Array | None = None,
         theta: PompParameters | None = None,

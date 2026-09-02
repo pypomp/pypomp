@@ -219,7 +219,9 @@ def fast_binomial(
 
     n_float = jnp.asarray(n, dtype=float_dtype)
     p_float = jnp.asarray(p, dtype=float_dtype)
-    x = binominv(u, n_float, p_float, exact_max, order=order, dtype=float_dtype)
+    x = binominv(
+        u, n_float, p_float, order=order, exact_max=exact_max, dtype=float_dtype
+    )
 
     if jnp.issubdtype(dtype, jnp.integer):
         x = jnp.nan_to_num(x, nan=-1.0).astype(dtype)
@@ -232,8 +234,8 @@ def binominv(
     u: jax.Array,
     n: jax.Array,
     p: jax.Array,
-    exact_max: int = 5,
     order: int = 2,
+    exact_max: int = 5,
     dtype: np.dtype | None = None,
 ) -> jax.Array:
     """Compute the approximate inverse binomial CDF using JAX primitives.
@@ -250,11 +252,11 @@ def binominv(
         Number of trials.  Must be a positive integer or float.
     p : jax.Array
         Success probability in ``[0, 1]``.
+    order : int, optional
+        Order of approximation (0, 1, or 2).  Defaults to ``2``.
     exact_max : int, optional
         Maximum iterations for the bottom-up exact inverse CDF stage.
         Defaults to ``5``.
-    order : int, optional
-        Order of approximation (0, 1, or 2).  Defaults to ``2``.
     dtype : np.dtype or None, optional
         Floating-point dtype for computation.  Inferred from inputs if
         ``None``.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, overload
+from typing import TYPE_CHECKING, Any, Literal, Protocol, overload
 
 import jax
 import pandas as pd
@@ -9,6 +9,9 @@ from ..core.parameters import PanelParameters
 from ..core.pomp import Pomp
 from ..core.results import ResultsHistory
 from ..functional.structs import PanelPompStruct
+
+if TYPE_CHECKING:
+    from .panel import PanelPomp
 
 
 # This Protocol defines what attributes the Mixins can expect to exist
@@ -55,7 +58,7 @@ class PanelPompInterface(Protocol):
         key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
-    ) -> Any: ...
+    ) -> PanelPomp: ...
 
     def simulate(
         self,
@@ -64,7 +67,7 @@ class PanelPompInterface(Protocol):
         times: jax.Array | None = None,
         key: jax.Array | None = None,
         as_pomp: bool = False,
-    ) -> tuple[pd.DataFrame, pd.DataFrame] | Any: ...
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | PanelPomp: ...
 
     @staticmethod
     def merge(*panel_pomp_objs: Any) -> Any: ...

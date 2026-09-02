@@ -32,6 +32,7 @@ from ..maths import logmeanexp
 if TYPE_CHECKING:
     from ..core.pomp import Pomp
     from .interfaces import PanelPompInterface as Base
+    from .panel import PanelPomp
 else:
     Base = object  # At runtime, this is just a normal class
 
@@ -224,7 +225,7 @@ class PanelEstimationMixin(Base):
         key: jax.Array | None = None,
         *,
         as_pomp: Literal[True],
-    ) -> Base: ...
+    ) -> PanelPomp: ...
 
     def simulate(
         self,
@@ -233,7 +234,7 @@ class PanelEstimationMixin(Base):
         times: jax.Array | None = None,
         key: jax.Array | None = None,
         as_pomp: bool = False,
-    ) -> tuple[pd.DataFrame, pd.DataFrame] | Base:
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | PanelPomp:
         """Simulate latent states and observations from the panel model.
 
         Parameters
@@ -304,7 +305,7 @@ class PanelEstimationMixin(Base):
             new_model = deepcopy(self)
             new_model.unit_objects = new_unit_objects
             new_model.theta = theta.subset([0])
-            return new_model
+            return cast("PanelPomp", new_model)
 
         X_sims_long = pd.concat(X_sims_list, ignore_index=True)
         Y_sims_long = pd.concat(Y_sims_list, ignore_index=True)
@@ -314,6 +315,7 @@ class PanelEstimationMixin(Base):
     def probe(
         self,
         probes: dict[str, Callable[[dict[str, jax.Array]], float]],
+        *,
         nsim: int = 100,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
@@ -385,6 +387,7 @@ class PanelEstimationMixin(Base):
     def pfilter(
         self,
         J: int,
+        *,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         thresh: float = 0.0,
@@ -600,6 +603,7 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         rw_sd: RWSigma,
+        *,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         thresh: float = 0.0,
@@ -785,6 +789,7 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate,
+        *,
         key: jax.Array | None = None,
         theta: PanelParameters | None = None,
         optimizer: Optimizer | None = None,
@@ -1022,6 +1027,7 @@ class PanelEstimationMixin(Base):
         J: int,
         M: int,
         eta: LearningRate | dict[str, float] | float,
+        *,
         chunk_size: int = 1,
         optimizer: Optimizer | None = None,
         alpha: float = 0.97,

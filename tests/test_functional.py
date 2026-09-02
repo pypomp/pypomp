@@ -451,8 +451,8 @@ def test_pmcmc_functional(model_setup):
         struct,
         thetas_array,
         proposal=prop,
-        M=M,
         J=J,
+        M=M,
         thresh=0.0,
         keys=keys,
     )
@@ -556,7 +556,7 @@ def test_pmcmc_and_abc_functional_par_trans():
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
     _, _, theta_traces_pmcmc, _ = pmcmc(
-        struct, thetas_array, proposal=prop, M=1, J=5, keys=keys
+        struct, thetas_array, proposal=prop, J=5, M=1, keys=keys
     )
     assert jnp.allclose(theta_traces_pmcmc[0, 0, :], theta_val[0])
 
@@ -587,8 +587,8 @@ def test_pmcmc_and_abc_functional_raw_dprior(model_setup):
         struct,
         thetas_array,
         proposal=prop,
-        M=M,
         J=J,
+        M=M,
         keys=keys,
         dprior=raw_dprior,
     )

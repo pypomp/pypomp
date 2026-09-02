@@ -209,6 +209,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         t0: float,
         rinit: Callable,
         rproc: Callable,
+        *,
         dmeas: Callable | None = None,
         rmeas: Callable | None = None,
         dprior: Callable | None = None,

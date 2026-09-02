@@ -19,8 +19,8 @@ def pmcmc(
     struct: PompStruct,
     thetas_array: jax.Array,
     proposal,
-    M: int,
     J: int,
+    M: int,
     keys: jax.Array,
     thresh: float = 0.0,
     dprior: Callable | None = None,
@@ -42,10 +42,10 @@ def pmcmc(
         Starting parameter vectors, shape ``(n_chains, d)``.
     proposal
         Proposal object (see :mod:`pypomp.proposals`).
-    M : int
-        Number of MCMC iterations per chain.
     J : int
         Number of particles per filter evaluation.
+    M : int
+        Number of MCMC iterations per chain.
     keys : jax.Array
         PRNG keys, shape ``(n_chains, ...)``.
     thresh : float, optional

@@ -13,7 +13,7 @@ def test_pmcmc_regression(lg_struct, tol, num_regression):
     prop = pp.MVNDiagRW({name: 0.01 for name in param_names})
 
     ll_traces, _, theta_traces, accepts = pmcmc(
-        struct, theta0, proposal=prop, M=M, J=J, thresh=0.0, keys=keys
+        struct, theta0, proposal=prop, J=J, M=M, thresh=0.0, keys=keys
     )
 
     num_regression.check(

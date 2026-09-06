@@ -279,13 +279,14 @@ def test_partrans_serialization():
     assert p_loaded_default.to_est(theta) == {"p": 5.0}
     assert p_loaded_default.from_est(theta) == {"p": 5.0}
 
-    # 2. Test lambdas/closures (should fall back to defaults)
+    # 2. Test lambdas/closures round-trip by value (CORE-06 fix).
+    # Lambdas used to silently degrade to the identity transform after
+    # pickling; they are now cloudpickled by value and restore exactly.
     p_lambda = pp.ParTrans(lambda x: {"p": x["p"] * 2.0}, lambda x: {"p": x["p"] / 2.0})
     data_lambda = pickle.dumps(p_lambda)
     p_loaded_lambda = pickle.loads(data_lambda)
-    # Since they are lambdas, they restore to default functions
-    assert p_loaded_lambda.to_est(theta) == {"p": 5.0}
-    assert p_loaded_lambda.from_est(theta) == {"p": 5.0}
+    assert p_loaded_lambda.to_est(theta) == {"p": 10.0}
+    assert p_loaded_lambda.from_est(theta) == {"p": 2.5}
 
     # 3. Test module-level functions
     p_module = pp.ParTrans(dummy_to_est, dummy_from_est)
@@ -296,14 +297,22 @@ def test_partrans_serialization():
     assert p_loaded_module.to_est(cast(ParamDict, {"p": 1.0})) == {"p": 2.0}
     assert p_loaded_module.from_est(cast(ParamDict, {"p": 2.0})) == {"p": 1.0}
 
-    # 4. Test unpickling error fallback
-    state = p_module.__getstate__()
-    # Corrupt the state to refer to a non-existent module/function
-    state["_to_est_module"] = "non_existent_module_foo"
-    state["_from_est_name"] = "non_existent_function_bar"
+    # 4. Test unpickling error fallback for legacy (pre-CORE-06) payloads.
+    # Old pickles stored functions by module+name reference instead of by
+    # value. That legacy fallback path is intentionally preserved for
+    # loading old payloads, so a legacy-format state referring to a
+    # non-existent module/function should still fall back to defaults
+    # silently. (New cloudpickle-bytes payloads have no such silent
+    # fallback: a corrupted `_bytes` entry raises instead of degrading.)
+    legacy_state = {
+        "_to_est_module": "non_existent_module_foo",
+        "_to_est_name": "non_existent_function_bar",
+        "_from_est_module": "non_existent_module_foo",
+        "_from_est_name": "non_existent_function_bar",
+    }
 
     p_corrupted = pp.ParTrans()
-    p_corrupted.__setstate__(state)
+    p_corrupted.__setstate__(legacy_state)
 
     # Should fall back to defaults
     assert p_corrupted.to_est(theta) == {"p": 5.0}
@@ -311,10 +320,12 @@ def test_partrans_serialization():
 
 
 def test_partrans_serialization_of_non_module_callable():
-    """A callable with no __name__ (e.g. functools.partial) can't be
-    serialized by module+name, so it falls back to the is_lambda marker --
-    same fallback path as lambdas, but exercised via a different __getstate__
-    branch (functions missing __name__ rather than being actual lambdas)."""
+    """A callable with no __name__ (e.g. functools.partial) used to be
+    unserializable by module+name, so it fell back to the is_lambda identity
+    marker. CORE-06 replaced serialization with an unconditional
+    cloudpickle-by-value scheme, so such callables now round-trip and
+    function correctly instead of falling back, and no is_lambda marker is
+    ever written."""
     import functools
 
     def scale(theta, factor):
@@ -325,12 +336,13 @@ def test_partrans_serialization_of_non_module_callable():
 
     p = pp.ParTrans(partial_to_est, dummy_from_est)
     state = p.__getstate__()
-    assert state["_to_est_is_lambda"] is True
+    assert "_to_est_is_lambda" not in state
+    assert "_to_est_bytes" in state
 
     p_loaded = pickle_roundtrip(p)
     theta: ParamDict = {"p": 5.0}
-    # Falls back to the identity default rather than the partial.
-    assert p_loaded.to_est(theta) == {"p": 5.0}
+    # Round-trips correctly and preserves the partial's actual behavior.
+    assert p_loaded.to_est(theta) == {"p": 10.0}
 
 
 def test_transform_array_empty_params():

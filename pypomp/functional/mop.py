@@ -56,7 +56,9 @@ def mop(
     context = MopContext.from_struct(struct, J=J, alpha=alpha)
 
     return _vmapped_mop_internal(
-        thetas_array,
+        struct.par_trans._transform_array(
+            thetas_array, struct.param_names, direction="to_est"
+        ),
         keys,
         context,
     )

@@ -106,7 +106,9 @@ def rproc(X_, theta_, key, covars, t, dt):
 
     # white noise (extrademographic stochasticity)
     keys = jax.random.split(key, 3)
-    dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    safe_sigmaSE = jnp.where(sigmaSE > 0, sigmaSE, 1.0)  # pomp: rgammawn(sigma=0, dt) == dt
+    dw = jnp.where(sigmaSE > 0,
+                   fast_gamma(keys[0], dt / safe_sigmaSE**2) * safe_sigmaSE**2, dt)
 
     rate = jnp.array([foi * dw / dt, mu, sigma, mu, gamma, mu])
 
@@ -139,7 +141,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     E = E + trans_S[0] - trans_E[0] - trans_E[1]
     I = I + trans_E[0] - trans_I[0] - trans_I[1]
     R = pop - S - E - I
-    W = W + (dw - dt) / sigmaSE
+    W = W + (dw - dt) / safe_sigmaSE
     C = C + trans_I[0]
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 

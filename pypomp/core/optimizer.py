@@ -57,6 +57,7 @@ class Optimizer:
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         """Compute the parameter update direction and update the optimizer state.
 
@@ -74,6 +75,9 @@ class Optimizer:
         eta_i : jax.Array, optional
             The current step size/learning rate at this iteration.
             Only used if the optimizer requires it (e.g. BFGS).
+        theta : jax.Array, optional
+            The current parameter iterate (before this step's update). Only used
+            if the optimizer requires the realised displacement (e.g. BFGS).
 
         Returns
         -------
@@ -111,6 +115,7 @@ class SGD(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         return -grad, ()
 
@@ -143,6 +148,7 @@ class Adam(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         m, v = state
         m_new = self.beta1 * m + (1 - self.beta1) * grad
@@ -200,6 +206,7 @@ class FullMatrixAdam(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         m, v = state
         if grad.ndim == 1:
@@ -217,7 +224,7 @@ class BFGS(Optimizer):
     """Quasi-Newton BFGS optimizer."""
 
     def init_state(self, theta: jax.Array) -> tuple:
-        return jnp.eye(theta.shape[-1]), jnp.zeros_like(theta)
+        return jnp.eye(theta.shape[-1]), jnp.zeros_like(theta), theta
 
     def step(
         self,
@@ -226,20 +233,15 @@ class BFGS(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
-        hess, prev_grad = state
+        hess, prev_grad, prev_theta = state
 
-        if eta_i is None:
-            raise ValueError("BFGS optimizer requires eta_i")
+        if theta is None:
+            raise ValueError("BFGS optimizer requires theta")
 
         def bfgs_true(_):
-            prev_direction = jax.lax.cond(
-                step_num > 0,
-                lambda __: -prev_grad,
-                lambda __: -grad,
-                operand=None,
-            )
-            s_k = jnp.mean(eta_i) * prev_direction
+            s_k = theta - prev_theta
             y_k = grad - prev_grad
             rho_k = jnp.reciprocal(jnp.dot(y_k, s_k))
 
@@ -263,7 +265,7 @@ class BFGS(Optimizer):
             bfgs_false,
             operand=None,
         )
-        return direction, (new_hess, grad)
+        return direction, (new_hess, grad, theta)
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,7 @@ class Newton(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         if compute_hessian_fn is None:
             raise ValueError("Newton optimizer requires compute_hessian_fn")
@@ -302,6 +305,7 @@ class WeightedNewton(Optimizer):
         step_num: int | jax.Array,
         compute_hessian_fn: Callable[[], jax.Array] | None = None,
         eta_i: jax.Array | None = None,
+        theta: jax.Array | None = None,
     ) -> tuple[jax.Array, tuple]:
         if compute_hessian_fn is None:
             raise ValueError("WeightedNewton optimizer requires compute_hessian_fn")

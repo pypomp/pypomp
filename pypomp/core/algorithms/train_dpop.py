@@ -159,6 +159,7 @@ def _dpop_train_scan_step(
         state=opt_state,
         step_num=m,
         eta_i=eta_m,
+        theta=theta,
     )
 
     if optimizer.scale:

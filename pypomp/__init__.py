@@ -38,7 +38,7 @@ from .core.par_trans import ParTrans
 from .core.parameters import PanelParameters, PompParameters
 from .core.pomp import Pomp
 from .core.rw_sigma import RWSigma
-from .mcap import mcap
+from .mcap import MCAPResult, mcap
 from .panel.panel import PanelPomp
 from .proposals import (
     MVNDiagRW,
@@ -79,6 +79,7 @@ __all__ = [
     "WeightedNewton",
     # Inference / Algorithms
     "mcap",
+    "MCAPResult",
     "Proposal",
     "MVNDiagRW",
     "MVNRWFull",

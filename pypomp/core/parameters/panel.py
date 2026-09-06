@@ -579,7 +579,11 @@ class PanelParameters(ParameterSet):
             data_vars={
                 "shared": new_shared_da,
                 "unit_specific": unit_specific_da,
-            }
+            },
+            attrs={
+                "shared_names": list(shared_keys),
+                "unit_specific_names": list(specific_keys),
+            },
         )
 
         new_obj._logLik_unit = new_ll_unit

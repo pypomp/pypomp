@@ -169,15 +169,13 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
     # Use original order for Panel DataFrames to ensure mismatch with London
     london_params = london_params_orig
     shared_df = pd.DataFrame(
-        {p: [london_params[p]] for p in toggled_params},
+        {"shared": [london_params[p] for p in toggled_params]},
         index=pd.Index(toggled_params),
-        columns=pd.Index(["shared"]),
     )
     specific_params = [p for p in london_params if p not in toggled_params]
     specific_df = pd.DataFrame(
-        {p: [london_params[p]] for p in specific_params},
+        {"London": [london_params[p] for p in specific_params]},
         index=pd.Index(specific_params),
-        columns=pd.Index(["London"]),
     )
 
     panel_shared = pp.PanelPomp(
@@ -187,9 +185,8 @@ def test_mif_shared_vs_unit_specific_single_unit_consistency(
 
     # 2. Setup Panel with toggled parameters as UNIT-SPECIFIC
     all_specific_df = pd.DataFrame(
-        {p: [london_params[p]] for p in london_params},
+        {"London": [london_params[p] for p in london_params]},
         index=pd.Index(list(london_params.keys())),
-        columns=pd.Index(["London"]),
     )
 
     panel_specific = pp.PanelPomp(

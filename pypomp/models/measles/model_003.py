@@ -151,7 +151,7 @@ def rproc(
     R_new = softclamp(pop - S_new - E_new - I_new)
 
     W_new = W + (dw - dt) / sigmaSE
-    C_new = softclamp(C + flux_EI)
+    C_new = softclamp(C + flux_IR)  # report I->R, like every other He10 variant
 
     return {"S": S_new, "E": E_new, "I": I_new, "R": R_new, "W": W_new, "C": C_new}
 

@@ -533,5 +533,10 @@ class UKMeasles:
         for unit, pomp_obj in pomp_dict.items():
             std_val = (log_pops[unit] - mean_log_pop) / sd_log_pop
             pomp_obj.covars["std_log_pop_1950"] = std_val
+            # Pomp.__init__ already froze covars into _covars_extended; refresh
+            # that column (constant, so no re-interpolation is needed) so the
+            # compiled kernel reads the z-score rather than the placeholder.
+            ci = pomp_obj.covar_names.index("std_log_pop_1950")
+            pomp_obj._covars_extended[:, ci] = std_val
 
         return PanelPomp(pomp_dict=pomp_dict, theta=theta)

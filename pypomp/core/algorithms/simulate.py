@@ -128,7 +128,7 @@ def _simulate_helper(
         accumvars,
         should_trans,
     )
-    t = times0[i]
+    t = times0[i + 1]  # end of the interval just propagated
 
     covars_t = None if covars_extended is None else covars_extended[t_idx]
     split_keys = jax.random.split(key, num=nsim + 1)

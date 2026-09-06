@@ -187,8 +187,11 @@ def rproc(X_, theta_, key, covars, t, dt):
     beta = beta1 * seas_1 + beta2 * seas_2 + beta3 * seas_3
 
     key, subkey = jax.random.split(key)
-    shape = dt / (beta_sd**2 + 1e-10)
-    dW = fast_gamma(subkey, shape) * (beta_sd**2)
+    safe_beta_sd = jnp.where(beta_sd > 0, beta_sd, 1.0)
+    # No epsilon floor: it biases the small-beta_sd limit badly (dW=0.0014 vs dt
+    # =0.1429 at beta_sd=1e-6). beta_sd == 0 is handled exactly by the where below.
+    shape = dt / safe_beta_sd**2
+    dW = jnp.where(beta_sd > 0, fast_gamma(subkey, shape) * safe_beta_sd**2, dt)
 
     rate_foi = (iota + beta * I * dW / dt) / pop
 
@@ -220,7 +223,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     I_new = I + infections - recoveries - deaths_I
     R_new = R + recoveries - deaths_R
     cases_new = cases + recoveries
-    W_new = jnp.where(beta_sd > 0, W + (dW - dt) / beta_sd, W)
+    W_new = jnp.where(beta_sd > 0, W + (dW - dt) / safe_beta_sd, W)
     logw_new = logw + logw_step
 
     return {

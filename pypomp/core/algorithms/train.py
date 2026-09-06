@@ -57,13 +57,26 @@ def _train_internal(
     )
     step_fn = jax.tree_util.Partial(_train_scan_step, context, optimizer)
 
-    _, history = jax.lax.scan(
+    final_state, history = jax.lax.scan(
         step_fn,
         initial_carry,
         jnp.arange(context.M),
     )
 
-    neg_logliks = jnp.concatenate((jnp.array([jnp.nan]), history.neg_loglik))
+    # history.neg_loglik[m] is the monitor at Acopies[m]; monitor the returned
+    # final iterate too, so row i's logLik and row i's theta are one parameter set.
+    if context.n_monitors >= 1:
+        final_keys = jax.random.split(final_state.key, context.n_monitors)
+        final_neg_loglik = jnp.mean(
+            _vmapped_pfilter_internal(
+                final_state.theta_ests,
+                final_keys,
+                context.to_pfilter_context(should_trans=True),
+            )["neg_loglik"]
+        )
+    else:
+        final_neg_loglik = jnp.array(jnp.nan)
+    neg_logliks = jnp.concatenate((history.neg_loglik, final_neg_loglik[jnp.newaxis]))
     Acopies = jnp.concatenate((theta_ests[jnp.newaxis, ...], history.theta_ests))
 
     return neg_logliks, Acopies
@@ -131,6 +144,7 @@ def _train_scan_step(
         step_num=m,
         compute_hessian_fn=compute_hessian,
         eta_i=context.eta[m],
+        theta=theta_ests,
     )
 
     if optimizer.scale:

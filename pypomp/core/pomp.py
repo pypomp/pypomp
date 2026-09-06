@@ -262,6 +262,11 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.ys = ys
         self.covars = covars
         self.t0 = float(t0)
+        _times = np.asarray(ys.index, dtype=float)
+        if _times.size and self.t0 > _times[0]:
+            raise ValueError(
+                f"t0 ({self.t0}) must be no later than the first observation time ({_times[0]})"
+            )
         self.results_history = ResultsHistory()
         self.fresh_key = None
         self.metadata = ModelMetadata()
@@ -349,6 +354,29 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             validate_logic=validate_logic,
             nstep_array=self._nstep_array,
         )
+
+    @property
+    def par_trans(self) -> ParTrans:
+        """Parameter transformation; assigning it rebuilds fresh components."""
+        # "par_trans" is the key pickles written before this property still use.
+        if "_par_trans" in self.__dict__:
+            return self.__dict__["_par_trans"]
+        return self.__dict__["par_trans"]
+
+    @par_trans.setter
+    def par_trans(self, value: ParTrans | None) -> None:
+        value = value or ParTrans()
+        self._par_trans = value
+        for name in ("rinit", "rproc", "dmeas", "rmeas", "dprior"):
+            component = getattr(self, name, None)
+            if component is not None:
+                # Copy first: structs exported earlier keep the old component,
+                # whose closures read that component's own par_trans.
+                fresh = object.__new__(type(component))
+                fresh.__dict__.update(component.__dict__)
+                fresh.par_trans = value
+                fresh._build_mechanics()  # copied callables still read the old one
+                setattr(self, name, fresh)
 
     @property
     def theta(self) -> PompParameters:
@@ -741,11 +769,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
+                    nstep_array=getattr(self, "_nstep_array", None),
                     **kwargs,
                 )
-                if state.get("_rproc_nstep") is not None:
-                    if state.get("_rproc_dt") is not None:
-                        self.rproc.nstep = state["_rproc_nstep"]
 
         # Reconstruct dmeas
         obj_dmeas = _load_func("dmeas")

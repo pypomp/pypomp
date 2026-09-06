@@ -432,7 +432,8 @@ class MVNRWAdaptive:
 
         # ---- Choose covariance matrix ----
         cov_p1 = scaling_new**2 * self.init_rw_var
-        cov_p2 = (2.38**2 / d) * state.covmat_emp
+        d_active = jnp.maximum(jnp.sum(jnp.any(self.init_rw_var != 0, axis=0)), 1)
+        cov_p2 = (2.38**2 / d_active) * state.covmat_emp  # pomp: 2.38^2/length(parnm)
         in_phase2 = accepts >= self.shape_start
         covmat = jnp.where(
             in_phase2, cov_p2, jnp.where(in_phase1, cov_p1, self.init_rw_var)
@@ -452,8 +453,11 @@ class MVNRWAdaptive:
             self.init_rw_var != 0, axis=1
         )
         active_mask = active_mask.astype(dt)
-        jitter = 1e-10 * jnp.eye(d, dtype=dt)
+        jitter = jnp.maximum(10 * jnp.finfo(dt).eps * jnp.trace(covmat) / d,
+                             jnp.finfo(dt).tiny) * jnp.eye(d, dtype=dt)
         chol = jnp.linalg.cholesky(covmat + jitter)
+        chol = jnp.where(jnp.any(jnp.isnan(chol)),
+                         jnp.linalg.cholesky(cov_p1 + jitter), chol)
         z = jax.random.normal(key, shape=(d,))
         theta_proposed = theta_arr + (chol @ z) * active_mask
 

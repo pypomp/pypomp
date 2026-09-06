@@ -11,7 +11,7 @@ class ModelMetadata:
     """Stores environment and instantiation metadata for reproducibility."""
 
     pypomp_version: str = field(
-        default_factory=lambda: importlib.metadata.version("pypomp")
+        default_factory=lambda: importlib.import_module("pypomp").__version__
     )
     jax_version: str = field(default_factory=lambda: jax.__version__)
     python_version: str = field(default_factory=platform.python_version)

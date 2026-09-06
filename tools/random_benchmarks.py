@@ -104,13 +104,12 @@ def benchmark_poisson() -> None:
     state_key1 = [key1]
     state_key2 = [key2]
 
-    # JIT compilable closures for JAX compatibility
-    @jax.jit
+    # ppr.fast_poisson is already jitted; keep the split outside the traced
+    # region so it runs on every call instead of once at trace time.
     def run_fast() -> jax.Array:
         state_key1[0], subkey = jax.random.split(state_key1[0])
         return ppr.fast_poisson(subkey, lam_samples)
 
-    @jax.jit
     def run_ref() -> jax.Array:
         state_key2[0], subkey = jax.random.split(state_key2[0])
         return jax.random.poisson(subkey, lam_samples)

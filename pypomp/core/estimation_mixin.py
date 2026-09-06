@@ -25,6 +25,7 @@ from .learning_rate import LearningRate
 from .optimizer import Adam, Optimizer
 from .parameters import PompParameters
 from .results import (
+    ResultsHistory,
     build_abc_result,
     build_dpop_train_result,
     build_mif_result,
@@ -82,6 +83,13 @@ class PompEstimationMixin(Base):
         20
         """
         param_names = list(param_bounds.keys())
+        for p in param_names:
+            # equal bounds pin a parameter while others are sampled, which is a
+            # supported idiom; only a reversed interval is invalid
+            if not param_bounds[p][0] <= param_bounds[p][1]:
+                raise ValueError(
+                    f"param_bounds[{p!r}] needs lower <= upper, got {param_bounds[p]}"
+                )
         low = jnp.array([param_bounds[p][0] for p in param_names])
         high = jnp.array([param_bounds[p][1] for p in param_names])
 
@@ -358,6 +366,8 @@ class PompEstimationMixin(Base):
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
             raise ValueError("J should be greater than 0.")
+        if M < 1:
+            raise ValueError("M should be greater than 0.")
 
         keys = jax.random.split(new_key, n_reps)
 
@@ -537,7 +547,6 @@ class PompEstimationMixin(Base):
 
         n_reps = theta_obj_in.num_replicates()
 
-        theta_obj_in = theta_obj_in.transformed(self.par_trans, direction="to_est")
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -571,11 +580,7 @@ class PompEstimationMixin(Base):
         nLLs, theta_ests = jax.device_get((nLLs_jax, theta_ests_jax))
         del nLLs_jax, theta_ests_jax
 
-        theta_ests_natural = self.par_trans._transform_array(
-            theta_ests,
-            self.canonical_param_names,
-            direction="from_est",
-        )
+        theta_ests_natural = theta_ests
 
         joined_array = xr.DataArray(
             np.concatenate(
@@ -601,7 +606,7 @@ class PompEstimationMixin(Base):
                 "parameter": self.canonical_param_names,
             },
         )
-        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs[:, -1]))
 
         execution_time = time.time() - start_time
 
@@ -784,7 +789,7 @@ class PompEstimationMixin(Base):
                 "parameter": self.canonical_param_names,
             },
         )
-        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs[:, -1]))
 
         execution_time = time.time() - start_time
 
@@ -883,6 +888,12 @@ class PompEstimationMixin(Base):
             (ll_jax, lp_jax, theta_jax, accepts_jax)
         )
         del ll_jax, lp_jax, theta_jax, accepts_jax
+        bad_start = np.flatnonzero(~np.isfinite(lp_traces[:, 0]))
+        if bad_start.size:
+            raise ValueError(
+                f"non-finite log prior at starting parameters for chains "
+                f"{bad_start.tolist()}: no proposal can ever be accepted"
+            )
 
         trace_vars = ["logLik", "log_prior"] + list(canonical_names)
         trace_data = np.concatenate(
@@ -1202,6 +1213,8 @@ class PompEstimationMixin(Base):
             pomp_copy = deepcopy(self)
             pomp_copy.ys = simulated_ys
             pomp_copy.theta = theta_obj_in.subset([0])
+            pomp_copy.results_history = ResultsHistory()
+            pomp_copy.fresh_key = jax.random.fold_in(new_key, 1)
             return cast("Pomp", pomp_copy)
 
         return X_sims_long, Y_sims_long

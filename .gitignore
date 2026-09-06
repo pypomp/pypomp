@@ -181,3 +181,28 @@ cython_debug/
 junit/
 GEMINI.md
 CLAUDE.md
+
+# --- AI coding assistants: config, transcripts and generated artefacts ---
+AGENTS.md
+.claude/
+.claude-plugin/
+.codex/
+.codex-plugin/
+.cursor/
+.aider*
+.continue/
+.windsurf/
+.github/copilot-instructions.md
+.mcp.json
+
+# Audit/review output and working notes produced by those tools
+quality_reports/
+MEMORY.md
+findings.md
+progress.md
+task_plan.md
+*_summary.txt
+email_to_*.txt
+
+# Generated reports and any other HTML (none is tracked in this repo)
+*.html

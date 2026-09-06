@@ -13,7 +13,7 @@ def _quadratic_profile(rng, n=60, center=0.3, curvature=0.5, noise=0.05):
 def test_mcap_returns_result_with_expected_fields():
     rng = np.random.default_rng(0)
     x, y = _quadratic_profile(rng)
-    result = mcap(x, y)
+    result = mcap(parameter=x, loglik=y)
 
     assert isinstance(result, MCAPResult)
     assert result.level == 0.95
@@ -28,7 +28,7 @@ def test_mcap_recovers_mle_and_finite_ci_on_quadratic():
     rng = np.random.default_rng(1)
     true_center = 0.3
     x, y = _quadratic_profile(rng, center=true_center)
-    result = mcap(x, y)
+    result = mcap(parameter=x, loglik=y)
 
     # MLE should be close to the true peak
     assert abs(result.mle - true_center) < 0.2
@@ -50,14 +50,14 @@ def test_mcap_grid_size_matches_n_grid():
     rng = np.random.default_rng(2)
     x, y = _quadratic_profile(rng)
     n_grid = 250
-    result = mcap(x, y, n_grid=n_grid)
+    result = mcap(parameter=x, loglik=y, n_grid=n_grid)
     assert result.fit["parameter"].shape == (n_grid,)
 
 
 def test_mcap_loess_degree_1_runs():
     rng = np.random.default_rng(3)
     x, y = _quadratic_profile(rng)
-    result = mcap(x, y, loess_degree=1)
+    result = mcap(parameter=x, loglik=y, loess_degree=1)
     assert isinstance(result, MCAPResult)
     assert np.isfinite(result.mle)
 
@@ -71,7 +71,7 @@ def test_mcap_constant_parameter_returns_finite_result():
     x = np.full(20, 2.0)
     y = rng.normal(0.0, 1.0, size=20)
 
-    result = mcap(x, y)
+    result = mcap(parameter=x, loglik=y)
     assert isinstance(result, MCAPResult)
     assert result.mle == 2.0
     # smoothed profile is flat at mean(y)
@@ -81,8 +81,8 @@ def test_mcap_constant_parameter_returns_finite_result():
 def test_mcap_higher_level_widens_delta():
     rng = np.random.default_rng(5)
     x, y = _quadratic_profile(rng)
-    r95 = mcap(x, y, level=0.95)
-    r99 = mcap(x, y, level=0.99)
+    r95 = mcap(parameter=x, loglik=y, level=0.95)
+    r99 = mcap(parameter=x, loglik=y, level=0.99)
     assert r99.delta > r95.delta
 
 
@@ -100,7 +100,7 @@ def test_mcap_monotonic_profile_signals_failed_fit():
     with warnings.catch_warnings():
         # se_stat2 = 1/(2a) is negative when a < 0; sqrt(se_stat2) -> NaN
         warnings.simplefilter("ignore", RuntimeWarning)
-        result = mcap(x, y)
+        result = mcap(parameter=x, loglik=y)
 
     assert result.quadratic_coef["a"] < 0.0
     assert result.quadratic_max == result.mle
@@ -114,7 +114,7 @@ def test_mcap_small_sample_uses_zero_residual_variance():
     rng = np.random.default_rng(0)
     x = np.linspace(-1.0, 1.0, 5)
     y = -0.5 * x**2 + rng.normal(0.0, 0.05, size=5)
-    result = mcap(x, y, span=0.75)
+    result = mcap(parameter=x, loglik=y, span=0.75)
     assert isinstance(result, MCAPResult)
     assert np.isfinite(result.mle)
 
@@ -132,32 +132,37 @@ def test_mcap_r_comparison():
         [0.01, -0.02, 0.03, -0.01, 0.02, -0.03, 0.01, -0.02, 0.03, -0.01]
     )
 
-    # R pomp::mcap reference outputs:
-    # mle: 0.23293293
+    # R reference outputs, recomputed with
+    # loess.control(surface="direct") so that R's own kd-tree
+    # interpolation error is excluded from the comparison:
+    # mle: 0.23093093
     # ci: (0.1, 0.5)
-    # delta: 1.93755414
-    # se_stat: 0.35499986
-    # se_mc: 0.03322532
-    # se_total: 0.35655129
-    # quadratic_max: 0.23196971
+    # delta: 1.93853420
+    # se_stat: 0.35866466
+    # se_mc: 0.03453217
+    # se_total: 0.36032320
+    # quadratic_max: 0.23246813
 
-    result = mcap(x, y)
+    result = mcap(parameter=x, loglik=y)
 
     # MLE and quadratic peak should be close to R values
-    assert abs(result.mle - 0.23293293) < 0.05
-    assert abs(result.quadratic_max - 0.23196971) < 0.05
+    assert abs(result.mle - 0.23093093) < 0.05
+    assert abs(result.quadratic_max - 0.23246813) < 0.05
 
     # Confidence intervals should match
     assert result.ci[0] is not None and result.ci[1] is not None
     assert abs(result.ci[0] - 0.1) < 1e-5
     assert abs(result.ci[1] - 0.5) < 1e-5
 
-    # Delta and SE components should match within a reasonable tolerance
-    # due to loess implementation differences
-    assert abs(result.delta - 1.93755414) < 0.1
-    assert abs(result.se_stat - 0.35499986) < 0.1
-    assert abs(result.se_mc - 0.03322532) < 0.05
-    assert abs(result.se_total - 0.35655129) < 0.1
+    # Delta must decompose exactly into the chi-square cutoff plus the
+    # Monte Carlo adjustment term this test exists to protect.
+    q = _qchisq(0.95, df=1)
+    mc_term = q * result.quadratic_coef["a"] * result.se_mc**2
+    assert result.delta - 0.5 * q == pytest.approx(mc_term, rel=1e-8)
+    assert mc_term > 1e-4
+    assert abs(result.se_stat - 0.35866466) < 0.1
+    assert abs(result.se_mc - 0.03453217) < 0.05
+    assert abs(result.se_total - 0.36032320) < 0.1
 
 
 def test_mcap_loess_zero_mad_subset():
@@ -167,7 +172,7 @@ def test_mcap_loess_zero_mad_subset():
     y = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0])
 
     # Calling mcap on this should produce a valid, non-degenerate smoothed profile.
-    result = mcap(x, y, span=0.75, loess_degree=1)
+    result = mcap(parameter=x, loglik=y, span=0.75, loess_degree=1)
 
     # Verify the smoothed profile is NOT degenerate (all zeroes)
     assert not np.allclose(result.fit["smoothed"], 0.0)

@@ -69,12 +69,12 @@ def _mif_scan_body(
     )
 
     # 2. Optionally run pfilter for unperturbed logLik
+    next_theta_mean = jnp.mean(next_theta_Jd, axis=0)
     if context.n_monitors >= 1:
-        current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
         mon_keys = jax.random.split(iter_key, context.n_monitors)
         neg_loglik_m = jnp.mean(
             _vmapped_pfilter_internal(
-                current_theta_mean,
+                next_theta_mean,
                 mon_keys,
                 context_pf,
             )["neg_loglik"]
@@ -82,7 +82,7 @@ def _mif_scan_body(
     else:
         neg_loglik_m = neg_loglik_per
 
-    return next_theta_Jd, (jnp.mean(next_theta_Jd, axis=0), neg_loglik_m)
+    return next_theta_Jd, (next_theta_mean, neg_loglik_m)
 
 
 def _perfilter_internal(
@@ -202,12 +202,9 @@ def _perfilter_scan_body(
     )
 
     # 5. Compute log-likelihood contribution of current observation.
-    measurements = jnp.nan_to_num(
-        context.per.dmeasure(
-            xs.y, particlesP_Jx, perturbed_thetas, covars_t, xs.time, SHOULD_TRANS
-        ).squeeze(),
-        nan=jnp.log(1e-18),
-    )
+    measurements = context.per.dmeasure(
+        xs.y, particlesP_Jx, perturbed_thetas, covars_t, xs.time, SHOULD_TRANS
+    ).squeeze()
 
     # 6. Update the running log-likelihood and normalize particle weights.
     weights = carry.norm_weights + measurements

@@ -231,9 +231,8 @@ class ParTrans:
         """
         Custom pickling method to preserve function identity.
 
-        Stores module and function names for module-level functions.
-        Lambdas/closures cannot be reliably reconstructed and will fall back
-        to defaults on unpickling.
+        Serialises the transform by value, so lambdas and closures round-trip
+        intact rather than degrading to the identity.
         """
         return {
             **_serialize_func(self.to_est, "to_est"),
@@ -244,25 +243,24 @@ class ParTrans:
         """
         Custom unpickling method to reconstruct functions.
 
-        Reconstructs module-level functions by importing them.
-        Falls back to defaults for lambdas/closures.
+        Restores a by-value payload. Payloads written before this change are
+        still read by reference, and those may fall back to the default.
         """
         self.to_est = _restore_func(state, "to_est", _to_est_default)
         self.from_est = _restore_func(state, "from_est", _from_est_default)
 
 
-def _serialize_func(func, name: str) -> dict[str, str | bool]:
-    if (
-        hasattr(func, "__module__")
-        and hasattr(func, "__name__")
-        and func.__module__ is not None
-    ):
-        return {f"_{name}_module": func.__module__, f"_{name}_name": func.__name__}
-    return {f"_{name}_is_lambda": True}
+import cloudpickle  # add beside the existing `import importlib`
+
+
+def _serialize_func(func, name: str) -> dict[str, bytes]:
+    return {f"_{name}_bytes": cloudpickle.dumps(func)}
 
 
 def _restore_func(state: dict, name: str, default_func) -> Callable:
-    if f"_{name}_is_lambda" in state:
+    if f"_{name}_bytes" in state:
+        return cloudpickle.loads(state[f"_{name}_bytes"])
+    if f"_{name}_is_lambda" in state:  # legacy by-reference payloads
         return default_func
     try:
         module = importlib.import_module(state[f"_{name}_module"])

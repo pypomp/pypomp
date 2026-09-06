@@ -4,6 +4,7 @@ This module implements Monte Carlo-adjusted profile (MCAP) for POMP models.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,61 +65,36 @@ def _loess_smooth_1d(
         return np.full_like(grid, float(np.mean(y)), dtype=float)
 
     n = len(x)
-    npoints = int(np.ceil(span * n))
+    npoints = int(np.floor(span * n + 1e-5))  # R's lowesd rule; eps matters at integer span*n
     npoints = max(degree + 1, min(n, npoints))
 
     deg = int(degree)
     deg_powers = np.arange(deg + 1)
     y_sm = np.empty_like(grid, dtype=float)
 
-    for j, xj in enumerate(grid):
-        dist = np.abs(x - xj)
-        w_idx = np.argsort(dist)[:npoints]
-        xw = x[w_idx]
-        yw = y[w_idx]
-        dw = dist[w_idx]
-
-        max_d = dw[-1]
-        if max_d > 0.0:
-            dist_weights = (1.0 - (dw / max_d) ** 3) ** 3
-        else:
-            dist_weights = np.ones_like(dw)
-
-        A = xw[:, None] ** deg_powers
-        sqw = np.sqrt(dist_weights)
-        coef, _, _, _ = np.linalg.lstsq(A * sqw[:, None], yw * sqw, rcond=None)
-        yfit = A @ coef
-
-        bad = None
-        for _ in range(max_iter):
-            aerr = np.abs(yfit - yw)
-            mad = float(np.median(aerr))
-            if mad == 0.0:
-                break
-            uu = (aerr / (6.0 * mad)) ** 2
-            uu = np.clip(uu, 0.0, 1.0)
-            biweights = (1.0 - uu) ** 2
-            tot_weights = dist_weights * biweights
-
-            if np.all(tot_weights == 0.0):
-                break
-
-            sqw_tot = np.sqrt(tot_weights)
-            try:
-                coef, _, _, _ = np.linalg.lstsq(
-                    A * sqw_tot[:, None], yw * sqw_tot, rcond=None
-                )
-                yfit = A @ coef
-            except np.linalg.LinAlgError:
-                break
-
-            bad_old = bad
-            bad = biweights < 0.34
-            if bad_old is not None and np.array_equal(bad_old, bad):
-                break
-
-        a_xj = xj**deg_powers
-        y_sm[j] = float(a_xj @ coef)
+    rob = np.ones(n)
+    max_iter = max(int(max_iter), 0)
+    for it in range(max_iter + 1):
+        pts = x if it < max_iter else grid
+        y_sm = np.empty(len(pts), dtype=float)
+        for j, xj in enumerate(pts):
+            dist = np.abs(x - xj)
+            w_idx = np.argsort(dist)[:npoints]
+            xw, yw, dw = x[w_idx], y[w_idx], dist[w_idx]
+            max_d = dw[-1]
+            dist_weights = ((1.0 - (dw / max_d) ** 3) ** 3 if max_d > 0.0
+                            else np.ones_like(dw))
+            A = xw[:, None] ** deg_powers
+            sqw = np.sqrt(dist_weights * rob[w_idx])
+            if not np.any(sqw > 0.0):
+                sqw = np.sqrt(dist_weights)
+            coef, _, _, _ = np.linalg.lstsq(A * sqw[:, None], yw * sqw, rcond=None)
+            y_sm[j] = float((xj**deg_powers) @ coef)
+        if it == max_iter:
+            break
+        aerr = np.abs(y - y_sm)
+        cmad = 6.0 * float(np.median(aerr))
+        rob = np.where(aerr >= cmad, 0.0, (1.0 - (aerr / cmad) ** 2) ** 2) if cmad > 0.0 else rob
 
     return y_sm
 
@@ -225,13 +201,14 @@ class MCAPResult:
 
 
 def mcap(
+    *,
     parameter: npt.ArrayLike,
     loglik: npt.ArrayLike,
-    *,
     level: float = 0.95,
     span: float = 0.75,
     n_grid: int = 1000,
     loess_degree: int = 2,
+    loess_family: str = "gaussian",
 ) -> MCAPResult:
     """Compute Monte Carlo-adjusted profile (MCAP) confidence intervals.
 
@@ -254,6 +231,11 @@ def mcap(
         Defaults to ``1000``.
     loess_degree : int, optional
         Polynomial degree for the LOESS smoother.  Defaults to ``2``.
+    loess_family : str, optional
+        LOESS smoothing mode, as in R's ``loess``: ``"gaussian"`` for plain
+        least-squares smoothing (the ``pomp::mcap`` behaviour) or
+        ``"symmetric"`` for robust bisquare reweighting.  Defaults to
+        ``"gaussian"``.
 
     Returns
     -------
@@ -270,38 +252,57 @@ def mcap(
     x: FloatArray = np.asarray(parameter, dtype=float)
     y: FloatArray = np.asarray(loglik, dtype=float)
 
-    # grid over observed parameter range
-    grid = np.linspace(float(np.min(x)), float(np.max(x)), int(n_grid))
+    # both fits run on u = (x - x0) / s0, so no design matrix carries the offset
+    x0 = 0.5 * (float(np.min(x)) + float(np.max(x)))
+    s0 = float(np.max(x)) - float(np.min(x))
+    if not np.isfinite(s0) or s0 <= 0.0:
+        x0, s0 = 0.0, 1.0  # degenerate range: keep the identity transform
+    u: FloatArray = (x - x0) / s0
 
-    # smooth noisy profile
-    y_sm = _loess_smooth_1d(x, y, grid=grid, span=span, degree=loess_degree)
+    # grid over observed parameter range
+    u_grid = np.linspace(float(np.min(u)), float(np.max(u)), int(n_grid))
+    grid = x0 + s0 * u_grid
+
+    # smooth noisy profile; robust bisquare reweighting only on explicit request
+    if loess_family not in ("gaussian", "symmetric"):
+        raise ValueError("loess_family must be 'gaussian' or 'symmetric'")
+    y_sm = _loess_smooth_1d(
+        u,
+        y,
+        grid=u_grid,
+        span=span,
+        degree=loess_degree,
+        max_iter=10 if loess_family == "symmetric" else 0,
+    )
 
     # MLE = argmax of smoothed profile
     i_max = int(np.nanargmax(y_sm))
-    mle = float(grid[i_max])
+    u_mle = float(u_grid[i_max])
+    mle = float(x0 + s0 * u_mle)
 
-    # local quadratic at smoothed MLE with raw data
-    a, b, c, vc_ab = _fit_local_quadratic(x, y, center=mle, span=span)
+    # local quadratic at smoothed MLE with raw data, in local coordinates
+    a_u, b_u, c_u, vc_ab_u = _fit_local_quadratic(u, y, center=u_mle, span=span)
 
-    # SE decomposition
-    se_stat2 = 1.0 / (2.0 * a)
+    # SE decomposition (local units; s0 converts back to parameter units)
+    se_stat2 = s0 * s0 / (2.0 * a_u)
 
-    # Monte Carlo variance from vcov(a, b)
-    var_a = float(vc_ab[0, 0])
-    var_b = float(vc_ab[1, 1])
-    cov_ab = float(vc_ab[0, 1])
+    # Monte Carlo variance from vcov(a_u, b_u): no cancellation in local units
+    var_a = float(vc_ab_u[0, 0])
+    var_b = float(vc_ab_u[1, 1])
+    cov_ab = float(vc_ab_u[0, 1])
 
-    se_mc2 = (
+    se_mc2_u = (
         1.0
-        / (4.0 * a * a)
-        * (var_b - 2.0 * (b / a) * cov_ab + (b * b / (a * a)) * var_a)
+        / (4.0 * a_u * a_u)
+        * (var_b - 2.0 * (b_u / a_u) * cov_ab + (b_u * b_u / (a_u * a_u)) * var_a)
     )
+    se_mc2 = s0 * s0 * se_mc2_u
 
     # se_tot2 = se_stat2 + se_mc2
 
-    # MC-adjusted cutoff
+    # MC-adjusted cutoff (a * se_mc2 is scale free)
     q = _qchisq(level, df=1)
-    delta = float(q * (a * se_mc2 + 0.5))
+    delta = float(q * (a_u * se_mc2_u + 0.5))
 
     # CI from smoothed profile
     diff = float(np.nanmax(y_sm)) - y_sm
@@ -311,16 +312,33 @@ def mcap(
         ci = (None, None)
     else:
         idx = np.where(inside)[0]
+        if idx.max() - idx.min() + 1 != idx.size:
+            warnings.warn(
+                "acceptance set is not an interval (multimodal profile); "
+                "ci is reported as its convex hull"
+            )
         ci = (float(grid[idx.min()]), float(grid[idx.max()]))
+        if idx.min() == 0 or idx.max() == len(grid) - 1:
+            warnings.warn(
+                "confidence interval truncated at the profiled range boundary; "
+                "widen the parameter range"
+            )
 
-    # quadratic curve on grid
-    quad = c - a * (grid**2) + b * grid
+    # quadratic curve on grid, evaluated in local units
+    quad = c_u - a_u * (u_grid**2) + b_u * u_grid
 
-    if a > 0.0:
-        quad_max = b / (2.0 * a)
+    if a_u > 0.0:
+        quad_max = x0 + s0 * (b_u / (2.0 * a_u))
     else:
         # fallback to smoothed MLE if curvature is non-positive
         quad_max = mle
+
+    # coefficients and their covariance reported in the caller's units
+    a = a_u / (s0 * s0)
+    b = b_u / s0 + 2.0 * a * x0
+    c = c_u - a * x0 * x0 - (b_u / s0) * x0
+    J = np.array([[1.0 / (s0 * s0), 0.0], [2.0 * x0 / (s0 * s0), 1.0 / s0]])
+    vc_ab = J @ vc_ab_u @ J.T
 
     return MCAPResult(
         level=level,

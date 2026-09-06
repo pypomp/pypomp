@@ -91,7 +91,20 @@ def test_setstate_prewrapped_components(dprior_pomp):
 
 
 def test_setstate_rproc_dt_and_nstep_both_present(base_pomp):
-    """Cover the raw-function rproc reconstruction path when both dt and nstep are set."""
+    """Cover the raw-function rproc reconstruction path when both dt and nstep are set.
+
+    ``_rproc_nstep`` here is a stale/fabricated value (3) that deliberately
+    disagrees with ``base_pomp``'s real per-interval step schedule
+    (``_nstep_array == [1, 1]``, from ``nstep=1`` over 2 observation
+    intervals). ``__setstate__`` reconstructs ``rproc`` by passing
+    ``nstep_array=self._nstep_array`` into ``_RProc``, which derives
+    ``rproc.nstep`` from that real schedule rather than trusting the
+    pickled ``_rproc_nstep`` scalar -- so the rebuilt rproc's compiled step
+    closure and its reported ``nstep`` stay consistent with each other
+    (a mismatch previously left the closure built for a different step
+    count than ``rproc.nstep`` claimed, breaking ``train()`` after
+    unpickling). Hence the expected value below is 1, not the fabricated 3.
+    """
     state = base_pomp.__getstate__()
     state["_rproc_func_bytes"] = cloudpickle.dumps(base_pomp.rproc.original_func)
     state["_rproc_dt"] = 0.5
@@ -103,7 +116,7 @@ def test_setstate_rproc_dt_and_nstep_both_present(base_pomp):
     pomp_unpickled.__setstate__(state)
 
     assert pomp_unpickled.rproc is not None
-    assert pomp_unpickled.rproc.nstep == 3
+    assert pomp_unpickled.rproc.nstep == 1
 
 
 def test_setstate_rproc_missing_defaults_to_none(base_pomp):

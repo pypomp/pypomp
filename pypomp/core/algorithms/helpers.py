@@ -209,9 +209,9 @@ def _calc_steps(
     nstep_array = np.zeros(nintervals, dtype=int)
     dt_array = np.zeros(nintervals, dtype=float)
     for i in range(nintervals):
-        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
-        nstep_array[i] = nstep
-        dt_array[i] = dt
+        nstep_i, dt_i = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
+        nstep_array[i] = nstep_i
+        dt_array[i] = dt_i
     return nstep_array, dt_array
 
 

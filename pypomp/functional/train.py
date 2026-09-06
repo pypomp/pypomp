@@ -102,11 +102,16 @@ def train(
         struct, J, M, alpha_cooling, thresh, n_monitors, eta_array, alpha
     )
 
-    return _vmapped_train_internal(
-        thetas_array,
+    nLLs, traces_est = _vmapped_train_internal(
+        struct.par_trans._transform_array(
+            thetas_array, struct.param_names, direction="to_est"
+        ),
         keys,
         context,
         optimizer,
+    )
+    return nLLs, struct.par_trans._transform_array(
+        traces_est, struct.param_names, direction="from_est"
     )
 
 

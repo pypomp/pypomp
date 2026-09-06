@@ -213,7 +213,7 @@ class RWSigma:
             return factor**frac
         elif self.cooling_type == "cosine":
             assert self.c is not None and self.M is not None
-            progress = frac / self.M
+            progress = jnp.minimum(frac / self.M, 1.0)
             return self.c + (1.0 - self.c) * 0.5 * (1.0 + jnp.cos(jnp.pi * progress))
         elif self.cooling_type == "hyperbolic":
             assert self.s is not None

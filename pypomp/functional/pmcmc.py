@@ -73,6 +73,7 @@ def pmcmc(
     """
     if struct.dmeas_pf is None:
         raise ValueError("PMCMC requires struct.dmeas_pf to be non-None.")
+    thresh = float(max(0.0, thresh))  # same clamp as pfilter/mif
     thetas_est = struct.par_trans._transform_array(
         thetas_array,
         struct.param_names,

@@ -135,22 +135,21 @@ def test_simulate_parity(lg):
 
 
 def test_train_parity(lg):
-    """Pomp.train matches F.train, including the to_est transform it applies."""
+    """Pomp.train matches F.train; both take theta on the natural scale."""
     model, param_names = lg
     key = jax.random.key(SEED)
     eta = pp.LearningRate({name: 0.01 for name in param_names})
     optimizer = pp.Adam(scale=False, ls=False, c=0.0, max_ls_itn=1)
 
-    theta_est = deepcopy(model.theta).transformed(model.par_trans, direction="to_est")
-    theta_array_est = theta_est.to_jax_array(param_names)
+    theta_array = model.theta.to_jax_array(param_names)
 
     model.train(J=J, M=M, eta=eta, key=key, optimizer=optimizer, alpha=0.0)
     result = model.results_history[-1]
 
-    keys = jnp.array(jax.random.split(_derive_new_key(key), theta_array_est.shape[0]))
+    keys = jnp.array(jax.random.split(_derive_new_key(key), theta_array.shape[0]))
     nLLs, _ = F.train(
         model.to_struct(),
-        theta_array_est,
+        theta_array,
         J,
         M,
         eta,

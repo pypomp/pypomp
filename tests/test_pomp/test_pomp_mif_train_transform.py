@@ -245,3 +245,40 @@ def test_train_parity_with_transform(simple_pomp_with_transform):
     # Verify final theta logLik is 1D
     assert LG_copy.theta.logLik.ndim == 1
     assert LG_copy.theta.logLik.shape == (LG_copy.theta.num_replicates(),)
+
+
+def test_mif_transform_before_tiling(simple_pomp_with_transform):
+    """Test that Pomp.mif transforms parameters before tiling across J particles.
+
+    Verifies that _transform_array with direction="to_est" receives a 2D parameter
+    array (n_reps, n_params), rather than a 3D J-tiled array (n_reps, J, n_params).
+    """
+    LG = simple_pomp_with_transform
+    rw_sd = pp.RWSigma(
+        sigmas={k: 0.0 for k in LG.canonical_param_names},
+        init_names=[],
+    ).geometric_cooling(a=0.5)
+
+    J = 5
+    with patch.object(
+        LG.par_trans,
+        "_transform_array",
+        wraps=LG.par_trans._transform_array,
+    ) as spy_transform:
+        LG.mif(J=J, M=1, rw_sd=rw_sd, key=jax.random.key(123))
+
+        to_est_calls = [
+            call
+            for call in spy_transform.call_args_list
+            if call.kwargs.get("direction") == "to_est"
+        ]
+        assert len(to_est_calls) >= 1
+        thetas_arg = (
+            to_est_calls[0].args[0]
+            if to_est_calls[0].args
+            else to_est_calls[0].kwargs.get("param_array")
+        )
+        assert thetas_arg is not None
+        assert thetas_arg.ndim == 2, (
+            f"thetas_arg has shape {thetas_arg.shape}, expected 2D without J={J}"
+        )

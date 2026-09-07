@@ -21,6 +21,7 @@ def mif(
     keys: jax.Array,
     thresh: float = 0.0,
     n_monitors: int = 0,
+    return_swarm: bool = True,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Run the Iterated Filtering 2 (IF2) algorithm on a POMP model struct.
 
@@ -38,8 +39,9 @@ def mif(
         Compiled structural representation of the POMP model.  Obtain via
         :meth:`~pypomp.Pomp.to_struct`.
     thetas_array : jax.Array
-        Initial parameter array of shape ``(n_reps, J, n_params)`` on the
-        natural scale.  Must be aligned with ``struct.param_names``.
+        Initial parameter array of shape ``(n_reps, n_params)`` or
+        ``(n_reps, J, n_params)`` on the natural scale.  Must be aligned with
+        ``struct.param_names``.
     J : int
         Number of particles.
     M : int
@@ -53,6 +55,9 @@ def mif(
     n_monitors : int, optional
         Number of unperturbed filter runs for log-likelihood monitoring.
         Defaults to ``0``.
+    return_swarm : bool, optional
+        Whether to transform and return the final particle swarm.  Defaults to
+        ``True``.
 
     Returns
     -------
@@ -61,7 +66,7 @@ def mif(
         - Parameter trace history of shape ``(n_reps, M+1, n_params)``
         - on the natural scale.
         - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
-          natural scale.
+          natural scale (or zero-sized if ``return_swarm=False``).
 
     Notes
     -----
@@ -82,11 +87,24 @@ def mif(
     """
 
     thresh = float(max(0.0, thresh))
-    thetas_est = struct.par_trans._transform_array(
-        thetas_array,
-        struct.param_names,
-        direction="to_est",
-    )
+    if thetas_array.ndim == 2 or (
+        thetas_array.ndim == 3 and thetas_array.shape[1] == 1
+    ):
+        thetas_untiled = (
+            thetas_array if thetas_array.ndim == 2 else thetas_array[:, 0, :]
+        )
+        thetas_est_untiled = struct.par_trans._transform_array(
+            thetas_untiled,
+            struct.param_names,
+            direction="to_est",
+        )
+        thetas_est = jnp.repeat(thetas_est_untiled[:, jnp.newaxis, :], J, axis=1)
+    else:
+        thetas_est = struct.par_trans._transform_array(
+            thetas_array,
+            struct.param_names,
+            direction="to_est",
+        )
 
     if struct.dmeas_per is None:
         raise ValueError("dmeasure is required for MIF")
@@ -114,18 +132,23 @@ def mif(
         struct.param_names,
         direction="from_est",
     )
-    final_thetas_natural = struct.par_trans._transform_array(
-        res[2],
-        struct.param_names,
-        direction="from_est",
-    )
+    if return_swarm:
+        final_thetas_natural = struct.par_trans._transform_array(
+            res[2],
+            struct.param_names,
+            direction="from_est",
+        )
+    else:
+        final_thetas_natural = jnp.zeros(
+            (thetas_array.shape[0], 0, len(struct.param_names))
+        )
     return -res[0], traces_natural, final_thetas_natural
 
 
 def panel_mif(
     struct: PanelPompStruct,
-    shared_array: jax.Array,  # (n_reps, J, n_shared) on natural scale
-    unit_array: jax.Array,  # (n_reps, J, U, n_spec) on natural scale
+    shared_array: jax.Array,  # (n_reps, J, n_shared) or (n_reps, n_shared) on natural scale
+    unit_array: jax.Array,  # (n_reps, J, U, n_spec) or (n_reps, U, n_spec) on natural scale
     J: int,
     M: int,
     rw_sd: RWSigma,
@@ -133,6 +156,7 @@ def panel_mif(
     thresh: float = 0.0,
     block: bool = True,
     n_monitors: int = 0,
+    return_swarm: bool = True,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Estimate panel POMP parameters using Panel Iterated Filtering.
 
@@ -150,11 +174,11 @@ def panel_mif(
     struct : PanelPompStruct
         Compiled structural representation of the Panel POMP model.
     shared_array : jax.Array
-        Swarm of initial shared parameters of shape ``(n_reps, J, n_shared)``
-        on the natural scale.
+        Initial shared parameters of shape ``(n_reps, n_shared)`` or swarm of
+        shape ``(n_reps, J, n_shared)`` on the natural scale.
     unit_array : jax.Array
-        Swarm of initial unit-specific parameters of shape
-        ``(n_reps, J, U, n_spec)`` on the natural scale.
+        Initial unit-specific parameters of shape ``(n_reps, U, n_spec)`` or
+        swarm of shape ``(n_reps, J, U, n_spec)`` on the natural scale.
     J : int
         Number of particles.
     M : int
@@ -171,6 +195,8 @@ def panel_mif(
     n_monitors : int, optional
         Number of monitor runs to perform at each iteration.  Defaults to
         ``0``.
+    return_swarm : bool, optional
+        Whether to transform and return the final swarms.  Defaults to ``True``.
 
     Returns
     -------
@@ -180,9 +206,11 @@ def panel_mif(
         Unit-specific parameter history trace of shape
         ``(n_reps, M + 1, U, n_spec + 1)``.
     final_shared_swarm : jax.Array
-        Final swarm of shared parameters of shape ``(n_reps, J, n_shared)``.
+        Final swarm of shared parameters of shape ``(n_reps, J, n_shared)``
+        (or zero-sized if ``return_swarm=False``).
     final_unit_swarm : jax.Array
-        Final swarm of unit-specific parameters of shape ``(n_reps, J, U, n_spec)``.
+        Final swarm of unit-specific parameters of shape ``(n_reps, J, U, n_spec)``
+        (or zero-sized if ``return_swarm=False``).
 
     Notes
     -----
@@ -206,14 +234,46 @@ def panel_mif(
 
     thresh = float(max(0.0, thresh))
     U = len(struct.unit_names)
+    n_shared = len(struct.shared_param_names)
+    n_spec = len(struct.unit_param_names)
 
-    shared_est, unit_est = struct.par_trans._transform_panel_array(
-        shared_array,
-        unit_array,
-        struct.shared_param_names,
-        struct.unit_param_names,
-        direction="to_est",
+    is_untiled = (
+        shared_array.ndim == 2
+        or (shared_array.ndim == 3 and shared_array.shape[1] == 1)
+        or unit_array.ndim == 3
+        or (unit_array.ndim == 4 and unit_array.shape[1] == 1)
     )
+
+    if is_untiled:
+        shared_untiled = (
+            shared_array if shared_array.ndim == 2 else shared_array[:, 0, :]
+        )
+        unit_untiled = unit_array if unit_array.ndim == 3 else unit_array[:, 0, :, :]
+        shared_est_untiled, unit_est_untiled = struct.par_trans._transform_panel_array(
+            shared_untiled,
+            unit_untiled,
+            struct.shared_param_names,
+            struct.unit_param_names,
+            direction="to_est",
+        )
+        shared_est = (
+            jnp.repeat(shared_est_untiled[:, jnp.newaxis, :], J, axis=1)
+            if (shared_est_untiled is not None and n_shared > 0)
+            else jnp.zeros((keys.shape[0], J, 0))
+        )
+        unit_est = (
+            jnp.repeat(unit_est_untiled[:, jnp.newaxis, :, :], J, axis=1)
+            if (unit_est_untiled is not None and n_spec > 0)
+            else jnp.zeros((keys.shape[0], J, U, 0))
+        )
+    else:
+        shared_est, unit_est = struct.par_trans._transform_panel_array(
+            shared_array,
+            unit_array,
+            struct.shared_param_names,
+            struct.unit_param_names,
+            direction="to_est",
+        )
 
     if struct.dmeas_per is None:
         raise ValueError("dmeasure is required for Panel MIF")
@@ -238,9 +298,6 @@ def panel_mif(
         keys,
         context,
     )
-
-    n_shared = len(struct.shared_param_names)
-    n_spec = len(struct.unit_param_names)
 
     shared_traces_natural = shared_traces
     unit_traces_natural = unit_traces
@@ -276,15 +333,19 @@ def panel_mif(
                 [unit_traces[:, :, :, :1], unit_transformed], axis=-1
             )
 
-    final_shared_swarm_natural, final_unit_swarm_natural = (
-        struct.par_trans._transform_panel_array(
-            shared_array_f,
-            unit_array_f,
-            struct.shared_param_names,
-            struct.unit_param_names,
-            direction="from_est",
+    if return_swarm:
+        final_shared_swarm_natural, final_unit_swarm_natural = (
+            struct.par_trans._transform_panel_array(
+                shared_array_f,
+                unit_array_f,
+                struct.shared_param_names,
+                struct.unit_param_names,
+                direction="from_est",
+            )
         )
-    )
+    else:
+        final_shared_swarm_natural = jnp.zeros((shared_traces.shape[0], 0, n_shared))
+        final_unit_swarm_natural = jnp.zeros((unit_traces.shape[0], 0, U, n_spec))
 
     return (
         shared_traces_natural,

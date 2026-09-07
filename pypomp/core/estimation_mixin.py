@@ -361,14 +361,12 @@ class PompEstimationMixin(Base):
 
         keys = jax.random.split(new_key, n_reps)
 
-        theta_array_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
-
         logliks_jax, theta_traces_jax, final_swarm_jax = run_jax_batch_sharded(
             F.mif,
             {1: 0, 5: 0},
             [0, 0, 0],
             self.to_struct(),
-            theta_array_3d,
+            theta_array,
             J,
             M,
             rw_sd,

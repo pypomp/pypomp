@@ -669,18 +669,17 @@ class PanelEstimationMixin(Base):
         shared_index = self.canonical_shared_param_names
         n_shared = len(shared_index)
         if n_shared == 0:
-            shared_array = jnp.zeros((n_reps, J, 0))
+            shared_array = jnp.zeros((n_reps, 0))
         else:
             shared_vals = theta_obj_in.to_jax_array(shared_index, unit_names=unit_names)
-            shared_array = jnp.repeat(shared_vals[:, jnp.newaxis, 0, :], J, axis=1)
+            shared_array = shared_vals[:, 0, :]
 
         spec_index = self.canonical_unit_param_names
         n_spec = len(spec_index)
         if n_spec == 0:
-            unit_array = jnp.zeros((n_reps, J, U, 0))
+            unit_array = jnp.zeros((n_reps, U, 0))
         else:
-            spec_vals = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
-            unit_array = jnp.repeat(spec_vals[:, jnp.newaxis, :, :], J, axis=1)
+            unit_array = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
 
         key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(key, n_reps)
@@ -705,6 +704,7 @@ class PanelEstimationMixin(Base):
             thresh,
             block,
             n_monitors,
+            return_swarm=False,
         )
 
         shared_traces, unit_traces = jax.device_get(

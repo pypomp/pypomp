@@ -2,6 +2,8 @@
 Integration tests for parameter transformations in PanelPomp.mif method.
 """
 
+from unittest.mock import patch
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -123,3 +125,55 @@ def test_panel_mif_traces_transformed(panel_pomp_with_transform):
                         f"Unit parameter {param} for {unit} changed from {initial_val} "
                         f"to {final_val} with rw_sd=0"
                     )
+
+
+def test_panel_mif_transform_before_tiling(panel_pomp_with_transform):
+    """Test that PanelPomp.mif transforms parameters before tiling across J particles.
+
+    Verifies that _transform_panel_array with direction="to_est" receives untiled
+    arrays (ndim == 2 for shared, ndim == 3 for unit-specific), rather than J-tiled
+    swarms (ndim == 3 and ndim == 4 with particle dimension J).
+    """
+    panel = panel_pomp_with_transform
+    shared_names = panel.canonical_shared_param_names
+    unit_names = panel.canonical_unit_param_names
+    all_param_names = list(shared_names) + list(unit_names)
+    rw_sd = pp.RWSigma(
+        sigmas={k: 0.0 for k in all_param_names},
+        init_names=[],
+    ).geometric_cooling(0.5)
+
+    J = 5
+    M = 1
+    rep_unit = panel.unit_objects[panel.get_unit_names()[0]]
+
+    with patch.object(
+        rep_unit.par_trans,
+        "_transform_panel_array",
+        wraps=rep_unit.par_trans._transform_panel_array,
+    ) as spy_transform:
+        panel.mif(J=J, M=M, rw_sd=rw_sd, key=jax.random.key(123))
+
+        to_est_calls = [
+            call
+            for call in spy_transform.call_args_list
+            if call.kwargs.get("direction") == "to_est"
+        ]
+        assert len(to_est_calls) >= 1
+        first_call = to_est_calls[0]
+        shared_arg = first_call.kwargs.get("shared_array")
+        if shared_arg is None and len(first_call.args) > 0:
+            shared_arg = first_call.args[0]
+        unit_arg = first_call.kwargs.get("unit_array")
+        if unit_arg is None and len(first_call.args) > 1:
+            unit_arg = first_call.args[1]
+
+        assert shared_arg is not None
+        assert unit_arg is not None
+        # Untiled parameters have shape (n_reps, n_shared) and (n_reps, U, n_spec)
+        assert shared_arg.ndim == 2, (
+            f"shared_arg has shape {shared_arg.shape}, expected 2D without J={J}"
+        )
+        assert unit_arg.ndim == 3, (
+            f"unit_arg has shape {unit_arg.shape}, expected 3D without J={J}"
+        )

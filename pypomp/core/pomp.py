@@ -168,7 +168,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     dprior: _DPrior | None
     """Prior log-density model."""
 
-    par_trans: ParTrans
+    _par_trans: ParTrans
     """Parameter transformation object mapping between natural and estimation spaces."""
 
     covars: pd.DataFrame | None
@@ -373,6 +373,22 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         if value is not None and not isinstance(value, PompParameters):
             raise TypeError("theta must be a PompParameters instance")
         self._theta = value
+
+    @property
+    def par_trans(self) -> ParTrans:
+        """Parameter transformation object mapping between natural and estimation spaces."""
+        return self._par_trans
+
+    @par_trans.setter
+    def par_trans(self, value: ParTrans) -> None:
+        if not isinstance(value, ParTrans):
+            raise TypeError("par_trans must be a ParTrans instance")
+        self._par_trans = value
+        for comp_name in ("rinit", "rproc", "dmeas", "rmeas", "dprior"):
+            comp = getattr(self, comp_name, None)
+            if comp is not None:
+                comp.par_trans = value
+                comp._build_mechanics()
 
     def _prepare_theta_input(
         self,
@@ -663,6 +679,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         """
         # Restore basic attributes
         self.__dict__.update(state)
+        if "par_trans" in state and "_par_trans" not in state:
+            self._par_trans = state["par_trans"]
 
         # Reconstruct JAX key from raw bits
         if "_fresh_key_data" in state:

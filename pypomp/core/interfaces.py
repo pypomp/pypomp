@@ -34,7 +34,7 @@ class PompInterface(Protocol):
     rmeas: _RMeas | None
     dprior: _DPrior | None
 
-    par_trans: ParTrans
+    _par_trans: ParTrans
     covars: pd.DataFrame | None
     _covars_extended: np.ndarray | None
     _nstep_array: np.ndarray
@@ -51,6 +51,12 @@ class PompInterface(Protocol):
 
     @theta.setter
     def theta(self, value: PompParameters | None) -> None: ...
+
+    @property
+    def par_trans(self) -> ParTrans: ...
+
+    @par_trans.setter
+    def par_trans(self, value: ParTrans) -> None: ...
 
     def _prepare_theta_input(
         self,

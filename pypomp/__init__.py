@@ -5,7 +5,8 @@ The top-level namespace exports the core modelling classes (:class:`Pomp`,
 :class:`PanelPomp`), parameter containers (:class:`PompParameters`,
 :class:`PanelParameters`), configuration helpers (:class:`ParTrans`,
 :class:`RWSigma`, :class:`LearningRate`), optimizers (:class:`Adam`,
-:class:`SGD`, etc.), and the :func:`mcap` inference utility.
+:class:`SGD`, etc.), and the :func:`mcap` inference utility along with
+its result container (:class:`MCAPResult`).
 
 Submodules
 ----------
@@ -38,7 +39,7 @@ from .core.par_trans import ParTrans
 from .core.parameters import PanelParameters, PompParameters
 from .core.pomp import Pomp
 from .core.rw_sigma import RWSigma
-from .mcap import mcap
+from .mcap import MCAPResult, mcap
 from .panel.panel import PanelPomp
 from .proposals import (
     MVNDiagRW,
@@ -78,6 +79,7 @@ __all__ = [
     "Newton",
     "WeightedNewton",
     # Inference / Algorithms
+    "MCAPResult",
     "mcap",
     "Proposal",
     "MVNDiagRW",

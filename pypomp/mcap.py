@@ -188,7 +188,13 @@ def _fit_local_quadratic(
 # MCAP result container
 @dataclass
 class MCAPResult:
-    """Results of a Monte Carlo adjusted profile (MCAP) analysis."""
+    """Results of a Monte Carlo adjusted profile (MCAP) analysis.
+
+    Notes
+    -----
+    This object is created and returned by :func:`~pypomp.mcap` and is not
+    intended to be instantiated directly.
+    """
 
     level: float
     """The confidence level of the profile likelihood confidence interval."""

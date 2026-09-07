@@ -214,3 +214,34 @@ def test_jgrad_and_jvg_dpop(simple_sir_for_dpop):
     assert grad_v.shape == theta_ests.shape
     assert jnp.all(jnp.isfinite(grad_v))
     np.testing.assert_allclose(grad, grad_v, atol=1e-7)
+
+
+def test_dpop_train_final_theta_loglik_1d_and_pruned(simple_sir_for_dpop):
+    """Test that Pomp._dpop_train sets self.theta.logLik as a 1D array matching final iteration."""
+    model = simple_sir_for_dpop
+    model.theta = model.theta * 2
+    eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+
+    model.results_history.clear()
+    model._dpop_train(
+        J=J_DEFAULT,
+        M=M_DEFAULT,
+        eta=eta,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_state="logw",
+        key=jax.random.key(1),
+    )
+
+    res = model.results_history[-1]
+    final_logliks = np.asarray(res.traces_da.isel(iteration=-1).sel(variable="logLik"))
+
+    assert model.theta.logLik.ndim == 1
+    assert model.theta.logLik.shape == (2,)
+    np.testing.assert_allclose(model.theta.logLik, final_logliks)
+
+    # Verify that pruning works on the resulting theta without error
+    pruned = model.theta.pruned(n=1, refill=False)
+    assert pruned.logLik.ndim == 1
+    assert pruned.logLik.shape == (1,)
+    assert pruned.num_replicates() == 1

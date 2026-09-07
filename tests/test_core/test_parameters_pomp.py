@@ -100,6 +100,13 @@ def test_pomp_parameters_log_lik_format():
     with pytest.raises(ValueError, match="Length of logLik"):
         pp.PompParameters([{"a": 1.0}, {"a": 2.0}], logLik=np.array([1.0]))
 
+    # logLik multidimensional rejection
+    with pytest.raises(ValueError, match="logLik must be 1-dimensional"):
+        pp.PompParameters(
+            [{"a": 1.0}, {"a": 2.0}],
+            logLik=np.array([[1.0, 2.0], [3.0, 4.0]]),
+        )
+
     # logLik setter
     p.logLik = np.array(10.0)
     assert np.allclose(p.logLik, [10.0, 10.0])

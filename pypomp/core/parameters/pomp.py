@@ -247,6 +247,9 @@ class PompParameters(ParameterSet):
         if ll.ndim == 0:  # Handle single scalar input (broadcast)
             return np.full(n_reps, ll)
 
+        if ll.ndim > 1:
+            raise ValueError(f"logLik must be 1-dimensional, got shape {ll.shape}")
+
         if len(ll) != n_reps:
             raise ValueError(
                 f"Length of logLik ({len(ll)}) must match parameters ({n_reps})"

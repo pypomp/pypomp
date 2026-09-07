@@ -227,6 +227,14 @@ class ParTrans:
             return False
         return True
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> "ParTrans":
+        """In-memory copy preserving callable references without pickling."""
+        if id(self) in memo:
+            return memo[id(self)]
+        new_obj = type(self)(to_est=self.to_est, from_est=self.from_est)
+        memo[id(self)] = new_obj
+        return new_obj
+
     def __getstate__(self):
         """
         Custom pickling method to preserve function identity.

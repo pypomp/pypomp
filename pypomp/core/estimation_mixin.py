@@ -537,7 +537,6 @@ class PompEstimationMixin(Base):
 
         n_reps = theta_obj_in.num_replicates()
 
-        theta_obj_in = theta_obj_in.transformed(self.par_trans, direction="to_est")
         if self.dmeas is None:
             raise ValueError("self.dmeas cannot be None")
         if J < 1:
@@ -551,7 +550,7 @@ class PompEstimationMixin(Base):
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
-        nLLs_jax, theta_ests_jax = run_jax_batch_sharded(
+        nLLs_jax, theta_traces_jax = run_jax_batch_sharded(
             F.train,
             {1: 0, 5: 0},
             [0, 0],
@@ -568,20 +567,14 @@ class PompEstimationMixin(Base):
             n_monitors,
         )
 
-        nLLs, theta_ests = jax.device_get((nLLs_jax, theta_ests_jax))
-        del nLLs_jax, theta_ests_jax
-
-        theta_ests_natural = self.par_trans._transform_array(
-            theta_ests,
-            self.canonical_param_names,
-            direction="from_est",
-        )
+        nLLs, theta_traces = jax.device_get((nLLs_jax, theta_traces_jax))
+        del nLLs_jax, theta_traces_jax
 
         joined_array = xr.DataArray(
             np.concatenate(
                 [
                     -nLLs[..., np.newaxis],  # shape: (theta_idx, iteration, 1)
-                    theta_ests_natural,  # shape: (theta_idx, iteration, n_theta)
+                    theta_traces,  # shape: (theta_idx, iteration, n_theta)
                 ],
                 axis=-1,
             ),
@@ -594,14 +587,14 @@ class PompEstimationMixin(Base):
         )
 
         final_theta_da = xr.DataArray(
-            theta_ests_natural[:, -1, :],
+            theta_traces[:, -1, :],
             dims=["theta_idx", "parameter"],
             coords={
                 "theta_idx": np.arange(n_reps),
                 "parameter": self.canonical_param_names,
             },
         )
-        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs[:, -1]))
 
         execution_time = time.time() - start_time
 
@@ -784,7 +777,7 @@ class PompEstimationMixin(Base):
                 "parameter": self.canonical_param_names,
             },
         )
-        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs))
+        self.theta = PompParameters(final_theta_da, logLik=np.asarray(-nLLs[:, -1]))
 
         execution_time = time.time() - start_time
 

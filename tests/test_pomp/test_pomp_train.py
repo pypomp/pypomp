@@ -209,3 +209,25 @@ def test_train_clipping(simple):
     diff_clip = np.linalg.norm(p1_clip - p0)
 
     assert diff_clip < diff_no_clip
+
+
+def test_train_final_theta_loglik_1d_and_pruned(simple):
+    """Test that Pomp.train sets self.theta.logLik as a 1D array matching final iteration."""
+    LG, ys, covars, theta, J, key, M = simple
+    # Test with multiple replicates to ensure 1D shape (n_reps,)
+    LG.theta = theta * 3
+    eta = pp.LearningRate({param: 0.2 for param in LG.canonical_param_names})
+    LG.train(J=J, M=M, eta=eta, optimizer=pp.Adam(), key=key)
+
+    res = LG.results_history[-1]
+    final_logliks = np.asarray(res.traces_da.isel(iteration=-1).sel(variable="logLik"))
+
+    assert LG.theta.logLik.ndim == 1
+    assert LG.theta.logLik.shape == (3,)
+    np.testing.assert_allclose(LG.theta.logLik, final_logliks)
+
+    # Verify that pruning works on the resulting theta without error
+    pruned = LG.theta.pruned(n=1, refill=False)
+    assert pruned.logLik.ndim == 1
+    assert pruned.logLik.shape == (1,)
+    assert pruned.num_replicates() == 1

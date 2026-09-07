@@ -76,8 +76,9 @@ def train(
     Returns
     -------
     tuple of (jax.Array, jax.Array)
-        - Negative log-likelihood history of shape ``(n_reps, M)``.
-        - Parameter trace history of shape ``(n_reps, M+1, n_params)``.
+        - Negative log-likelihood history of shape ``(n_reps, M + 1)``.
+        - Parameter trace history of shape ``(n_reps, M + 1, n_params)`` on the
+          natural scale.
 
     Notes
     -----
@@ -98,16 +99,30 @@ def train(
     optimizer = optimizer or Adam()
     eta_array = eta.to_array(struct.param_names, M)
 
+    thetas_est = struct.par_trans._transform_array(
+        thetas_array,
+        struct.param_names,
+        direction="to_est",
+    )
+
     context = TrainContext.from_train_struct(
         struct, J, M, alpha_cooling, thresh, n_monitors, eta_array, alpha
     )
 
-    return _vmapped_train_internal(
-        thetas_array,
+    neg_logliks, theta_traces_est = _vmapped_train_internal(
+        thetas_est,
         keys,
         context,
         optimizer,
     )
+
+    theta_traces_natural = struct.par_trans._transform_array(
+        theta_traces_est,
+        struct.param_names,
+        direction="from_est",
+    )
+
+    return neg_logliks, theta_traces_natural
 
 
 def panel_train(

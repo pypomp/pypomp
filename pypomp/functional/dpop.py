@@ -43,8 +43,9 @@ def dpop(
     struct : PompStruct
         Compiled structural representation of the POMP model.
     thetas_array : jax.Array
-        Array of initial parameters of shape ``(n_reps, n_params)``, aligned
-        with the canonical order of ``struct.param_names``.
+        Array of parameters of shape ``(n_reps, n_params)`` on the
+        estimation scale, aligned with the canonical order of
+        ``struct.param_names``.
     J : int
         Number of particles.
     alpha : float
@@ -58,6 +59,20 @@ def dpop(
     -------
     jax.Array
         Negative DPOP log-likelihood estimates.
+
+    Notes
+    -----
+    Because :func:`dpop` internally transforms parameters from the estimation
+    scale to the natural scale using ``struct.par_trans.from_est`` within its
+    differentiable computation graph, gradients computed via automatic
+    differentiation (e.g. :func:`jax.grad`) are with respect to the estimation
+    parameters.
+
+    Callers are responsible for transforming initial parameters to the
+    estimation scale before the optimization loop (e.g. via
+    :meth:`~pypomp.ParTrans._transform_array` with ``direction="to_est"``) and
+    transforming optimized estimates back to the natural scale
+    (``direction="from_est"``) when the loop concludes.
 
     See Also
     --------

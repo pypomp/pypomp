@@ -298,6 +298,23 @@ def test_measles_panel_pomp():
         hastings_std_val,
     )
 
+    london_obj = panel.unit_objects["London"]
+    hastings_obj = panel.unit_objects["Hastings"]
+    assert london_obj._covars_extended is not None
+    assert hastings_obj._covars_extended is not None
+
+    london_covar_idx = london_obj.covar_names.index("std_log_pop_1950")
+    hastings_covar_idx = hastings_obj.covar_names.index("std_log_pop_1950")
+
+    np.testing.assert_allclose(
+        london_obj._covars_extended[:, london_covar_idx],
+        london_std_val,
+    )
+    np.testing.assert_allclose(
+        hastings_obj._covars_extended[:, hastings_covar_idx],
+        hastings_std_val,
+    )
+
 
 def test_uk_measles_units():
     units = pp.models.UKMeasles.units()
@@ -446,10 +463,18 @@ def test_measles_panelpomp_single_unit_std_fallback():
         theta=theta,
         clean=True,
     )
-    london_covars = panel.unit_objects["London"].covars
+    london_obj = panel.unit_objects["London"]
+    london_covars = london_obj.covars
     assert london_covars is not None
     std_val = float(london_covars["std_log_pop_1950"].iloc[0])
     assert std_val == 0.0
+
+    assert london_obj._covars_extended is not None
+    covar_idx = london_obj.covar_names.index("std_log_pop_1950")
+    np.testing.assert_allclose(
+        london_obj._covars_extended[:, covar_idx],
+        0.0,
+    )
 
 
 def test_measles_panelpomp_zero_std_fallback(monkeypatch):
@@ -484,13 +509,30 @@ def test_measles_panelpomp_zero_std_fallback(monkeypatch):
     mean_val = (london_log_pop + hastings_log_pop) / 2.0
 
     # sd fallback is 1.0, so std_log_pop_1950 == log_pop - mean
+    expected_london_std = london_log_pop - mean_val
+    expected_hastings_std = hastings_log_pop - mean_val
     np.testing.assert_allclose(
         float(london_covars["std_log_pop_1950"].iloc[0]),
-        london_log_pop - mean_val,
+        expected_london_std,
     )
     np.testing.assert_allclose(
         float(hastings_covars["std_log_pop_1950"].iloc[0]),
-        hastings_log_pop - mean_val,
+        expected_hastings_std,
+    )
+
+    london_obj = panel.unit_objects["London"]
+    hastings_obj = panel.unit_objects["Hastings"]
+    assert london_obj._covars_extended is not None
+    assert hastings_obj._covars_extended is not None
+    london_covar_idx = london_obj.covar_names.index("std_log_pop_1950")
+    hastings_covar_idx = hastings_obj.covar_names.index("std_log_pop_1950")
+    np.testing.assert_allclose(
+        london_obj._covars_extended[:, london_covar_idx],
+        expected_london_std,
+    )
+    np.testing.assert_allclose(
+        hastings_obj._covars_extended[:, hastings_covar_idx],
+        expected_hastings_std,
     )
 
 
@@ -541,3 +583,46 @@ def test_measles_log_pop_1950_fallback(monkeypatch):
     expected_log_pop = np.log(float(fake_demog["pop"].iloc[0]))
     actual_log_pop = float(measles.covars["log_pop_1950"].iloc[0])
     np.testing.assert_allclose(actual_log_pop, expected_log_pop)
+
+
+def test_measles_pomp_standalone_std_log_pop():
+    """Single-unit UKMeasles.pomp should default std_log_pop_1950 to 0.0 in both
+    covars and _covars_extended, and allow custom values."""
+    theta = BASE_THETA.copy()
+    del theta["mu"]
+    del theta["alpha"]
+
+    m_default = pp.models.UKMeasles.pomp(
+        unit="London",
+        theta=pp.PompParameters(theta),
+        clean=True,
+    )
+    assert m_default.covars is not None
+    assert m_default._covars_extended is not None
+    covar_idx = m_default.covar_names.index("std_log_pop_1950")
+    np.testing.assert_allclose(
+        float(m_default.covars["std_log_pop_1950"].iloc[0]),
+        0.0,
+    )
+    np.testing.assert_allclose(
+        m_default._covars_extended[:, covar_idx],
+        0.0,
+    )
+
+    m_custom = pp.models.UKMeasles.pomp(
+        unit="London",
+        theta=pp.PompParameters(theta),
+        clean=True,
+        std_log_pop_1950=1.25,
+    )
+    assert m_custom.covars is not None
+    assert m_custom._covars_extended is not None
+    covar_idx_c = m_custom.covar_names.index("std_log_pop_1950")
+    np.testing.assert_allclose(
+        float(m_custom.covars["std_log_pop_1950"].iloc[0]),
+        1.25,
+    )
+    np.testing.assert_allclose(
+        m_custom._covars_extended[:, covar_idx_c],
+        1.25,
+    )

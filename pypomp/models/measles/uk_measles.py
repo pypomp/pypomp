@@ -323,6 +323,7 @@ class UKMeasles:
         last_year: int = 1963,
         dt: float = 1 / 365.25,
         clean: bool = False,
+        std_log_pop_1950: float | None = None,
     ):
         """
         Returns a Pomp object for the UK Measles data.
@@ -346,6 +347,9 @@ class UKMeasles:
             The time step size to use for the model.
         clean : bool
             If True, uses a copy of the data with suspicious values set to np.nan.
+        std_log_pop_1950 : float or None, optional
+            Standardized log 1950 population covariate across panel units.
+            If None, defaults to 0.0 for a single unit.
 
         Returns
         -------
@@ -406,9 +410,12 @@ class UKMeasles:
             # Fallback: use earliest available year
             covar_df["log_pop_1950"] = np.log(float(demog["pop"].to_numpy()[0]))
 
-        # Placeholder for standardized log(pop_1950); must be overwritten
-        # at the panel level with correct z-score across all units.
-        covar_df["std_log_pop_1950"] = covar_df["log_pop_1950"]
+        # Set standardized log(pop_1950) covariate for iota log-log linear models.
+        # For panels, this is precomputed across units; for a single unit, defaults to 0.0.
+        if std_log_pop_1950 is not None:
+            covar_df["std_log_pop_1950"] = float(std_log_pop_1950)
+        else:
+            covar_df["std_log_pop_1950"] = 0.0
 
         # ----pomp-construction-----------------------------------------------
 
@@ -485,6 +492,30 @@ class UKMeasles:
         mod = cls._MODELS[model]
         param_names = mod.param_names
 
+        demog_all = cls.subset(units, clean)["demog"]
+        log_pops = {}
+        for unit in units:
+            unit_demog = demog_all[demog_all["unit"] == unit]
+            pop_1950_row = unit_demog.loc[unit_demog["year"] == 1950, "pop"]
+            if len(pop_1950_row) > 0:
+                log_pops[unit] = np.log(float(pop_1950_row.to_numpy()[0]))
+            else:
+                log_pops[unit] = np.log(float(unit_demog["pop"].to_numpy()[0]))
+
+        log_pop_values = list(log_pops.values())
+        mean_log_pop = float(np.mean(log_pop_values))
+        if len(log_pop_values) > 1:
+            sd_log_pop = float(np.std(log_pop_values, ddof=1))
+        else:
+            sd_log_pop = 1.0
+
+        if sd_log_pop == 0.0:
+            sd_log_pop = 1.0
+
+        std_log_pops = {
+            unit: (log_pops[unit] - mean_log_pop) / sd_log_pop for unit in units
+        }
+
         pomp_dict = {}
         theta_list = theta.params(as_list=True)
 
@@ -514,24 +545,7 @@ class UKMeasles:
                 last_year=last_year,
                 dt=dt,
                 clean=clean,
+                std_log_pop_1950=std_log_pops[unit],
             )
-
-        log_pops = {
-            unit: float(pomp_obj.covars["log_pop_1950"].iloc[0])
-            for unit, pomp_obj in pomp_dict.items()
-        }
-        log_pop_values = list(log_pops.values())
-        mean_log_pop = np.mean(log_pop_values)
-        if len(log_pop_values) > 1:
-            sd_log_pop = np.std(log_pop_values, ddof=1)
-        else:
-            sd_log_pop = 1.0
-
-        if sd_log_pop == 0.0:
-            sd_log_pop = 1.0
-
-        for unit, pomp_obj in pomp_dict.items():
-            std_val = (log_pops[unit] - mean_log_pop) / sd_log_pop
-            pomp_obj.covars["std_log_pop_1950"] = std_val
 
         return PanelPomp(pomp_dict=pomp_dict, theta=theta)

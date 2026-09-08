@@ -38,7 +38,11 @@ def _standardize_panel_theta(
             data_vars={
                 "shared": shared_da,
                 "unit_specific": unit_specific_da,
-            }
+            },
+            attrs={
+                "shared_names": [],
+                "unit_specific_names": [],
+            },
         )
         return ds, [], []
 
@@ -242,6 +246,12 @@ class PanelParameters(ParameterSet):
                 self._canonical_shared_param_names,
                 self._canonical_unit_param_names,
             ) = self._names_from_dataset(self._data)
+            self._data.attrs.setdefault(
+                "shared_names", list(self._canonical_shared_param_names)
+            )
+            self._data.attrs.setdefault(
+                "unit_specific_names", list(self._canonical_unit_param_names)
+            )
         else:
             ds, s_names, u_names = _standardize_panel_theta(theta)
             self._data = ds
@@ -575,11 +585,15 @@ class PanelParameters(ParameterSet):
             },
         )
         new_obj = copy.deepcopy(self)
+        attrs = dict(self._data.attrs)
+        attrs["shared_names"] = list(shared_keys)
+        attrs["unit_specific_names"] = list(specific_keys)
         new_obj._data = xr.Dataset(
             data_vars={
                 "shared": new_shared_da,
                 "unit_specific": unit_specific_da,
-            }
+            },
+            attrs=attrs,
         )
 
         new_obj._logLik_unit = new_ll_unit
@@ -640,6 +654,8 @@ class PanelParameters(ParameterSet):
         if isinstance(value, xr.Dataset):
             self._data = value.copy(deep=True)
             s_names, u_names = self._names_from_dataset(self._data)
+            self._data.attrs.setdefault("shared_names", list(s_names))
+            self._data.attrs.setdefault("unit_specific_names", list(u_names))
         else:
             self._data, s_names, u_names = _standardize_panel_theta(value)
             s_names = [str(x) for x in s_names]

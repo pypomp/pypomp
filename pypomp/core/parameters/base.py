@@ -119,8 +119,12 @@ class ParameterSet(ABC):
         if n == 0:
             raise ValueError("Cannot create empty ParameterSet")
 
-        new_data = xr.concat(cast(Any, [self._data] * n), dim="theta_idx")
+        new_data = cast(
+            Any,
+            xr.concat(cast(Any, [self._data] * n), dim="theta_idx"),
+        )
         new_data.coords["theta_idx"] = np.arange(new_data.sizes["theta_idx"])
+        self._finalize_merged_data(new_data)
 
         extra_kwargs = self._replicated_logLik(n)
         cls = cast(Any, self.__class__)

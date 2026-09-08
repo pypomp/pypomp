@@ -243,6 +243,33 @@ def test_panel_parameters_mix_and_match():
     np.testing.assert_allclose(panel.logLik_unit[:, 1], expected_u2_ll)
 
 
+def test_panel_parameters_mix_and_match_attrs_and_mul():
+    # shared_names and unit_specific_names are deliberately disjoint and unsorted
+    shared_vals = np.array([[1.0, 2.0], [3.0, 4.0]])
+    unit_vals = np.array([[[5.0]], [[6.0]]])
+    panel = pp.PanelParameters.from_arrays(
+        shared_values=shared_vals,
+        unit_specific_values=unit_vals,
+        shared_names=["zz", "aa"],
+        unit_specific_names=["mm"],
+        unit_names=["u1"],
+        logLik_unit=np.array([[10.0], [20.0]]),
+    )
+
+    mm = panel.mixed_and_matched()
+    assert mm.params().attrs["shared_names"] == ["zz", "aa"]
+    assert mm.params().attrs["unit_specific_names"] == ["mm"]
+    assert mm._canonical_shared_param_names == ["zz", "aa"]
+    assert mm._canonical_unit_param_names == ["mm"]
+
+    # Multiplying by 2 forces reconstruction via xr.Dataset
+    mul = mm * 2
+    assert mul._canonical_shared_param_names == ["zz", "aa"]
+    assert mul._canonical_unit_param_names == ["mm"]
+    assert mul.params().attrs["shared_names"] == ["zz", "aa"]
+    assert mul.params().attrs["unit_specific_names"] == ["mm"]
+
+
 def test_panel_parameters_eq_logLik_names_mismatch():
     shared_df = pd.DataFrame({"shared": [1.0]}, index=["s1"])
     unit_df = pd.DataFrame({"u1": [2.0]}, index=["up1"])

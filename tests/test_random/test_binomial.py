@@ -96,3 +96,42 @@ def test_binomial_moments() -> None:
             skew_tol=(0.15, 0.06),
             check_skew=(var_th > 2),
         )
+
+
+def test_binomial_tail_discrete_and_accurate() -> None:
+    """Extreme upper tail for large n, small np produces discrete counts and no wild divergence."""
+    from scipy import stats
+
+    from pypomp.random.binom import binominv
+
+    n = 100_000.0
+    p = 0.2 / n  # np = 0.2
+
+    # Probe the 1-in-500k upper tail (u > CDF(4) ~ 0.9999977)
+    u = jnp.array([0.999998, 0.999999, 0.9999995], dtype=jnp.float32)
+    n_arr = jnp.full_like(u, n)
+    p_arr = jnp.full_like(u, p)
+
+    samples = binominv(u, n_arr, p_arr, exact_max=5)
+
+    # 1. Must never return fractional counts
+    assert jnp.all(samples == jnp.floor(samples)), (
+        f"Non-integer counts returned: {samples}"
+    )
+
+    # 2. Must not diverge to 7.88, 13, etc. (true scipy quantiles are 5.0 or 6.0)
+    exact = stats.binom.ppf(np.array(u), n, p)
+    assert np.all(np.abs(np.array(samples) - exact) <= 1.0), (
+        f"Tail quantiles diverged: got {samples}, expected {exact}"
+    )
+
+    # 3. Test random sampler with float32 output
+    key = jax.random.key(1001)
+    draws = ppr.fast_binomial(
+        key,
+        jnp.full((10_000,), n, dtype=jnp.float32),
+        jnp.full((10_000,), p, dtype=jnp.float32),
+    )
+    assert jnp.all(draws == jnp.floor(draws)), (
+        "fast_binomial returned non-integer values"
+    )

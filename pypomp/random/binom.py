@@ -359,7 +359,7 @@ def binominv(
     k_approx = jnp.clip(jnp.floor(q_u), 0.0, n_safe)
     # Cap to prevent wild tail divergence of asymptotic expansions when np is small
     max_reasonable = np_ + 6.0 * sqrt_npq + 5.0
-    k_approx = jnp.minimum(k_approx, max_reasonable)
+    k_approx = jnp.floor(jnp.minimum(k_approx, max_reasonable))
 
     u_exact = jnp.clip(u_flipped, 0.0, 1.0)
     k_bottom_up = _binom_bottom_up(
@@ -488,6 +488,9 @@ def _q_n1(
     denominator_t2 = 72.0 * sqrt_npq
     tiny = jnp.finfo(w.dtype).tiny
     term2 = numerator_t2 / jnp.maximum(denominator_t2, tiny)
+    npq_ = sqrt_npq * sqrt_npq
+    # Asymptotic corrections in 1/sqrt(npq) diverge when npq < 1.0; fall back to Q_N0
+    term2 = jnp.where(npq_ < 1.0, 0.0, term2)
     return q_n0 + term2
 
 
@@ -515,4 +518,6 @@ def _q_n2(
     denominator_t3 = 1620.0 * npq_
     tiny = jnp.finfo(w.dtype).tiny
     term3 = numerator_t3 / jnp.maximum(denominator_t3, tiny)
+    # Asymptotic corrections in 1/npq diverge when npq < 1.0; fall back to Q_N0
+    term3 = jnp.where(npq_ < 1.0, 0.0, term3)
     return q_n1 + term3

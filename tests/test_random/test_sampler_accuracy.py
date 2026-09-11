@@ -130,12 +130,14 @@ def test_binomial_quantile_wasserstein_distance() -> None:
     u_jnp = jnp.array(u)
 
     binom_params = [
+        (2, 0.1),
         (10, 0.1),
         (10, 0.5),
         (10, 0.9),
         (100, 0.01),
         (100, 0.5),
         (100, 0.99),
+        (1000, 0.001),
         (1000, 0.1),
         (1000, 0.5),
         (1000, 0.9),

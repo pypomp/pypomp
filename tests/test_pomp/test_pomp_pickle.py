@@ -24,6 +24,7 @@ import pandas as pd
 import pytest
 
 import pypomp as pp
+from pypomp._bake_compat import RUniform
 from tests.helpers.assertions import pickle_roundtrip
 from tests.helpers.dummy import (
     dummy_dmeas,
@@ -548,6 +549,126 @@ def archive_rng_state():
     finally:
         np.random.set_state(numpy_state)
         pp.r_uniform.set_state(r_state)
+
+
+@pytest.mark.parametrize("operation", [pp.bake, pp.stew, pp.freeze])
+@pytest.mark.parametrize(
+    "options,message",
+    [
+        ({"compatibility": "invalid"}, "compatibility must be 'native' or 'R'"),
+        (
+            {"compatibility": "native", "kind": "Mersenne-Twister"},
+            "kind and normal_kind require compatibility='R'",
+        ),
+        (
+            {"compatibility": "native", "normal_kind": "Inversion"},
+            "kind and normal_kind require compatibility='R'",
+        ),
+        (
+            {"compatibility": "R", "kind": "Wichmann-Hill"},
+            "Only R Mersenne-Twister/Inversion kind metadata is supported",
+        ),
+        (
+            {"compatibility": "R", "normal_kind": "Box-Muller"},
+            "Only R Mersenne-Twister/Inversion kind metadata is supported",
+        ),
+    ],
+)
+def test_archive_invalid_rng_options(tmp_path, operation, options, message):
+    path = tmp_path / "invalid.pkl"
+    calls = []
+    code = "calls.append(1)\nx=2\nx"
+    args = (code,) if operation is pp.freeze else (path, code)
+    with pytest.raises(ValueError, match=message):
+        operation(*args, envir={"calls": calls}, **options)
+    assert calls == []
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("operation", [pp.bake, pp.freeze])
+@pytest.mark.parametrize("fails", [False, True])
+def test_archive_restores_existing_rng_binding(
+    tmp_path, archive_rng_state, operation, fails
+):
+    original = object()
+    calls = []
+    env = {"_rng": original, "calls": calls}
+    code = "calls.append(_rng.uniform())\ncalls[-1]"
+    if fails:
+        code += "\nraise RuntimeError('expression failed')"
+    path = tmp_path / "restore.pkl"
+    args = (code,) if operation is pp.freeze else (path, code)
+    options = {} if operation is pp.freeze else {"dir": "", "timing": False}
+    if fails:
+        with pytest.raises(RuntimeError, match="expression failed"):
+            operation(*args, seed=7, compatibility="R", envir=env, **options)
+        assert not path.exists()
+    else:
+        assert (
+            operation(*args, seed=7, compatibility="R", envir=env, **options)
+            == 0.9889092978555709
+        )
+    assert calls == [0.9889092978555709]
+    assert env["_rng"] is original
+
+
+@pytest.mark.parametrize("compatibility", ["native", "R"])
+@pytest.mark.parametrize("bindings", [None, [], {1: "invalid name"}])
+def test_stew_rejects_malformed_archive_bindings(tmp_path, compatibility, bindings):
+    path = tmp_path / "invalid.pkl"
+    code = "calls.append(1)\nx=2"
+    options = {"compatibility": compatibility, "dir": "", "timing": False}
+    pp.stew(path, code, dependson=0, envir={"calls": []}, **options)
+    record = pickle.loads(path.read_bytes())
+    record["objects"] = bindings
+    before = pickle.dumps(record)
+    path.write_bytes(before)
+    env = {"calls": [], "x": "original"}
+    with pytest.raises(ValueError, match="Invalid stew bindings in archive"):
+        pp.stew(path, code, dependson=1, envir=env, **options)
+    assert env == {"calls": [], "x": "original"}
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "low,high",
+    [(-np.inf, 1), (0, np.inf), (np.nan, 1), (0, np.nan), (2, 1)],
+)
+def test_r_uniform_rejects_invalid_bounds(low, high):
+    rng = RUniform()
+    with pytest.raises(
+        ValueError, match="uniform bounds must be finite with low <= high"
+    ):
+        rng.uniform(low, high)
+    assert rng.get_state() is None
+
+
+def test_r_uniform_initializes_on_first_draw():
+    rng = RUniform()
+    assert rng.get_state() is None
+    values = rng.uniform(size=4)
+    assert isinstance(values, np.ndarray)
+    assert values.shape == (4,)
+    assert np.all((values > 0) & (values < 1))
+    state = rng.get_state()
+    assert state is not None
+    following = rng.uniform(size=4)
+    rng.set_state(state)
+    np.testing.assert_array_equal(rng.uniform(size=4), following)
+
+
+@pytest.mark.parametrize("size", [None, 0, 4, (2, 3)])
+def test_r_uniform_equal_bounds_preserve_state(size):
+    rng = RUniform()
+    rng.seed(7)
+    before = pickle.dumps(rng.get_state())
+    value = rng.uniform(2.5, 2.5, size=size)
+    if size is None:
+        assert isinstance(value, float)
+        assert value == 2.5
+    else:
+        np.testing.assert_array_equal(value, np.full(size, 2.5))
+    assert pickle.dumps(rng.get_state()) == before
 
 
 @pytest.mark.parametrize(

@@ -95,6 +95,14 @@ file decoding, or equal R/JAX model trajectories. Simulation predicates check
 reproducibility within each runtime. See the computation archives API page for
 the native defaults and the explicit `compatibility="R"` behavior.
 
+Additional tests cover Python validation, malformed pickle bindings and RNG
+cleanup. These are separate from exact R comparisons: invalid uniform bounds
+raise `ValueError` in Python, while R `runif` returns `NaN` with a warning.
+The pypomp archive API rejects RNG kinds outside Mersenne-Twister/Inversion, including
+Wichmann-Hill and Box-Muller, which R supports. Equal-bound uniform values and
+unchanged RNG state are checked against executed R observations; initialization
+without a seed is compared through bounds and state replay, not identical draws.
+
 `test_regression/` compares against CSV baselines stored in a directory named
 after each test file. When an algorithm legitimately changes, regenerate with
 `--force-regen` and review the diff. Renaming a regression test file means

@@ -10,6 +10,14 @@ test/test_scratch
 scratch/
 .claude
 .agents
+.codex/
+.Codex/
+AGENTS.md
+MEMORY.md
+/quality_reports/
+/task_plan.md
+/findings.md
+/progress.md
 docs/source/api/generated/
 
 #### the following is the default Python package gitignore from GitHub ####

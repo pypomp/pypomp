@@ -408,3 +408,96 @@ def test_pomp_constant_interpolation():
     assert cov_ext is not None
     expected_cov = np.array([10.0, 10.0, 10.0, 10.0, 20.0])
     assert np.allclose(cov_ext.ravel(), expected_cov)
+
+
+def test_resample_upper_bound_clipped():
+    """Verify that _resample clamps indices so that counts are strictly < J even
+
+    if systematic uniforms round to 1.0.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    J = 10
+    norm_weights = jnp.zeros(J) - jnp.log(J)
+    # Mock jax.random.uniform to return 1.0 (boundary condition)
+    with patch("jax.random.uniform", return_value=jnp.array(1.0)):
+        counts = ifunc._resample(norm_weights, jax.random.key(101))
+        assert jnp.all(counts >= 0)
+        assert jnp.all(counts < J)
+        assert counts[-1] == J - 1
+
+
+def test_resampler_zero_weight_particles_no_nan():
+    """Verify that _resampler preserves -inf for dead particles without producing NaNs."""
+    import jax
+    import jax.numpy as jnp
+
+    J = 5
+    # One dead particle (-inf weight)
+    norm_weights = jnp.array([0.0, 0.0, 0.0, 0.0, -jnp.inf])
+    particlesP = jnp.arange(J)[:, None]
+    counts = jnp.arange(J)
+
+    # Force _resample to return index 4 (the zero-weight particle)
+    with patch(
+        "pypomp.core.algorithms.helpers._resample",
+        return_value=jnp.array([0, 1, 2, 3, 4]),
+    ):
+        counts_out, particlesF, nw_out = ifunc._resampler(
+            counts, particlesP, norm_weights, jax.random.key(101)
+        )
+        assert not jnp.any(jnp.isnan(nw_out))
+        assert nw_out[4] == -jnp.inf
+        assert jnp.all(jnp.isfinite(nw_out[:4]))
+
+
+def test_resampler_thetas_zero_weight_particles_no_nan():
+    """Verify that _resampler_thetas preserves -inf for dead particles without producing NaNs."""
+    import jax
+    import jax.numpy as jnp
+
+    J = 5
+    norm_weights = jnp.array([0.0, 0.0, 0.0, 0.0, -jnp.inf])
+    particlesP = jnp.arange(J)[:, None]
+    thetas = jnp.arange(J)[:, None]
+    counts = jnp.arange(J)
+
+    with patch(
+        "pypomp.core.algorithms.helpers._resample",
+        return_value=jnp.array([0, 1, 2, 3, 4]),
+    ):
+        counts_out, particlesF, nw_out, thetasF = ifunc._resampler_thetas(
+            counts, particlesP, norm_weights, thetas, jax.random.key(101)
+        )
+        assert not jnp.any(jnp.isnan(nw_out))
+        assert nw_out[4] == -jnp.inf
+        assert jnp.all(jnp.isfinite(nw_out[:4]))
+
+
+def test_resample_never_selects_zero_weight_particles():
+    """Verify that _resample never selects a zero-weight particle.
+
+    The float32 parallel cumsum is not exactly flat across zero-weight
+    particles, so a plain searchsorted used to select one on roughly 2% of
+    steps when many particles were dead, turning their carried weights into
+    NaN.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    J = 10000
+    k1, k2 = jax.random.split(jax.random.key(0))
+    dead = (jax.random.uniform(k2, (J,)) < 0.4).at[-1].set(True)
+    w = jnp.where(dead, -jnp.inf, jax.random.normal(k1, (J,)))
+    norm_weights = w - jax.scipy.special.logsumexp(w)
+
+    keys = jax.random.split(jax.random.key(1), 2000)
+    counts = jax.vmap(lambda k: ifunc._resample(norm_weights, k))(keys)
+    assert jnp.all((counts >= 0) & (counts < J))
+    assert not jnp.any(dead[counts])
+
+    # Systematic resampling copies each particle floor(J * w) or ceil(J * w) times.
+    copies = jax.vmap(lambda c: jnp.bincount(c, length=J))(counts[:200])
+    expected = J * jnp.exp(norm_weights)
+    assert jnp.all(jnp.abs(copies - expected) < 1.0 + 1e-2)

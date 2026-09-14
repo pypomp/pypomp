@@ -58,6 +58,66 @@ def test_dpop_functional(model_setup):
     assert jnp.all(jnp.isfinite(results))
 
 
+def test_mop_dpop_finite_with_many_zero_weight_particles():
+    """MOP and DPOP stay finite when many particles have zero measurement weight.
+
+    Both rebuild their carried weights as ``(w + m - stop_gradient(m))[counts]``,
+    which is NaN if resampling ever selects a particle with ``m = -inf``.
+    """
+    import numpy as np
+    import pandas as pd
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": jax.random.normal(key), "W": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        # A fresh draw each interval, so about half the particles are dead at every step.
+        return {"X": theta_["sigma"] * jax.random.normal(key), "W": X_["W"]}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        ll = jax.scipy.stats.norm.logpdf(Y_["y"], X_["X"], 1.0)
+        return jnp.where(X_["X"] > 0, ll, -jnp.inf)
+
+    def rmeas(X_, theta_, key, covars, t):
+        return {"y": X_["X"] + jax.random.normal(key)}
+
+    T = 100
+    ys = pd.DataFrame(
+        {"y": np.full(T, 0.5)}, index=pd.Index(np.arange(1.0, T + 1), name="time")
+    )
+    model = pp.Pomp(
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        rmeas=rmeas,
+        ys=ys,
+        theta=pp.PompParameters({"sigma": 1.0}),
+        statenames=["X", "W"],
+        t0=0.0,
+        nstep=1,
+        accumvars=("W",),
+        covars=None,
+    )
+    struct = model.to_struct()
+    n_reps, J = 8, 10000
+    thetas_array = jnp.repeat(
+        model.theta.to_jax_array(model.canonical_param_names), n_reps, axis=0
+    )
+    keys = jax.random.split(jax.random.key(0), n_reps)
+
+    def mop_objective(th):
+        return F.mop(struct, th, J, alpha=0.97, keys=keys)
+
+    assert jnp.all(jnp.isfinite(mop_objective(thetas_array)))
+    assert jnp.all(
+        jnp.isfinite(jax.grad(lambda th: mop_objective(th).sum())(thetas_array))
+    )
+    dpop_nll = dpop(
+        struct, thetas_array, J, alpha=0.97, process_weight_index=1, keys=keys
+    )
+    assert jnp.all(jnp.isfinite(dpop_nll))
+
+
 def test_dpop_train_functional(model_setup):
     struct, thetas_array, key, J, n_reps, param_names = model_setup
     keys = jax.random.split(key, n_reps)

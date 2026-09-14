@@ -15,6 +15,12 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     """
     Systematic resampling method based on input normalized weights.
 
+    Particles with zero weight are never selected. The float32 parallel
+    cumsum is neither monotone nor exactly flat across zero-weight
+    particles, so a plain search would occasionally land on one; here the
+    cumulative weights are made monotone and flat across them first, and
+    indices are capped at the last particle with positive weight.
+
     Args:
         norm_weights (array-like): The array containing the logarithm of
             normalized weights.
@@ -25,10 +31,13 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
             systematic resampling given the input normalized weights.
     """
     J = norm_weights.shape[-1]
-    unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J
-    csum = jnp.cumsum(jnp.exp(norm_weights))
-    counts = jnp.searchsorted(csum / csum[-1], unifs, side="right")
-    return counts
+    w = jnp.exp(norm_weights)
+    live = w > 0
+    csum = jax.lax.cummax(jnp.where(live, jnp.cumsum(w), -jnp.inf))
+    unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J * csum[-1]
+    counts = jnp.searchsorted(csum, unifs, side="right")
+    last_live = J - 1 - jnp.argmax(live[::-1])
+    return jnp.minimum(counts, last_live)
 
 
 def _normalize_weights(weights: jax.Array) -> tuple[jax.Array, jax.Array]:
@@ -85,8 +94,11 @@ def _resampler(
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
     particlesF = particlesP[counts]
-    norm_weights = (
-        norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - jnp.log(J)
+    nw_c = norm_weights[counts]
+    norm_weights = jnp.where(
+        jnp.isfinite(nw_c),
+        nw_c - jax.lax.stop_gradient(nw_c) - jnp.log(J),
+        -jnp.inf,
     )
     return counts, particlesF, norm_weights
 
@@ -134,8 +146,11 @@ def _resampler_thetas(
     J = norm_weights.shape[-1]
     counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
     particlesF = particlesP[counts]
-    norm_weights = (
-        norm_weights[counts] - jax.lax.stop_gradient(norm_weights[counts]) - jnp.log(J)
+    nw_c = norm_weights[counts]
+    norm_weights = jnp.where(
+        jnp.isfinite(nw_c),
+        nw_c - jax.lax.stop_gradient(nw_c) - jnp.log(J),
+        -jnp.inf,
     )
     thetasF = thetas[counts]
     return counts, particlesF, norm_weights, thetasF

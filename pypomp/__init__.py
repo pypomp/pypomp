@@ -5,8 +5,9 @@ The top-level namespace exports the core modelling classes (:class:`Pomp`,
 :class:`PanelPomp`), parameter containers (:class:`PompParameters`,
 :class:`PanelParameters`), configuration helpers (:class:`ParTrans`,
 :class:`RWSigma`, :class:`LearningRate`), optimizers (:class:`Adam`,
-:class:`SGD`, etc.), and the :func:`mcap` inference utility along with
-its result container (:class:`MCAPResult`).
+:class:`SGD`, etc.), the :func:`mcap` inference utility along with
+its result container (:class:`MCAPResult`), and the :func:`bake` /
+:func:`stew` computation archives.
 
 Submodules
 ----------
@@ -25,6 +26,7 @@ types
 """
 
 from . import benchmarks, functional, maths, models, random, types
+from .archive import bake, stew
 from .core.learning_rate import LearningRate
 from .core.model_mechanics import vectorized
 from .core.optimizer import (
@@ -85,6 +87,9 @@ __all__ = [
     "MVNDiagRW",
     "MVNRWFull",
     "MVNRWAdaptive",
+    # Utilities
+    "bake",
+    "stew",
     # Submodules
     "benchmarks",
     "models",

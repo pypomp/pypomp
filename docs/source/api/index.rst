@@ -44,6 +44,7 @@ Utilities
    random
    benchmarks
    mcap
+   archive
    types
 
 Example Models

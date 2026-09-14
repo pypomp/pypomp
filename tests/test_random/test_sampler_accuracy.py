@@ -64,9 +64,7 @@ def test_binomial_quantile_mismatch_rate() -> None:
         exact = stats.binom.ppf(u_np, n_val, p_val)
         n_arr = jnp.full((n_samples,), n_val, dtype=jnp.float32)
         p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
-        fast = np.array(
-            binominv(u_clip, n_arr, p_arr, exact_max=5, order=2, dtype=jnp.float32)
-        )
+        fast = np.array(binominv(u_clip, n_arr, p_arr, order=2, dtype=jnp.float32))
 
         mismatches = np.sum(exact != fast)
         mismatch_rate = mismatches / n_samples
@@ -148,7 +146,6 @@ def test_binomial_quantile_wasserstein_distance() -> None:
                 u_jnp,
                 jnp.full((n_samples,), n_val),
                 jnp.full((n_samples,), p_val),
-                exact_max=5,
                 order=2,
                 dtype=jnp.float32,
             )

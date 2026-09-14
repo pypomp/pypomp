@@ -31,7 +31,7 @@ def fast_multinomial(
     n: jax.Array,
     p: jax.Array,
     order: int = 2,
-    exact_max: int = 5,
+    exact_max: int = 8,
     dtype: np.dtype | None = None,
 ) -> jax.Array:
     """Sample multinomial random variates using a GPU-optimized inverse CDF algorithm.
@@ -55,8 +55,9 @@ def fast_multinomial(
         Order of the beta-function approximation (0, 1, or 2).  Defaults
         to ``2`` (most accurate).
     exact_max : int, optional
-        Maximum iterations for the bottom-up exact inverse CDF stage.
-        Defaults to ``5``.
+        Number of terms in the bottom-up exact inverse CDF summation.
+        Defaults to ``8``.  Set to ``16`` for exact extreme upper tails
+        when ``n * p`` is between 1 and 4; see :func:`binominv`.
     dtype : np.dtype or None, optional
         Output dtype (float or integer).  Defaults to ``float64`` if
         ``jax_enable_x64=True``, otherwise ``float32``.  Integer dtypes
@@ -133,7 +134,7 @@ def fast_binomial(
     n: jax.Array,
     p: jax.Array,
     order: int = 2,
-    exact_max: int = 5,
+    exact_max: int = 8,
     dtype: np.dtype | None = None,
 ) -> jax.Array:
     """Sample binomial random variates using a GPU-optimized inverse CDF algorithm.
@@ -159,8 +160,9 @@ def fast_binomial(
         Asymptotic expansion order (0, 1, or 2).  Higher orders give
         greater accuracy for large ``n``.  Defaults to ``2``.
     exact_max : int, optional
-        Threshold below which the exact inverse CDF is used instead of the
-        asymptotic expansion.  Defaults to ``5``.
+        Number of terms in the bottom-up exact inverse CDF summation.
+        Defaults to ``8``.  Set to ``16`` for exact extreme upper tails
+        when ``n * p`` is between 1 and 4; see :func:`binominv`.
     dtype : np.dtype or None, optional
         Integer dtype for the output.  Defaults to ``jnp.int32`` (or
         ``jnp.int64`` if JAX 64-bit mode is active).
@@ -172,9 +174,10 @@ def fast_binomial(
 
     References
     ----------
-    .. [1] Giles, Mike, and Casper Beentjes. "Approximation of an Inverse
-       of the Incomplete Beta Function." *arXiv preprint arXiv:2407.13576*
-       (2024). https://arxiv.org/abs/2407.13576.
+    .. [1] Giles, Michael B., and Casper Beentjes. "Approximation of an
+       Inverse of the Incomplete Beta Function." In *Mathematical Software
+       – ICMS 2024*, vol. 14749. Springer, 2024.
+       https://doi.org/10.1007/978-3-031-64529-7_22.
 
     Examples
     --------
@@ -235,7 +238,7 @@ def binominv(
     n: jax.Array,
     p: jax.Array,
     order: int = 2,
-    exact_max: int = 5,
+    exact_max: int = 8,
     dtype: np.dtype | None = None,
 ) -> jax.Array:
     """Compute the approximate inverse binomial CDF using JAX primitives.
@@ -255,8 +258,14 @@ def binominv(
     order : int, optional
         Order of approximation (0, 1, or 2).  Defaults to ``2``.
     exact_max : int, optional
-        Maximum iterations for the bottom-up exact inverse CDF stage.
-        Defaults to ``5``.
+        Number of terms in the bottom-up exact inverse CDF summation, which
+        is used when ``n * min(p, 1 - p) < 4`` or the asymptotic estimate is
+        below 10.  Quantiles of ``exact_max`` or more fall back to the
+        asymptotic estimate, which overweights the extreme upper tail (up
+        to ~3x for ``n * p`` between 1 and 4).  The default of ``8`` is
+        exact to float32 resolution for ``n * p`` up to about 1; ``16``
+        extends that to ``n * p < 4`` for ~20% more sampler time.  Defaults
+        to ``8``.
     dtype : np.dtype or None, optional
         Floating-point dtype for computation.  Inferred from inputs if
         ``None``.

@@ -137,7 +137,7 @@ def benchmark_binomial() -> None:
     @jax.jit
     def run_fast() -> jax.Array:
         state_key1[0], subkey = jax.random.split(state_key1[0])
-        return ppr.fast_binomial(subkey, trial_samples, p_samples, exact_max=5)
+        return ppr.fast_binomial(subkey, trial_samples, p_samples)
 
     @jax.jit
     def run_ref() -> jax.Array:
@@ -528,7 +528,7 @@ def plot_binomial() -> None:
             p_arr = jnp.full((n_samples,), p_val, dtype=jnp.float32)
             n_arr = jnp.full((n_samples,), n, dtype=jnp.int32)
             key_fast, key = jax.random.split(key)
-            fast_samples = ppr.fast_binomial(key_fast, n_arr, p_arr, exact_max=5)
+            fast_samples = ppr.fast_binomial(key_fast, n_arr, p_arr)
 
             key_ref, key = jax.random.split(key)
             ref_samples = jax.random.binomial(key_ref, n=n_arr, p=p_arr)

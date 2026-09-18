@@ -15,11 +15,17 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     """
     Systematic resampling method based on input normalized weights.
 
+    Rather than searching the cumulative weights for each of the J points,
+    this counts the points below each particle's cumulative weight, n_k,
+    and marks where each count first changes; a running max then recovers
+    the indices in O(J) with a collision-free scatter, which is much
+    faster than searchsorted on GPU for large J.
+
     Particles with zero weight are never selected. The float32 parallel
     cumsum is neither monotone nor exactly flat across zero-weight
-    particles, so a plain search would occasionally land on one; here the
-    cumulative weights are made monotone and flat across them first, and
-    indices are capped at the last particle with positive weight.
+    particles, so the cumulative weights are made monotone and flat across
+    them first, and indices are capped at the last particle with positive
+    weight.
 
     Args:
         norm_weights (array-like): The array containing the logarithm of
@@ -34,10 +40,19 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
     w = jnp.exp(norm_weights)
     live = w > 0
     csum = jax.lax.cummax(jnp.where(live, jnp.cumsum(w), -jnp.inf))
-    unifs = (jax.random.uniform(key=subkey) + jnp.arange(J)) / J * csum[-1]
-    counts = jnp.searchsorted(csum, unifs, side="right")
+    u = jax.random.uniform(key=subkey)
+    n = jnp.clip(jnp.ceil(csum * (J / csum[-1]) - u), 0, J).astype(jnp.int32)
     last_live = J - 1 - jnp.argmax(live[::-1])
-    return jnp.minimum(counts, last_live)
+    # Only the last particle of each run of equal n is marked, so valid
+    # positions are unique; the rest get distinct out-of-range positions.
+    is_last = jnp.append(n[1:] != n[:-1], True)
+    pos = jnp.where(is_last & (n < J), n, J + 1 + jnp.arange(J))
+    marks = (
+        jnp.zeros(J, jnp.int32)
+        .at[pos]
+        .set(jnp.arange(1, J + 1, dtype=jnp.int32), mode="drop", unique_indices=True)
+    )
+    return jnp.minimum(jax.lax.cummax(marks), last_live)
 
 
 def _normalize_weights(weights: jax.Array) -> tuple[jax.Array, jax.Array]:

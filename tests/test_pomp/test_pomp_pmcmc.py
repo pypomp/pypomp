@@ -351,9 +351,20 @@ class TestPMCMC:
         keys = jnp.asarray([[init_pf_key]])
 
         assert res.theta is not None
+        # PMCMC filters at theta after a float32 round trip through the
+        # estimation scale; at J=20 even that perturbation can flip a
+        # resampling decision, so recompute at the same round-tripped theta.
+        struct = sir.to_struct()
+        names = sir.canonical_param_names
+        theta_est = struct.par_trans._transform_array(
+            res.theta.to_jax_array(names), names, direction="to_est"
+        )
+        theta_rt = struct.par_trans._transform_array(
+            theta_est, names, direction="from_est"
+        )
         recomputed = pp.functional.pfilter(
-            sir.to_struct(),
-            res.theta.to_jax_array(sir.canonical_param_names),
+            struct,
+            theta_rt,
             J,
             keys,
             thresh=0.0,

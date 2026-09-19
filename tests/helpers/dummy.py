@@ -48,3 +48,11 @@ def dummy_pomp(with_dprior: bool = False) -> pp.Pomp:
     )
     pomp.fresh_key = jax.random.key(1)
     return pomp
+
+
+def shifted_to_est(theta):
+    return {k: v + 1 for k, v in theta.items()}
+
+
+def shifted_from_est(theta):
+    return {k: v - 1 for k, v in theta.items()}

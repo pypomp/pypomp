@@ -4,7 +4,7 @@ This is the DPOP-enabled version of model_002, combining:
 - model_002's iota parameterization: iota = exp(iota1 + iota2 * log(pop_1950))
   where iota1 and iota2 are shared parameters in a panel model
 - model_001d's gradient-stability fixes for DPOP training:
-  1. rproc: sample_and_log_prob for unified gradient path + logw accumulation
+  1. rproc: Euler-multinomial log-pmf accumulated in logw
   2. dmeas: custom JVP log_cdf_diff to prevent 0 * inf = NaN
   3. dmeas: NaN-safe y handling
 
@@ -31,11 +31,10 @@ Parameters:
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jspecial
-from jax.scipy.special import log_ndtr
+from jax.scipy.special import gammaln, log_ndtr
 
-from pypomp.models.ctmc_multinom import sample_and_log_prob
-from pypomp.random.gamma import fast_gamma
-from pypomp.random.poisson import fast_poisson
+from pypomp.core.model_mechanics import vectorized
+from pypomp.models.measles import _samplers as smp
 
 # =========================================================================
 # Custom JVP log_cdf_diff for gradient stability (from model_001d)
@@ -94,6 +93,19 @@ def log_cdf_single(z: jax.Array) -> jax.Array:
     return log_cdf_diff(z, -jnp.inf)
 
 
+def sample_and_log_prob(u0, u1, N, r0, r1, dt):
+    """Draw Euler-multinomial exits via rates r0, r1 and their multinomial log-pmf."""
+    p_stay, p0, p1 = smp.euler_probs(r0, r1, dt)
+    x0, x1 = smp.multinom_exits(u0, u1, N, p0, p1)
+    x_stay = N - x0 - x1
+
+    def term(x, p):
+        return x * jnp.log(jnp.clip(p, 1.0e-12, 1.0)) - gammaln(x + 1.0)
+
+    logw = gammaln(N + 1.0) + term(x_stay, p_stay) + term(x0, p0) + term(x1, p1)
+    return x0, x1, logw
+
+
 # =========================================================================
 # Model definition
 # =========================================================================
@@ -138,16 +150,17 @@ def rinit(theta_, key, covars, t0=None):
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
 
 
+@vectorized
 def rproc(X_, theta_, key, covars, t, dt):
-    S, E, I, R, W, C, logw = (
+    S, E, I, W, C, logw = (
         X_["S"],
         X_["E"],
         X_["I"],
-        X_["R"],
         X_["W"],
         X_["C"],
         X_["logw"],
     )
+    J = jnp.asarray(S).shape[0]
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
     gamma = theta_["gamma"]
@@ -191,23 +204,20 @@ def rproc(X_, theta_, key, covars, t, dt):
     # Force of infection
     foi = beta * (I + iota) / pop
 
+    # 1 gamma draw, 1 Poisson, 2 binomials for each of 3 classes
+    u = jax.random.uniform(key, (smp.N_GAMMA_UNIFORMS + 7, J))
+    u_gamma, u = u[: smp.N_GAMMA_UNIFORMS], u[smp.N_GAMMA_UNIFORMS :]
+
     # White noise (extrademographic stochasticity)
-    keys = jax.random.split(key, 3)
-    dw = fast_gamma(keys[0], dt / sigmaSE**2) * sigmaSE**2
+    dw = smp.gamma(u_gamma, dt / sigmaSE**2) * sigmaSE**2
 
     # Poisson births
-    births = fast_poisson(keys[1], br * dt).astype(jnp.float32)
+    births = smp.poisson(u[0], br * dt)
 
-    # Transition rates for Euler-multinomial steps
-    rates_S = jnp.array([foi * dw / dt, mu])
-    rates_E = jnp.array([sigma, mu])
-    rates_I = jnp.array([gamma, mu])
-
-    # Use sample_and_log_prob for unified gradient path (DPOP fix)
-    key_proc = keys[2]
-    (StoE, StoDeath), lp_S, key_proc = sample_and_log_prob(S, rates_S, dt, key_proc)
-    (EtoI, EtoDeath), lp_E, key_proc = sample_and_log_prob(E, rates_E, dt, key_proc)
-    (ItoR, ItoDeath), lp_I, key_proc = sample_and_log_prob(I, rates_I, dt, key_proc)
+    # Euler-multinomial transitions
+    StoE, StoDeath, lp_S = sample_and_log_prob(u[1], u[2], S, foi * dw / dt, mu, dt)
+    EtoI, EtoDeath, lp_E = sample_and_log_prob(u[3], u[4], E, sigma, mu, dt)
+    ItoR, ItoDeath, lp_I = sample_and_log_prob(u[5], u[6], I, gamma, mu, dt)
 
     # Accumulate process log-density for DPOP
     logw_step = lp_S + lp_E + lp_I

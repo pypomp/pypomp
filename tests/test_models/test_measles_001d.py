@@ -98,14 +98,15 @@ def test_001d_process_score_surrogate_matches_fixed_logpmf_gradient():
     from pypomp.models.ctmc_multinom import _euler_multinomial_probs
     from pypomp.models.measles.model_001d import _sample_and_score_log_prob
 
-    key = jax.random.key(17)
+    u = jax.random.uniform(jax.random.key(17), (2,))
     population = jnp.array(80.0)
     rates = jnp.array([0.12, 0.02])
     dt = 1.0 / 365.25
 
-    event_counts, logw_score, key_out = _sample_and_score_log_prob(
-        population, rates, dt, key
+    x0, x1, logw_score = _sample_and_score_log_prob(
+        u[0], u[1], population, rates[0], rates[1], dt
     )
+    event_counts = jnp.stack([x0, x1])
     no_event = population - jnp.sum(event_counts)
     counts_full = jnp.concatenate([jnp.array([no_event]), event_counts], axis=0)
     counts_full = jax.lax.stop_gradient(counts_full)
@@ -115,7 +116,6 @@ def test_001d_process_score_surrogate_matches_fixed_logpmf_gradient():
 
     assert event_counts.shape == rates.shape
     assert jnp.all(event_counts >= 0)
-    assert not jnp.array_equal(key, key_out)
     assert jnp.allclose(jnp.sum(counts_full), population)
     assert jnp.allclose(logw_score, expected_score)
 
@@ -142,10 +142,10 @@ def test_001d_birth_score_surrogate_matches_fixed_logpmf_gradient():
 
     from pypomp.models.measles.model_001d import _sample_poisson_and_score_log_prob
 
-    key = jax.random.key(23)
+    u = jax.random.uniform(jax.random.key(23))
     lam = jnp.array(12.5)
 
-    births, logw_score = _sample_poisson_and_score_log_prob(lam, key)
+    births, logw_score = _sample_poisson_and_score_log_prob(u, lam)
     births = jax.lax.stop_gradient(births)
 
     expected_score = births * jnp.log(lam) - lam

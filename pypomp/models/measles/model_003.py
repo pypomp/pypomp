@@ -7,7 +7,8 @@ import jax.numpy as jnp
 import jax.scipy.special as jspecial
 from jax.scipy.special import log_ndtr
 
-from pypomp.random.gamma import fast_gamma
+from pypomp.core.model_mechanics import vectorized
+from pypomp.models.measles import _samplers as smp
 from pypomp.types import (
     CovarDict,
     InitialTimeFloat,
@@ -72,6 +73,7 @@ def rinit(
     return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C}
 
 
+@vectorized
 def rproc(
     X_: StateDict,
     theta_: ParamDict,
@@ -82,6 +84,7 @@ def rproc(
 ):
     S, E, I = X_["S"], X_["E"], X_["I"]
     W, C = X_["W"], X_["C"]
+    J = jnp.asarray(S).shape[0]
 
     R0 = theta_["R0"]
     sigma = theta_["sigma"]
@@ -118,32 +121,30 @@ def rproc(
     # Expected Force of Infection
     foi = beta * (I + iota) / pop
 
-    normal_keys, gamma_key = jax.random.split(key, 2)
-    all_noise = jax.random.normal(normal_keys, shape=(7,))
+    gamma_key, normal_key = jax.random.split(key)
+    u_gamma = jax.random.uniform(gamma_key, (smp.N_GAMMA_UNIFORMS, J))
+    noise = jax.random.normal(normal_key, (7, J))
 
-    dw = fast_gamma(gamma_key, dt / sigmaSE**2) * sigmaSE**2
+    dw = smp.gamma(u_gamma, dt / sigmaSE**2) * sigmaSE**2
 
     birth_mean = br * dt
-    birth_noise = all_noise[0]
     # Use a 1e-8 floor to avoid gradient numerical instability
     safe_birth_mean = softclamp(birth_mean)
-    births = softclamp(birth_mean + jnp.sqrt(safe_birth_mean) * birth_noise)
+    births = softclamp(birth_mean + jnp.sqrt(safe_birth_mean) * noise[0])
 
-    # Rates
     rate_inf = foi * (dw / dt)  # effective infection rate
 
-    flux_noises = all_noise[1:7]
+    def flux(rate, state, z):
+        mean = rate * state * dt
+        # Use a 1e-8 floor to avoid gradient numerical instability
+        return mean + jnp.sqrt(softclamp(mean)) * z
 
-    rates = jnp.array([rate_inf, mu, sigma, mu, gamma, mu])
-    states = jnp.array([S, S, E, E, I, I])
-
-    mu_fluxes = rates * states * dt
-
-    # Use a 1e-8 floor to avoid gradient numerical instability
-    safe_mu_fluxes = softclamp(mu_fluxes)
-    fluxes = mu_fluxes + jnp.sqrt(safe_mu_fluxes) * flux_noises
-
-    flux_SE, flux_SD, flux_EI, flux_ED, flux_IR, flux_ID = fluxes
+    flux_SE = flux(rate_inf, S, noise[1])
+    flux_SD = flux(mu, S, noise[2])
+    flux_EI = flux(sigma, E, noise[3])
+    flux_ED = flux(mu, E, noise[4])
+    flux_IR = flux(gamma, I, noise[5])
+    flux_ID = flux(mu, I, noise[6])
 
     S_new = softclamp(S + births - flux_SE - flux_SD)
     E_new = softclamp(E + flux_SE - flux_EI - flux_ED)

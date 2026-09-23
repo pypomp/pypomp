@@ -44,6 +44,7 @@ Utilities
    random
    benchmarks
    mcap
+   bake_stew
    types
 
 Example Models

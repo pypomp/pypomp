@@ -24,6 +24,8 @@ types
     Annotated type aliases used in user-defined model component functions.
 """
 
+import sys as _sys
+
 from . import benchmarks, functional, maths, models, random, types
 from .core.learning_rate import LearningRate
 from .core.model_mechanics import vectorized
@@ -40,6 +42,7 @@ from .core.parameters import PanelParameters, PompParameters
 from .core.pomp import Pomp
 from .core.rw_sigma import RWSigma
 from .mcap import MCAPResult, mcap
+from .bake import ArchiveValue, archive_directory, bake, freeze, r_uniform, stew
 from .panel.panel import PanelPomp
 from .proposals import (
     MVNDiagRW,
@@ -47,6 +50,10 @@ from .proposals import (
     MVNRWFull,
     Proposal,
 )
+
+_sys.modules[__name__ + ".recipes"] = _sys.modules[__name__ + ".bake"]
+_sys.modules[__name__ + "._recipe_compat"] = _sys.modules[__name__ + "._bake_compat"]
+del _sys
 
 
 def _get_version():
@@ -80,6 +87,12 @@ __all__ = [
     "WeightedNewton",
     # Inference / Algorithms
     "MCAPResult",
+    "ArchiveValue",
+    "archive_directory",
+    "freeze",
+    "r_uniform",
+    "bake",
+    "stew",
     "mcap",
     "Proposal",
     "MVNDiagRW",

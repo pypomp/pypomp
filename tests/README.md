@@ -72,6 +72,37 @@ before JAX is imported.
 
 ## Regression baselines
 
+The existing `test_pomp/test_pomp_pickle.py` also covers the `bake`, `stew` and
+`freeze` computation archives. Run it without R or any local report files:
+
+```bash
+python -m pytest tests/test_pomp/test_pomp_pickle.py -o addopts= -q
+```
+
+The R compatibility cases use expected observations from an executed pomp
+6.4.0.4 reference, commit `7cfb3f9aa84c85de687b82d71b081016b9cc5762`, on R 4.5.3.
+The `U` case IDs translate the predicates in that version's
+[`tests/bake.R`](https://github.com/kingaa/pomp/blob/7cfb3f9aa84c85de687b82d71b081016b9cc5762/tests/bake.R).
+The other case IDs cover archive boundaries, failure behavior, stress cases and
+the documented compatibility adapter. Expected observations were checked against
+both the stated contract and live R before being stored here. Long uniform
+vectors are compared through SHA-256 of their integer words, serialized as a
+compact JSON array; their length and integer bounds are checked separately.
+
+These are portable Python regressions against fixed R observations. They do not
+execute R at test time or assert compatibility with every R version, RDS/RData
+file decoding, or equal R/JAX model trajectories. Simulation predicates check
+reproducibility within each runtime. See the computation archives API page for
+the native defaults and the explicit `compatibility="R"` behavior.
+
+Additional tests cover Python validation, malformed pickle bindings and RNG
+cleanup. These are separate from exact R comparisons: invalid uniform bounds
+raise `ValueError` in Python, while R `runif` returns `NaN` with a warning.
+The pypomp archive API rejects RNG kinds outside Mersenne-Twister/Inversion, including
+Wichmann-Hill and Box-Muller, which R supports. Equal-bound uniform values and
+unchanged RNG state are checked against executed R observations; initialization
+without a seed is compared through bounds and state replay, not identical draws.
+
 `test_regression/` compares against CSV baselines stored in a directory named
 after each test file. When an algorithm legitimately changes, regenerate with
 `--force-regen` and review the diff. Renaming a regression test file means

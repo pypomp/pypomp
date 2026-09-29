@@ -326,6 +326,20 @@ def test_uk_measles_units():
     assert units == sorted(units)
 
 
+def test_uk_measles_coords():
+    """Every unit has one coordinate, inside England and Wales."""
+    data = pp.models.UKMeasles._get_data()
+    coord = data["coord"]
+    assert sorted(coord["unit"]) == pp.models.UKMeasles.units()
+    assert not coord["unit"].duplicated().any()
+    assert coord["long"].between(-6.0, 2.0).all()
+    assert coord["lat"].between(49.9, 56.0).all()
+    # The two Wellingtons: ".1" is the Somerset one, not Shropshire.
+    lat = coord.set_index("unit")["lat"]
+    assert lat["Wellington"] > 52.5
+    assert lat["Wellington.1"] < 51.5
+
+
 def test_evaluate_spline_right_extrapolation():
     """evaluate_spline_with_linear_extrapolation should linearly extrapolate
     beyond x_max (the right_mask branch), matching the spline's value/slope

@@ -13,6 +13,16 @@ The raw data files in the `raw/` subdirectory originate from:
     Journal of The Royal Society Interface 17, no. 168 (2020): 20200010.
     https://doi.org/10.1098/rsif.2020.0010
 
+except `raw/coord_lau2020.csv`, which is `data/formatted/prevac/coordinates_urban.csv`
+from https://github.com/msylau/measles_competing_risks (commit b7a6758). It derives
+from the Grenfell/Bjørnstad England and Wales dataset and accompanies:
+    Lau, Max S. Y., et al. "A competing-risks model explains hierarchical spatial
+    coupling of measles epidemics en route to national elimination."
+    Nature Ecology & Evolution 4 (2020): 934–939.
+    https://doi.org/10.1038/s41559-020-1186-6
+Despite its name, it covers every urban and rural unit, plus the 29 London
+metropolitan boroughs that the case data merge into a single London unit.
+
 Transformations
 ---------------
 1. Case Reports:
@@ -29,8 +39,9 @@ Transformations
    - Exported as `demog.csv`.
 
 3. Spatial Coordinates:
-   - Longitude and latitude coordinates for urban and rural units are combined into a table
-     with columns: `['unit', 'long', 'lat']`.
+   - The raw file stores one unit per column; it is transposed into a table with columns
+     `['unit', 'long', 'lat']`, restricted to units in the case data (dropping the London
+     boroughs).
    - Exported as `coord.csv`.
 """
 
@@ -103,10 +114,15 @@ def process_raw_measles_data(
     demog = demog.sort_values(["unit", "year"]).reset_index(drop=True)
 
     # 3. Spatial coordinates
-    coord = pd.concat([urr["coord_rural"], urr["coord_urban"]], axis=0)
+    coord = urr["coord_lau2020"].set_index(urr["coord_lau2020"].columns[0]).T
     coord = pd.DataFrame(
-        {"unit": coord["X"], "long": coord["Long"], "lat": coord["Lat"]}
+        {"unit": coord.index, "long": coord["Long"], "lat": coord["Lat"]}
     )
+    units = set(measles["unit"])
+    missing = units - set(coord["unit"])
+    if missing:
+        raise ValueError(f"Units missing coordinates: {sorted(missing)}")
+    coord = coord[coord["unit"].isin(units)]
     coord = coord.sort_values(["unit"]).reset_index(drop=True)
 
     return {

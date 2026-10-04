@@ -2,9 +2,13 @@ from copy import deepcopy
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 import pypomp as pp
+import pypomp.functional as F
+from pypomp.core.algorithms.contexts import MifContext
+from pypomp.core.algorithms.mif import _jv_mif_internal
 
 
 @pytest.fixture(scope="module")
@@ -194,3 +198,66 @@ def test_mif_cooling_schedules(simple):
     res_cust = LG.results_history[-1]
     assert res_cust.rw_sd.a is None
     assert res_cust.rw_sd == rw_cust
+
+
+def _lg_mif_inputs(n_reps):
+    LG = pp.models.lg()
+    struct = LG.to_struct()
+    theta = LG.theta.params(as_list=True)[0]
+    thetas = jnp.tile(jnp.array([theta[k] for k in struct.param_names]), (n_reps, 1))
+    rw_sd = pp.RWSigma(
+        sigmas={k: 0.02 for k in struct.param_names}, init_names=[]
+    ).geometric_cooling(0.5)
+    keys = jax.random.split(jax.random.key(1), n_reps)
+    return struct, thetas, rw_sd, keys
+
+
+@pytest.mark.parametrize("n_monitors", [0, 1])
+def test_mif_untiled_matches_tiled(n_monitors):
+    """Untiled starting parameters give the same run as the equivalent swarm."""
+    J, M = 20, 2
+    struct, thetas, rw_sd, keys = _lg_mif_inputs(n_reps=2)
+    untiled = F.mif(struct, thetas, J, M, rw_sd, keys, n_monitors=n_monitors)
+    tiled = F.mif(
+        struct,
+        jnp.repeat(thetas[:, None], J, axis=1),
+        J,
+        M,
+        rw_sd,
+        keys,
+        n_monitors=n_monitors,
+    )
+    np.testing.assert_array_equal(untiled[0], tiled[0])
+    np.testing.assert_array_equal(untiled[1][:, 1:], tiled[1][:, 1:])
+    np.testing.assert_allclose(untiled[1][:, 0], tiled[1][:, 0], rtol=1e-5)
+    np.testing.assert_array_equal(untiled[2], tiled[2])
+
+
+def test_mif_untiled_holds_one_swarm():
+    """Tiling inside the jit needs less memory than passing a swarm."""
+    J, M, n_reps = 1000, 1, 2
+    struct, thetas, rw_sd, keys = _lg_mif_inputs(n_reps=n_reps)
+    context = MifContext.from_struct(
+        struct=struct,
+        rw_sigma=rw_sd._canonicalize(struct.param_names),
+        J=J,
+        M=M,
+        thresh=0.0,
+        n_monitors=0,
+        return_ancestry=False,
+    )
+
+    def total_bytes(theta):
+        mem = _jv_mif_internal.lower(theta, keys, context).compile().memory_analysis()
+        assert mem is not None
+        return (
+            mem.argument_size_in_bytes
+            + mem.temp_size_in_bytes
+            + mem.output_size_in_bytes
+            - mem.alias_size_in_bytes
+        )
+
+    # XLA's buffer layout gives back part of the saved swarm as temp memory,
+    # so only require that tiling inside the jit is cheaper.
+    tiled = jnp.repeat(thetas[:, None], J, axis=1)
+    assert total_bytes(thetas) < total_bytes(tiled)

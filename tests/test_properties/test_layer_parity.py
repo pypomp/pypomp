@@ -89,9 +89,8 @@ def test_mif_parity(lg):
     result = model.results_history[-1]
 
     keys = jax.random.split(_derive_new_key(key), theta_array.shape[0])
-    theta_3d = jnp.repeat(theta_array[:, jnp.newaxis, :], J, axis=1)
     logliks, theta_traces, _ = F.mif(
-        model.to_struct(), theta_3d, J, M, rw_sd, keys, thresh=0.0
+        model.to_struct(), theta_array, J, M, rw_sd, keys, thresh=0.0
     )
 
     # Iteration 0 holds the starting theta, so its loglik is NaN by construction.

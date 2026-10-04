@@ -9,7 +9,7 @@ import xarray as xr
 import pypomp as pp
 import pypomp.functional as F
 from pypomp.core.algorithms.contexts import PanelMifContext
-from pypomp.core.algorithms.panel_mif import _jv_panel_mif_internal_untiled
+from pypomp.core.algorithms.panel_mif import _jv_panel_mif_internal
 from tests.helpers.models import lg_panel
 from tests.helpers.params import uniform_rw_sd
 
@@ -353,7 +353,7 @@ def test_panel_mif_untiled_holds_one_swarm():
         block=True,
     )
     mem = (
-        _jv_panel_mif_internal_untiled.lower(shared, unit, keys, context)
+        _jv_panel_mif_internal.lower(shared, unit, keys, context)
         .compile()
         .memory_analysis()
     )

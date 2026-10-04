@@ -21,8 +21,11 @@ def _panel_mif_internal(
     context: PanelMifContext,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
-    Fully JIT-compatible panel iterated filtering across M iterations and U units,
-    starting from a swarm.
+    Fully JIT-compatible panel iterated filtering across M iterations and U units.
+
+    Takes either a single parameter set, shared_array (n_shared,) and unit_array
+    (U, n_spec), or a swarm, (J, n_shared) and (J, U, n_spec). A single set is
+    tiled to J particles here, inside the jit, so only one swarm is allocated.
 
     Returns
         shared_array_final: (J, n_shared)
@@ -30,46 +33,15 @@ def _panel_mif_internal(
         shared_traces: (M+1, n_shared+1) where [:,0] is sum logLik per iter, [:,1:] are means
         unit_traces: (M+1, U, n_spec+1) where [:,:,0] is per-unit logLik per iter, [:,:,1:] are means
     """
-    n_shared = shared_array.shape[1]
-    n_spec = unit_array.shape[2]
-    shared_means0 = jnp.mean(shared_array, axis=0) if n_shared > 0 else jnp.zeros((0,))
-    unit_means0 = (
-        jnp.mean(unit_array, axis=0) if n_spec > 0 else jnp.zeros((context.U, 0))
-    )
-    return _panel_mif_loop(
-        shared_array, unit_array, shared_means0, unit_means0, key, context
-    )
-
-
-def _panel_mif_internal_untiled(
-    shared_params: jax.Array,
-    unit_params: jax.Array,
-    key: jax.Array,
-    context: PanelMifContext,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """
-    Like ``_panel_mif_internal`` but takes one parameter set, shared_params
-    (n_shared,) and unit_params (U, n_spec), and tiles it to J particles inside
-    the jit so that only one swarm is ever allocated. Since all particles start
-    equal, the iteration-0 trace means are the inputs themselves.
-    """
-    shared_array = jnp.broadcast_to(shared_params, (context.J, *shared_params.shape))
-    unit_array = jnp.broadcast_to(unit_params, (context.J, *unit_params.shape))
-    return _panel_mif_loop(
-        shared_array, unit_array, shared_params, unit_params, key, context
-    )
-
-
-def _panel_mif_loop(
-    shared_array: jax.Array,
-    unit_array: jax.Array,
-    shared_means0: jax.Array,
-    unit_means0: jax.Array,
-    key: jax.Array,
-    context: PanelMifContext,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Run the M panel IF iterations from a swarm with given iteration-0 means."""
     # 1. Setup metadata and initial traces.
+    if unit_array.ndim == 2:
+        # All particles start equal, so the iteration-0 means are the inputs.
+        shared_means0, unit_means0 = shared_array, unit_array
+        shared_array = jnp.broadcast_to(shared_array, (context.J, *shared_array.shape))
+        unit_array = jnp.broadcast_to(unit_array, (context.J, *unit_array.shape))
+    else:
+        shared_means0 = jnp.mean(shared_array, axis=0)
+        unit_means0 = jnp.mean(unit_array, axis=0)
     inv_perms = jax.vmap(jnp.argsort)(context.unit_param_permutations)
 
     shared_trace_0 = jnp.concatenate([jnp.array([jnp.nan]), shared_means0])[None, :]
@@ -291,15 +263,3 @@ _vmapped_panel_mif_internal = jax.vmap(
 )
 
 _jv_panel_mif_internal = jit(_vmapped_panel_mif_internal)
-
-_vmapped_panel_mif_internal_untiled = jax.vmap(
-    _panel_mif_internal_untiled,
-    in_axes=(
-        0,  # shared_params
-        0,  # unit_params
-        0,  # key
-        None,  # context
-    ),
-)
-
-_jv_panel_mif_internal_untiled = jit(_vmapped_panel_mif_internal_untiled)

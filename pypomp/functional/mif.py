@@ -7,7 +7,6 @@ from ..core.algorithms.mif import (
 )
 from ..core.algorithms.panel_mif import (
     _jv_panel_mif_internal,
-    _jv_panel_mif_internal_untiled,
 )
 from ..core.rw_sigma import RWSigma
 from .structs import PanelPompStruct, PompStruct
@@ -94,12 +93,12 @@ def mif(
         thetas_untiled = (
             thetas_array if thetas_array.ndim == 2 else thetas_array[:, 0, :]
         )
-        thetas_est_untiled = struct.par_trans._transform_array(
+        # Tiled to J inside the jit so only one swarm is allocated.
+        thetas_est = struct.par_trans._transform_array(
             thetas_untiled,
             struct.param_names,
             direction="to_est",
         )
-        thetas_est = jnp.repeat(thetas_est_untiled[:, jnp.newaxis, :], J, axis=1)
     else:
         thetas_est = struct.par_trans._transform_array(
             thetas_array,
@@ -294,10 +293,7 @@ def panel_mif(
         n_monitors=n_monitors,
         block=block,
     )
-    panel_mif_fn = (
-        _jv_panel_mif_internal_untiled if is_untiled else _jv_panel_mif_internal
-    )
-    shared_array_f, unit_array_f, shared_traces, unit_traces = panel_mif_fn(
+    shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
         shared_est,
         unit_est,
         keys,

@@ -14,10 +14,23 @@ SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
 
 def _mif_internal(
-    theta_Jd: jax.Array,
+    theta: jax.Array,
     key: jax.Array,
     context: MifContext,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """
+    Iterated filtering from a single parameter set (d,) or a swarm (J, d). A
+    single set is tiled to J particles here, inside the jit, so only one swarm is
+    allocated.
+    """
+    if theta.ndim == 1:
+        # All particles start equal, so the iteration-0 mean is the input.
+        theta_mean0 = theta
+        theta_Jd = jnp.broadcast_to(theta, (context.J, theta.shape[0]))
+    else:
+        theta_mean0 = jnp.mean(theta, axis=0)
+        theta_Jd = theta
+
     # 1. Prepare keys.
     all_keys = jax.random.split(key, num=context.M + 1)
     m_keys = all_keys[1:]
@@ -42,7 +55,7 @@ def _mif_internal(
     # 4. Collect results.
     # thetas_traces_Md: (M+1, n_theta)
     thetas_traces_Md = jnp.concatenate(
-        [jnp.mean(theta_Jd, axis=0)[None, :], thetas_history_mean], axis=0
+        [theta_mean0[None, :], thetas_history_mean], axis=0
     )
     # neg_logliks_M: (M,)
     neg_logliks_M = neg_logliks_history
@@ -261,7 +274,7 @@ def _perfilter_scan_body(
 _vmapped_mif_internal = jax.vmap(
     _mif_internal,
     in_axes=(
-        0,  # theta_Jd
+        0,  # theta
         0,  # key
         None,  # context
     ),

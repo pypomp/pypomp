@@ -7,6 +7,7 @@ from ..core.algorithms.mif import (
 )
 from ..core.algorithms.panel_mif import (
     _jv_panel_mif_internal,
+    _jv_panel_mif_internal_untiled,
 )
 from ..core.rw_sigma import RWSigma
 from .structs import PanelPompStruct, PompStruct
@@ -256,15 +257,16 @@ def panel_mif(
             struct.unit_param_names,
             direction="to_est",
         )
+        # Tiled to J inside the jit so only one swarm is allocated.
         shared_est = (
-            jnp.repeat(shared_est_untiled[:, jnp.newaxis, :], J, axis=1)
+            shared_est_untiled
             if (shared_est_untiled is not None and n_shared > 0)
-            else jnp.zeros((keys.shape[0], J, 0))
+            else jnp.zeros((keys.shape[0], 0))
         )
         unit_est = (
-            jnp.repeat(unit_est_untiled[:, jnp.newaxis, :, :], J, axis=1)
+            unit_est_untiled
             if (unit_est_untiled is not None and n_spec > 0)
-            else jnp.zeros((keys.shape[0], J, U, 0))
+            else jnp.zeros((keys.shape[0], U, 0))
         )
     else:
         shared_est, unit_est = struct.par_trans._transform_panel_array(
@@ -292,7 +294,10 @@ def panel_mif(
         n_monitors=n_monitors,
         block=block,
     )
-    shared_array_f, unit_array_f, shared_traces, unit_traces = _jv_panel_mif_internal(
+    panel_mif_fn = (
+        _jv_panel_mif_internal_untiled if is_untiled else _jv_panel_mif_internal
+    )
+    shared_array_f, unit_array_f, shared_traces, unit_traces = panel_mif_fn(
         shared_est,
         unit_est,
         keys,

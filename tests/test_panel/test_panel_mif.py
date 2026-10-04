@@ -2,10 +2,16 @@ from copy import deepcopy
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 import xarray as xr
 
 import pypomp as pp
+import pypomp.functional as F
+from pypomp.core.algorithms.contexts import PanelMifContext
+from pypomp.core.algorithms.panel_mif import _jv_panel_mif_internal_untiled
+from tests.helpers.models import lg_panel
+from tests.helpers.params import uniform_rw_sd
 
 
 def check_mif_result(result, panel, J, M, a, rw_sd, theta_orig):
@@ -296,3 +302,68 @@ def test_panel_mif_cooling_schedules(lg_panel_setup_some_shared):
     res_cust = panel.results_history[-1]
     assert res_cust.rw_sd.a is None
     assert res_cust.rw_sd == rw_cust
+
+
+def _lg_panel_mif_inputs(U, n_reps):
+    panel = lg_panel(sharing="some", n_units=U, n_reps=n_reps)
+    struct = panel.to_struct()
+    units = panel.get_unit_names()
+    theta = panel._prepare_theta_input(None)
+    shared_names = panel.canonical_shared_param_names
+    shared = theta.to_jax_array(shared_names, unit_names=units)[:, 0, :]
+    unit = theta.to_jax_array(panel.canonical_unit_param_names, unit_names=units)
+    rw_sd = uniform_rw_sd(list(struct.param_names), cooling=0.5)
+    keys = jax.random.split(jax.random.key(1), n_reps)
+    return struct, shared, unit, rw_sd, keys
+
+
+def test_panel_mif_untiled_matches_tiled():
+    """Untiled starting parameters give the same run as the equivalent swarm."""
+    J, M = 20, 2
+    struct, shared, unit, rw_sd, keys = _lg_panel_mif_inputs(U=2, n_reps=2)
+    untiled = F.panel_mif(struct, shared, unit, J, M, rw_sd, keys)
+    tiled = F.panel_mif(
+        struct,
+        jnp.repeat(shared[:, None], J, axis=1),
+        jnp.repeat(unit[:, None], J, axis=1),
+        J,
+        M,
+        rw_sd,
+        keys,
+    )
+    for a, b in zip(untiled[:2], tiled[:2], strict=True):
+        np.testing.assert_array_equal(a[:, 1:], b[:, 1:])
+        np.testing.assert_allclose(a[:, 0], b[:, 0], rtol=1e-5)
+    for a, b in zip(untiled[2:], tiled[2:], strict=True):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_panel_mif_untiled_holds_one_swarm():
+    """Untiled panel MIF allocates the unit-specific swarm only once."""
+    J, M, U, n_reps = 1000, 1, 20, 2
+    struct, shared, unit, rw_sd, keys = _lg_panel_mif_inputs(U=U, n_reps=n_reps)
+    context = PanelMifContext.from_struct(
+        struct=struct,
+        rw_sigma=rw_sd._canonicalize(struct.param_names),
+        J=J,
+        M=M,
+        U=U,
+        thresh=0.0,
+        n_monitors=0,
+        block=True,
+    )
+    mem = (
+        _jv_panel_mif_internal_untiled.lower(shared, unit, keys, context)
+        .compile()
+        .memory_analysis()
+    )
+    assert mem is not None
+    swarm_bytes = n_reps * J * U * unit.shape[-1] * unit.dtype.itemsize
+    total = (
+        mem.argument_size_in_bytes
+        + mem.temp_size_in_bytes
+        + mem.output_size_in_bytes
+        - mem.alias_size_in_bytes
+    )
+    # The final swarm output is one swarm; a second copy would push this past 2x.
+    assert total < 2.0 * swarm_bytes

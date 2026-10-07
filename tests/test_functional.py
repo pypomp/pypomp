@@ -4,9 +4,8 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
-from pypomp.functional.abc import abc
+from pypomp.functional import abc, pmcmc
 from pypomp.functional.dpop import dpop, dpop_train
-from pypomp.functional.pmcmc import pmcmc
 from tests.helpers.models import lg_panel
 from tests.helpers.params import uniform_rw_sd
 

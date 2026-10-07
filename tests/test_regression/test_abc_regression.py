@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import pypomp as pp
-from pypomp.functional.abc import abc
+from pypomp.functional import abc
 
 M = 3
 

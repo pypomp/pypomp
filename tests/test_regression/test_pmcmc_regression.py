@@ -2,7 +2,7 @@ import jax
 import numpy as np
 
 import pypomp as pp
-from pypomp.functional.pmcmc import pmcmc
+from pypomp.functional import pmcmc
 
 M = 3
 

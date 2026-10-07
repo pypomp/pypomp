@@ -43,6 +43,17 @@ These functions are primarily used for gradient-based parameter estimation.
    panel_train
    mop
 
+Bayesian Inference
+------------------
+
+Particle MCMC (PMMH) and ABC-MCMC samplers. Proposals come from :doc:`proposals`.
+
+.. autosummary::
+   :toctree: generated/
+
+   pmcmc
+   abc
+
 Utilities
 ---------
 

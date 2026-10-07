@@ -13,7 +13,8 @@ Submodules
 random
     JAX-compatible GPU-optimized random variable samplers.
 functional
-    Pure-functional JAX implementations of pfilter, mif, train, simulate.
+    Pure-functional JAX implementations of pfilter, mif, train, pmcmc, abc,
+    simulate.
 maths
     Numerical utilities (logmeanexp, logit, expit).
 models

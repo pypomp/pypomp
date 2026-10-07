@@ -1,4 +1,4 @@
-"""Tests for Pomp._pmcmc() -- JIT-compiled Particle MCMC (PMMH)."""
+"""Tests for Pomp.pmcmc() -- JIT-compiled Particle MCMC (PMMH)."""
 
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ import pytest
 import pypomp as pp
 from pypomp import MVNDiagRW, MVNRWAdaptive, MVNRWFull
 from pypomp.core.results import Result
-from pypomp.functional.pmcmc import pmcmc
+from pypomp.functional import pmcmc
 from pypomp.types import ParamDict
 
 
@@ -179,7 +179,7 @@ class TestPMCMC:
     def test_basic_run(self, sir):
         """PMCMC should run and produce a Result."""
         prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
-        sir._pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(0))
+        sir.pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(0))
         res = sir.results_history[-1]
         assert isinstance(res, Result)
         assert res.method == "pmcmc"
@@ -197,7 +197,7 @@ class TestPMCMC:
 
     def test_with_dprior(self, sir):
         prop = MVNDiagRW({"gamma": 0.1})
-        sir._pmcmc(
+        sir.pmcmc(
             J=20,
             M=3,
             proposal=prop,
@@ -216,7 +216,7 @@ class TestPMCMC:
             return 0.0
 
         sir_default = deepcopy(sir)
-        sir_default._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(2))
+        sir_default.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(2))
         lp_default = (
             _pmcmc_res(sir_default.results_history[-1])
             .traces_da.sel(variable="log_prior")
@@ -224,7 +224,7 @@ class TestPMCMC:
         )
 
         sir_explicit = deepcopy(sir)
-        sir_explicit._pmcmc(
+        sir_explicit.pmcmc(
             J=20, M=3, proposal=prop, dprior=flat_natural, key=jax.random.key(2)
         )
         lp_explicit = (
@@ -238,7 +238,7 @@ class TestPMCMC:
 
     def test_acceptance_rate_in_range(self, sir):
         prop = MVNDiagRW({"beta1": 0.01, "gamma": 0.001})
-        sir._pmcmc(J=20, M=10, proposal=prop, key=jax.random.key(3))
+        sir.pmcmc(J=20, M=10, proposal=prop, key=jax.random.key(3))
         res = _pmcmc_res(sir.results_history[-1])
         for r in res.acceptance_rate:
             assert 0.0 <= r <= 1.0
@@ -251,13 +251,13 @@ class TestPMCMC:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1._pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(99))
+        sir1.pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(99))
         res1 = _pmcmc_res(sir1.results_history[-1])
 
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2._pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(99))
+        sir2.pmcmc(J=20, M=5, proposal=prop, key=jax.random.key(99))
         res2 = _pmcmc_res(sir2.results_history[-1])
 
         np.testing.assert_array_equal(
@@ -268,7 +268,7 @@ class TestPMCMC:
 
     def test_to_dataframe(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(4))
+        sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(4))
         df = _pmcmc_res(sir.results_history[-1]).to_dataframe()
         assert "logLik" in df.columns
         assert "log_prior" in df.columns
@@ -278,7 +278,7 @@ class TestPMCMC:
 
     def test_traces_method(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(5))
+        sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(5))
         df = _pmcmc_res(sir.results_history[-1]).traces()
         assert "method" in df.columns
         assert "theta_idx" in df.columns
@@ -286,7 +286,7 @@ class TestPMCMC:
 
     def test_print_summary(self, sir, capsys):
         prop = MVNDiagRW({"beta1": 1.0})
-        sir._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(6))
+        sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(6))
         _pmcmc_res(sir.results_history[-1]).print_summary()
         out = capsys.readouterr().out
         assert "Method: pmcmc" in out
@@ -294,7 +294,7 @@ class TestPMCMC:
 
     def test_theta_updated(self, sir):
         prop = MVNDiagRW({"beta1": 50.0})  # large jumps -> some acceptance
-        sir._pmcmc(J=20, M=8, proposal=prop, key=jax.random.key(7))
+        sir.pmcmc(J=20, M=8, proposal=prop, key=jax.random.key(7))
         res = _pmcmc_res(sir.results_history[-1])
 
         # self.theta should exactly match the final trace row, regardless of
@@ -314,7 +314,7 @@ class TestPMCMC:
         theta_before = pp.PompParameters(theta_input)
         prop = MVNDiagRW({"beta1": 1.0})
 
-        sir._pmcmc(
+        sir.pmcmc(
             J=20,
             M=3,
             proposal=prop,
@@ -337,14 +337,14 @@ class TestPMCMC:
         prop = MVNDiagRW({"beta1": 1.0})
         J = 20
 
-        sir._pmcmc(J=J, M=2, proposal=prop, key=run_key)
+        sir.pmcmc(J=J, M=2, proposal=prop, key=run_key)
         res = _pmcmc_res(sir.results_history[-1])
         recorded = np.asarray(
             res.traces_da.isel(theta_idx=0, iteration=0).sel(variable="logLik")
         )
 
         # Reconstruct the exact initial particle-filter key used internally by
-        # Pomp._pmcmc -> pmcmc -> _pmcmc_internal.
+        # Pomp.pmcmc -> pmcmc -> _pmcmc_internal.
         _, method_key = jax.random.split(run_key)
         chain_key = jax.random.split(method_key, 1)[0]
         _, init_pf_key = jax.random.split(chain_key)
@@ -382,7 +382,7 @@ class TestPMCMC:
             )
 
         prop = MVNDiagRW({"beta1": 1.0})
-        sir._pmcmc(
+        sir.pmcmc(
             J=20,
             M=5,
             proposal=prop,
@@ -428,7 +428,7 @@ class TestPMCMC:
 
     def test_pmcmc_loglik_matches_analytic_static_normal(self, static_normal_pomp):
         prop = MVNDiagRW({"mu": 0.01})
-        static_normal_pomp._pmcmc(J=3, M=1, proposal=prop, key=jax.random.key(75))
+        static_normal_pomp.pmcmc(J=3, M=1, proposal=prop, key=jax.random.key(75))
         res = _pmcmc_res(static_normal_pomp.results_history[-1])
 
         recorded = float(
@@ -439,7 +439,7 @@ class TestPMCMC:
 
     def test_with_mvn_rw(self, sir):
         prop = MVNRWFull(np.array([[1.0]]), ["beta1"])
-        sir._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(8))
+        sir.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(8))
         res = _pmcmc_res(sir.results_history[-1])
         assert isinstance(res, Result)
 
@@ -449,7 +449,7 @@ class TestPMCMC:
             scale_start=2,
             shape_start=2,
         )
-        sir._pmcmc(J=20, M=8, proposal=prop, key=jax.random.key(9))
+        sir.pmcmc(J=20, M=8, proposal=prop, key=jax.random.key(9))
         res = _pmcmc_res(sir.results_history[-1])
         assert isinstance(res, Result)
 
@@ -467,7 +467,7 @@ class TestPMCMCMultiChain:
         t3 = dict(sir.theta[0])
         t3["beta1"] = 420.0
         prop = MVNDiagRW({"beta1": 1.0, "gamma": 0.1})
-        sir._pmcmc(
+        sir.pmcmc(
             J=20,
             M=5,
             proposal=prop,
@@ -485,7 +485,7 @@ class TestPMCMCMultiChain:
         t2 = dict(sir.theta[0])
         t2["beta1"] = 380.0
         prop = MVNDiagRW({"beta1": 1.0})
-        sir._pmcmc(
+        sir.pmcmc(
             J=20,
             M=3,
             proposal=prop,
@@ -508,12 +508,12 @@ class TestPMCMCValidation:
     def test_invalid_J(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="J must be"):
-            sir._pmcmc(J=0, M=3, proposal=prop, key=jax.random.key(0))
+            sir.pmcmc(J=0, M=3, proposal=prop, key=jax.random.key(0))
 
     def test_invalid_M(self, sir):
         prop = MVNDiagRW({"beta1": 1.0})
         with pytest.raises(ValueError, match="M must be"):
-            sir._pmcmc(J=20, M=0, proposal=prop, key=jax.random.key(0))
+            sir.pmcmc(J=20, M=0, proposal=prop, key=jax.random.key(0))
 
 
 # ---------------------------------------------------------------
@@ -530,13 +530,13 @@ class TestPMCMCMerge:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(20))
+        sir1.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(20))
         res1 = _pmcmc_res(sir1.results_history[-1])
 
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(21))
+        sir2.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(21))
         res2 = _pmcmc_res(sir2.results_history[-1])
 
         merged = Result.merge(res1, res2)
@@ -556,13 +556,13 @@ class TestPMCMCMerge:
         sir1 = deepcopy(model_orig)
         sir1.results_history.clear()
         sir1.theta = theta
-        sir1._pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(30))
+        sir1.pmcmc(J=20, M=3, proposal=prop, key=jax.random.key(30))
         res1 = _pmcmc_res(sir1.results_history[-1])
 
         sir2 = deepcopy(model_orig)
         sir2.results_history.clear()
         sir2.theta = theta
-        sir2._pmcmc(J=20, M=4, proposal=prop, key=jax.random.key(31))
+        sir2.pmcmc(J=20, M=4, proposal=prop, key=jax.random.key(31))
         res2 = _pmcmc_res(sir2.results_history[-1])
 
         with pytest.raises(ValueError, match="same M"):

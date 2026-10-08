@@ -27,6 +27,8 @@ from .carries import (
 from .contexts import PanelTrainContext, SeriesData, TrainContext
 from .helpers import _cosine_cooling
 from .mop import (
+    _chunked_panel_mop_internal,
+    _mop_internal,
     _panel_mop_internal_vmap,
 )
 from .pfilter import (
@@ -57,16 +59,46 @@ def _train_internal(
     )
     step_fn = jax.tree_util.Partial(_train_scan_step, context, optimizer)
 
-    _, history = jax.lax.scan(
+    final_state, history = jax.lax.scan(
         step_fn,
         initial_carry,
         jnp.arange(context.M),
     )
 
-    neg_logliks = jnp.concatenate((jnp.array([jnp.nan]), history.neg_loglik))
+    # Each step monitors the theta it starts from, so the final theta needs one
+    # more evaluation for row m to pair theta_m with its own log-likelihood.
+    _, monitor_key = jax.random.split(final_state.key)
+    final_neg_loglik = _monitor_neg_loglik(final_state.theta_ests, monitor_key, context)
+    neg_logliks = jnp.concatenate(
+        (history.neg_loglik, jnp.reshape(final_neg_loglik, (1,)))
+    )
     Acopies = jnp.concatenate((theta_ests[jnp.newaxis, ...], history.theta_ests))
 
     return neg_logliks, Acopies
+
+
+def _monitor_neg_loglik(
+    theta_ests: jax.Array,
+    key: jax.Array,
+    context: TrainContext,
+) -> jax.Array:
+    """Mean negative log-likelihood over ``context.n_monitors`` filter runs.
+
+    A single monitor uses the MOP forward value, which equals a bootstrap
+    particle filter estimate. With no monitors the result is NaN.
+    """
+    if context.n_monitors == 0:
+        return jnp.array(jnp.nan)
+    if context.n_monitors == 1:
+        return jnp.asarray(_mop_internal(theta_ests, key, context.to_mop_context()))
+    keys = jax.random.split(key, context.n_monitors)
+    return jnp.mean(
+        _vmapped_pfilter_internal(
+            theta_ests,
+            keys,
+            context.to_pfilter_context(should_trans=True),
+        )["neg_loglik"]
+    )
 
 
 def _train_scan_step(
@@ -84,8 +116,8 @@ def _train_scan_step(
     )
     context_m = replace(context, alpha=alpha_m)
 
+    key, subkey = jax.random.split(key)
     if context.n_monitors == 1:
-        key, subkey = jax.random.split(key)
         neg_loglik, grad = _jvg_mop(
             theta_ests,
             subkey,
@@ -94,23 +126,13 @@ def _train_scan_step(
         ylen = context.series.ys.shape[0]
         neg_loglik *= ylen
     else:
-        key, subkey = jax.random.split(key)
         grad = _jgrad_mop(
             theta_ests,
             subkey,
             context_m,
         )
-        if context.n_monitors > 0:
-            key, *subkeys = jax.random.split(key, context.n_monitors + 1)
-            neg_loglik = jnp.mean(
-                _vmapped_pfilter_internal(
-                    theta_ests,
-                    jnp.array(subkeys),
-                    context.to_pfilter_context(should_trans=True),
-                )["neg_loglik"]
-            )
-        else:
-            neg_loglik = jnp.array(jnp.nan)
+        key, monitor_key = jax.random.split(key)
+        neg_loglik = _monitor_neg_loglik(theta_ests, monitor_key, context)
 
     if optimizer.clip_norm is not None:
         grad = jnp.clip(grad, -optimizer.clip_norm, optimizer.clip_norm)
@@ -134,7 +156,7 @@ def _train_scan_step(
     )
 
     if optimizer.scale:
-        direction = direction / jnp.linalg.norm(direction)
+        direction = direction / jnp.maximum(jnp.linalg.norm(direction), 1e-8)
 
     if optimizer.ls:
 
@@ -199,7 +221,7 @@ def _panel_train_internal(
             f"Optimizer '{optimizer.__class__.__name__}' not supported for panel train"
         )
 
-    n_chunks = (context.U + context.chunk_size - 1) // context.chunk_size
+    n_chunks = context.U // context.chunk_size
 
     # Reshape for chunk-wise processing, which vectorizes more
     ys_c = context.series.ys.reshape((n_chunks, context.chunk_size, context.n_obs, -1))
@@ -232,15 +254,26 @@ def _panel_train_internal(
         unit_param_permutations_c,
     )
 
-    _, history = jax.lax.scan(
+    final_state, history = jax.lax.scan(
         step_fn,
         initial_carry,
         jnp.arange(context.M),
     )
 
-    neg_loglik_init = jnp.nan
+    # Each iteration monitors the parameters it starts from; evaluate the final
+    # parameters with the last key slab so that row m pairs with theta_m.
+    final_neg_loglik = _chunked_panel_mop_internal(
+        final_state.shared_ests,
+        final_state.unit_ests_chunked.reshape(unit_array.shape),
+        context.unit_param_permutations,
+        context.to_mop_context(),
+        context.keys[context.M],
+        context.chunk_size,
+    ) * (context.U * context.n_obs)
 
-    neg_logliks = jnp.concatenate((jnp.array([neg_loglik_init]), history.neg_loglik))
+    neg_logliks = jnp.concatenate(
+        (history.neg_loglik, jnp.reshape(final_neg_loglik, (1,)))
+    )
     shared_copies = jnp.concatenate(
         (shared_array[None, :], history.shared_ests), axis=0
     )
@@ -259,7 +292,7 @@ def _iteration_scan_step(
     m: int,
 ) -> tuple[PanelTrainState, IterationMetrics]:
     """Performs gradient descent step across chunks."""
-    n_chunks = (context.U + context.chunk_size - 1) // context.chunk_size
+    n_chunks = context.U // context.chunk_size
     iter_keys_c = context.keys[m].reshape(
         (n_chunks, context.chunk_size) + context.keys.shape[2:]
     )
@@ -368,7 +401,7 @@ def _chunk_scan_step(
         norm_unit = jnp.linalg.norm(dir_unit, axis=-1, keepdims=True)
         dir_unit = dir_unit / jnp.maximum(norm_unit, 1e-8)
 
-    n_chunks = (context.U + context.chunk_size - 1) // context.chunk_size
+    n_chunks = context.U // context.chunk_size
     curr_shared_ests = (
         curr_shared_ests + (context.eta_shared[m] / n_chunks) * dir_shared
     )

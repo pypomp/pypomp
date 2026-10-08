@@ -40,15 +40,14 @@ def test_panel_train_unit_specific_only():
     assert res.shared_traces.shape == (1, M + 1, 1)
     assert list(res.shared_traces.coords["variable"].values) == ["logLik"]
     assert res.unit_traces.shape[-1] == 1 + len(panel.canonical_unit_param_names)
-    # All but the first (pre-training) iteration should have a finite logLik.
-    assert np.all(np.isfinite(np.asarray(res.shared_traces)[:, 1:, :]))
+    # Every iteration, including the starting parameters, has a finite logLik.
+    assert np.all(np.isfinite(np.asarray(res.shared_traces)))
 
 
 def test_panel_train_shared_only():
     """No unit-specific parameters: unit_traces should reduce to unitLogLik only.
 
-    Exercises the ``n_spec == 0`` setup branch as well as the
-    ``unit_traces is None`` fallback used when assembling the unit trace.
+    Exercises the ``n_spec == 0`` setup branch.
     """
     panel = _get_lg_panel_shared_only()
     J, M = 2, 2
@@ -63,9 +62,9 @@ def test_panel_train_shared_only():
     assert list(res.unit_traces.coords["variable"].values) == ["unitLogLik"]
     assert res.unit_traces.shape[-1] == 1
     assert res.shared_traces.shape[-1] == 1 + len(panel.canonical_shared_param_names)
-    # unit_traces is filled with zeros as a placeholder since there are no
-    # unit-specific parameters to trace.
-    assert np.all(np.asarray(res.unit_traces) == 0.0)
+    # Training does not estimate unit log-likelihoods, so they are NaN.
+    assert np.all(np.isnan(np.asarray(res.unit_traces)))
+    assert np.all(np.isnan(panel.theta.logLik))
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])

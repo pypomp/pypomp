@@ -4,7 +4,7 @@ import time
 import warnings
 from collections.abc import Callable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import jax
 import jax.numpy as jnp
@@ -16,7 +16,7 @@ import pypomp.functional as F
 
 from .. import benchmarks
 from ..core.algorithms.helpers import run_jax_batch_sharded
-from ..core.algorithms.train_panel_dpop import _vmapped_panel_dpop_train_internal
+from ..core.estimation_mixin import _process_weight_state_index
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Adam, Optimizer
 from ..core.parameters import PanelParameters
@@ -27,6 +27,7 @@ from ..core.results import (
     build_panel_train_result,
 )
 from ..core.rw_sigma import RWSigma
+from ..functional.train import _panel_train
 from ..maths import logmeanexp
 
 if TYPE_CHECKING:
@@ -35,6 +36,20 @@ if TYPE_CHECKING:
     from .panel import PanelPomp
 else:
     Base = object  # At runtime, this is just a normal class
+
+
+def _divisor_chunk_size(chunk_size: int, U: int) -> int:
+    """Clamp ``chunk_size`` to [1, U] and lower it to a divisor of ``U``."""
+    clamped = min(max(int(chunk_size), 1), U)
+    divisor = max(d for d in range(clamped, 0, -1) if U % d == 0)
+    if divisor != clamped:
+        warnings.warn(
+            "chunk_size does not divide the number of units; "
+            f"using chunk_size={divisor} instead of {clamped}.",
+            UserWarning,
+            stacklevel=4,
+        )
+    return divisor
 
 
 class PanelEstimationMixin(Base):
@@ -801,14 +816,14 @@ class PanelEstimationMixin(Base):
 
         Performs Maximum Likelihood Estimation using the Measurement Off-Parameter (MOP) particle filter (Tan et al. 2024 [1]_), treating the particle filter
         as a differentiable computation graph and applies gradient-based
-        optimizers (e.g. Adam, SGD, Newton) via JAX reverse-mode
+        optimizers (e.g. Adam, SGD) via JAX reverse-mode
         automatic differentiation.
 
         .. warning::
 
             MOP gradients are only well-defined for **continuous-state**
-            models.  For discrete-state models, use :meth:`mif` or
-            :meth:`_dpop_train` (experimental) instead.
+            models.  For discrete-state models, use :meth:`mif` or the
+            experimental DPOP trainer ``_dpop_train``.
 
         .. note::
 
@@ -833,21 +848,26 @@ class PanelEstimationMixin(Base):
         theta : PanelParameters or None, optional
             Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
         optimizer : Optimizer, optional
-            Optimizer configuration object.  Defaults to ``Adam()``.
+            Optimizer configuration object (:class:`~pypomp.Adam`,
+            :class:`~pypomp.SGD` or :class:`~pypomp.FullMatrixAdam`).
+            Defaults to ``Adam()``.
         alpha : float, optional
             MOP discount factor.  Defaults to ``0.97``.
         alpha_cooling : float, optional
             Cooling factor for the MOP discount factor ``alpha`` using cosine decay.
             Defaults to ``1.0``.
         chunk_size : int, optional
-            Number of units to process in parallel per gradient step.  Defaults
-            to ``1``.
+            Number of units to process in parallel per gradient step.  A value
+            that does not divide the number of units is lowered to the nearest
+            divisor, with a warning.  Defaults to ``1``.
 
         Returns
         -------
         None
             Updates ``self.theta`` with final estimates and appends a
-            :class:`~pypomp.core.results.Result` to the history.
+            :class:`~pypomp.core.results.Result` to the history.  The
+            log-likelihood at iteration ``m`` is estimated at the parameters of
+            iteration ``m``.
 
         References
         ----------
@@ -855,6 +875,116 @@ class PanelEstimationMixin(Base):
            for Partially Observed Markov Processes using Automatic Differentiation."
            *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
         """
+        self._train_impl(
+            J=J,
+            M=M,
+            eta=eta,
+            key=key,
+            theta=theta,
+            optimizer=optimizer,
+            alpha=alpha,
+            alpha_cooling=alpha_cooling,
+            chunk_size=chunk_size,
+            process_weight_state=None,
+        )
+
+    def _dpop_train(
+        self,
+        J: int,
+        M: int,
+        eta: LearningRate,
+        *,
+        process_weight_state: str,
+        key: jax.Array | None = None,
+        theta: PanelParameters | None = None,
+        optimizer: Optimizer | None = None,
+        alpha: float = 0.97,
+        alpha_cooling: float = 1.0,
+        chunk_size: int = 1,
+    ) -> None:
+        """Estimate parameters using DPOP-based gradient-descent optimization.
+
+        .. warning::
+           This method is experimental.  Its API and behavior are subject to change
+           in future releases.
+
+        Identical to :meth:`train` except that gradients come from the DPOP
+        objective, which supports process models whose sample paths are not
+        differentiable in the parameters, such as discrete-state models.  See
+        ``pypomp.Pomp._dpop_train`` for the requirements on the process model.
+
+        .. note::
+
+            Training requires the number of integration steps between
+            consecutive observations to be constant across all intervals.
+            Setting `nstep` ensures this, but `dt` can also yield constant steps.
+
+        Parameters
+        ----------
+        J : int
+            Number of particles per unit.
+        M : int
+            Number of training iterations.
+        eta : LearningRate
+            Learning rates per parameter.
+        process_weight_state : str
+            Name of the state that accumulates the process log-weight
+            (e.g. ``"logw"``).  It must be listed in ``accumvars``.
+        key : jax.Array or None, optional
+            JAX random key.  If ``None``, uses the model's ``fresh_key``.
+        theta : PanelParameters or None, optional
+            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
+        optimizer : Optimizer, optional
+            Optimizer configuration object, as for :meth:`train`.  Defaults to
+            ``Adam()``.
+        alpha : float, optional
+            Discount factor applied to the carried particle weights.  Defaults
+            to ``0.97``.
+        alpha_cooling : float, optional
+            Cosine cooling factor for alpha.  Defaults to ``1.0``.
+        chunk_size : int, optional
+            Number of units to process per gradient step, as for :meth:`train`.
+            Defaults to ``1``.
+
+        Returns
+        -------
+        None
+            Updates ``self.theta`` with final estimates and appends a
+            :class:`~pypomp.core.results.Result` to the history.
+        """
+        warnings.warn(
+            "dpop_train is experimental and its API and behavior are subject to change.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        self._train_impl(
+            J=J,
+            M=M,
+            eta=eta,
+            key=key,
+            theta=theta,
+            optimizer=optimizer,
+            alpha=alpha,
+            alpha_cooling=alpha_cooling,
+            chunk_size=chunk_size,
+            process_weight_state=process_weight_state,
+        )
+
+    def _train_impl(
+        self,
+        *,
+        J: int,
+        M: int,
+        eta: LearningRate,
+        key: jax.Array | None,
+        theta: PanelParameters | None,
+        optimizer: Optimizer | None,
+        alpha: float,
+        alpha_cooling: float,
+        chunk_size: int,
+        process_weight_state: str | None,
+    ) -> None:
+        """Shared body of :meth:`train` (MOP) and :meth:`_dpop_train` (DPOP)."""
         start_time = time.time()
         optimizer = optimizer or Adam()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
@@ -862,9 +992,10 @@ class PanelEstimationMixin(Base):
 
         n_reps = theta_obj_in.num_replicates()
 
-        key, old_key = self._update_fresh_key(key)
         if J < 1 or M < 1:
             raise ValueError("J and M must be greater than 0.")
+        if not isinstance(eta, LearningRate):
+            raise TypeError("eta must be a LearningRate object")
 
         unit_names = self.get_unit_names()
         U = len(unit_names)
@@ -873,7 +1004,17 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        chunk_size = max(1, int(chunk_size))
+        process_weight_index = (
+            None
+            if process_weight_state is None
+            else _process_weight_state_index(
+                rep_unit.statenames, rep_unit.accumvars, process_weight_state
+            )
+        )
+        chunk_size = _divisor_chunk_size(chunk_size, U)
+        struct = self.to_struct()
+
+        key, old_key = self._update_fresh_key(key)
 
         shared_index = self.canonical_shared_param_names
         n_shared = len(shared_index)
@@ -893,20 +1034,17 @@ class PanelEstimationMixin(Base):
         else:
             unit_array = theta_obj_in.to_jax_array(spec_index, unit_names=unit_names)
 
-        if not isinstance(eta, LearningRate):
-            raise TypeError("eta must be a LearningRate object")
-
-        keys = jax.random.split(key, n_reps * M * U).reshape(
-            (n_reps, M, U) + key.shape[1:]
+        # Slab m < M drives iteration m; slab M evaluates the final parameters.
+        keys = jax.random.split(key, n_reps * (M + 1) * U).reshape(
+            (n_reps, M + 1, U) + key.shape[1:]
         )
 
-        struct = self.to_struct()
         (
             logliks_history_jax,
             shared_history_natural_jax,
             unit_history_natural_jax,
         ) = run_jax_batch_sharded(
-            F.panel_train,
+            _panel_train,
             {1: 0, 2: 0, 6: 0},
             [0, 0, 0],
             struct,
@@ -920,6 +1058,7 @@ class PanelEstimationMixin(Base):
             alpha,
             alpha_cooling,
             chunk_size,
+            process_weight_index,
         )
 
         (
@@ -939,40 +1078,27 @@ class PanelEstimationMixin(Base):
             unit_history_natural_jax,
         )
 
-        shared_traces = None
-        if (
-            shared_history_natural is not None
-            and logliks_history is not None
-            and n_shared > 0
-        ):
-            shared_ll_expanded = np.expand_dims(-np.array(logliks_history), axis=-1)
-            shared_traces = np.concatenate(
-                [shared_ll_expanded, np.array(shared_history_natural)], axis=-1
-            )
-
-        unit_traces = None
-        if unit_history_natural is not None and n_spec > 0:
-            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
-            unit_traces = np.concatenate([nan_ll, unit_history_natural], axis=-1)
-
-        if shared_traces is None:
-            if unit_traces is None:
-                raise ValueError(
-                    "Both shared_traces and unit_traces are None; cannot build traces."
-                )
-            n_reps = unit_traces.shape[0]
-            shared_traces = np.expand_dims(-np.array(logliks_history), axis=-1)
-            shared_index = []
-
-        if unit_traces is None:
-            n_reps = shared_traces.shape[0]
-            unit_traces = np.zeros((n_reps, M + 1, U, 1), dtype=float)
+        shared_traces = np.concatenate(
+            [
+                -np.asarray(logliks_history)[..., np.newaxis],
+                np.asarray(shared_history_natural),
+            ],
+            axis=-1,
+        )
+        # Training does not estimate per-unit log-likelihoods.
+        unit_traces = np.concatenate(
+            [
+                np.full((n_reps, M + 1, U, 1), np.nan),
+                np.asarray(unit_history_natural),
+            ],
+            axis=-1,
+        )
 
         shared_da = xr.DataArray(
             shared_traces,
             dims=["theta_idx", "iteration", "variable"],
             coords={
-                "theta_idx": np.arange(shared_traces.shape[0]),
+                "theta_idx": np.arange(n_reps),
                 "iteration": np.arange(M + 1),
                 "variable": ["logLik"] + shared_index,
             },
@@ -981,7 +1107,7 @@ class PanelEstimationMixin(Base):
             unit_traces,
             dims=["theta_idx", "iteration", "unit", "variable"],
             coords={
-                "theta_idx": np.arange(unit_traces.shape[0]),
+                "theta_idx": np.arange(n_reps),
                 "iteration": np.arange(M + 1),
                 "unit": unit_names,
                 "variable": ["unitLogLik"] + spec_index,
@@ -998,7 +1124,7 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
-        result = build_panel_train_result(
+        result_kwargs: dict[str, Any] = dict(
             execution_time=time.time() - start_time,
             key=old_key,
             theta=theta_for_result,
@@ -1019,348 +1145,12 @@ class PanelEstimationMixin(Base):
             alpha=alpha,
             alpha_cooling=alpha_cooling,
         )
-
-        self.results_history.add(result)
-
-    def _dpop_train(
-        self,
-        J: int,
-        M: int,
-        eta: LearningRate | dict[str, float] | float,
-        *,
-        chunk_size: int = 1,
-        optimizer: Optimizer | None = None,
-        alpha: float = 0.97,
-        alpha_cooling: float = 1.0,
-        process_weight_state: str | None = None,
-        key: jax.Array | None = None,
-        theta: PanelParameters | None = None,
-    ) -> None:
-        """Estimate parameters using DPOP-based gradient-descent optimization.
-
-        .. warning::
-           This method is experimental.  Its API and behavior are subject to change
-           in future releases.
-
-        This method is analogous to :meth:`train` as an optimization algorithm
-        for parameter estimation, but it can handle continuous states.
-        It additionally incorporates a per-interval transition log-weight that
-        is assumed to be stored in one of the state components.
-
-        The process log-weight is expected to be accumulated over a single
-        observation interval by the user-specified process model.  At the
-        beginning of each interval, the corresponding state component should be
-        reset to zero (this is naturally handled by ``accumvars``).
-
-        .. note::
-
-            Training requires the number of integration steps between
-            consecutive observations to be constant across all intervals.
-            Setting `nstep` ensures this, but `dt` can also yield constant steps.
-
-        Parameters
-        ----------
-        J : int
-            Number of particles per unit.
-        M : int
-            Number of training iterations.
-        eta : LearningRate or dict or float
-            Learning rate(s).
-        chunk_size : int, optional
-            Number of units to process per gradient step.  Defaults to ``1``.
-        optimizer : Optimizer, optional
-            Optimizer configuration object.  Defaults to ``Adam()``.
-        alpha : float, optional
-            DPOP discount / cooling factor.  Defaults to ``0.97``.
-        alpha_cooling : float, optional
-            Cosine cooling factor for alpha.  Defaults to ``1.0``.
-        process_weight_state : str or None, optional
-            Name of the state component that stores the accumulated process
-            log-weight (e.g. ``"logw"``).
-        key : jax.Array or None, optional
-            JAX random key.  If ``None``, uses the model's ``fresh_key``.
-        theta : PanelParameters or None, optional
-            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
-        """
-        warnings.warn(
-            "dpop_train is experimental and its API and behavior are subject to change.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-
-        start_time = time.time()
-        optimizer = optimizer or Adam()
-        theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
-        if theta_obj_in is None:
-            raise ValueError("theta must be provided or self.theta must exist")
-
-        key, old_key = self._update_fresh_key(key)
-        if J < 1:
-            raise ValueError("J should be greater than 0.")
-        if M < 1:
-            raise ValueError("M should be greater than 0.")
-
-        unit_names = self.get_unit_names()
-        U = len(unit_names)
-        rep_unit = self.unit_objects[unit_names[0]]
-
-        if rep_unit.dmeas is None:
-            raise ValueError("dmeas cannot be None in PanelPomp units")
-
-        # Determine chunk size
-        chunk_size_value = int(chunk_size)
-
-        chunk_size_value = max(chunk_size_value, 1)
-        chunk_size_value = min(chunk_size_value, U)
-        if U % chunk_size_value != 0:
-            original_chunk_size = chunk_size_value
-            chunk_size_value = max(
-                d for d in range(chunk_size_value, 0, -1) if U % d == 0
-            )
-            warnings.warn(
-                "chunk_size does not divide the number of units; "
-                f"using chunk_size={chunk_size_value} instead of {original_chunk_size}.",
-                UserWarning,
-                stacklevel=2,
-            )
-        chunk_size = chunk_size_value
-
-        # Determine process_weight_index
         if process_weight_state is None:
-            raise ValueError(
-                "dpop_train requires a process-weight state. "
-                "Please provide `process_weight_state` as the name of the "
-                "state variable that accumulates the transition log-weight "
-                "(e.g. 'logw')."
-            )
-        try:
-            process_weight_index = int(rep_unit.statenames.index(process_weight_state))
-        except ValueError as e:
-            raise ValueError(
-                f"process_weight_state '{process_weight_state}' not found in "
-                f"statenames: {rep_unit.statenames}"
-            ) from e
-
-        unit_param_permutations = jnp.stack(
-            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
-        )
-
-        dt_array_extended = rep_unit._dt_array_extended
-        nstep_array = rep_unit._nstep_array
-        t0 = rep_unit.t0
-        times = jnp.array(rep_unit.ys.index)
-
-        rinitializers = rep_unit.rinit.mechanics_pf
-        rprocesses_interp = rep_unit.rproc.mechanics_pf_interp
-        dmeasures = rep_unit.dmeas.mechanics_pf
-        accumvars = rep_unit.rproc.accumvars
-
-        has_covars = [
-            self.unit_objects[u]._covars_extended is not None for u in unit_names
-        ]
-        if all(has_covars):
-            covars_per_unit = jnp.stack(
-                [jnp.array(self.unit_objects[u]._covars_extended) for u in unit_names],
-                axis=0,
-            )
-        elif any(has_covars):
-            raise NotImplementedError(
-                "Some units have covariates, but not all units have covariates. This is not supported yet."
-            )
+            result = build_panel_train_result(**result_kwargs)
         else:
-            covars_per_unit = None
-
-        n_reps = theta_obj_in.num_replicates()
-
-        theta_obj_in = theta_obj_in.transformed(rep_unit.par_trans, direction="to_est")
-
-        shared_index = self.canonical_shared_param_names
-        n_shared = len(shared_index)
-        if n_shared == 0:
-            shared_array = jnp.zeros((n_reps, 0))
-            shared_index = []
-        else:
-            shared_array = theta_obj_in.to_jax_array(
-                shared_index, unit_names=unit_names
-            )[:, 0, :]
-
-        spec_index = self.canonical_unit_param_names
-        n_spec = len(spec_index)
-        if n_spec == 0:
-            unit_array = jnp.zeros((n_reps, 0, U))
-            spec_index = []
-        else:
-            unit_array = theta_obj_in.to_jax_array(
-                spec_index, unit_names=unit_names
-            ).transpose(0, 2, 1)
-
-        if isinstance(eta, LearningRate):
-            # Full (M, p) per-iteration schedule (e.g. cosine_decay)
-            eta_shared = eta.to_array(shared_index, M)
-            eta_spec = eta.to_array(spec_index, M)
-        else:
-            # Constant dict/float -> broadcast to an (M, p) schedule; the scalar
-            # `decay` (reciprocal) is still applied per-iteration in the kernel.
-            eta_dict = (
-                eta
-                if isinstance(eta, dict)
-                else {p: eta for p in self.canonical_param_names}
+            result = build_panel_dpop_train_result(
+                **result_kwargs, process_weight_state=process_weight_state
             )
-            eta_shared_vec = jnp.array(
-                [eta_dict.get(p, 0.0) for p in shared_index], dtype=float
-            )
-            eta_spec_vec = jnp.array(
-                [eta_dict.get(p, 0.0) for p in spec_index], dtype=float
-            )
-            eta_shared = jnp.broadcast_to(eta_shared_vec, (M, eta_shared_vec.shape[0]))
-            eta_spec = jnp.broadcast_to(eta_spec_vec, (M, eta_spec_vec.shape[0]))
-
-        ys_per_unit = jnp.stack(
-            [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
-        )
-        n_obs = ys_per_unit.shape[1]
-        ntimes = n_obs
-
-        keys = jax.random.split(key, n_reps * M * U)
-        keys = keys.reshape((n_reps, M, U) + keys.shape[1:])
-
-        (
-            logliks_history_jax,
-            shared_history_jax,
-            unit_history_jax,
-        ) = _vmapped_panel_dpop_train_internal(
-            shared_array,
-            unit_array,
-            unit_param_permutations,
-            dt_array_extended,
-            nstep_array,
-            t0,
-            times,
-            ys_per_unit,
-            covars_per_unit,
-            keys,
-            J,
-            rinitializers,
-            rprocesses_interp,
-            dmeasures,
-            accumvars,
-            chunk_size,
-            optimizer,
-            M,
-            eta_shared,
-            eta_spec,
-            alpha,
-            alpha_cooling,
-            n_obs,
-            U,
-            process_weight_index,
-            ntimes,
-        )
-
-        (
-            logliks_history,
-            shared_history,
-            unit_history,
-        ) = jax.device_get((logliks_history_jax, shared_history_jax, unit_history_jax))
-        del (
-            logliks_history_jax,
-            shared_history_jax,
-            unit_history_jax,
-        )
-
-        logliks_trace = -np.array(logliks_history)
-
-        shared_history_arr = np.array(shared_history) if len(shared_index) > 0 else None
-        unit_history_arr = (
-            np.transpose(np.array(unit_history), (0, 1, 3, 2))
-            if len(spec_index) > 0
-            else None
-        )
-
-        if shared_history_arr is None and unit_history_arr is None:
-            raise ValueError(
-                "Both shared_traces and unit_traces are None; cannot build traces."
-            )
-
-        shared_trans, unit_trans = rep_unit.par_trans._transform_panel_array(
-            shared_array=shared_history_arr,
-            unit_array=unit_history_arr,
-            shared_names=shared_index,
-            unit_specific_names=spec_index,
-            direction="from_est",
-        )
-
-        shared_ll_expanded = np.expand_dims(logliks_trace, axis=-1)
-        if shared_trans is not None:
-            shared_traces = np.concatenate([shared_ll_expanded, shared_trans], axis=-1)
-        else:
-            shared_traces = shared_ll_expanded
-
-        if len(spec_index) > 0 and unit_trans is not None:
-            nan_ll = np.full((n_reps, M + 1, U, 1), np.nan, dtype=float)
-            unit_traces = np.concatenate([nan_ll, unit_trans], axis=-1)
-        else:
-            unit_traces = np.zeros((n_reps, M + 1, U, 1), dtype=float)
-
-        shared_vars = ["logLik"] + shared_index
-        unit_vars = ["unitLogLik"] + spec_index
-
-        shared_da = xr.DataArray(
-            shared_traces,
-            dims=["theta_idx", "iteration", "variable"],
-            coords={
-                "theta_idx": jnp.arange(shared_traces.shape[0]),
-                "iteration": jnp.arange(M + 1),
-                "variable": shared_vars,
-            },
-        )
-        unit_da = xr.DataArray(
-            unit_traces,
-            dims=["theta_idx", "iteration", "unit", "variable"],
-            coords={
-                "theta_idx": jnp.arange(unit_traces.shape[0]),
-                "iteration": jnp.arange(M + 1),
-                "unit": unit_names,
-                "variable": unit_vars,
-            },
-        )
-
-        logLik_unit_out = unit_traces[:, -1, :, 0].astype(float)
-
-        self.theta = PanelParameters.from_arrays(
-            shared_values=shared_traces[:, -1, 1:],
-            unit_specific_values=unit_traces[:, -1, :, 1:],
-            shared_names=shared_index,
-            unit_specific_names=spec_index,
-            unit_names=unit_names,
-            logLik_unit=logLik_unit_out,
-            estimation_scale=False,
-        )
-
-        execution_time = time.time() - start_time
-
-        result = build_panel_dpop_train_result(
-            execution_time=execution_time,
-            key=old_key,
-            theta=self.theta,
-            shared_traces=shared_da,
-            unit_traces=unit_da,
-            logLiks=xr.DataArray(
-                np.full((n_reps, U + 1), np.nan),
-                dims=["theta_idx", "unit"],
-                coords={
-                    "theta_idx": jnp.arange(n_reps),
-                    "unit": ["shared"] + unit_names,
-                },
-            ),
-            J=J,
-            M=M,
-            eta=eta,
-            optimizer=optimizer,
-            alpha=alpha,
-            alpha_cooling=alpha_cooling,
-            process_weight_state=process_weight_state,
-        )
 
         self.results_history.add(result)
 

@@ -3,12 +3,13 @@ import numpy as np
 
 import pypomp as pp
 from pypomp.functional.dpop import dpop_train
+from pypomp.models.sir import get_process_weight_index
 
 M = 3
 
 
-def test_dpop_train_regression(lg_struct, tol, num_regression):
-    struct, theta0, key, J, n_reps, param_names = lg_struct
+def test_dpop_train_regression(sir_struct, tol, num_regression):
+    struct, theta0, key, J, n_reps, param_names = sir_struct
     keys = jax.random.split(key, n_reps)
     eta = pp.LearningRate({name: 0.01 for name in param_names})
 
@@ -16,12 +17,12 @@ def test_dpop_train_regression(lg_struct, tol, num_regression):
         struct,
         theta0,
         J,
+        M,
+        eta,
+        keys,
+        get_process_weight_index(),
         optimizer=pp.Adam(),
-        M=M,
-        eta=eta,
         alpha=0.8,
-        process_weight_index=0,
-        keys=keys,
     )
 
     num_regression.check(

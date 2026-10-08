@@ -175,8 +175,7 @@ def test_train_n_monitors_variants(n_monitors, simple):
     if n_monitors == 0:
         assert np.all(np.isnan(logliks))
     else:
-        # iteration 0 is NaN by design (pre-training); the rest should be finite
-        assert np.all(np.isfinite(logliks[1:]))
+        assert np.all(np.isfinite(logliks))
 
 
 def test_train_clipping(simple):

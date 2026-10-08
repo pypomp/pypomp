@@ -224,38 +224,41 @@ def test_dpop_train_validation(base_pomp):
         nstep=1,
     )
     pomp_no_dmeas.fresh_key = jax.random.key(1)
-    with pytest.raises(
-        ValueError, match="dpop_train requires self.dmeas to be not None"
-    ):
+    with pytest.raises(ValueError, match="self.dmeas cannot be None"):
         pomp_no_dmeas._dpop_train(J=5, M=1, eta=eta, process_weight_state="logw")
 
     # 2. invalid eta
     with pytest.raises(TypeError, match="eta must be a LearningRate object"):
         base_pomp._dpop_train(J=5, M=1, eta="not_lr", process_weight_state="logw")
 
-    # 3. missing process_weight_state
-    with pytest.raises(ValueError, match="dpop_train requires a process-weight state"):
-        base_pomp._dpop_train(J=5, M=1, eta=eta, process_weight_state=None)
-
-    # 4. process_weight_state not in statenames
+    # 3. process_weight_state not in statenames
     with pytest.raises(ValueError, match="not found in statenames"):
         base_pomp._dpop_train(J=5, M=1, eta=eta, process_weight_state="non_existent")
 
+    # 4. process_weight_state must be reset at observation times
+    def build_logw_pomp(accumvars):
+        return pp.Pomp(
+            ys=base_pomp.ys,
+            theta=base_pomp.theta,
+            rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"], "logw": 0.0},
+            rproc=lambda X_, theta_, key, covars, t, dt: {
+                "X": X_["X"],
+                "logw": X_["logw"] + 0.1,
+            },
+            dmeas=dummy_dmeas,
+            statenames=["X", "logw"],
+            t0=0.0,
+            nstep=1,
+            accumvars=accumvars,
+        )
+
+    with pytest.raises(ValueError, match="must be listed in accumvars"):
+        build_logw_pomp(None)._dpop_train(
+            J=5, M=1, eta=eta, process_weight_state="logw", key=jax.random.key(1)
+        )
+
     # 5. Test valid call with optimizer='SGD'
-    # Add logw to states
-    pomp_dpop = pp.Pomp(
-        ys=base_pomp.ys,
-        theta=base_pomp.theta,
-        rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"], "logw": 0.0},
-        rproc=lambda X_, theta_, key, covars, t, dt: {
-            "X": X_["X"],
-            "logw": X_["logw"] + 0.1,
-        },
-        dmeas=dummy_dmeas,
-        statenames=["X", "logw"],
-        t0=0.0,
-        nstep=1,
-    )
+    pomp_dpop = build_logw_pomp(("logw",))
     pomp_dpop.fresh_key = jax.random.key(1)
     pomp_dpop.results_history.clear()
     ret = pomp_dpop._dpop_train(

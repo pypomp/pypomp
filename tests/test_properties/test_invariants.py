@@ -105,9 +105,9 @@ def test_sir_simulate_state_invariants():
 # Parameters are held in dicts and aligned to canonical_param_names internally,
 # so results must not depend on the order the user supplied them in.
 #
-# The dpop_train and panel_mif equivalents stay in their own files: they run a
-# different model and a different code path, so they are not instances of this
-# same check.
+# The dpop_train and panel_mif equivalents stay in their own files: they need a
+# different model (dpop_train) or a different code path (panel_mif), so they are
+# not instances of this same check.
 # ---------------------------------------------------------------------------
 
 

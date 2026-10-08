@@ -220,23 +220,55 @@ class PfilterContext:
 # ----MOP-----------------------------------------------------------------------
 
 
+def check_process_weight_index(
+    struct: PompStruct | PanelPompStruct, process_weight_index: int | None
+) -> None:
+    """Require the DPOP process log-weight state to be an accumulator variable.
+
+    DPOP adds the score of the transition density over one observation
+    interval, so the state holding it must be reset at every observation time.
+    """
+    if process_weight_index is None:
+        return
+    if process_weight_index not in (struct.accumvars or ()):
+        raise ValueError(
+            f"process_weight_index {process_weight_index} must index an "
+            f"accumulator variable (accumvars indices: {struct.accumvars}), so "
+            "that the process log-weight is reset at every observation time."
+        )
+
+
 @register_dataclass
 @dataclass(frozen=True, kw_only=True)
 class MopContext:
+    """Context for the MOP objective.
+
+    A non-None ``process_weight_index`` turns on DPOP: the state at that index
+    holds the transition log-density accumulated over each observation
+    interval, and its score is added to the particle weights.
+    """
+
     series: SeriesData
     alpha: float | jax.Array
     fns: ModelFns = static()
     J: int = static()
+    process_weight_index: int | None = static(default=None)
 
     @classmethod
     def from_struct(
-        cls, struct: PompStruct, J: int, alpha: float | jax.Array
+        cls,
+        struct: PompStruct,
+        J: int,
+        alpha: float | jax.Array,
+        process_weight_index: int | None = None,
     ) -> MopContext:
+        check_process_weight_index(struct, process_weight_index)
         return cls(
             series=SeriesData.from_struct(struct),
             alpha=alpha,
             fns=ModelFns.pf(struct),
             J=J,
+            process_weight_index=process_weight_index,
         )
 
 
@@ -265,12 +297,15 @@ class TrainContext(MopContext):
         n_monitors: int,
         eta: jax.Array,
         alpha: float | jax.Array,
+        process_weight_index: int | None = None,
     ) -> TrainContext:
+        check_process_weight_index(struct, process_weight_index)
         return cls(
             series=SeriesData.from_struct(struct),
             alpha=alpha,
             fns=ModelFns.pf(struct),
             J=J,
+            process_weight_index=process_weight_index,
             eta=eta,
             M=M,
             alpha_cooling=alpha_cooling,
@@ -279,7 +314,13 @@ class TrainContext(MopContext):
         )
 
     def to_mop_context(self) -> MopContext:
-        return MopContext(series=self.series, alpha=self.alpha, fns=self.fns, J=self.J)
+        return MopContext(
+            series=self.series,
+            alpha=self.alpha,
+            fns=self.fns,
+            J=self.J,
+            process_weight_index=self.process_weight_index,
+        )
 
     def to_pfilter_context(self, should_trans: bool = False) -> PfilterContext:
         return PfilterContext(
@@ -288,43 +329,6 @@ class TrainContext(MopContext):
             J=self.J,
             thresh=self.thresh,
             should_trans=should_trans,
-        )
-
-
-# ----DPOP TRAIN----------------------------------------------------------------
-
-
-@register_dataclass
-@dataclass(frozen=True, kw_only=True)
-class DpopTrainContext(TrainContext):
-    """Extends :class:`TrainContext` for DPOP optimization with process weights."""
-
-    process_weight_index: int | None = static()
-
-    @classmethod
-    def from_dpop_train_struct(
-        cls,
-        struct: PompStruct,
-        J: int,
-        M: int,
-        alpha_cooling: float,
-        thresh: float,
-        n_monitors: int,
-        eta: jax.Array,
-        alpha: float | jax.Array,
-        process_weight_index: int | None,
-    ) -> DpopTrainContext:
-        return cls(
-            series=SeriesData.from_struct(struct),
-            alpha=alpha,
-            fns=ModelFns.pf(struct),
-            J=J,
-            eta=eta,
-            M=M,
-            alpha_cooling=alpha_cooling,
-            thresh=thresh,
-            n_monitors=n_monitors,
-            process_weight_index=process_weight_index,
         )
 
 
@@ -347,6 +351,7 @@ class PanelTrainContext:
     alpha_cooling: float = static()
     n_obs: int = static()
     U: int = static()
+    process_weight_index: int | None = static(default=None)
 
     @classmethod
     def from_panel_train_struct(
@@ -360,7 +365,15 @@ class PanelTrainContext:
         eta_shared: jax.Array,
         eta_spec: jax.Array,
         alpha: float,
+        process_weight_index: int | None = None,
     ) -> PanelTrainContext:
+        check_process_weight_index(struct, process_weight_index)
+        U = len(struct.unit_names)
+        if chunk_size < 1 or U % chunk_size != 0:
+            raise ValueError(
+                f"chunk_size must be a positive divisor of the number of units "
+                f"({U}); got {chunk_size}."
+            )
         return cls(
             series=SeriesData.from_panel_struct(struct),
             unit_param_permutations=struct.unit_param_permutations,
@@ -374,11 +387,18 @@ class PanelTrainContext:
             M=M,
             alpha_cooling=alpha_cooling,
             n_obs=struct.ys_per_unit.shape[1],
-            U=len(struct.unit_names),
+            U=U,
+            process_weight_index=process_weight_index,
         )
 
     def to_mop_context(self) -> MopContext:
-        return MopContext(series=self.series, alpha=self.alpha, fns=self.fns, J=self.J)
+        return MopContext(
+            series=self.series,
+            alpha=self.alpha,
+            fns=self.fns,
+            J=self.J,
+            process_weight_index=self.process_weight_index,
+        )
 
 
 # ----MIF-----------------------------------------------------------------------

@@ -12,7 +12,15 @@ def test_panel_train_regression(lg_panel_struct, tol, num_regression):
     U = unit0.shape[1]
     all_param_names = list(struct.shared_param_names) + list(struct.unit_param_names)
     eta = pp.LearningRate({name: 0.01 for name in all_param_names})
-    keys = jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U)
+    # The final-evaluation slab comes from its own root key, so the iteration
+    # keys (and hence the parameter baselines) do not depend on it.
+    keys = jax.numpy.concatenate(
+        [
+            jax.random.split(key, n_reps * M * U).reshape(n_reps, M, U),
+            jax.random.split(jax.random.key(1), n_reps * U).reshape(n_reps, 1, U),
+        ],
+        axis=1,
+    )
 
     neg_logliks, shared_history, unit_history = F.panel_train(
         struct,

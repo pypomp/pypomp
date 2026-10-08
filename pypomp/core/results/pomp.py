@@ -127,6 +127,7 @@ def build_dpop_train_result(
     M: int,
     eta: Any,
     alpha: float,
+    thresh: float,
     alpha_cooling: float,
     process_weight_state: str | None,
 ) -> Result:
@@ -143,6 +144,7 @@ def build_dpop_train_result(
             "M": M,
             "eta": eta,
             "alpha": alpha,
+            "thresh": thresh,
             "alpha_cooling": alpha_cooling,
             "process_weight_state": process_weight_state,
         },

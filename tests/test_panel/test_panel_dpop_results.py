@@ -6,6 +6,7 @@ import pytest
 
 import pypomp as pp
 from pypomp.core.results import Result
+from pypomp.models.sir import DEFAULT_THETA
 from tests.helpers.models import sir_panel
 
 _test_times = np.arange(1 / 52, 3 / 52, 1 / 52)
@@ -28,7 +29,7 @@ def dpop_results_module():
         p._dpop_train(
             J=2,
             M=2,
-            eta=0.01,
+            eta=pp.LearningRate({name: 0.01 for name in DEFAULT_THETA}),
             theta=deepcopy(p.theta),
             chunk_size=1,
             optimizer=pp.Adam(),

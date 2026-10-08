@@ -1,5 +1,7 @@
 """
-This module implements the MOP algorithm for POMP models.
+This module implements the MOP algorithm for POMP models, and its DPOP
+extension for process models whose sample paths are not differentiable in the
+parameters (enabled by ``MopContext.process_weight_index``).
 """
 
 from dataclasses import replace
@@ -101,6 +103,12 @@ def _mop_step(
         SHOULD_TRANS,
     )
     t = context.series.times[i]
+
+    if context.process_weight_index is not None:
+        # DPOP: add the score of the transition log-density over this interval.
+        # Its value is zero, so it changes only the gradient.
+        proc_w = particlesP[:, context.process_weight_index]
+        weightsP = weightsP + (proc_w - jax.lax.stop_gradient(proc_w))
 
     covars_t = (
         None

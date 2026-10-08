@@ -68,7 +68,8 @@ def train(
     alpha_cooling : float, optional
         Cosine cooling multiplier for ``alpha``.  Defaults to ``1.0``.
     thresh : float, optional
-        ESS-based resampling threshold.  Defaults to ``0.0``.
+        ESS-based resampling threshold for the particle filters used by
+        ``n_monitors > 1`` and by line search.  Defaults to ``0.0``.
     n_monitors : int, optional
         Number of unperturbed filter runs for log-likelihood monitoring.
         Defaults to ``1``.
@@ -76,7 +77,8 @@ def train(
     Returns
     -------
     tuple of (jax.Array, jax.Array)
-        - Negative log-likelihood history of shape ``(n_reps, M + 1)``.
+        - Negative log-likelihood history of shape ``(n_reps, M + 1)``.  Row
+          ``m`` is estimated at the parameters in row ``m`` of the trace.
         - Parameter trace history of shape ``(n_reps, M + 1, n_params)`` on the
           natural scale.
 
@@ -96,6 +98,40 @@ def train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    return _train(
+        struct,
+        thetas_array,
+        J,
+        M,
+        eta,
+        keys,
+        optimizer,
+        alpha,
+        alpha_cooling,
+        thresh,
+        n_monitors,
+        None,
+    )
+
+
+def _train(
+    struct: PompStruct,
+    thetas_array: jax.Array,
+    J: int,
+    M: int,
+    eta: LearningRate,
+    keys: jax.Array,
+    optimizer: Optimizer | None,
+    alpha: float | jax.Array,
+    alpha_cooling: float,
+    thresh: float,
+    n_monitors: int,
+    process_weight_index: int | None,
+) -> tuple[jax.Array, jax.Array]:
+    """Shared body of :func:`train` and :func:`~pypomp.functional.dpop.dpop_train`.
+
+    ``process_weight_index=None`` gives MOP; an index gives DPOP.
+    """
     optimizer = optimizer or Adam()
     eta_array = eta.to_array(struct.param_names, M)
 
@@ -106,7 +142,15 @@ def train(
     )
 
     context = TrainContext.from_train_struct(
-        struct, J, M, alpha_cooling, thresh, n_monitors, eta_array, alpha
+        struct,
+        J,
+        M,
+        alpha_cooling,
+        thresh,
+        n_monitors,
+        eta_array,
+        alpha,
+        process_weight_index=process_weight_index,
     )
 
     neg_logliks, theta_traces_est = _vmapped_train_internal(
@@ -171,22 +215,27 @@ def panel_train(
     eta : LearningRate
         Learning rates object containing rates for shared and unit-specific parameters.
     keys : jax.Array
-        Random keys of shape ``(n_reps, M, U, ...)``.
+        Random keys of shape ``(n_reps, M + 1, U, ...)``.  Slab ``m < M``
+        drives iteration ``m``; slab ``M`` evaluates the final parameters.
     optimizer : Optimizer or None, optional
-        Optimizer configuration object (e.g. :class:`~pypomp.Adam`,
-        :class:`~pypomp.SGD`, :class:`~pypomp.Newton`).  Defaults to ``Adam()``.
+        Optimizer configuration object (:class:`~pypomp.Adam`,
+        :class:`~pypomp.SGD` or :class:`~pypomp.FullMatrixAdam`).  Defaults to
+        ``Adam()``.
     alpha : float, optional
         Discount factor for MOP updates.  Defaults to ``0.97``.
     alpha_cooling : float, optional
         Cooling factor for discount factor alpha.  Defaults to ``1.0``.
     chunk_size : int, optional
-        Number of units to process per gradient step.  Defaults to ``1``.
+        Number of units to process per gradient step; must divide ``U``.
+        Defaults to ``1``.
 
     Returns
     -------
     logliks_history : jax.Array
-        Average negative log-likelihood trace across iterations of shape
-        ``(n_reps, M + 1)``.
+        Negative log-likelihood summed over units, of shape
+        ``(n_reps, M + 1)``.  Row ``m`` is estimated at the parameters in row
+        ``m`` of the traces; within an iteration, later chunks see the shared
+        parameters already updated by earlier chunks.
     shared_history_natural : jax.Array
         Shared parameter history trace of shape ``(n_reps, M + 1, n_shared)`` on the
         natural scale.
@@ -210,6 +259,46 @@ def panel_train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    return _panel_train(
+        struct,
+        shared_array,
+        unit_array,
+        J,
+        M,
+        eta,
+        keys,
+        optimizer,
+        alpha,
+        alpha_cooling,
+        chunk_size,
+        None,
+    )
+
+
+def _panel_train(
+    struct: PanelPompStruct,
+    shared_array: jax.Array,
+    unit_array: jax.Array,
+    J: int,
+    M: int,
+    eta: LearningRate,
+    keys: jax.Array,
+    optimizer: Optimizer | None,
+    alpha: float,
+    alpha_cooling: float,
+    chunk_size: int,
+    process_weight_index: int | None,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Shared body of :func:`panel_train` and the panel DPOP trainer.
+
+    ``process_weight_index=None`` gives MOP; an index gives DPOP.
+    """
+    if keys.shape[1] != M + 1:
+        # Indexing a missing slab would silently clamp to the last one.
+        raise ValueError(
+            f"keys must have shape (n_reps, M + 1, U, ...); got {keys.shape} "
+            f"with M={M}."
+        )
     optimizer = optimizer or Adam()
     eta_shared = (
         eta.to_array(struct.shared_param_names, M)
@@ -231,7 +320,16 @@ def panel_train(
     )
 
     context = PanelTrainContext.from_panel_train_struct(
-        struct, J, chunk_size, M, alpha_cooling, keys, eta_shared, eta_spec, alpha
+        struct,
+        J,
+        chunk_size,
+        M,
+        alpha_cooling,
+        keys,
+        eta_shared,
+        eta_spec,
+        alpha,
+        process_weight_index=process_weight_index,
     )
 
     (

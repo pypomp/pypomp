@@ -525,7 +525,7 @@ class PompEstimationMixin(Base):
             model accumulates the log-density of its sampled transitions.
             Setting it enables the experimental DPOP gradient for process
             models that are not differentiable in the parameters, such as
-            discrete-state models; see :func:`pypomp.functional.mop` for the
+            discrete-state models; see :func:`pypomp.functional.pop` for the
             requirements on the process model.  Defaults to ``None`` (MOP).
 
         Returns

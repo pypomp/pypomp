@@ -865,7 +865,7 @@ class PanelEstimationMixin(Base):
             Name of a state (listed in ``accumvars``) in which the process
             model accumulates the log-density of its sampled transitions.
             Setting it enables the experimental DPOP gradient; see
-            :func:`pypomp.functional.mop` for the requirements on the process
+            :func:`pypomp.functional.pop` for the requirements on the process
             model.  Defaults to ``None`` (MOP).
 
         Returns

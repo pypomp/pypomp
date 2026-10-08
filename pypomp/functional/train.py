@@ -78,7 +78,7 @@ def train(
     process_weight_index : int or None, optional
         Index of the state holding the process log-weight, which enables the
         experimental DPOP gradient for process models that are not
-        differentiable in the parameters (see :func:`pypomp.functional.mop`).
+        differentiable in the parameters (see :func:`pypomp.functional.pop`).
         Must be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
 
     Returns
@@ -237,7 +237,7 @@ def panel_train(
         Defaults to ``1``.
     process_weight_index : int or None, optional
         Index of the state holding the process log-weight, which enables the
-        experimental DPOP gradient (see :func:`pypomp.functional.mop`).  Must
+        experimental DPOP gradient (see :func:`pypomp.functional.pop`).  Must
         be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
 
     Returns

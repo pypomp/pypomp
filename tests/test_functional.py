@@ -62,7 +62,7 @@ def sir_dpop_setup():
 def test_dpop_functional(sir_dpop_setup):
     struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
 
-    results = F.mop(
+    results = F.pop(
         struct, thetas_est, J, alpha=0.5, keys=keys, process_weight_index=pwi
     )
 
@@ -75,7 +75,7 @@ def test_dpop_value_matches_mop(sir_dpop_setup):
     the same keys; only the gradient differs."""
     struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
 
-    dpop_nll = F.mop(
+    dpop_nll = F.pop(
         struct, thetas_est, J, alpha=0.9, keys=keys, process_weight_index=pwi
     )
     mop_nll = F.mop(struct, thetas_est, J, alpha=0.9, keys=keys)
@@ -90,7 +90,14 @@ def test_dpop_rejects_non_accumulator_process_weight(sir_dpop_setup):
     non_accum = next(i for i in range(6) if i not in (struct.accumvars or ()))
 
     with pytest.raises(ValueError, match="must index an accumulator variable"):
-        F.mop(struct, thetas_est, J, 0.5, keys, process_weight_index=non_accum)
+        F.pop(struct, thetas_est, J, 0.5, keys, process_weight_index=non_accum)
+
+
+def test_pop_requires_process_weight_index(sir_dpop_setup):
+    struct, _, thetas_est, keys, J, _ = sir_dpop_setup
+
+    with pytest.raises(ValueError, match="use mop for MOP"):
+        F.pop(struct, thetas_est, J, 0.5, keys, None)  # pyright: ignore[reportArgumentType]
 
 
 def _zero_weight_particles_model(T: int) -> pp.Pomp:
@@ -150,7 +157,7 @@ def test_mop_dpop_finite_with_many_zero_weight_particles():
     assert jnp.all(
         jnp.isfinite(jax.grad(lambda th: mop_objective(th).sum())(thetas_array))
     )
-    dpop_nll = F.mop(
+    dpop_nll = F.pop(
         struct, thetas_array, J, alpha=0.97, keys=keys, process_weight_index=1
     )
     assert jnp.all(jnp.isfinite(dpop_nll))
@@ -165,7 +172,7 @@ def test_dpop_grad_matches_mop_when_process_weight_is_zero():
     keys = jax.random.split(jax.random.key(0), 1)
 
     grad_mop = jax.grad(lambda th: F.mop(struct, th, 50, 0.9, keys).sum())(thetas_array)
-    grad_dpop = jax.grad(lambda th: F.mop(struct, th, 50, 0.9, keys, 1).sum())(
+    grad_dpop = jax.grad(lambda th: F.pop(struct, th, 50, 0.9, keys, 1).sum())(
         thetas_array
     )
 

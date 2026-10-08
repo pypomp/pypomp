@@ -2,7 +2,7 @@
 Pure-functional JAX implementations of the core POMP algorithms.
 
 This submodule exposes the low-level, stateless versions of the particle
-filter, iterated filter, MOP training, PMCMC, ABC-MCMC, and simulation
+filter, iterated filter, MOP/POP training, PMCMC, ABC-MCMC, and simulation
 algorithms for users who need to compose them within custom JAX loops or
 higher-order functions.
 
@@ -12,7 +12,7 @@ and :class:`~pypomp.PanelPomp` classes instead.
 
 from .abc import abc
 from .mif import mif, panel_mif
-from .mop import mop
+from .mop import mop, pop
 from .pfilter import panel_pfilter, pfilter
 from .pmcmc import pmcmc
 from .simulate import simulate
@@ -32,6 +32,7 @@ __all__ = [
     "panel_train",
     "pfilter",
     "pmcmc",
+    "pop",
     "simulate",
     "train",
 ]

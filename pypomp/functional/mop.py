@@ -149,7 +149,8 @@ def pop(
       draw in :func:`jax.lax.stop_gradient`, or its gradient is counted twice.
     - The model's gradients are finite.  NaN gradients are not masked.
 
-    Parameters are on the estimation scale, as for :func:`mop`.
+    See :ref:`dpop-rproc` for a template.  Parameters are on the estimation
+    scale, as for :func:`mop`.
 
     See Also
     --------

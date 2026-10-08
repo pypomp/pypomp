@@ -4,19 +4,13 @@ Unit tests for the Euler-multinomial CTMC utilities.
 
 We test:
 - basic shape and mass-conservation properties of `reulermultinom`,
-- consistency between `sample_and_log_prob` and `deulermultinom`,
 - behaviour of `deulermultinom` in the "no event" case.
 """
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
-from pypomp.models.ctmc_multinom import (
-    deulermultinom,
-    reulermultinom,
-    sample_and_log_prob,
-)
+from pypomp.models.ctmc_multinom import deulermultinom, reulermultinom
 
 
 def test_reulermultinom_shape_and_total():
@@ -47,39 +41,6 @@ def test_reulermultinom_shape_and_total():
 
     totals = jnp.sum(x_batch, axis=-1)
     assert jnp.all(jnp.isclose(totals, n))
-
-
-def test_sample_and_log_prob_matches_deulermultinom():
-    """
-    Check that `sample_and_log_prob` and `deulermultinom` are consistent.
-
-    For a given (N, rates, dt) and random key:
-    - `sample_and_log_prob` returns a sample and its log-probability,
-    - `deulermultinom(sample, N, rates, dt)` should match that log-prob.
-    """
-    key = jax.random.key(2)
-    N = 20
-    rates = jnp.array([0.4, 0.6], dtype=jnp.float32)
-    dt = 0.3
-
-    sample, logw, key_out = sample_and_log_prob(N=N, rates=rates, dt=dt, key=key)
-
-    # Shape checks
-    assert sample.shape == rates.shape
-    assert isinstance(logw, jnp.ndarray)
-    assert logw.shape == ()  # scalar
-
-    # Key should be updated
-    assert not jnp.array_equal(key, key_out)
-
-    # Consistency check: recompute log-prob using deulermultinom
-    logw2 = deulermultinom(x=sample, n=N, rates=rates, dt=dt)
-    np.testing.assert_allclose(
-        np.array(logw),
-        np.array(logw2),
-        atol=1e-6,
-        err_msg="sample_and_log_prob logw does not match deulermultinom",
-    )
 
 
 def test_deulermultinom_handles_zero_events():

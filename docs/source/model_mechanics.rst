@@ -144,6 +144,55 @@ On GPU, the decorator is not expected to make a difference.
    draw-for-draw even with the same seed. They agree in distribution, and
    deterministic dynamics agree exactly.
 
+.. _dpop-rproc:
+
+Process Models for DPOP (experimental)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Gradient-based training with :meth:`~pypomp.Pomp.train` differentiates through ``rproc``.
+When the process draws discrete counts, such as Poisson, binomial or multinomial transitions, its sample paths are not differentiable in the parameters, and the gradient with respect to the transition parameters is zero.
+DPOP corrects this by adding the score of the transitions' log-density to the particle weights.
+It is enabled with ``dpop=True`` in :meth:`~pypomp.Pomp.train` and :meth:`~pypomp.PanelPomp.train`, or by calling :func:`~pypomp.functional.pop` in place of :func:`~pypomp.functional.mop`.
+
+**Contract:**
+
+- The model has a state named ``_logw``, which ``rinit`` sets to ``0.0``.
+  It is reset to zero at every observation time, so it need not be listed in ``accumvars``.
+- ``rproc`` adds to ``_logw`` the log-weight of every random draw whose distribution depends on the parameters and that has no pathwise gradient.
+  :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
+  Each returns a surrogate with the gradient of the draw's log-probability, holding the draw fixed.
+- The draws themselves carry no gradient.
+  The Poisson, binomial and multinomial samplers in :mod:`pypomp.random` already satisfy this; wrap draws from other samplers in :func:`jax.lax.stop_gradient`, or their gradient is counted twice.
+- Draws with a pathwise gradient, such as :func:`~pypomp.random.fast_gamma` noise, are differentiated directly and need no log-weight.
+- The model's gradients are finite. NaN gradients are not masked.
+
+**Template:**
+
+.. code-block:: python
+
+    from pypomp.random import fast_poisson, poisson_logw
+    from pypomp.types import StateDict, ParamDict, RNGKey, CovarDict, TimeFloat, StepSizeFloat
+
+    def rproc(
+        state: StateDict,
+        params: ParamDict,
+        key: RNGKey,
+        covars: CovarDict,
+        t: TimeFloat,
+        dt: StepSizeFloat
+    ) -> dict:
+        rate = params['beta'] * state['I']
+        n_events = fast_poisson(key, rate * dt)
+
+        return {
+            'S': state['S'] - n_events,
+            'I': state['I'] + n_events,
+            '_logw': state['_logw'] + poisson_logw(n_events, rate * dt),
+        }
+
+The helpers broadcast, so they also work in a :ref:`vectorized rproc <vectorized-rproc>`; :func:`~pypomp.random.euler_multinomial_logw` takes the event counts and rates as tuples of per-event arrays.
+:func:`pypomp.models.sir` and the ``"001d"`` and ``"002d"`` variants of :class:`~pypomp.models.UKMeasles` are complete examples.
+
 .. _dmeas-tutorial:
 
 Measurement Density (dmeas)

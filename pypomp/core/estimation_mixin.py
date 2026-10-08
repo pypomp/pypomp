@@ -14,6 +14,7 @@ import xarray as xr
 
 from pypomp import benchmarks
 from pypomp import functional as F
+from pypomp.functional.mop import _warn_dpop_experimental
 from pypomp.functional.train import _train
 from pypomp.maths import logmeanexp
 from pypomp.proposals import Proposal
@@ -24,7 +25,6 @@ from .optimizer import Adam, Optimizer
 from .parameters import PompParameters
 from .results import (
     build_abc_result,
-    build_dpop_train_result,
     build_mif_result,
     build_pfilter_result,
     build_pmcmc_result,
@@ -462,6 +462,7 @@ class PompEstimationMixin(Base):
         thresh: float = 0.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
+        process_weight_state: str | None = None,
     ) -> None:
         """Optimize parameters via a differentiable particle filter (MOP).
 
@@ -473,8 +474,8 @@ class PompEstimationMixin(Base):
         .. warning::
 
             MOP gradients are only well-defined for **continuous-state**
-            models.  For discrete-state models, use :meth:`mif` or the
-            experimental DPOP trainer ``_dpop_train``.
+            models.  For discrete-state models, use :meth:`mif`, or pass
+            ``process_weight_state`` to use the experimental DPOP gradient.
 
         .. note::
 
@@ -519,6 +520,13 @@ class PompEstimationMixin(Base):
             Number of unperturbed particle filter runs to average for the
             log-likelihood monitor.  Defaults to ``1``. Using more than 1 monitor
             increases computation time but can lead to more stable estimates.
+        process_weight_state : str or None, optional
+            Name of a state (listed in ``accumvars``) in which the process
+            model accumulates the log-density of its sampled transitions.
+            Setting it enables the experimental DPOP gradient for process
+            models that are not differentiable in the parameters, such as
+            discrete-state models; see :func:`pypomp.functional.mop` for the
+            requirements on the process model.  Defaults to ``None`` (MOP).
 
         Returns
         -------
@@ -545,140 +553,8 @@ class PompEstimationMixin(Base):
         >>> model.train(J=100, M=200, eta=eta)
         >>> model.results()
         """
-        self._train_impl(
-            J=J,
-            M=M,
-            eta=eta,
-            key=key,
-            theta=theta,
-            optimizer=optimizer,
-            alpha=alpha,
-            thresh=thresh,
-            alpha_cooling=alpha_cooling,
-            n_monitors=n_monitors,
-            process_weight_state=None,
-        )
-
-    def _dpop_train(
-        self,
-        J: int,
-        M: int,
-        eta: LearningRate,
-        *,
-        process_weight_state: str,
-        key: jax.Array | None = None,
-        theta: PompParameters | None = None,
-        optimizer: Optimizer | None = None,
-        alpha: float = 0.97,
-        thresh: float = 0.0,
-        alpha_cooling: float = 1.0,
-        n_monitors: int = 1,
-    ) -> None:
-        """Optimize parameters via DPOP differentiable particle filter gradients.
-
-        .. warning::
-            This method is experimental. Its API and behavior are subject to change in future releases.
-
-        Identical to :meth:`train` except that gradients come from the DPOP
-        objective, which supports process models whose sample paths are not
-        differentiable in the parameters, such as discrete-state models.  The
-        process model records the log-density of its sampled transitions in
-        the state ``process_weight_state``, and the score of that log-density
-        is added to the particle weights.
-
-        .. note::
-
-            Training requires the number of integration steps between
-            consecutive observations to be constant across all intervals.
-            Setting `nstep` ensures this, but `dt` can also yield constant steps.
-
-        Parameters
-        ----------
-        J : int
-            Number of particles.
-        M : int
-            Number of gradient steps.
-        eta : LearningRate
-            Per-parameter learning rates as a LearningRate object.
-        process_weight_state : str
-            Name of the state that accumulates the process log-weight
-            (e.g. ``"logw"``).  It must be listed in ``accumvars``.
-        key : jax.Array or None, default None
-            Random key. If None, uses ``self.fresh_key``.
-        theta : PompParameters, default None
-            Optional initial parameter(s). Defaults to self.theta.
-        optimizer : Optimizer, default Adam()
-            Optimizer configuration object, as for :meth:`train`.
-        alpha : float, default 0.97
-            Discount factor applied to the carried particle weights.
-        thresh : float, default 0.0
-            ESS-based resampling threshold for the particle filters used by
-            ``n_monitors > 1`` and by line search.
-        alpha_cooling : float, default 1.0
-            Cosine cooling factor for alpha. This factor represents the
-            multiplier for the distance of alpha from 1.0 by the end of
-            training. The default keeps alpha fixed.
-        n_monitors : int, default 1
-            Number of unperturbed particle filter runs to average for the
-            log-likelihood monitor.
-
-        Returns
-        -------
-        None
-            A :class:`~pypomp.core.results.Result` is appended
-            to :attr:`results_history`, containing log-likelihood and
-            parameter traces over iterations.
-
-        Notes
-        -----
-        The process model must satisfy the following for the gradient to be
-        correct:
-
-        - ``process_weight_state`` holds the log-density of the transitions
-          sampled during the current observation interval, or a surrogate
-          with the same gradient in the parameters, and is listed in
-          ``accumvars`` so that it is reset at every observation time.
-        - Sampled quantities whose log-density is accumulated there are
-          wrapped in :func:`jax.lax.stop_gradient`.  Otherwise their pathwise
-          gradient is added to the score and counted twice.
-        - The model's gradients are finite, e.g. by clipping probabilities
-          before taking ``log``.  NaN gradients are not masked.
-        """
-        warnings.warn(
-            "dpop_train is experimental and its API and behavior are subject to change.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        self._train_impl(
-            J=J,
-            M=M,
-            eta=eta,
-            key=key,
-            theta=theta,
-            optimizer=optimizer,
-            alpha=alpha,
-            thresh=thresh,
-            alpha_cooling=alpha_cooling,
-            n_monitors=n_monitors,
-            process_weight_state=process_weight_state,
-        )
-
-    def _train_impl(
-        self,
-        *,
-        J: int,
-        M: int,
-        eta: LearningRate,
-        key: jax.Array | None,
-        theta: PompParameters | None,
-        optimizer: Optimizer | None,
-        alpha: float,
-        thresh: float,
-        alpha_cooling: float,
-        n_monitors: int,
-        process_weight_state: str | None,
-    ) -> None:
-        """Shared body of :meth:`train` (MOP) and :meth:`_dpop_train` (DPOP)."""
+        if process_weight_state is not None:
+            _warn_dpop_experimental(stacklevel=2)
         start_time = time.time()
         thresh = float(max(0.0, thresh))
         optimizer = optimizer or Adam()
@@ -757,35 +633,20 @@ class PompEstimationMixin(Base):
 
         execution_time = time.time() - start_time
 
-        if process_weight_state is None:
-            result = build_train_result(
-                execution_time=execution_time,
-                key=old_key,
-                theta=theta_obj_for_result,
-                traces=joined_array,
-                optimizer=optimizer,
-                J=J,
-                M=M,
-                eta=eta,
-                alpha=alpha,
-                thresh=thresh,
-                alpha_cooling=alpha_cooling,
-            )
-        else:
-            result = build_dpop_train_result(
-                execution_time=execution_time,
-                key=old_key,
-                theta=theta_obj_for_result,
-                traces=joined_array,
-                optimizer=optimizer,
-                J=J,
-                M=M,
-                eta=eta,
-                alpha=alpha,
-                thresh=thresh,
-                alpha_cooling=alpha_cooling,
-                process_weight_state=process_weight_state,
-            )
+        result = build_train_result(
+            execution_time=execution_time,
+            key=old_key,
+            theta=theta_obj_for_result,
+            traces=joined_array,
+            optimizer=optimizer,
+            J=J,
+            M=M,
+            eta=eta,
+            alpha=alpha,
+            thresh=thresh,
+            alpha_cooling=alpha_cooling,
+            process_weight_state=process_weight_state,
+        )
 
         self.results_history.add(result)
 

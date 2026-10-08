@@ -115,44 +115,10 @@ def build_panel_train_result(
     eta: Any,
     alpha: float,
     alpha_cooling: float,
+    process_weight_state: str | None = None,
 ) -> Result:
     return Result(
         method="train",
-        kind="trace",
-        panel=True,
-        execution_time=execution_time,
-        key=key,
-        theta=theta,
-        config={
-            "optimizer": optimizer,
-            "J": J,
-            "M": M,
-            "eta": eta,
-            "alpha": alpha,
-            "alpha_cooling": alpha_cooling,
-        },
-        payload=_trace_payload(shared_traces, unit_traces, logLiks),
-    )
-
-
-def build_panel_dpop_train_result(
-    *,
-    key: jax.Array,
-    execution_time: float | None,
-    theta: Any,
-    shared_traces: xr.DataArray,
-    unit_traces: xr.DataArray,
-    logLiks: xr.DataArray,
-    optimizer: Any,
-    J: int,
-    M: int,
-    eta: Any,
-    alpha: float,
-    alpha_cooling: float,
-    process_weight_state: str | None,
-) -> Result:
-    return Result(
-        method="dpop_train",
         kind="trace",
         panel=True,
         execution_time=execution_time,

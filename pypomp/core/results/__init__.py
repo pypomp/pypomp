@@ -1,13 +1,11 @@
 from .history import ResultsHistory
 from .panel import (
-    build_panel_dpop_train_result,
     build_panel_mif_result,
     build_panel_pfilter_result,
     build_panel_train_result,
 )
 from .pomp import (
     build_abc_result,
-    build_dpop_train_result,
     build_mif_result,
     build_pfilter_result,
     build_pmcmc_result,
@@ -24,9 +22,7 @@ __all__ = [
     "Result",
     "ResultsHistory",
     "build_abc_result",
-    "build_dpop_train_result",
     "build_mif_result",
-    "build_panel_dpop_train_result",
     "build_panel_mif_result",
     "build_panel_pfilter_result",
     "build_panel_train_result",

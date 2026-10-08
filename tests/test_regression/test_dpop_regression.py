@@ -1,7 +1,7 @@
 import jax
 import numpy as np
 
-from pypomp.functional.dpop import dpop
+import pypomp.functional as F
 from pypomp.models.sir import get_process_weight_index
 
 
@@ -15,7 +15,7 @@ def test_dpop_regression(sir_struct, tol, num_regression):
     # The value equals MOP's for the same keys, so the gradient is what
     # locks the DPOP-specific process-score term.
     value, grad = jax.value_and_grad(
-        lambda th: dpop(struct, th, J, 0.5, keys, get_process_weight_index()).sum()
+        lambda th: F.mop(struct, th, J, 0.5, keys, get_process_weight_index()).sum()
     )(theta_est)
 
     num_regression.check(

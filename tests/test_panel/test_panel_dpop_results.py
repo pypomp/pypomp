@@ -19,14 +19,14 @@ def _build_sir_panel_for_results():
 
 @pytest.fixture(scope="module")
 def dpop_results_module():
-    """Run dpop_train with seed=0 and seed=1 once per module; cache both results."""
+    """Run DPOP training with seed=0 and seed=1 once per module; cache both results."""
     panel, theta = _build_sir_panel_for_results()
 
     def _run(seed):
         p = deepcopy(panel)
         p.theta = deepcopy(theta)
         p.results_history.clear()
-        p._dpop_train(
+        p.train(
             J=2,
             M=2,
             eta=pp.LearningRate({name: 0.01 for name in DEFAULT_THETA}),
@@ -39,7 +39,7 @@ def dpop_results_module():
         )
         res = p.results_history[-1]
         assert isinstance(res, Result)
-        assert res.method == "dpop_train"
+        assert res.method == "train"
         return res
 
     res0 = _run(seed=0)
@@ -73,7 +73,7 @@ def test_dpop_result_equality(dpop_results_module):
 def test_dpop_result_empty_traces():
     # If traces are empty, traces() should return an empty DataFrame
     res = Result(
-        method="dpop_train",
+        method="train",
         kind="trace",
         panel=True,
         execution_time=0.1,
@@ -112,3 +112,9 @@ def test_dpop_result_merge(dpop_results_module):
     res_diff.config["J"] = 999
     with pytest.raises(ValueError, match="must have the same J"):
         Result.merge(res0, res_diff)
+
+    # MOP and DPOP training results are not merged together.
+    res_mop = deepcopy(res1)
+    res_mop.config["process_weight_state"] = None
+    with pytest.raises(ValueError, match="must have the same process_weight_state"):
+        Result.merge(res0, res_mop)

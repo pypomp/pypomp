@@ -7,7 +7,6 @@ import pytest
 import pypomp as pp
 import pypomp.functional as F
 from pypomp.functional import abc, pmcmc
-from pypomp.functional.dpop import dpop, dpop_train, panel_dpop_train
 from tests.helpers.models import lg_panel, sir_panel
 from tests.helpers.params import uniform_rw_sd
 
@@ -63,7 +62,7 @@ def sir_dpop_setup():
 def test_dpop_functional(sir_dpop_setup):
     struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
 
-    results = dpop(
+    results = F.mop(
         struct, thetas_est, J, alpha=0.5, keys=keys, process_weight_index=pwi
     )
 
@@ -76,7 +75,7 @@ def test_dpop_value_matches_mop(sir_dpop_setup):
     the same keys; only the gradient differs."""
     struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
 
-    dpop_nll = dpop(
+    dpop_nll = F.mop(
         struct, thetas_est, J, alpha=0.9, keys=keys, process_weight_index=pwi
     )
     mop_nll = F.mop(struct, thetas_est, J, alpha=0.9, keys=keys)
@@ -91,7 +90,7 @@ def test_dpop_rejects_non_accumulator_process_weight(sir_dpop_setup):
     non_accum = next(i for i in range(6) if i not in (struct.accumvars or ()))
 
     with pytest.raises(ValueError, match="must index an accumulator variable"):
-        dpop(struct, thetas_est, J, 0.5, keys, process_weight_index=non_accum)
+        F.mop(struct, thetas_est, J, 0.5, keys, process_weight_index=non_accum)
 
 
 def _zero_weight_particles_model(T: int) -> pp.Pomp:
@@ -151,7 +150,7 @@ def test_mop_dpop_finite_with_many_zero_weight_particles():
     assert jnp.all(
         jnp.isfinite(jax.grad(lambda th: mop_objective(th).sum())(thetas_array))
     )
-    dpop_nll = dpop(
+    dpop_nll = F.mop(
         struct, thetas_array, J, alpha=0.97, keys=keys, process_weight_index=1
     )
     assert jnp.all(jnp.isfinite(dpop_nll))
@@ -166,7 +165,7 @@ def test_dpop_grad_matches_mop_when_process_weight_is_zero():
     keys = jax.random.split(jax.random.key(0), 1)
 
     grad_mop = jax.grad(lambda th: F.mop(struct, th, 50, 0.9, keys).sum())(thetas_array)
-    grad_dpop = jax.grad(lambda th: dpop(struct, th, 50, 0.9, keys, 1).sum())(
+    grad_dpop = jax.grad(lambda th: F.mop(struct, th, 50, 0.9, keys, 1).sum())(
         thetas_array
     )
 
@@ -180,8 +179,16 @@ def test_dpop_train_functional(sir_dpop_setup):
     M = 2
     eta = pp.LearningRate({name: 0.01 for name in struct.param_names})
 
-    neg_logliks, theta_traces = dpop_train(
-        struct, thetas, J, M, eta, keys, pwi, optimizer=pp.Adam(), alpha=0.8
+    neg_logliks, theta_traces = F.train(
+        struct,
+        thetas,
+        J,
+        M,
+        eta,
+        keys,
+        optimizer=pp.Adam(),
+        alpha=0.8,
+        process_weight_index=pwi,
     )
 
     assert neg_logliks.shape == (n_reps, M + 1)
@@ -191,12 +198,14 @@ def test_dpop_train_functional(sir_dpop_setup):
 
 
 def test_dpop_train_functional_natural_scale(sir_dpop_setup):
-    """dpop_train takes and returns natural-scale parameters, like train: with
-    zero learning rates the trace reproduces the input exactly."""
+    """With a process weight, train still takes and returns natural-scale
+    parameters: with zero learning rates the trace reproduces the input."""
     struct, thetas, _, keys, J, pwi = sir_dpop_setup
     eta = pp.LearningRate({name: 0.0 for name in struct.param_names})
 
-    neg_logliks, theta_traces = dpop_train(struct, thetas, J, 2, eta, keys, pwi)
+    neg_logliks, theta_traces = F.train(
+        struct, thetas, J, 2, eta, keys, process_weight_index=pwi
+    )
 
     assert jnp.all(jnp.isfinite(neg_logliks))
     np.testing.assert_allclose(
@@ -466,8 +475,8 @@ def test_panel_dpop_train_functional():
     eta = pp.LearningRate({name: 0.001 for name in struct.param_names})
     pwi = panel.unit_objects[unit_names[0]].statenames.index("logw")
 
-    neg_logliks, shared_history, unit_history = panel_dpop_train(
-        struct, shared, unit, 2, M, eta, keys, pwi
+    neg_logliks, shared_history, unit_history = F.panel_train(
+        struct, shared, unit, 2, M, eta, keys, process_weight_index=pwi
     )
 
     assert neg_logliks.shape == (1, M + 1)

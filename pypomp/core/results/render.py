@@ -335,7 +335,7 @@ def _pomp_trace_traces(result: Result) -> pd.DataFrame:
 
 
 # ======================================================================
-# Estimation ("trace") — panel (mif / train / dpop_train).
+# Estimation ("trace") — panel (mif / train).
 # ======================================================================
 def _panel_trace_to_df(result: Result) -> pd.DataFrame:
     shared_traces = _var(result, "shared_traces")

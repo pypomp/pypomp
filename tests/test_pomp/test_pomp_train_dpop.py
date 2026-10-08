@@ -34,14 +34,14 @@ def _eta(model):
     ids=["adam", "sgd", "sgd-hyperbolic", "adam-linesearch", "newton"],
 )
 def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
-    """dpop_train shares train's step, so every train optimizer is supported."""
+    """DPOP uses train's step, so every train optimizer is supported."""
     model = simple_sir_for_dpop
     eta = _eta(model)
     if eta_type == "hyperbolic":
         eta = eta.hyperbolic_decay(0.1, M=M_DEFAULT)
 
     model.results_history.clear()
-    ret = model._dpop_train(
+    ret = model.train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
@@ -52,7 +52,8 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
     )
     assert ret is None
     res = model.results_history[-1]
-    assert res.method == "dpop_train"
+    assert res.method == "train"
+    assert res.process_weight_state == "logw"
     assert res.kind == "trace"
     traces = res.traces()
     assert not traces.empty
@@ -61,7 +62,7 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
 
 def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     """
-    Check that dpop_train is invariant to the ordering of
+    Check that DPOP training is invariant to the ordering of
     parameter dictionary keys (in natural space).
     """
     model = simple_sir_for_dpop
@@ -71,7 +72,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
 
     # First run: default theta ordering
     model.results_history.clear()
-    model._dpop_train(
+    model.train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
@@ -90,7 +91,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
     permuted_theta = [{k: th[k] for k in rev_keys} for th in theta_orig]
 
     # Second run: same random key & hyper-parameters, but permuted theta
-    model._dpop_train(
+    model.train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=eta,
@@ -124,9 +125,9 @@ def test_dpop_train_alpha_cooling(simple_sir_for_dpop):
     )
     names = model.canonical_param_names
 
-    model._dpop_train(theta=deepcopy(initial_theta), alpha_cooling=1.0, **kwargs)
+    model.train(theta=deepcopy(initial_theta), alpha_cooling=1.0, **kwargs)
     fixed = model.results_history[-1].traces_da.sel(theta_idx=0, variable=names)
-    model._dpop_train(theta=deepcopy(initial_theta), alpha_cooling=0.1, **kwargs)
+    model.train(theta=deepcopy(initial_theta), alpha_cooling=0.1, **kwargs)
     cooled = model.results_history[-1].traces_da.sel(theta_idx=0, variable=names)
 
     np.testing.assert_array_equal(fixed.sel(iteration=1), cooled.sel(iteration=1))
@@ -134,12 +135,12 @@ def test_dpop_train_alpha_cooling(simple_sir_for_dpop):
 
 
 def test_dpop_train_final_theta_loglik_1d_and_pruned(simple_sir_for_dpop):
-    """Test that Pomp._dpop_train sets self.theta.logLik as a 1D array matching final iteration."""
+    """DPOP training sets self.theta.logLik as a 1D array matching the final iteration."""
     model = simple_sir_for_dpop
     model.theta = model.theta * 2
 
     model.results_history.clear()
-    model._dpop_train(
+    model.train(
         J=J_DEFAULT,
         M=M_DEFAULT,
         eta=_eta(model),
@@ -168,7 +169,7 @@ def test_dpop_train_warns_once(simple_sir_for_dpop):
     model = simple_sir_for_dpop
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        model._dpop_train(
+        model.train(
             J=J_DEFAULT,
             M=1,
             eta=_eta(model),

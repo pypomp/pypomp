@@ -95,44 +95,10 @@ def build_train_result(
     alpha: float,
     thresh: float,
     alpha_cooling: float,
+    process_weight_state: str | None = None,
 ) -> Result:
     return Result(
         method="train",
-        kind="trace",
-        panel=False,
-        execution_time=execution_time,
-        key=key,
-        theta=theta,
-        config={
-            "optimizer": optimizer,
-            "J": J,
-            "M": M,
-            "eta": eta,
-            "alpha": alpha,
-            "thresh": thresh,
-            "alpha_cooling": alpha_cooling,
-        },
-        payload=_dataset(traces=traces),
-    )
-
-
-def build_dpop_train_result(
-    *,
-    key: jax.Array,
-    execution_time: float | None,
-    theta: Any,
-    traces: xr.DataArray,
-    optimizer: Any,
-    J: int,
-    M: int,
-    eta: Any,
-    alpha: float,
-    thresh: float,
-    alpha_cooling: float,
-    process_weight_state: str | None,
-) -> Result:
-    return Result(
-        method="dpop_train",
         kind="trace",
         panel=False,
         execution_time=execution_time,

@@ -209,7 +209,7 @@ def test_filtering_methods_validation(base_pomp):
 
 
 def test_dpop_train_validation(base_pomp):
-    """Test input validations for dpop_train."""
+    """Test input validations for DPOP training (train with process_weight_state)."""
     eta = pp.LearningRate({"X0": 0.1, "sigma": 0.1})
 
     # 1. missing dmeas
@@ -225,15 +225,15 @@ def test_dpop_train_validation(base_pomp):
     )
     pomp_no_dmeas.fresh_key = jax.random.key(1)
     with pytest.raises(ValueError, match="self.dmeas cannot be None"):
-        pomp_no_dmeas._dpop_train(J=5, M=1, eta=eta, process_weight_state="logw")
+        pomp_no_dmeas.train(J=5, M=1, eta=eta, process_weight_state="logw")
 
     # 2. invalid eta
     with pytest.raises(TypeError, match="eta must be a LearningRate object"):
-        base_pomp._dpop_train(J=5, M=1, eta="not_lr", process_weight_state="logw")
+        base_pomp.train(J=5, M=1, eta="not_lr", process_weight_state="logw")
 
     # 3. process_weight_state not in statenames
     with pytest.raises(ValueError, match="not found in statenames"):
-        base_pomp._dpop_train(J=5, M=1, eta=eta, process_weight_state="non_existent")
+        base_pomp.train(J=5, M=1, eta=eta, process_weight_state="non_existent")
 
     # 4. process_weight_state must be reset at observation times
     def build_logw_pomp(accumvars):
@@ -253,7 +253,7 @@ def test_dpop_train_validation(base_pomp):
         )
 
     with pytest.raises(ValueError, match="must be listed in accumvars"):
-        build_logw_pomp(None)._dpop_train(
+        build_logw_pomp(None).train(
             J=5, M=1, eta=eta, process_weight_state="logw", key=jax.random.key(1)
         )
 
@@ -261,12 +261,12 @@ def test_dpop_train_validation(base_pomp):
     pomp_dpop = build_logw_pomp(("logw",))
     pomp_dpop.fresh_key = jax.random.key(1)
     pomp_dpop.results_history.clear()
-    ret = pomp_dpop._dpop_train(
+    ret = pomp_dpop.train(
         J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD()
     )
     assert ret is None
     res = pomp_dpop.results_history[-1]
-    assert res.method == "dpop_train"
+    assert res.method == "train"
     assert res.kind == "trace"
     traces = res.traces()
     assert len(traces) > 0

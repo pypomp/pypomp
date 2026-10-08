@@ -8,6 +8,7 @@ from ..core.algorithms.train import (
 )
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Adam, Optimizer
+from .mop import _warn_dpop_experimental
 from .structs import PanelPompStruct, PompStruct
 
 
@@ -23,6 +24,7 @@ def train(
     alpha_cooling: float = 1.0,
     thresh: float = 0.0,
     n_monitors: int = 1,
+    process_weight_index: int | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """Optimize parameters via a differentiable particle filter (MOP).
 
@@ -73,6 +75,11 @@ def train(
     n_monitors : int, optional
         Number of unperturbed filter runs for log-likelihood monitoring.
         Defaults to ``1``.
+    process_weight_index : int or None, optional
+        Index of the state holding the process log-weight, which enables the
+        experimental DPOP gradient for process models that are not
+        differentiable in the parameters (see :func:`pypomp.functional.mop`).
+        Must be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
 
     Returns
     -------
@@ -98,6 +105,8 @@ def train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    if process_weight_index is not None:
+        _warn_dpop_experimental(stacklevel=2)
     return _train(
         struct,
         thetas_array,
@@ -110,7 +119,7 @@ def train(
         alpha_cooling,
         thresh,
         n_monitors,
-        None,
+        process_weight_index,
     )
 
 
@@ -128,10 +137,7 @@ def _train(
     n_monitors: int,
     process_weight_index: int | None,
 ) -> tuple[jax.Array, jax.Array]:
-    """Shared body of :func:`train` and :func:`~pypomp.functional.dpop.dpop_train`.
-
-    ``process_weight_index=None`` gives MOP; an index gives DPOP.
-    """
+    """Body of :func:`train`, without the DPOP warning, for the OOP layer."""
     optimizer = optimizer or Adam()
     eta_array = eta.to_array(struct.param_names, M)
 
@@ -181,6 +187,7 @@ def panel_train(
     alpha: float = 0.97,
     alpha_cooling: float = 1.0,
     chunk_size: int = 1,
+    process_weight_index: int | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Optimize panel POMP parameters via a differentiable particle filter (MOP).
 
@@ -228,6 +235,10 @@ def panel_train(
     chunk_size : int, optional
         Number of units to process per gradient step; must divide ``U``.
         Defaults to ``1``.
+    process_weight_index : int or None, optional
+        Index of the state holding the process log-weight, which enables the
+        experimental DPOP gradient (see :func:`pypomp.functional.mop`).  Must
+        be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
 
     Returns
     -------
@@ -259,6 +270,8 @@ def panel_train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
+    if process_weight_index is not None:
+        _warn_dpop_experimental(stacklevel=2)
     return _panel_train(
         struct,
         shared_array,
@@ -271,7 +284,7 @@ def panel_train(
         alpha,
         alpha_cooling,
         chunk_size,
-        None,
+        process_weight_index,
     )
 
 
@@ -289,10 +302,7 @@ def _panel_train(
     chunk_size: int,
     process_weight_index: int | None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Shared body of :func:`panel_train` and the panel DPOP trainer.
-
-    ``process_weight_index=None`` gives MOP; an index gives DPOP.
-    """
+    """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer."""
     if keys.shape[1] != M + 1:
         # Indexing a missing slab would silently clamp to the last one.
         raise ValueError(

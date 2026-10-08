@@ -169,6 +169,7 @@ def test_train_n_monitors_variants(n_monitors, simple):
 
     LG.train(J=J, M=M, eta=eta, optimizer=pp.SGD(), n_monitors=n_monitors, key=key)
 
+    assert LG.results_history[-1].process_weight_state is None
     traces = LG.results_history[-1].traces_da
     logliks = traces.sel(theta_idx=0, variable="logLik").values
 

@@ -57,7 +57,7 @@ class Result:
     ----------
     method : str
         Name of the method that produced this result (``"pfilter"``, ``"mif"``,
-        ``"train"``, ``"pmcmc"``, ``"abc"``, ``"dpop_train"``).
+        ``"train"``, ``"pmcmc"``, ``"abc"``).
     kind : str
         Payload shape: ``"table"`` (pfilter-style log-likelihood table) or
         ``"trace"`` (iteration-by-iteration parameter/likelihood traces).

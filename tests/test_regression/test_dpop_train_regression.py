@@ -2,7 +2,7 @@ import jax
 import numpy as np
 
 import pypomp as pp
-from pypomp.functional.dpop import dpop_train
+import pypomp.functional as F
 from pypomp.models.sir import get_process_weight_index
 
 M = 3
@@ -13,16 +13,16 @@ def test_dpop_train_regression(sir_struct, tol, num_regression):
     keys = jax.random.split(key, n_reps)
     eta = pp.LearningRate({name: 0.01 for name in param_names})
 
-    neg_logliks, theta_traces = dpop_train(
+    neg_logliks, theta_traces = F.train(
         struct,
         theta0,
         J,
         M,
         eta,
         keys,
-        get_process_weight_index(),
         optimizer=pp.Adam(),
         alpha=0.8,
+        process_weight_index=get_process_weight_index(),
     )
 
     num_regression.check(

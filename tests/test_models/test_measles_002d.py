@@ -61,7 +61,7 @@ def test_002d_pfilter(london_002d):
 def test_002d_dpop_train(london_002d):
     eta = pp.LearningRate({name: 0.01 for name in london_002d.canonical_param_names})
     london_002d.results_history.clear()
-    ret = london_002d._dpop_train(
+    ret = london_002d.train(
         J=DEFAULT_J,
         M=2,
         eta=eta,
@@ -72,7 +72,7 @@ def test_002d_dpop_train(london_002d):
     )
     assert ret is None
     res = london_002d.results_history[-1]
-    assert res.method == "dpop_train"
+    assert res.method == "train"
     assert not res.traces().empty
 
 

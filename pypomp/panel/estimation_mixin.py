@@ -4,7 +4,7 @@ import time
 import warnings
 from collections.abc import Callable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import jax
 import jax.numpy as jnp
@@ -21,12 +21,12 @@ from ..core.learning_rate import LearningRate
 from ..core.optimizer import Adam, Optimizer
 from ..core.parameters import PanelParameters
 from ..core.results import (
-    build_panel_dpop_train_result,
     build_panel_mif_result,
     build_panel_pfilter_result,
     build_panel_train_result,
 )
 from ..core.rw_sigma import RWSigma
+from ..functional.mop import _warn_dpop_experimental
 from ..functional.train import _panel_train
 from ..maths import logmeanexp
 
@@ -811,6 +811,7 @@ class PanelEstimationMixin(Base):
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
         chunk_size: int = 1,
+        process_weight_state: str | None = None,
     ) -> None:
         """Estimate parameters using MOP-based gradient-descent optimization.
 
@@ -822,8 +823,8 @@ class PanelEstimationMixin(Base):
         .. warning::
 
             MOP gradients are only well-defined for **continuous-state**
-            models.  For discrete-state models, use :meth:`mif` or the
-            experimental DPOP trainer ``_dpop_train``.
+            models.  For discrete-state models, use :meth:`mif`, or pass
+            ``process_weight_state`` to use the experimental DPOP gradient.
 
         .. note::
 
@@ -860,6 +861,12 @@ class PanelEstimationMixin(Base):
             Number of units to process in parallel per gradient step.  A value
             that does not divide the number of units is lowered to the nearest
             divisor, with a warning.  Defaults to ``1``.
+        process_weight_state : str or None, optional
+            Name of a state (listed in ``accumvars``) in which the process
+            model accumulates the log-density of its sampled transitions.
+            Setting it enables the experimental DPOP gradient; see
+            :func:`pypomp.functional.mop` for the requirements on the process
+            model.  Defaults to ``None`` (MOP).
 
         Returns
         -------
@@ -875,116 +882,8 @@ class PanelEstimationMixin(Base):
            for Partially Observed Markov Processes using Automatic Differentiation."
            *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
         """
-        self._train_impl(
-            J=J,
-            M=M,
-            eta=eta,
-            key=key,
-            theta=theta,
-            optimizer=optimizer,
-            alpha=alpha,
-            alpha_cooling=alpha_cooling,
-            chunk_size=chunk_size,
-            process_weight_state=None,
-        )
-
-    def _dpop_train(
-        self,
-        J: int,
-        M: int,
-        eta: LearningRate,
-        *,
-        process_weight_state: str,
-        key: jax.Array | None = None,
-        theta: PanelParameters | None = None,
-        optimizer: Optimizer | None = None,
-        alpha: float = 0.97,
-        alpha_cooling: float = 1.0,
-        chunk_size: int = 1,
-    ) -> None:
-        """Estimate parameters using DPOP-based gradient-descent optimization.
-
-        .. warning::
-           This method is experimental.  Its API and behavior are subject to change
-           in future releases.
-
-        Identical to :meth:`train` except that gradients come from the DPOP
-        objective, which supports process models whose sample paths are not
-        differentiable in the parameters, such as discrete-state models.  See
-        ``pypomp.Pomp._dpop_train`` for the requirements on the process model.
-
-        .. note::
-
-            Training requires the number of integration steps between
-            consecutive observations to be constant across all intervals.
-            Setting `nstep` ensures this, but `dt` can also yield constant steps.
-
-        Parameters
-        ----------
-        J : int
-            Number of particles per unit.
-        M : int
-            Number of training iterations.
-        eta : LearningRate
-            Learning rates per parameter.
-        process_weight_state : str
-            Name of the state that accumulates the process log-weight
-            (e.g. ``"logw"``).  It must be listed in ``accumvars``.
-        key : jax.Array or None, optional
-            JAX random key.  If ``None``, uses the model's ``fresh_key``.
-        theta : PanelParameters or None, optional
-            Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
-        optimizer : Optimizer, optional
-            Optimizer configuration object, as for :meth:`train`.  Defaults to
-            ``Adam()``.
-        alpha : float, optional
-            Discount factor applied to the carried particle weights.  Defaults
-            to ``0.97``.
-        alpha_cooling : float, optional
-            Cosine cooling factor for alpha.  Defaults to ``1.0``.
-        chunk_size : int, optional
-            Number of units to process per gradient step, as for :meth:`train`.
-            Defaults to ``1``.
-
-        Returns
-        -------
-        None
-            Updates ``self.theta`` with final estimates and appends a
-            :class:`~pypomp.core.results.Result` to the history.
-        """
-        warnings.warn(
-            "dpop_train is experimental and its API and behavior are subject to change.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        self._train_impl(
-            J=J,
-            M=M,
-            eta=eta,
-            key=key,
-            theta=theta,
-            optimizer=optimizer,
-            alpha=alpha,
-            alpha_cooling=alpha_cooling,
-            chunk_size=chunk_size,
-            process_weight_state=process_weight_state,
-        )
-
-    def _train_impl(
-        self,
-        *,
-        J: int,
-        M: int,
-        eta: LearningRate,
-        key: jax.Array | None,
-        theta: PanelParameters | None,
-        optimizer: Optimizer | None,
-        alpha: float,
-        alpha_cooling: float,
-        chunk_size: int,
-        process_weight_state: str | None,
-    ) -> None:
-        """Shared body of :meth:`train` (MOP) and :meth:`_dpop_train` (DPOP)."""
+        if process_weight_state is not None:
+            _warn_dpop_experimental(stacklevel=2)
         start_time = time.time()
         optimizer = optimizer or Adam()
         theta_obj_in: PanelParameters = deepcopy(self._prepare_theta_input(theta))
@@ -1124,7 +1023,7 @@ class PanelEstimationMixin(Base):
             estimation_scale=False,
         )
 
-        result_kwargs: dict[str, Any] = dict(
+        result = build_panel_train_result(
             execution_time=time.time() - start_time,
             key=old_key,
             theta=theta_for_result,
@@ -1144,13 +1043,8 @@ class PanelEstimationMixin(Base):
             optimizer=optimizer,
             alpha=alpha,
             alpha_cooling=alpha_cooling,
+            process_weight_state=process_weight_state,
         )
-        if process_weight_state is None:
-            result = build_panel_train_result(**result_kwargs)
-        else:
-            result = build_panel_dpop_train_result(
-                **result_kwargs, process_weight_state=process_weight_state
-            )
 
         self.results_history.add(result)
 

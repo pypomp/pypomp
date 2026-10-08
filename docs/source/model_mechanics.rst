@@ -159,7 +159,7 @@ It is enabled with ``dpop=True`` in :meth:`~pypomp.Pomp.train` and :meth:`~pypom
 - The model has a state named ``_logw``, which ``rinit`` sets to ``0.0``.
   It is reset to zero at every observation time, so it need not be listed in ``accumvars``.
 - ``rproc`` adds to ``_logw`` the log-weight of every random draw whose distribution depends on the parameters and that has no pathwise gradient.
-  :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
+  :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw`, :func:`~pypomp.random.multinomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
   Each returns a surrogate with the gradient of the draw's log-probability, holding the draw fixed.
 - The draws themselves carry no gradient.
   The Poisson, binomial and multinomial samplers in :mod:`pypomp.random` already satisfy this; wrap draws from other samplers in :func:`jax.lax.stop_gradient`, or their gradient is counted twice.
@@ -190,7 +190,8 @@ It is enabled with ``dpop=True`` in :meth:`~pypomp.Pomp.train` and :meth:`~pypom
             '_logw': state['_logw'] + poisson_logw(n_events, rate * dt),
         }
 
-The helpers broadcast, so they also work in a :ref:`vectorized rproc <vectorized-rproc>`; :func:`~pypomp.random.euler_multinomial_logw` takes the event counts and rates as tuples of per-event arrays.
+The helpers broadcast, so they also work in a :ref:`vectorized rproc <vectorized-rproc>`.
+The multinomial helpers take categories along the last axis, as the samplers return them; :func:`~pypomp.random.euler_multinomial_logw` also takes tuples of per-event arrays.
 :func:`pypomp.models.sir` and the ``"001d"`` and ``"002d"`` variants of :class:`~pypomp.models.UKMeasles` are complete examples.
 
 .. _dmeas-tutorial:

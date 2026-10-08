@@ -21,6 +21,15 @@ def _log(p: jax.Array | float) -> jax.Array:
     return jnp.log(jnp.maximum(p, _FLOOR))
 
 
+def _per_event(v: jax.Array | Sequence[jax.Array | float]) -> list:
+    """A sequence's items, or an array's slices along its last axis, which is
+    the category axis of the samplers' output."""
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    v = jnp.asarray(v)
+    return [v[..., k] for k in range(v.shape[-1])]
+
+
 def poisson_logw(x: jax.Array, lam: jax.Array | float) -> jax.Array:
     """DPOP log-weight of a Poisson draw.
 
@@ -64,6 +73,31 @@ def binomial_logw(
     return x * _log(p) + (n - x) * _log(1.0 - p)
 
 
+def multinomial_logw(x: jax.Array, p: jax.Array) -> jax.Array:
+    """DPOP log-weight of a multinomial draw, such as from
+    :func:`~pypomp.random.fast_multinomial`.
+
+    Parameters
+    ----------
+    x : jax.Array
+        The counts in every category, of shape ``(..., K)``.
+    p : jax.Array
+        The category probabilities, of shape ``(..., K)``.  Like
+        :func:`~pypomp.random.fast_multinomial`, they are normalized along the
+        last axis.
+
+    Returns
+    -------
+    jax.Array
+        ``sum(x * log(p / sum(p)))`` over the last axis, with ``x`` held fixed.
+    """
+    x = jax.lax.stop_gradient(x)
+    p = jnp.asarray(p)
+    p_sum = jnp.sum(p, axis=-1, keepdims=True)
+    p = p / jnp.where(p_sum > 0.0, p_sum, 1.0)
+    return jnp.sum(x * _log(p), axis=-1)
+
+
 def euler_multinomial_logw(
     x: jax.Array | Sequence[jax.Array],
     n: jax.Array | float,
@@ -79,8 +113,8 @@ def euler_multinomial_logw(
     Parameters
     ----------
     x : jax.Array or sequence of jax.Array
-        The ``K`` event counts, excluding those who stay: a sequence of ``K``
-        arrays, or an array whose leading axis has length ``K``.
+        The ``K`` event counts, excluding those who stay: an array of shape
+        ``(..., K)``, or a sequence of ``K`` arrays.
     n : jax.Array or float
         The number of individuals.
     rates : jax.Array or sequence
@@ -94,9 +128,9 @@ def euler_multinomial_logw(
         The multinomial log-pmf without its normalizing constant, with ``x``
         and ``n`` held fixed.
     """
-    xs = [jax.lax.stop_gradient(xk) for xk in x]
+    xs = [jax.lax.stop_gradient(xk) for xk in _per_event(x)]
     n = jax.lax.stop_gradient(n)
-    rates = list(rates)
+    rates = _per_event(rates)
     r_sum = sum(rates)
     # P(leave via k) = rates[k] * scale; expm1 keeps scale accurate when
     # r_sum * dt is small.

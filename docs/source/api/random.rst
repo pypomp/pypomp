@@ -43,4 +43,5 @@ Each has the gradient of the draw's log-probability in the distribution's parame
 
    poisson_logw
    binomial_logw
+   multinomial_logw
    euler_multinomial_logw

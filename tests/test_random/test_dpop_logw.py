@@ -47,6 +47,33 @@ def test_euler_multinomial_logw_gradient_matches_logpmf():
     np.testing.assert_allclose(got, want, rtol=1e-4)
 
 
+def test_multinomial_logw_gradient_matches_logpmf():
+    """The probabilities are normalized, as in fast_multinomial, so unnormalized
+    weights give the gradient of the log-pmf at the normalized probabilities."""
+    x = jnp.array([3.0, 1.0, 6.0])
+    weights = jnp.array([0.5, 1.0, 2.5])
+
+    got = jax.grad(lambda w: ppr.multinomial_logw(x, w))(weights)
+    want = jax.grad(
+        lambda w: stats.multinomial.logpmf(x.astype(int), 10, w / jnp.sum(w))
+    )(weights)
+
+    np.testing.assert_allclose(got, want, rtol=1e-5)
+
+
+def test_multinomial_logw_matches_fast_multinomial_batch():
+    """Batched draws from fast_multinomial give one log-weight per draw."""
+    probs = jnp.array([[0.2, 0.3, 0.5], [0.6, 0.3, 0.1]])
+    x = ppr.fast_multinomial(jax.random.key(0), jnp.array([10.0, 20.0]), probs)
+
+    got = ppr.multinomial_logw(x, probs)
+
+    assert got.shape == (2,)
+    np.testing.assert_allclose(
+        got, [ppr.multinomial_logw(x[i], probs[i]) for i in range(2)]
+    )
+
+
 def test_logw_holds_draws_and_trials_fixed():
     x, n = jnp.array(3.0), jnp.array(40.0)
     rates = jnp.array([2.5, 0.7])
@@ -58,6 +85,8 @@ def test_logw_holds_draws_and_trials_fixed():
     )
     np.testing.assert_array_equal(dx, 0.0)
     assert dn == 0.0
+    dx = jax.grad(ppr.multinomial_logw)(jnp.array([3.0, 1.0]), jnp.array([0.4, 0.6]))
+    np.testing.assert_array_equal(dx, 0.0)
 
 
 def test_logw_finite_at_zero_rates():
@@ -82,9 +111,10 @@ def test_logw_finite_at_zero_rates():
     assert jnp.isfinite(value) and jnp.isfinite(grad)
 
 
-def test_euler_multinomial_logw_sequence_layout():
+def test_euler_multinomial_logw_layouts():
     """Per-event arrays (as in a vectorized rproc) broadcast against a scalar
-    rate and match the stacked layout."""
+    rate, and a batch with events on the last axis (as samplers return them)
+    gives the same values as one particle at a time."""
     J = 4
     x0 = jnp.array([0.0, 1.0, 2.0, 3.0])
     x1 = jnp.array([1.0, 0.0, 0.0, 2.0])
@@ -101,3 +131,8 @@ def test_euler_multinomial_logw_sequence_layout():
 
     assert got.shape == (J,)
     np.testing.assert_allclose(got, want, rtol=1e-6)
+
+    stacked = ppr.euler_multinomial_logw(
+        jnp.stack([x0, x1], axis=-1), n, jnp.stack([r0, jnp.full(J, mu)], axis=-1), DT
+    )
+    np.testing.assert_allclose(stacked, want, rtol=1e-6)

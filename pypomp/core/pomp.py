@@ -464,6 +464,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             par_trans=self.par_trans,
             param_names=self.canonical_param_names,
             y_names=list(self.ys.columns),
+            statenames=tuple(self.statenames),
         )
 
     def print_metadata(self) -> None:

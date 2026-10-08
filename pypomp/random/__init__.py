@@ -25,9 +25,14 @@ binominv
     Vectorised inverse Binomial CDF.
 gammainv
     Vectorised inverse Gamma CDF.
+
+Exported DPOP Log-Weights
+-------------------------
+poisson_logw, binomial_logw, euler_multinomial_logw
+    Log-weight increments of draws, for a DPOP model's ``_logw`` state.
 """
 
-from . import _dtype_helpers, binom, gamma, nbinom, poisson
+from . import _dtype_helpers, binom, dpop, gamma, nbinom, poisson
 
 fast_poisson = poisson.fast_poisson
 fast_binomial = binom.fast_binomial
@@ -39,15 +44,22 @@ poissoninv = poisson.poissoninv
 binominv = binom.binominv
 gammainv = gamma.gammainv
 
+poisson_logw = dpop.poisson_logw
+binomial_logw = dpop.binomial_logw
+euler_multinomial_logw = dpop.euler_multinomial_logw
+
 __all__ = [
+    "binomial_logw",
     "binominv",
+    "euler_multinomial_logw",
     "fast_binomial",
     "fast_gamma",
     "fast_multinomial",
     "fast_nbinomial",
     "fast_poisson",
     "gammainv",
+    "poisson_logw",
     "poissoninv",
 ]
 
-del poisson, binom, gamma, nbinom, _dtype_helpers
+del poisson, binom, dpop, gamma, nbinom, _dtype_helpers

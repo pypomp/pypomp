@@ -88,7 +88,7 @@ def test_sir_simulate_state_invariants():
     assert np.all(np.isfinite(obs_values))
     assert np.all(obs_values >= 0), "simulated SIR case counts must be non-negative"
 
-    # S, I, R and the cases accumulator are counts; W and logw are unconstrained.
+    # S, I, R and the cases accumulator are counts; W and _logw are unconstrained.
     state_values = states.drop(columns=["theta_idx", "sim", "time"])
     counts = state_values[["S", "I", "R", "cases"]].to_numpy()
     assert np.all(np.isfinite(state_values.to_numpy()))

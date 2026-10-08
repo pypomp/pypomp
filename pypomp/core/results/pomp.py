@@ -95,7 +95,7 @@ def build_train_result(
     alpha: float,
     thresh: float,
     alpha_cooling: float,
-    process_weight_state: str | None = None,
+    dpop: bool = False,
 ) -> Result:
     return Result(
         method="train",
@@ -112,7 +112,7 @@ def build_train_result(
             "alpha": alpha,
             "thresh": thresh,
             "alpha_cooling": alpha_cooling,
-            "process_weight_state": process_weight_state,
+            "dpop": dpop,
         },
         payload=_dataset(traces=traces),
     )

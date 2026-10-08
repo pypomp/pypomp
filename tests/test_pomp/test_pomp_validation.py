@@ -209,7 +209,7 @@ def test_filtering_methods_validation(base_pomp):
 
 
 def test_dpop_train_validation(base_pomp):
-    """Test input validations for DPOP training (train with process_weight_state)."""
+    """Test input validations for DPOP training (train with dpop=True)."""
     eta = pp.LearningRate({"X0": 0.1, "sigma": 0.1})
 
     # 1. missing dmeas
@@ -225,51 +225,37 @@ def test_dpop_train_validation(base_pomp):
     )
     pomp_no_dmeas.fresh_key = jax.random.key(1)
     with pytest.raises(ValueError, match="self.dmeas cannot be None"):
-        pomp_no_dmeas.train(J=5, M=1, eta=eta, process_weight_state="logw")
+        pomp_no_dmeas.train(J=5, M=1, eta=eta, dpop=True)
 
     # 2. invalid eta
     with pytest.raises(TypeError, match="eta must be a LearningRate object"):
-        base_pomp.train(J=5, M=1, eta="not_lr", process_weight_state="logw")
+        base_pomp.train(J=5, M=1, eta="not_lr", dpop=True)
 
-    # 3. process_weight_state not in statenames
-    with pytest.raises(ValueError, match="not found in statenames"):
-        base_pomp.train(J=5, M=1, eta=eta, process_weight_state="non_existent")
+    # 3. no _logw state
+    with pytest.raises(ValueError, match="state named '_logw'"):
+        base_pomp.train(J=5, M=1, eta=eta, dpop=True, key=jax.random.key(1))
 
-    # 4. process_weight_state must be reset at observation times
-    def build_logw_pomp(accumvars):
-        return pp.Pomp(
-            ys=base_pomp.ys,
-            theta=base_pomp.theta,
-            rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"], "logw": 0.0},
-            rproc=lambda X_, theta_, key, covars, t, dt: {
-                "X": X_["X"],
-                "logw": X_["logw"] + 0.1,
-            },
-            dmeas=dummy_dmeas,
-            statenames=["X", "logw"],
-            t0=0.0,
-            nstep=1,
-            accumvars=accumvars,
-        )
-
-    with pytest.raises(ValueError, match="must be listed in accumvars"):
-        build_logw_pomp(None).train(
-            J=5, M=1, eta=eta, process_weight_state="logw", key=jax.random.key(1)
-        )
-
-    # 5. Test valid call with optimizer='SGD'
-    pomp_dpop = build_logw_pomp(("logw",))
-    pomp_dpop.fresh_key = jax.random.key(1)
-    pomp_dpop.results_history.clear()
-    ret = pomp_dpop.train(
-        J=2, M=2, eta=eta, process_weight_state="logw", optimizer=pp.SGD()
+    # 4. valid call; _logw need not be listed in accumvars
+    pomp_dpop = pp.Pomp(
+        ys=base_pomp.ys,
+        theta=base_pomp.theta,
+        rinit=lambda theta_, key, covars, t0: {"X": theta_["X0"], "_logw": 0.0},
+        rproc=lambda X_, theta_, key, covars, t, dt: {
+            "X": X_["X"],
+            "_logw": X_["_logw"] + 0.1,
+        },
+        dmeas=dummy_dmeas,
+        statenames=["X", "_logw"],
+        t0=0.0,
+        nstep=1,
     )
+    pomp_dpop.fresh_key = jax.random.key(1)
+    ret = pomp_dpop.train(J=2, M=2, eta=eta, dpop=True, optimizer=pp.SGD())
     assert ret is None
     res = pomp_dpop.results_history[-1]
     assert res.method == "train"
     assert res.kind == "trace"
-    traces = res.traces()
-    assert len(traces) > 0
+    assert len(res.traces()) > 0
 
 
 def test_merge_validation(base_pomp):

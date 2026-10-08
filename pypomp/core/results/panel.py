@@ -115,7 +115,7 @@ def build_panel_train_result(
     eta: Any,
     alpha: float,
     alpha_cooling: float,
-    process_weight_state: str | None = None,
+    dpop: bool = False,
 ) -> Result:
     return Result(
         method="train",
@@ -131,7 +131,7 @@ def build_panel_train_result(
             "eta": eta,
             "alpha": alpha,
             "alpha_cooling": alpha_cooling,
-            "process_weight_state": process_weight_state,
+            "dpop": dpop,
         },
         payload=_trace_payload(shared_traces, unit_traces, logLiks),
     )

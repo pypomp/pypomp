@@ -16,7 +16,7 @@ import pypomp.functional as F
 
 from .. import benchmarks
 from ..core.algorithms.helpers import run_jax_batch_sharded
-from ..core.estimation_mixin import _process_weight_state_index
+from ..core.algorithms.contexts import dpop_state_index
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Adam, Optimizer
 from ..core.parameters import PanelParameters
@@ -811,7 +811,7 @@ class PanelEstimationMixin(Base):
         alpha: float = 0.97,
         alpha_cooling: float = 1.0,
         chunk_size: int = 1,
-        process_weight_state: str | None = None,
+        dpop: bool = False,
     ) -> None:
         """Estimate parameters using MOP-based gradient-descent optimization.
 
@@ -824,7 +824,7 @@ class PanelEstimationMixin(Base):
 
             MOP gradients are only well-defined for **continuous-state**
             models.  For discrete-state models, use :meth:`mif`, or pass
-            ``process_weight_state`` to use the experimental DPOP gradient.
+            ``dpop=True`` to use the experimental DPOP gradient.
 
         .. note::
 
@@ -861,12 +861,12 @@ class PanelEstimationMixin(Base):
             Number of units to process in parallel per gradient step.  A value
             that does not divide the number of units is lowered to the nearest
             divisor, with a warning.  Defaults to ``1``.
-        process_weight_state : str or None, optional
-            Name of a state (listed in ``accumvars``) in which the process
-            model accumulates the log-density of its sampled transitions.
-            Setting it enables the experimental DPOP gradient; see
-            :func:`pypomp.functional.pop` for the requirements on the process
-            model.  Defaults to ``None`` (MOP).
+        dpop : bool, optional
+            Whether to use the experimental DPOP gradient.  The units must
+            have a ``_logw`` state, in which ``rproc`` accumulates the
+            log-density of its sampled transitions; see
+            :func:`pypomp.functional.pop` for the requirements.  Defaults to
+            ``False`` (MOP).
 
         Returns
         -------
@@ -882,7 +882,7 @@ class PanelEstimationMixin(Base):
            for Partially Observed Markov Processes using Automatic Differentiation."
            *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
         """
-        if process_weight_state is not None:
+        if dpop:
             _warn_dpop_experimental(stacklevel=2)
         start_time = time.time()
         optimizer = optimizer or Adam()
@@ -903,13 +903,8 @@ class PanelEstimationMixin(Base):
         if rep_unit.dmeas is None:
             raise ValueError("dmeas cannot be None in PanelPomp units")
 
-        process_weight_index = (
-            None
-            if process_weight_state is None
-            else _process_weight_state_index(
-                rep_unit.statenames, rep_unit.accumvars, process_weight_state
-            )
-        )
+        if dpop:
+            dpop_state_index(rep_unit.statenames)
         chunk_size = _divisor_chunk_size(chunk_size, U)
         struct = self.to_struct()
 
@@ -957,7 +952,7 @@ class PanelEstimationMixin(Base):
             alpha,
             alpha_cooling,
             chunk_size,
-            process_weight_index,
+            dpop,
         )
 
         (
@@ -1043,7 +1038,7 @@ class PanelEstimationMixin(Base):
             optimizer=optimizer,
             alpha=alpha,
             alpha_cooling=alpha_cooling,
-            process_weight_state=process_weight_state,
+            dpop=dpop,
         )
 
         self.results_history.add(result)

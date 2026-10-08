@@ -1,7 +1,7 @@
 """
 SIR model with seasonal forcing, translated from pomp::sir in R.
-This version supports DPOP (Differentiable Particle Filter) by accumulating
-process log-density in the state variable 'logw'.
+This version supports DPOP by accumulating the process log-density in the
+state variable '_logw'.
 """
 
 from typing import Any
@@ -14,13 +14,14 @@ import pandas as pd
 
 from pypomp.core.par_trans import ParTrans
 from pypomp.core.pomp import Pomp
-from pypomp.models.ctmc_multinom import sample_and_log_prob
+from pypomp.models.ctmc_multinom import reulermultinom
+from pypomp.random.dpop import euler_multinomial_logw, poisson_logw
 from pypomp.random.gamma import fast_gamma
 from pypomp.random.nbinom import fast_nbinomial
 from pypomp.random.poisson import fast_poisson
 from pypomp.types import ParamDict
 
-STATENAMES = ["S", "I", "R", "cases", "W", "logw"]
+STATENAMES = ["S", "I", "R", "cases", "W", "_logw"]
 
 DEFAULT_THETA = {
     "gamma": 26.0,
@@ -165,12 +166,12 @@ def rinit(theta_, key, covars=None, t0=None):
     S = jnp.round(m * S_0)
     I = jnp.round(m * I_0)
     R = jnp.round(m * R_0)
-    return {"S": S, "I": I, "R": R, "cases": 0.0, "W": 0.0, "logw": 0.0}
+    return {"S": S, "I": I, "R": R, "cases": 0.0, "W": 0.0, "_logw": 0.0}
 
 
 def rproc(X_, theta_, key, covars, t, dt):
     S, I, R = X_["S"], X_["I"], X_["R"]
-    cases, W, logw = X_["cases"], X_["W"], X_["logw"]
+    cases, W, logw = X_["cases"], X_["W"], X_["_logw"]
 
     gamma = theta_["gamma"]
     mu = theta_["mu"]
@@ -204,17 +205,23 @@ def rproc(X_, theta_, key, covars, t, dt):
     rates_I = jnp.array([gamma, mu])
     rates_R = jnp.array([mu, 0.0])
 
+    # The draws carry no gradient; the DPOP log-weights supply their score.
+    sg = jax.lax.stop_gradient
     keys_compartments = jax.random.split(k_trans, 3)
-    trans_S, lps_S, _ = sample_and_log_prob(S_int, rates_S, dt, keys_compartments[0])
-    trans_I, lps_I, _ = sample_and_log_prob(I_int, rates_I, dt, keys_compartments[1])
-    trans_R, lps_R, _ = sample_and_log_prob(R_int, rates_R, dt, keys_compartments[2])
+    trans_S = sg(reulermultinom(keys_compartments[0], S_int, rates_S, dt))[1:]
+    trans_I = sg(reulermultinom(keys_compartments[1], I_int, rates_I, dt))[1:]
+    trans_R = sg(reulermultinom(keys_compartments[2], R_int, rates_R, dt))[1:]
 
     infections, deaths_S = trans_S[0], trans_S[1]
     recoveries, deaths_I = trans_I[0], trans_I[1]
     deaths_R = trans_R[0]
 
-    logw_step = lps_S + lps_I + lps_R
-    logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
+    logw_step = (
+        poisson_logw(births, mu * pop * dt)
+        + euler_multinomial_logw(trans_S, S_int, rates_S, dt)
+        + euler_multinomial_logw(trans_I, I_int, rates_I, dt)
+        + euler_multinomial_logw(trans_R, R_int, rates_R, dt)
+    )
 
     S_new = S + births - infections - deaths_S
     I_new = I + infections - recoveries - deaths_I
@@ -229,7 +236,7 @@ def rproc(X_, theta_, key, covars, t, dt):
         "R": R_new,
         "cases": cases_new,
         "W": W_new,
-        "logw": logw_new,
+        "_logw": logw_new,
     }
 
 
@@ -279,7 +286,7 @@ def sir(
     key: jax.Array | None = None,
 ) -> Pomp:
     """Create a Pomp object for the SIR model with seasonal forcing.
-    Supports DPOP through the logw state variable.
+    Supports DPOP through the _logw state variable.
 
     Parameters
     ----------
@@ -335,7 +342,7 @@ def sir(
     par_trans = ParTrans(to_est=to_est, from_est=from_est)
     ys_dummy = pd.DataFrame({"reports": np.zeros(len(times))}, index=pd.Index(times))
 
-    accumvars = ("cases", "logw")
+    accumvars = ("cases", "_logw")
 
     from pypomp.core.parameters import PompParameters
 
@@ -359,8 +366,3 @@ def sir(
     sim_pomp = sir_temp.simulate(key=key, nsim=1, as_pomp=True)
 
     return sim_pomp
-
-
-def get_process_weight_index():
-    """Return the index of logw in STATENAMES for DPOP."""
-    return STATENAMES.index("logw")

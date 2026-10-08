@@ -34,7 +34,7 @@ def dpop_results_module():
             chunk_size=1,
             optimizer=pp.Adam(),
             alpha=0.8,
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(seed),
         )
         res = p.results_history[-1]
@@ -63,7 +63,7 @@ def test_dpop_result_equality(dpop_results_module):
         ("eta", 0.5),
         ("alpha", 0.5),
         ("alpha_cooling", 0.5),
-        ("process_weight_state", "diff_state"),
+        ("dpop", False),
     ]:
         res_diff = deepcopy(res0)
         res_diff.config[key] = val
@@ -115,6 +115,6 @@ def test_dpop_result_merge(dpop_results_module):
 
     # MOP and DPOP training results are not merged together.
     res_mop = deepcopy(res1)
-    res_mop.config["process_weight_state"] = None
-    with pytest.raises(ValueError, match="must have the same process_weight_state"):
+    res_mop.config["dpop"] = False
+    with pytest.raises(ValueError, match="must have the same dpop"):
         Result.merge(res0, res_mop)

@@ -46,7 +46,7 @@ def test_panel_dpop_train_all_shared():
         chunk_size=1,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(0),
     )
 
@@ -78,7 +78,7 @@ def test_panel_dpop_train_learning_rate_eta(sir_panel_with_shared_dpop):
         chunk_size=1,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(7),
     )
 
@@ -103,7 +103,7 @@ def test_panel_dpop_train_dmeas_none(sir_panel_dpop):
             M=2,
             eta=_ETA,
             theta=deepcopy(panel.theta),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -123,7 +123,7 @@ def test_panel_dpop_train_chunk_size_warns_and_adjusts():
             chunk_size=2,
             optimizer=pp.Adam(),
             alpha=0.8,
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -147,7 +147,7 @@ def test_panel_dpop_train_partial_covariates(sir_panel_dpop):
             M=2,
             eta=_ETA,
             theta=deepcopy(panel.theta),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -166,7 +166,7 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
         optimizer=pp.Adam(),
         alpha=0.8,
         alpha_cooling=0.5,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(0),
     )
 
@@ -182,7 +182,7 @@ def test_panel_dpop_train_comprehensive(sir_panel_dpop):
     assert res.unit_traces.shape[0] == 1  # n_reps
     assert res.unit_traces.shape[1] == M + 1
     assert res.unit_traces.shape[2] == len(panel.get_unit_names())  # U
-    assert res.process_weight_state == "logw"
+    assert res.dpop is True
     assert res.alpha == 0.8
     assert res.alpha_cooling == 0.5
     assert np.all(np.isfinite(np.asarray(res.shared_traces.sel(variable="logLik"))))
@@ -208,7 +208,7 @@ def test_panel_dpop_train_sgd(sir_panel_dpop):
         chunk_size=1,
         optimizer=pp.SGD(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(43),
     )
 
@@ -233,7 +233,7 @@ def test_panel_dpop_train_shared_dataframe_and_eta(sir_panel_with_shared_dpop):
         chunk_size=1,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(0),
     )
 
@@ -268,7 +268,7 @@ def test_panel_dpop_train_adjusts_nondividing_chunk_size(sir_panel_dpop, chunk_s
         chunk_size=chunk_size,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(0),
     )
 
@@ -294,7 +294,7 @@ def test_panel_dpop_train_multi_replicate(sir_panel_dpop):
         chunk_size=1,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(0),
     )
 
@@ -314,7 +314,7 @@ def test_panel_dpop_train_reproducibility(sir_panel_dpop_module):
         chunk_size=1,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(99),
     )
 
@@ -347,7 +347,7 @@ def test_panel_dpop_train_invalid_J(sir_panel_dpop):
             M=2,
             eta=_ETA,
             theta=deepcopy(panel.theta),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -360,21 +360,7 @@ def test_panel_dpop_train_invalid_M(sir_panel_dpop):
             M=0,
             eta=_ETA,
             theta=deepcopy(panel.theta),
-            process_weight_state="logw",
-            key=jax.random.key(0),
-        )
-
-
-def test_panel_dpop_train_process_weight_state_not_accumulator(sir_panel_dpop):
-    """A process-weight state that is not reset at observation times is rejected."""
-    panel = sir_panel_dpop
-    with pytest.raises(ValueError, match="must be listed in accumvars"):
-        panel.train(
-            J=2,
-            M=2,
-            eta=_ETA,
-            theta=deepcopy(panel.theta),
-            process_weight_state="S",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -387,22 +373,16 @@ def test_panel_dpop_train_requires_learning_rate(sir_panel_dpop):
             M=2,
             eta=0.01,  # type: ignore
             theta=deepcopy(panel.theta),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
 
-def test_panel_dpop_train_invalid_process_weight_state(sir_panel_dpop):
-    panel = sir_panel_dpop
-    with pytest.raises(ValueError, match="not found in statenames"):
-        panel.train(
-            J=2,
-            M=2,
-            eta=_ETA,
-            theta=deepcopy(panel.theta),
-            process_weight_state="nonexistent_state",
-            key=jax.random.key(0),
-        )
+def test_panel_dpop_train_requires_logw_state(lg_panel_setup_some_shared):
+    panel, _, _ = lg_panel_setup_some_shared
+    eta = pp.LearningRate({name: 0.01 for name in panel.canonical_param_names})
+    with pytest.raises(ValueError, match="state named '_logw'"):
+        panel.train(J=2, M=1, eta=eta, dpop=True, key=jax.random.key(0))
 
 
 def test_panel_dpop_train_invalid_optimizer(sir_panel_dpop):
@@ -418,7 +398,7 @@ def test_panel_dpop_train_invalid_optimizer(sir_panel_dpop):
             eta=_ETA,
             theta=deepcopy(panel.theta),
             optimizer=pp.Newton(),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -433,7 +413,7 @@ def test_panel_dpop_train_invalid_theta_type(sir_panel_dpop):
             M=2,
             eta=_ETA,
             theta="not_a_panel_parameters_object",  # type: ignore
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
 
@@ -449,6 +429,6 @@ def test_panel_dpop_train_missing_theta_and_self_theta(sir_panel_dpop):
             M=2,
             eta=_ETA,
             theta=None,
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )

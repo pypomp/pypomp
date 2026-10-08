@@ -11,8 +11,8 @@ match live instances; build them using ``.axes()`` or ``dataclasses.replace``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 import jax
@@ -220,22 +220,36 @@ class PfilterContext:
 # ----MOP-----------------------------------------------------------------------
 
 
-def check_process_weight_index(
-    struct: PompStruct | PanelPompStruct, process_weight_index: int | None
-) -> None:
-    """Require the DPOP process log-weight state to be an accumulator variable.
+DPOP_STATE = "_logw"
+
+
+def dpop_state_index(statenames: Sequence[str]) -> int:
+    """Index of the ``_logw`` state, in which DPOP models accumulate the
+    log-density of their sampled transitions."""
+    if DPOP_STATE not in statenames:
+        raise ValueError(
+            f"DPOP requires a state named '{DPOP_STATE}', in which rproc "
+            "accumulates the log-density of its sampled transitions; "
+            f"statenames are {list(statenames)}."
+        )
+    return list(statenames).index(DPOP_STATE)
+
+
+def mop_model_fns(
+    struct: PompStruct | PanelPompStruct, dpop: bool
+) -> tuple[ModelFns, int | None]:
+    """Model functions for MOP and, with ``dpop``, the index of ``_logw``.
 
     DPOP adds the score of the transition density over one observation
-    interval, so the state holding it must be reset at every observation time.
+    interval, so ``_logw`` is reset at every observation time whether or not
+    it is listed in ``accumvars``.
     """
-    if process_weight_index is None:
-        return
-    if process_weight_index not in (struct.accumvars or ()):
-        raise ValueError(
-            f"process_weight_index {process_weight_index} must index an "
-            f"accumulator variable (accumvars indices: {struct.accumvars}), so "
-            "that the process log-weight is reset at every observation time."
-        )
+    fns = ModelFns.pf(struct)
+    if not dpop:
+        return fns, None
+    index = dpop_state_index(struct.statenames)
+    accumvars = tuple(sorted({*(fns.accumvars or ()), index}))
+    return replace(fns, accumvars=accumvars), index
 
 
 @register_dataclass
@@ -245,7 +259,8 @@ class MopContext:
 
     A non-None ``process_weight_index`` turns on DPOP: the state at that index
     holds the transition log-density accumulated over each observation
-    interval, and its score is added to the particle weights.
+    interval, and its score is added to the particle weights.  Build with
+    ``dpop=True`` rather than setting the index directly.
     """
 
     series: SeriesData
@@ -260,13 +275,13 @@ class MopContext:
         struct: PompStruct,
         J: int,
         alpha: float | jax.Array,
-        process_weight_index: int | None = None,
+        dpop: bool = False,
     ) -> MopContext:
-        check_process_weight_index(struct, process_weight_index)
+        fns, process_weight_index = mop_model_fns(struct, dpop)
         return cls(
             series=SeriesData.from_struct(struct),
             alpha=alpha,
-            fns=ModelFns.pf(struct),
+            fns=fns,
             J=J,
             process_weight_index=process_weight_index,
         )
@@ -297,13 +312,13 @@ class TrainContext(MopContext):
         n_monitors: int,
         eta: jax.Array,
         alpha: float | jax.Array,
-        process_weight_index: int | None = None,
+        dpop: bool = False,
     ) -> TrainContext:
-        check_process_weight_index(struct, process_weight_index)
+        fns, process_weight_index = mop_model_fns(struct, dpop)
         return cls(
             series=SeriesData.from_struct(struct),
             alpha=alpha,
-            fns=ModelFns.pf(struct),
+            fns=fns,
             J=J,
             process_weight_index=process_weight_index,
             eta=eta,
@@ -365,9 +380,9 @@ class PanelTrainContext:
         eta_shared: jax.Array,
         eta_spec: jax.Array,
         alpha: float,
-        process_weight_index: int | None = None,
+        dpop: bool = False,
     ) -> PanelTrainContext:
-        check_process_weight_index(struct, process_weight_index)
+        fns, process_weight_index = mop_model_fns(struct, dpop)
         U = len(struct.unit_names)
         if chunk_size < 1 or U % chunk_size != 0:
             raise ValueError(
@@ -381,7 +396,7 @@ class PanelTrainContext:
             eta_shared=eta_shared,
             eta_spec=eta_spec,
             alpha=alpha,
-            fns=ModelFns.pf(struct),
+            fns=fns,
             J=J,
             chunk_size=chunk_size,
             M=M,

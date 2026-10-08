@@ -35,7 +35,7 @@ Differentiable Particle Filtering
 
 These functions are primarily used for gradient-based parameter estimation.
 ``mop`` is designed to be fully differentiable with respect to the model parameters.
-``pop`` (experimental) is ``mop`` with the score of the process log-density added to the particle weights, for process models that are not differentiable in the parameters.
+``pop`` (experimental) is ``mop`` with the score of the process log-density, accumulated in a ``_logw`` state, added to the particle weights, for process models that are not differentiable in the parameters.
 
 .. autosummary::
    :toctree: generated/

@@ -4,7 +4,7 @@ This is the DPOP-enabled version of model_002, combining:
 - model_002's iota parameterization: iota = exp(iota1 + iota2 * log(pop_1950))
   where iota1 and iota2 are shared parameters in a panel model
 - model_001d's gradient-stability fixes for DPOP training:
-  1. rproc: Euler-multinomial log-pmf accumulated in logw
+  1. rproc: DPOP log-weights of births and transitions accumulated in _logw
   2. dmeas: custom JVP log_cdf_diff to prevent 0 * inf = NaN
   3. dmeas: NaN-safe y handling
 
@@ -31,10 +31,11 @@ Parameters:
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jspecial
-from jax.scipy.special import gammaln, log_ndtr
+from jax.scipy.special import log_ndtr
 
 from pypomp.core.model_mechanics import vectorized
 from pypomp.models.measles import _samplers as smp
+from pypomp.random import euler_multinomial_logw, poisson_logw
 
 # =========================================================================
 # Custom JVP log_cdf_diff for gradient stability (from model_001d)
@@ -93,19 +94,6 @@ def log_cdf_single(z: jax.Array) -> jax.Array:
     return log_cdf_diff(z, -jnp.inf)
 
 
-def sample_and_log_prob(u0, u1, N, r0, r1, dt):
-    """Draw Euler-multinomial exits via rates r0, r1 and their multinomial log-pmf."""
-    p_stay, p0, p1 = smp.euler_probs(r0, r1, dt)
-    x0, x1 = smp.multinom_exits(u0, u1, N, p0, p1)
-    x_stay = N - x0 - x1
-
-    def term(x, p):
-        return x * jnp.log(jnp.clip(p, 1.0e-12, 1.0)) - gammaln(x + 1.0)
-
-    logw = gammaln(N + 1.0) + term(x_stay, p_stay) + term(x0, p0) + term(x1, p1)
-    return x0, x1, logw
-
-
 # =========================================================================
 # Model definition
 # =========================================================================
@@ -126,11 +114,11 @@ param_names = (
     "R_0",  # 13 - initial recovered fraction
 )
 
-# State includes "logw" for DPOP process log-density
-statenames = ["S", "E", "I", "R", "W", "C", "logw"]
+# State includes "_logw" for DPOP process log-density
+statenames = ["S", "E", "I", "R", "W", "C", "_logw"]
 
 # accumvars are reset each observation interval
-accumvars = ("W", "C", "logw")
+accumvars = ("W", "C", "_logw")
 
 
 def rinit(theta_, key, covars, t0=None):
@@ -147,7 +135,7 @@ def rinit(theta_, key, covars, t0=None):
     W = 0.0
     C = 0.0
     logw = 0.0
-    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "_logw": logw}
 
 
 @vectorized
@@ -158,7 +146,7 @@ def rproc(X_, theta_, key, covars, t, dt):
         X_["I"],
         X_["W"],
         X_["C"],
-        X_["logw"],
+        X_["_logw"],
     )
     J = jnp.asarray(S).shape[0]
     R0 = theta_["R0"]
@@ -211,18 +199,22 @@ def rproc(X_, theta_, key, covars, t, dt):
     # White noise (extrademographic stochasticity)
     dw = smp.gamma(u_gamma, dt / sigmaSE**2) * sigmaSE**2
 
-    # Poisson births
-    births = smp.poisson(u[0], br * dt)
+    # Poisson births and Euler-multinomial transitions.  The draws carry no
+    # gradient; the DPOP log-weights supply their score.
+    sg = jax.lax.stop_gradient
+    rate_SE = foi * dw / dt
+    births = sg(smp.poisson(u[0], br * dt))
+    StoE, StoDeath = sg(smp.euler_exits(u[1], u[2], S, rate_SE, mu, dt))
+    EtoI, EtoDeath = sg(smp.euler_exits(u[3], u[4], E, sigma, mu, dt))
+    ItoR, ItoDeath = sg(smp.euler_exits(u[5], u[6], I, gamma, mu, dt))
 
-    # Euler-multinomial transitions
-    StoE, StoDeath, lp_S = sample_and_log_prob(u[1], u[2], S, foi * dw / dt, mu, dt)
-    EtoI, EtoDeath, lp_E = sample_and_log_prob(u[3], u[4], E, sigma, mu, dt)
-    ItoR, ItoDeath, lp_I = sample_and_log_prob(u[5], u[6], I, gamma, mu, dt)
-
-    # Accumulate process log-density for DPOP
-    logw_step = lp_S + lp_E + lp_I
-    logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
-    logw = logw + logw_step
+    logw = (
+        logw
+        + poisson_logw(births, br * dt)
+        + euler_multinomial_logw((StoE, StoDeath), S, (rate_SE, mu), dt)
+        + euler_multinomial_logw((EtoI, EtoDeath), E, (sigma, mu), dt)
+        + euler_multinomial_logw((ItoR, ItoDeath), I, (gamma, mu), dt)
+    )
 
     # State updates
     S = S + births - StoE - StoDeath
@@ -232,7 +224,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     W = W + (dw - dt) / sigmaSE
     C = C + ItoR
 
-    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "_logw": logw}
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):

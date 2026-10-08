@@ -54,6 +54,8 @@ class PompStruct(NamedTuple):
     y_names : list of str
         Observation column names, in the order matching the columns of
         ``ys`` (i.e. ``ys[:, i]`` corresponds to ``y_names[i]``).
+    statenames : tuple of str
+        State variable names, in the order of the state array's columns.
 
     See Also
     --------
@@ -78,6 +80,7 @@ class PompStruct(NamedTuple):
     par_trans: ParTrans
     param_names: list[str]
     y_names: list[str]
+    statenames: tuple[str, ...]
 
 
 def pomp_struct_flatten(struct: PompStruct):
@@ -104,6 +107,7 @@ def pomp_struct_flatten(struct: PompStruct):
         struct.par_trans,
         struct.param_names,
         struct.y_names,
+        struct.statenames,
     )
     return children, aux_data
 
@@ -124,6 +128,7 @@ def pomp_struct_unflatten(aux_data, children):
         par_trans,
         param_names,
         y_names,
+        statenames,
     ) = aux_data
     return PompStruct(
         ys=ys,
@@ -144,6 +149,7 @@ def pomp_struct_unflatten(aux_data, children):
         par_trans=par_trans,
         param_names=param_names,
         y_names=y_names,
+        statenames=statenames,
     )
 
 
@@ -181,6 +187,7 @@ class PanelPompStruct(NamedTuple):
     unit_param_names: list[str]
     unit_param_permutations: jax.Array
     unit_names: list[str]
+    statenames: tuple[str, ...]
 
 
 def panel_pomp_struct_flatten(struct: PanelPompStruct):
@@ -209,6 +216,7 @@ def panel_pomp_struct_flatten(struct: PanelPompStruct):
         struct.shared_param_names,
         struct.unit_param_names,
         struct.unit_names,
+        struct.statenames,
     )
     return children, aux_data
 
@@ -237,6 +245,7 @@ def panel_pomp_struct_unflatten(aux_data, children):
         shared_param_names,
         unit_param_names,
         unit_names,
+        statenames,
     ) = aux_data
     return PanelPompStruct(
         ys_per_unit=ys_per_unit,
@@ -259,6 +268,7 @@ def panel_pomp_struct_unflatten(aux_data, children):
         unit_param_names=unit_param_names,
         unit_param_permutations=unit_param_permutations,
         unit_names=unit_names,
+        statenames=statenames,
     )
 
 

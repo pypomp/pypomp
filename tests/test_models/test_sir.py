@@ -9,7 +9,6 @@ from pypomp.models.sir import (
     DEFAULT_THETA,
     STATENAMES,
     from_est,
-    get_process_weight_index,
     periodic_bspline_basis_eval,
     to_est,
 )
@@ -72,7 +71,3 @@ def test_periodic_bspline_basis_deriv_above_degree():
     # deriv > degree should short-circuit to zero.
     y = periodic_bspline_basis_eval(0.5, period=1.0, degree=3, nbasis=3, deriv=4)
     assert np.allclose(np.asarray(y), 0.0)
-
-
-def test_get_process_weight_index():
-    assert get_process_weight_index() == STATENAMES.index("logw")

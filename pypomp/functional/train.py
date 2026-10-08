@@ -24,7 +24,7 @@ def train(
     alpha_cooling: float = 1.0,
     thresh: float = 0.0,
     n_monitors: int = 1,
-    process_weight_index: int | None = None,
+    dpop: bool = False,
 ) -> tuple[jax.Array, jax.Array]:
     """Optimize parameters via a differentiable particle filter (MOP).
 
@@ -75,11 +75,11 @@ def train(
     n_monitors : int, optional
         Number of unperturbed filter runs for log-likelihood monitoring.
         Defaults to ``1``.
-    process_weight_index : int or None, optional
-        Index of the state holding the process log-weight, which enables the
-        experimental DPOP gradient for process models that are not
-        differentiable in the parameters (see :func:`pypomp.functional.pop`).
-        Must be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
+    dpop : bool, optional
+        Whether to use the experimental DPOP gradient, for process models
+        that are not differentiable in the parameters.  The model must have a
+        ``_logw`` state (see :func:`pypomp.functional.pop`).  Defaults to
+        ``False`` (MOP).
 
     Returns
     -------
@@ -105,7 +105,7 @@ def train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
-    if process_weight_index is not None:
+    if dpop:
         _warn_dpop_experimental(stacklevel=2)
     return _train(
         struct,
@@ -119,7 +119,7 @@ def train(
         alpha_cooling,
         thresh,
         n_monitors,
-        process_weight_index,
+        dpop,
     )
 
 
@@ -135,7 +135,7 @@ def _train(
     alpha_cooling: float,
     thresh: float,
     n_monitors: int,
-    process_weight_index: int | None,
+    dpop: bool,
 ) -> tuple[jax.Array, jax.Array]:
     """Body of :func:`train`, without the DPOP warning, for the OOP layer."""
     optimizer = optimizer or Adam()
@@ -156,7 +156,7 @@ def _train(
         n_monitors,
         eta_array,
         alpha,
-        process_weight_index=process_weight_index,
+        dpop=dpop,
     )
 
     neg_logliks, theta_traces_est = _vmapped_train_internal(
@@ -187,7 +187,7 @@ def panel_train(
     alpha: float = 0.97,
     alpha_cooling: float = 1.0,
     chunk_size: int = 1,
-    process_weight_index: int | None = None,
+    dpop: bool = False,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Optimize panel POMP parameters via a differentiable particle filter (MOP).
 
@@ -235,10 +235,10 @@ def panel_train(
     chunk_size : int, optional
         Number of units to process per gradient step; must divide ``U``.
         Defaults to ``1``.
-    process_weight_index : int or None, optional
-        Index of the state holding the process log-weight, which enables the
-        experimental DPOP gradient (see :func:`pypomp.functional.pop`).  Must
-        be one of ``struct.accumvars``.  Defaults to ``None`` (MOP).
+    dpop : bool, optional
+        Whether to use the experimental DPOP gradient.  The model must have a
+        ``_logw`` state (see :func:`pypomp.functional.pop`).  Defaults to
+        ``False`` (MOP).
 
     Returns
     -------
@@ -270,7 +270,7 @@ def panel_train(
        for Partially Observed Markov Processes using Automatic Differentiation."
        *arXiv preprint arXiv:2407.03085* (2024). https://arxiv.org/abs/2407.03085.
     """
-    if process_weight_index is not None:
+    if dpop:
         _warn_dpop_experimental(stacklevel=2)
     return _panel_train(
         struct,
@@ -284,7 +284,7 @@ def panel_train(
         alpha,
         alpha_cooling,
         chunk_size,
-        process_weight_index,
+        dpop,
     )
 
 
@@ -300,7 +300,7 @@ def _panel_train(
     alpha: float,
     alpha_cooling: float,
     chunk_size: int,
-    process_weight_index: int | None,
+    dpop: bool,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer."""
     if keys.shape[1] != M + 1:
@@ -339,7 +339,7 @@ def _panel_train(
         eta_shared,
         eta_spec,
         alpha,
-        process_weight_index=process_weight_index,
+        dpop=dpop,
     )
 
     (

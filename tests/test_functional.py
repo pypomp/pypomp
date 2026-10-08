@@ -48,7 +48,7 @@ def test_mop_functional(model_setup):
 
 @pytest.fixture(scope="module")
 def sir_dpop_setup():
-    """(struct, natural thetas, est thetas, keys, J, process_weight_index)."""
+    """(struct, natural thetas, est thetas, keys, J)."""
     model = pp.models.sir(times=np.array([0.2, 0.4]), key=jax.random.key(0))
     struct = model.to_struct()
     names = model.canonical_param_names
@@ -56,15 +56,13 @@ def sir_dpop_setup():
     thetas = jnp.repeat(model.theta.to_jax_array(names), n_reps, axis=0)
     thetas_est = struct.par_trans._transform_array(thetas, names, direction="to_est")
     keys = jax.random.split(jax.random.key(1), n_reps)
-    return struct, thetas, thetas_est, keys, 5, model.statenames.index("logw")
+    return struct, thetas, thetas_est, keys, 5
 
 
 def test_dpop_functional(sir_dpop_setup):
-    struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
+    struct, _, thetas_est, keys, J = sir_dpop_setup
 
-    results = F.pop(
-        struct, thetas_est, J, alpha=0.5, keys=keys, process_weight_index=pwi
-    )
+    results = F.pop(struct, thetas_est, J, alpha=0.5, keys=keys)
 
     assert results.shape == (keys.shape[0],)
     assert jnp.all(jnp.isfinite(results))
@@ -73,43 +71,47 @@ def test_dpop_functional(sir_dpop_setup):
 def test_dpop_value_matches_mop(sir_dpop_setup):
     """The process score has value zero, so DPOP's estimate equals MOP's for
     the same keys; only the gradient differs."""
-    struct, _, thetas_est, keys, J, pwi = sir_dpop_setup
+    struct, _, thetas_est, keys, J = sir_dpop_setup
 
-    dpop_nll = F.pop(
-        struct, thetas_est, J, alpha=0.9, keys=keys, process_weight_index=pwi
-    )
+    dpop_nll = F.pop(struct, thetas_est, J, alpha=0.9, keys=keys)
     mop_nll = F.mop(struct, thetas_est, J, alpha=0.9, keys=keys)
 
     np.testing.assert_array_equal(np.asarray(dpop_nll), np.asarray(mop_nll))
 
 
-def test_dpop_rejects_non_accumulator_process_weight(sir_dpop_setup):
-    """A process-weight state that is not reset at observation times would
-    carry past scores forward, so it is rejected."""
-    struct, _, thetas_est, keys, J, _ = sir_dpop_setup
-    non_accum = next(i for i in range(6) if i not in (struct.accumvars or ()))
+def test_pop_requires_logw_state(model_setup):
+    struct, thetas_array, key, J, n_reps, _ = model_setup
+    keys = jax.random.split(key, n_reps)
 
-    with pytest.raises(ValueError, match="must index an accumulator variable"):
-        F.pop(struct, thetas_est, J, 0.5, keys, process_weight_index=non_accum)
+    with pytest.raises(ValueError, match="state named '_logw'"):
+        F.pop(struct, thetas_array, J, 0.5, keys)
 
 
-def test_pop_requires_process_weight_index(sir_dpop_setup):
-    struct, _, thetas_est, keys, J, _ = sir_dpop_setup
+def test_pop_resets_logw_without_accumvars(sir_dpop_setup):
+    """_logw is reset at every observation time even when it is not listed in
+    accumvars; otherwise past scores would carry forward into the gradient."""
+    struct, _, thetas_est, keys, J = sir_dpop_setup
+    logw_index = struct.statenames.index("_logw")
+    unlisted = struct._replace(
+        accumvars=tuple(i for i in struct.accumvars or () if i != logw_index)
+    )
 
-    with pytest.raises(ValueError, match="use mop for MOP"):
-        F.pop(struct, thetas_est, J, 0.5, keys, None)  # pyright: ignore[reportArgumentType]
+    def grad(s):
+        return jax.grad(lambda th: F.pop(s, th, J, 0.5, keys).sum())(thetas_est)
+
+    np.testing.assert_array_equal(np.asarray(grad(unlisted)), np.asarray(grad(struct)))
 
 
 def _zero_weight_particles_model(T: int) -> pp.Pomp:
     """About half the particles have zero measurement weight at every step, and
-    the accumulator "W" stays identically zero."""
+    the DPOP log-weight "_logw" stays identically zero."""
 
     def rinit(theta_, key, covars, t0):
-        return {"X": jax.random.normal(key), "W": 0.0}
+        return {"X": jax.random.normal(key), "_logw": 0.0}
 
     def rproc(X_, theta_, key, covars, t, dt):
         # A fresh draw each interval, so about half the particles are dead at every step.
-        return {"X": theta_["sigma"] * jax.random.normal(key), "W": X_["W"]}
+        return {"X": theta_["sigma"] * jax.random.normal(key), "_logw": X_["_logw"]}
 
     def dmeas(Y_, X_, theta_, covars, t):
         ll = jax.scipy.stats.norm.logpdf(Y_["y"], X_["X"], 1.0)
@@ -128,10 +130,10 @@ def _zero_weight_particles_model(T: int) -> pp.Pomp:
         rmeas=rmeas,
         ys=ys,
         theta=pp.PompParameters({"sigma": 1.0}),
-        statenames=["X", "W"],
+        statenames=["X", "_logw"],
         t0=0.0,
         nstep=1,
-        accumvars=("W",),
+        accumvars=("_logw",),
         covars=None,
     )
 
@@ -157,9 +159,7 @@ def test_mop_dpop_finite_with_many_zero_weight_particles():
     assert jnp.all(
         jnp.isfinite(jax.grad(lambda th: mop_objective(th).sum())(thetas_array))
     )
-    dpop_nll = F.pop(
-        struct, thetas_array, J, alpha=0.97, keys=keys, process_weight_index=1
-    )
+    dpop_nll = F.pop(struct, thetas_array, J, alpha=0.97, keys=keys)
     assert jnp.all(jnp.isfinite(dpop_nll))
 
 
@@ -172,7 +172,7 @@ def test_dpop_grad_matches_mop_when_process_weight_is_zero():
     keys = jax.random.split(jax.random.key(0), 1)
 
     grad_mop = jax.grad(lambda th: F.mop(struct, th, 50, 0.9, keys).sum())(thetas_array)
-    grad_dpop = jax.grad(lambda th: F.pop(struct, th, 50, 0.9, keys, 1).sum())(
+    grad_dpop = jax.grad(lambda th: F.pop(struct, th, 50, 0.9, keys).sum())(
         thetas_array
     )
 
@@ -181,7 +181,7 @@ def test_dpop_grad_matches_mop_when_process_weight_is_zero():
 
 
 def test_dpop_train_functional(sir_dpop_setup):
-    struct, thetas, _, keys, J, pwi = sir_dpop_setup
+    struct, thetas, _, keys, J = sir_dpop_setup
     n_reps, n_params = thetas.shape
     M = 2
     eta = pp.LearningRate({name: 0.01 for name in struct.param_names})
@@ -195,7 +195,7 @@ def test_dpop_train_functional(sir_dpop_setup):
         keys,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_index=pwi,
+        dpop=True,
     )
 
     assert neg_logliks.shape == (n_reps, M + 1)
@@ -205,14 +205,12 @@ def test_dpop_train_functional(sir_dpop_setup):
 
 
 def test_dpop_train_functional_natural_scale(sir_dpop_setup):
-    """With a process weight, train still takes and returns natural-scale
-    parameters: with zero learning rates the trace reproduces the input."""
-    struct, thetas, _, keys, J, pwi = sir_dpop_setup
+    """With DPOP, train still takes and returns natural-scale parameters: with
+    zero learning rates the trace reproduces the input."""
+    struct, thetas, _, keys, J = sir_dpop_setup
     eta = pp.LearningRate({name: 0.0 for name in struct.param_names})
 
-    neg_logliks, theta_traces = F.train(
-        struct, thetas, J, 2, eta, keys, process_weight_index=pwi
-    )
+    neg_logliks, theta_traces = F.train(struct, thetas, J, 2, eta, keys, dpop=True)
 
     assert jnp.all(jnp.isfinite(neg_logliks))
     np.testing.assert_allclose(
@@ -480,10 +478,9 @@ def test_panel_dpop_train_functional():
     M = 2
     keys = jax.random.split(jax.random.key(0), (M + 1) * U).reshape(1, M + 1, U)
     eta = pp.LearningRate({name: 0.001 for name in struct.param_names})
-    pwi = panel.unit_objects[unit_names[0]].statenames.index("logw")
 
     neg_logliks, shared_history, unit_history = F.panel_train(
-        struct, shared, unit, 2, M, eta, keys, process_weight_index=pwi
+        struct, shared, unit, 2, M, eta, keys, dpop=True
     )
 
     assert neg_logliks.shape == (1, M + 1)

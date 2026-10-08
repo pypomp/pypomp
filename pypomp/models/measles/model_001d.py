@@ -2,7 +2,7 @@
 
 Gradient stability fixes:
 1. rproc: Reparameterized inverse-CDF gamma noise
-2. rproc: Use a score-only Euler multinomial log-weight for DPOP
+2. rproc: DPOP log-weights of births and transitions, from pypomp.random
 3. dmeas: Use custom JVP for log_cdf_diff (prevents 0 * inf = NaN in extreme z regions)
 4. dmeas: Replace NaN y before computing z (prevents NaN propagation through jnp.where)
 """
@@ -14,6 +14,7 @@ from jax.scipy.special import log_ndtr
 
 from pypomp.core.model_mechanics import vectorized
 from pypomp.models.measles import _samplers as smp
+from pypomp.random import euler_multinomial_logw, poisson_logw
 from pypomp.types import ParamDict
 
 # =========================================================================
@@ -76,29 +77,6 @@ def log_cdf_single(z: jax.Array) -> jax.Array:
     return log_cdf_diff(z, -jnp.inf)
 
 
-def _sample_and_score_log_prob(u0, u1, N, r0, r1, dt):
-    """Draw Euler-multinomial exits via rates r0, r1 and their DPOP score surrogate."""
-    p_stay, p0, p1 = smp.euler_probs(r0, r1, dt)
-    sg = jax.lax.stop_gradient
-    N = sg(N)
-    x0, x1 = smp.multinom_exits(u0, u1, N, sg(p0), sg(p1))
-    x0, x1 = sg(x0), sg(x1)
-
-    def score(x, p):
-        return x * jnp.log(jnp.clip(p, 1.0e-12, 1.0))
-
-    logw_score = score(N - x0 - x1, p_stay) + score(x0, p0) + score(x1, p1)
-    return x0, x1, logw_score
-
-
-def _sample_poisson_and_score_log_prob(u, lam):
-    """Draw a Poisson increment and return its DPOP score surrogate."""
-    count = jax.lax.stop_gradient(smp.poisson(u, jax.lax.stop_gradient(lam)))
-    lam_safe = jnp.clip(lam, 1.0e-12)
-    logw_score = count * jnp.log(lam_safe) - lam
-    return count, logw_score
-
-
 # =========================================================================
 # Model definition
 # =========================================================================
@@ -118,11 +96,11 @@ param_names = (
     "R_0",  # 12 - initial recovered fraction
 )
 
-# State includes "logw" for DPOP process log-density
-statenames = ["S", "E", "I", "R", "W", "C", "logw"]
+# State includes "_logw" for DPOP process log-density
+statenames = ["S", "E", "I", "R", "W", "C", "_logw"]
 
 # accumvars are reset each observation interval
-accumvars = ("W", "C", "logw")
+accumvars = ("W", "C", "_logw")
 
 
 def rinit(theta_, key, covars, t0=None):
@@ -139,7 +117,7 @@ def rinit(theta_, key, covars, t0=None):
     W = 0.0
     C = 0.0
     logw = 0.0
-    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "_logw": logw}
 
 
 @vectorized
@@ -150,7 +128,7 @@ def rproc(X_, theta_, key, covars, t, dt):
         X_["I"],
         X_["W"],
         X_["C"],
-        X_["logw"],
+        X_["_logw"],
     )
     J = jnp.asarray(S).shape[0]
     R0 = theta_["R0"]
@@ -196,20 +174,22 @@ def rproc(X_, theta_, key, covars, t, dt):
     # White noise (extrademographic stochasticity)
     dw = smp.gamma(u_gamma, dt / sigmaSE**2) * sigmaSE**2
 
-    # Poisson births
-    births, lp_birth = _sample_poisson_and_score_log_prob(u[0], br * dt)
+    # Poisson births and Euler-multinomial transitions.  The draws carry no
+    # gradient; the DPOP log-weights supply their score.
+    sg = jax.lax.stop_gradient
+    rate_SE = foi * dw / dt
+    births = sg(smp.poisson(u[0], br * dt))
+    StoE, StoDeath = sg(smp.euler_exits(u[1], u[2], S, rate_SE, mu, dt))
+    EtoI, EtoDeath = sg(smp.euler_exits(u[3], u[4], E, sigma, mu, dt))
+    ItoR, ItoDeath = sg(smp.euler_exits(u[5], u[6], I, gamma, mu, dt))
 
-    # Euler-multinomial transitions
-    StoE, StoDeath, lp_S = _sample_and_score_log_prob(
-        u[1], u[2], S, foi * dw / dt, mu, dt
+    logw = (
+        logw
+        + poisson_logw(births, br * dt)
+        + euler_multinomial_logw((StoE, StoDeath), S, (rate_SE, mu), dt)
+        + euler_multinomial_logw((EtoI, EtoDeath), E, (sigma, mu), dt)
+        + euler_multinomial_logw((ItoR, ItoDeath), I, (gamma, mu), dt)
     )
-    EtoI, EtoDeath, lp_E = _sample_and_score_log_prob(u[3], u[4], E, sigma, mu, dt)
-    ItoR, ItoDeath, lp_I = _sample_and_score_log_prob(u[5], u[6], I, gamma, mu, dt)
-
-    # Accumulate process log-density
-    logw_step = lp_birth + lp_S + lp_E + lp_I
-    logw_step = jnp.where(jnp.isfinite(logw_step), logw_step, 0.0)
-    logw = logw + logw_step
 
     # State updates
     S = S + births - StoE - StoDeath
@@ -219,7 +199,7 @@ def rproc(X_, theta_, key, covars, t, dt):
     W = W + (dw - dt) / sigmaSE
     C = C + ItoR
 
-    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "logw": logw}
+    return {"S": S, "E": E, "I": I, "R": R, "W": W, "C": C, "_logw": logw}
 
 
 def dmeas(Y_, X_, theta_, covars=None, t=None):

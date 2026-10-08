@@ -31,3 +31,16 @@ Inverse Cumulative Distribution Functions (CDFs)
    poissoninv
    binominv
    gammainv
+
+DPOP Log-Weights
+----------------
+
+Log-weight increments for a DPOP process model to add to its ``_logw`` state (see :func:`pypomp.functional.pop`).
+Each has the gradient of the draw's log-probability in the distribution's parameters, with the draw held fixed.
+
+.. autosummary::
+   :toctree: generated/
+
+   poisson_logw
+   binomial_logw
+   euler_multinomial_logw

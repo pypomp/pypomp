@@ -67,7 +67,7 @@ def test_002d_dpop_train(london_002d):
         eta=eta,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=DEFAULT_KEY,
     )
     assert ret is None

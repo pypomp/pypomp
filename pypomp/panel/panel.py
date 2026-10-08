@@ -147,6 +147,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit_param_names=self.canonical_unit_param_names,
             unit_param_permutations=unit_param_permutations,
             unit_names=unit_names,
+            statenames=tuple(rep_unit.statenames),
         )
 
     def print_metadata(self) -> None:

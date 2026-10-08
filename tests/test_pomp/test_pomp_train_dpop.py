@@ -47,13 +47,13 @@ def test_dpop_train_variants(simple_sir_for_dpop, optimizer, eta_type):
         eta=eta,
         optimizer=optimizer,
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(1),
     )
     assert ret is None
     res = model.results_history[-1]
     assert res.method == "train"
-    assert res.process_weight_state == "logw"
+    assert res.dpop is True
     assert res.kind == "trace"
     traces = res.traces()
     assert not traces.empty
@@ -80,7 +80,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
         alpha=0.8,
         key=jax.random.key(123),
         theta=deepcopy(initial_theta),
-        process_weight_state="logw",
+        dpop=True,
     )
     res1 = model.results_history[-1]
 
@@ -99,7 +99,7 @@ def test_dpop_train_param_order_invariance(simple_sir_for_dpop):
         alpha=0.8,
         key=jax.random.key(123),
         theta=pp.PompParameters(permuted_theta),
-        process_weight_state="logw",
+        dpop=True,
     )
     res2 = model.results_history[-1]
 
@@ -120,7 +120,7 @@ def test_dpop_train_alpha_cooling(simple_sir_for_dpop):
         eta=_eta(model),
         optimizer=pp.SGD(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(321),
     )
     names = model.canonical_param_names
@@ -146,7 +146,7 @@ def test_dpop_train_final_theta_loglik_1d_and_pruned(simple_sir_for_dpop):
         eta=_eta(model),
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_state="logw",
+        dpop=True,
         key=jax.random.key(1),
     )
 
@@ -173,7 +173,7 @@ def test_dpop_train_warns_once(simple_sir_for_dpop):
             J=J_DEFAULT,
             M=1,
             eta=_eta(model),
-            process_weight_state="logw",
+            dpop=True,
             key=jax.random.key(0),
         )
     experimental = [w for w in caught if "experimental" in str(w.message)]

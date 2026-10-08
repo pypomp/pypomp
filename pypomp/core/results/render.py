@@ -45,7 +45,7 @@ _SUMMARY_LABELS = {
     "alpha_cooling": "Cooling factor for alpha",
     "n_monitors": "Number of monitors",
     "block": "Block",
-    "process_weight_state": "Process weight state",
+    "dpop": "DPOP",
 }
 
 

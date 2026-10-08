@@ -14,6 +14,7 @@ import xarray as xr
 
 from pypomp import benchmarks
 from pypomp import functional as F
+from pypomp.core.algorithms.contexts import dpop_state_index
 from pypomp.functional.mop import _warn_dpop_experimental
 from pypomp.functional.train import _train
 from pypomp.maths import logmeanexp
@@ -37,24 +38,6 @@ if TYPE_CHECKING:
     from .pomp import Pomp
 else:
     Base = object
-
-
-def _process_weight_state_index(
-    statenames: list[str], accumvars: list[str] | None, process_weight_state: str
-) -> int:
-    """Index of the DPOP process log-weight state, which must be an accumulator."""
-    if process_weight_state not in statenames:
-        raise ValueError(
-            f"process_weight_state '{process_weight_state}' not found in "
-            f"statenames {statenames}"
-        )
-    if process_weight_state not in (accumvars or []):
-        raise ValueError(
-            f"process_weight_state '{process_weight_state}' must be listed in "
-            "accumvars, so that the process log-weight is reset at every "
-            "observation time."
-        )
-    return statenames.index(process_weight_state)
 
 
 class PompEstimationMixin(Base):
@@ -462,7 +445,7 @@ class PompEstimationMixin(Base):
         thresh: float = 0.0,
         alpha_cooling: float = 1.0,
         n_monitors: int = 1,
-        process_weight_state: str | None = None,
+        dpop: bool = False,
     ) -> None:
         """Optimize parameters via a differentiable particle filter (MOP).
 
@@ -475,7 +458,7 @@ class PompEstimationMixin(Base):
 
             MOP gradients are only well-defined for **continuous-state**
             models.  For discrete-state models, use :meth:`mif`, or pass
-            ``process_weight_state`` to use the experimental DPOP gradient.
+            ``dpop=True`` to use the experimental DPOP gradient.
 
         .. note::
 
@@ -520,13 +503,13 @@ class PompEstimationMixin(Base):
             Number of unperturbed particle filter runs to average for the
             log-likelihood monitor.  Defaults to ``1``. Using more than 1 monitor
             increases computation time but can lead to more stable estimates.
-        process_weight_state : str or None, optional
-            Name of a state (listed in ``accumvars``) in which the process
-            model accumulates the log-density of its sampled transitions.
-            Setting it enables the experimental DPOP gradient for process
-            models that are not differentiable in the parameters, such as
-            discrete-state models; see :func:`pypomp.functional.pop` for the
-            requirements on the process model.  Defaults to ``None`` (MOP).
+        dpop : bool, optional
+            Whether to use the experimental DPOP gradient, for process models
+            that are not differentiable in the parameters, such as
+            discrete-state models.  The model must have a ``_logw`` state, in
+            which ``rproc`` accumulates the log-density of its sampled
+            transitions; see :func:`pypomp.functional.pop` for the
+            requirements.  Defaults to ``False`` (MOP).
 
         Returns
         -------
@@ -553,7 +536,7 @@ class PompEstimationMixin(Base):
         >>> model.train(J=100, M=200, eta=eta)
         >>> model.results()
         """
-        if process_weight_state is not None:
+        if dpop:
             _warn_dpop_experimental(stacklevel=2)
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -571,13 +554,8 @@ class PompEstimationMixin(Base):
         if not isinstance(eta, LearningRate):
             raise TypeError("eta must be a LearningRate object")
 
-        process_weight_index = (
-            None
-            if process_weight_state is None
-            else _process_weight_state_index(
-                self.statenames, self.accumvars, process_weight_state
-            )
-        )
+        if dpop:
+            dpop_state_index(self.statenames)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
@@ -599,7 +577,7 @@ class PompEstimationMixin(Base):
             alpha_cooling,
             thresh,
             n_monitors,
-            process_weight_index,
+            dpop,
         )
 
         nLLs, theta_traces = jax.device_get((nLLs_jax, theta_traces_jax))
@@ -645,7 +623,7 @@ class PompEstimationMixin(Base):
             alpha=alpha,
             thresh=thresh,
             alpha_cooling=alpha_cooling,
-            process_weight_state=process_weight_state,
+            dpop=dpop,
         )
 
         self.results_history.add(result)

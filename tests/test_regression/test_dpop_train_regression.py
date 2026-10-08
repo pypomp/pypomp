@@ -3,7 +3,6 @@ import numpy as np
 
 import pypomp as pp
 import pypomp.functional as F
-from pypomp.models.sir import get_process_weight_index
 
 M = 3
 
@@ -22,7 +21,7 @@ def test_dpop_train_regression(sir_struct, tol, num_regression):
         keys,
         optimizer=pp.Adam(),
         alpha=0.8,
-        process_weight_index=get_process_weight_index(),
+        dpop=True,
     )
 
     num_regression.check(

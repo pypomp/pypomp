@@ -94,13 +94,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[tests,benchmarks,viz]"
 
+      # JAX compilation-cache entries are keyed on the CPU's instruction set,
+      # so runners with different CPUs (e.g. with/without AVX-512) cannot share
+      # them. Key the cache by CPU model so each lineage stays warm.
+      - name: CPU tag
+        id: cpu
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            model=$(lscpu | sed -n 's/^Model name: *//p')
+          else
+            model=$(sysctl -n machdep.cpu.brand_string)
+          fi
+          echo "tag=$(echo "$model" | tr -cs 'A-Za-z0-9' '-' | sed 's/-$//')" >> "$GITHUB_OUTPUT"
+
       # Restore JAX compilation cache from main (restored entries are scoped to main to save cache space).
+      # Falls back to another CPU's cache, which still gives partial hits.
       - uses: actions/cache/restore@v5
         id: jax-cache
         with:
           path: .pytest_cache/jax_cache
-          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ github.sha }}
+          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
           restore-keys: |
+            jax-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.cpu.outputs.tag }}-
             jax-${{ runner.os }}-${{ matrix.python-version }}-
 
       # Runner speed varies several-fold between jobs; record the hardware so
@@ -132,9 +147,14 @@ jobs:
 
       # Per-module wall/CPU time, compile-cache hits/misses and peak RSS per
       # worker, plus system CPU steal and swap from vmstat.
+      # A step timeout leaves the xdist workers running and writing to the
+      # compilation cache, which makes the cache save's tar fail; stop them.
       - name: Test diagnostics
         if: always()
         run: |
+          pkill python || true
+          for _ in $(seq 30); do pgrep python > /dev/null || break; sleep 1; done
+          pkill -KILL python || true
           cat test-modules.log 2>/dev/null || echo "no module log"
           cat vmstat.log 2>/dev/null || true
 
@@ -143,7 +163,7 @@ jobs:
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
         with:
           path: .pytest_cache/jax_cache
-          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ github.sha }}
+          key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -172,12 +192,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[tests,benchmarks,viz]"
 
+      - name: CPU tag
+        id: cpu
+        run: |
+          echo "tag=$(lscpu | sed -n 's/^Model name: *//p' | tr -cs 'A-Za-z0-9' '-' | sed 's/-$//')" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache/restore@v5
         id: jax-cache
         with:
           path: .pytest_cache/jax_cache
-          key: jax-heavy-${{ runner.os }}-${{ github.sha }}
+          key: jax-heavy-${{ runner.os }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
           restore-keys: |
+            jax-heavy-${{ runner.os }}-${{ steps.cpu.outputs.tag }}-
             jax-heavy-${{ runner.os }}-
 
       - name: Test with pytest
@@ -187,7 +213,7 @@ jobs:
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
         with:
           path: .pytest_cache/jax_cache
-          key: jax-heavy-${{ runner.os }}-${{ github.sha }}
+          key: jax-heavy-${{ runner.os }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

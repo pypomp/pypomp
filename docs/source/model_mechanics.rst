@@ -157,7 +157,7 @@ It is enabled with ``dpop=True`` in :meth:`~pypomp.Pomp.train` and :meth:`~pypom
 **Contract:**
 
 - The model has a state named ``_logw``, which ``rinit`` sets to ``0.0``.
-  It is reset to zero at every observation time, so it need not be listed in ``accumvars``.
+  :class:`~pypomp.Pomp` adds it to ``accumvars``, so every method resets it to zero at each observation time.
 - ``rproc`` adds to ``_logw`` the log-weight of every random draw whose distribution depends on the parameters and that has no pathwise gradient.
   :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw`, :func:`~pypomp.random.nbinomial_logw`, :func:`~pypomp.random.multinomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
   Each returns a surrogate with the gradient of the draw's log-probability, holding the draw fixed.

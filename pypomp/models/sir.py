@@ -342,7 +342,7 @@ def sir(
     par_trans = ParTrans(to_est=to_est, from_est=from_est)
     ys_dummy = pd.DataFrame({"reports": np.zeros(len(times))}, index=pd.Index(times))
 
-    accumvars = ("cases", "_logw")
+    accumvars = ("cases",)
 
     from pypomp.core.parameters import PompParameters
 

@@ -118,7 +118,7 @@ param_names = (
 statenames = ["S", "E", "I", "R", "W", "C", "_logw"]
 
 # accumvars are reset each observation interval
-accumvars = ("W", "C", "_logw")
+accumvars = ("W", "C")
 
 
 def rinit(theta_, key, covars, t0=None):

@@ -54,9 +54,8 @@ def test_panel_dpop_train_all_shared():
     assert isinstance(res, Result)
     assert list(res.unit_traces.coords["variable"].values) == ["unitLogLik"]
     assert res.unit_traces.shape == (1, M + 1, 2, 1)
-    # Training does not estimate unit log-likelihoods, so they are NaN.
-    assert np.all(np.isnan(np.asarray(res.unit_traces)))
-    assert np.all(np.isnan(panel.theta.logLik))
+    assert np.all(np.isfinite(np.asarray(res.unit_traces)))
+    assert np.all(np.isfinite(panel.theta.logLik))
 
     shared_vars = list(res.shared_traces.coords["variable"].values)
     assert shared_vars == ["logLik"] + panel.canonical_shared_param_names

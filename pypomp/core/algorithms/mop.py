@@ -170,7 +170,7 @@ def _panel_mop_internal_vmap(
     thetas: jax.Array,
     keys: jax.Array,
     context: MopContext,
-) -> jax.Array | float:
+) -> jax.Array:
     """vmap ``_mop_internal`` over units, mapping ys/covars per unit.
 
     The ``in_axes`` prototype is derived from ``context`` so its static fields
@@ -188,14 +188,15 @@ def _panel_mop_internal_vmap(
 
 
 @partial(jit, static_argnames=("chunk_size",))
-def _chunked_panel_mop_internal(
+def _chunked_panel_mop_units(
     shared_array: jax.Array,  # (n_shared,)
     unit_array: jax.Array,  # (U, n_spec)
     unit_param_permutations: jax.Array,  # (U, n_params)
     context: MopContext,
     keys: jax.Array,
     chunk_size: int,
-) -> jax.Array | float:
+) -> tuple[jax.Array, jax.Array]:
+    """Panel MOP negative log-likelihood summed over units, and per unit ``(U,)``."""
     U = unit_array.shape[0]
     n_params = unit_param_permutations.shape[1]
     n_chunks = U // chunk_size
@@ -233,9 +234,26 @@ def _chunked_panel_mop_internal(
         shared_tiled,
     )
 
-    total_neg_loglik, _ = jax.lax.scan(scan_fn, 0.0, jnp.arange(n_chunks))
+    total_neg_loglik, unit_neg_logliks = jax.lax.scan(
+        scan_fn, jnp.zeros(()), jnp.arange(n_chunks)
+    )
 
-    return total_neg_loglik / (U * context.series.ys.shape[1])
+    return total_neg_loglik, unit_neg_logliks.reshape(U)
+
+
+@partial(jit, static_argnames=("chunk_size",))
+def _chunked_panel_mop_internal(
+    shared_array: jax.Array,  # (n_shared,)
+    unit_array: jax.Array,  # (U, n_spec)
+    unit_param_permutations: jax.Array,  # (U, n_params)
+    context: MopContext,
+    keys: jax.Array,
+    chunk_size: int,
+) -> jax.Array | float:
+    total_neg_loglik, _ = _chunked_panel_mop_units(
+        shared_array, unit_array, unit_param_permutations, context, keys, chunk_size
+    )
+    return total_neg_loglik / (unit_array.shape[0] * context.series.ys.shape[1])
 
 
 def _panel_mop_scan_step(
@@ -248,7 +266,7 @@ def _panel_mop_scan_step(
     shared_tiled: jax.Array,
     carry: jax.Array,
     chunk_idx: int,
-) -> tuple[jax.Array, None]:
+) -> tuple[jax.Array, jax.Array]:
     unit_array_chunk = unit_array_c[chunk_idx]  # (chunk_size, n_spec)
     unit_param_perm_chunk = unit_param_permutations_c[
         chunk_idx
@@ -275,7 +293,7 @@ def _panel_mop_scan_step(
         key_chunk,
         context_chunk,
     )
-    return carry + jnp.sum(res), None
+    return carry + jnp.sum(res), res
 
 
 _vg_chunked_panel_mop_internal = jax.value_and_grad(

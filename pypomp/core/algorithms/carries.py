@@ -71,6 +71,7 @@ class ChunkState:
 @dataclass(frozen=True)
 class ChunkMetrics:
     neg_loglik: jax.Array
+    unit_neg_loglik: jax.Array
     unit_ests_chunk: jax.Array
     opt_state_unit_chunk: Any
 
@@ -79,6 +80,7 @@ class ChunkMetrics:
 @dataclass(frozen=True)
 class IterationMetrics:
     neg_loglik: jax.Array
+    unit_neg_loglik: jax.Array
     shared_ests: jax.Array
     unit_ests: jax.Array
 

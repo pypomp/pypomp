@@ -27,7 +27,7 @@ from .carries import (
 from .contexts import PanelTrainContext, SeriesData, TrainContext
 from .helpers import _cosine_cooling
 from .mop import (
-    _chunked_panel_mop_internal,
+    _chunked_panel_mop_units,
     _mop_internal,
     _panel_mop_internal_vmap,
 )
@@ -262,24 +262,27 @@ def _panel_train_internal(
 
     # Each iteration monitors the parameters it starts from; evaluate the final
     # parameters with the last key slab so that row m pairs with theta_m.
-    final_neg_loglik = _chunked_panel_mop_internal(
+    final_neg_loglik, final_unit_neg_logliks = _chunked_panel_mop_units(
         final_state.shared_ests,
         final_state.unit_ests_chunked.reshape(unit_array.shape),
         context.unit_param_permutations,
         context.to_mop_context(),
         context.keys[context.M],
         context.chunk_size,
-    ) * (context.U * context.n_obs)
+    )
 
     neg_logliks = jnp.concatenate(
         (history.neg_loglik, jnp.reshape(final_neg_loglik, (1,)))
+    )
+    unit_neg_logliks = jnp.concatenate(
+        (history.unit_neg_loglik, final_unit_neg_logliks[None, :]), axis=0
     )
     shared_copies = jnp.concatenate(
         (shared_array[None, :], history.shared_ests), axis=0
     )
     unit_copies = jnp.concatenate((unit_array[None, :, :], history.unit_ests), axis=0)
 
-    return neg_logliks, shared_copies, unit_copies
+    return neg_logliks, unit_neg_logliks, shared_copies, unit_copies
 
 
 def _iteration_scan_step(
@@ -337,6 +340,7 @@ def _iteration_scan_step(
     )
     iter_metrics = IterationMetrics(
         neg_loglik=jnp.mean(chunk_metrics.neg_loglik),
+        unit_neg_loglik=chunk_metrics.unit_neg_loglik.reshape(context.U),
         shared_ests=final_chunk_carry.shared_ests,
         unit_ests=unit_flat,
     )
@@ -370,8 +374,8 @@ def _chunk_scan_step(
 
     covars_chunk = None if covars_c is None else covars_c[chunk_idx]
 
-    neg_loglik, (grad_shared, grad_unit) = jax.value_and_grad(
-        _compute_chunk_loss, argnums=(0, 1)
+    (neg_loglik, unit_neg_loglik), (grad_shared, grad_unit) = jax.value_and_grad(
+        _compute_chunk_loss, argnums=(0, 1), has_aux=True
     )(
         curr_shared_ests,
         curr_unit_ests_chunk,
@@ -414,6 +418,7 @@ def _chunk_scan_step(
     )
     chunk_metrics = ChunkMetrics(
         neg_loglik=neg_loglik,
+        unit_neg_loglik=unit_neg_loglik,
         unit_ests_chunk=curr_unit_ests_chunk,
         opt_state_unit_chunk=new_opt_state_unit,
     )
@@ -429,7 +434,8 @@ def _compute_chunk_loss(
     keys_chunk: jax.Array,
     curr_alpha: float,
     context: PanelTrainContext,
-) -> jax.Array:
+) -> tuple[jax.Array, jax.Array]:
+    """Mean negative log-likelihood per unit and time point, and per unit."""
     shared_tiled = jnp.tile(s_ests, (context.chunk_size, 1))
     theta_unordered = jnp.concatenate([shared_tiled, u_ests], axis=1)
     theta_chunk = jax.vmap(lambda t, p: t[p])(theta_unordered, perm_chunk)
@@ -443,7 +449,7 @@ def _compute_chunk_loss(
         keys_chunk,
         mop_context,
     )
-    return jnp.sum(res) / (context.chunk_size * context.n_obs)
+    return jnp.sum(res) / (context.chunk_size * context.n_obs), res
 
 
 def _vmapped_panel_train_internal(

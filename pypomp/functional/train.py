@@ -272,7 +272,7 @@ def panel_train(
     """
     if dpop:
         _warn_dpop_experimental(stacklevel=2)
-    return _panel_train(
+    logliks_history, _, shared_history, unit_history = _panel_train(
         struct,
         shared_array,
         unit_array,
@@ -286,6 +286,7 @@ def panel_train(
         chunk_size,
         dpop,
     )
+    return logliks_history, shared_history, unit_history
 
 
 def _panel_train(
@@ -301,8 +302,12 @@ def _panel_train(
     alpha_cooling: float,
     chunk_size: int,
     dpop: bool,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer."""
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer.
+
+    Also returns the per-unit negative log-likelihood trace, of shape
+    ``(n_reps, M + 1, U)``.
+    """
     if keys.shape[1] != M + 1:
         # Indexing a missing slab would silently clamp to the last one.
         raise ValueError(
@@ -344,6 +349,7 @@ def _panel_train(
 
     (
         logliks_history,
+        unit_logliks_history,
         shared_history,
         unit_history,
     ) = _vmapped_panel_train_internal(
@@ -363,4 +369,9 @@ def _panel_train(
         )
     )
 
-    return logliks_history, shared_history_natural, unit_history_natural
+    return (
+        logliks_history,
+        unit_logliks_history,
+        shared_history_natural,
+        unit_history_natural,
+    )

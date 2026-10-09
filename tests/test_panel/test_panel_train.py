@@ -62,9 +62,33 @@ def test_panel_train_shared_only():
     assert list(res.unit_traces.coords["variable"].values) == ["unitLogLik"]
     assert res.unit_traces.shape[-1] == 1
     assert res.shared_traces.shape[-1] == 1 + len(panel.canonical_shared_param_names)
-    # Training does not estimate unit log-likelihoods, so they are NaN.
-    assert np.all(np.isnan(np.asarray(res.unit_traces)))
-    assert np.all(np.isnan(panel.theta.logLik))
+    assert np.all(np.isfinite(np.asarray(res.unit_traces)))
+    assert np.all(np.isfinite(panel.theta.logLik))
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])
+def test_panel_train_unit_logliks_sum_to_total(chunk_size):
+    """Each row's unit log-likelihoods sum to that row's total, and the final
+    row is stored on ``theta`` and in ``logLiks``."""
+    panel = _get_lg_panel()
+    M = 2
+    panel.train(
+        J=2,
+        M=M,
+        eta=pp.LearningRate({n: 0.01 for n in panel.canonical_param_names}),
+        chunk_size=chunk_size,
+        key=jax.random.key(17),
+    )
+    res = panel.results_history[-1]
+    unit_ll = np.asarray(res.unit_traces.sel(variable="unitLogLik"))
+    total_ll = np.asarray(res.shared_traces.sel(variable="logLik"))
+    assert unit_ll.shape == (1, M + 1, len(panel.unit_objects))
+    assert np.all(np.isfinite(unit_ll))
+    np.testing.assert_allclose(unit_ll.sum(axis=-1), total_ll, rtol=1e-5)
+    np.testing.assert_allclose(panel.theta.logLik_unit, unit_ll[:, -1, :])
+    logLiks = np.asarray(res.logLiks)
+    np.testing.assert_allclose(logLiks[:, 0], total_ll[:, -1])
+    np.testing.assert_allclose(logLiks[:, 1:], unit_ll[:, -1, :])
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2], ids=["chunk1", "chunk2"])

@@ -874,7 +874,11 @@ class PanelEstimationMixin(Base):
             Updates ``self.theta`` with final estimates and appends a
             :class:`~pypomp.core.results.Result` to the history.  The
             log-likelihood at iteration ``m`` is estimated at the parameters of
-            iteration ``m``.
+            iteration ``m``, and the ``unitLogLik`` trace holds its per-unit
+            terms, which sum to it.  With more than one chunk, later chunks in
+            an iteration see the shared parameters already updated by earlier
+            chunks; the final row is evaluated at the final parameters, and
+            sets ``self.theta.logLik_unit``.
 
         References
         ----------
@@ -935,12 +939,13 @@ class PanelEstimationMixin(Base):
 
         (
             logliks_history_jax,
+            unit_logliks_history_jax,
             shared_history_natural_jax,
             unit_history_natural_jax,
         ) = run_jax_batch_sharded(
             _panel_train,
             {1: 0, 2: 0, 6: 0},
-            [0, 0, 0],
+            [0, 0, 0, 0],
             struct,
             shared_array,
             unit_array,
@@ -957,17 +962,20 @@ class PanelEstimationMixin(Base):
 
         (
             logliks_history,
+            unit_logliks_history,
             shared_history_natural,
             unit_history_natural,
         ) = jax.device_get(
             (
                 logliks_history_jax,
+                unit_logliks_history_jax,
                 shared_history_natural_jax,
                 unit_history_natural_jax,
             )
         )
         del (
             logliks_history_jax,
+            unit_logliks_history_jax,
             shared_history_natural_jax,
             unit_history_natural_jax,
         )
@@ -979,10 +987,11 @@ class PanelEstimationMixin(Base):
             ],
             axis=-1,
         )
-        # Training does not estimate per-unit log-likelihoods.
+        # Within an iteration, later chunks see shared parameters already
+        # updated by earlier chunks; the final row is exact.
         unit_traces = np.concatenate(
             [
-                np.full((n_reps, M + 1, U, 1), np.nan),
+                -np.asarray(unit_logliks_history, dtype=float)[..., np.newaxis],
                 np.asarray(unit_history_natural),
             ],
             axis=-1,
@@ -1014,7 +1023,7 @@ class PanelEstimationMixin(Base):
             shared_names=shared_index,
             unit_specific_names=spec_index,
             unit_names=unit_names,
-            logLik_unit=np.full((n_reps, U), np.nan),
+            logLik_unit=unit_traces[:, -1, :, 0],
             estimation_scale=False,
         )
 
@@ -1024,8 +1033,10 @@ class PanelEstimationMixin(Base):
             theta=theta_for_result,
             shared_traces=shared_da,
             unit_traces=unit_da,
-            logLiks=xr.DataArray(  # Placeholder as we don't have unit logliks separated
-                np.full((n_reps, U + 1), np.nan),
+            logLiks=xr.DataArray(
+                np.concatenate(
+                    [shared_traces[:, -1, 0:1], unit_traces[:, -1, :, 0]], axis=1
+                ),
                 dims=["theta_idx", "unit"],
                 coords={
                     "theta_idx": np.arange(n_reps),

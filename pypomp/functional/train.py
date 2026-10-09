@@ -188,7 +188,7 @@ def panel_train(
     alpha_cooling: float = 1.0,
     chunk_size: int = 1,
     dpop: bool = False,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Optimize panel POMP parameters via a differentiable particle filter (MOP).
 
     This function performs Maximum Likelihood Estimation (MLE) for Panel POMP
@@ -247,6 +247,9 @@ def panel_train(
         ``(n_reps, M + 1)``.  Row ``m`` is estimated at the parameters in row
         ``m`` of the traces; within an iteration, later chunks see the shared
         parameters already updated by earlier chunks.
+    unit_logliks_history : jax.Array
+        Per-unit negative log-likelihood of shape ``(n_reps, M + 1, U)``, from
+        the same filter runs; it sums over units to ``logliks_history``.
     shared_history_natural : jax.Array
         Shared parameter history trace of shape ``(n_reps, M + 1, n_shared)`` on the
         natural scale.
@@ -272,7 +275,7 @@ def panel_train(
     """
     if dpop:
         _warn_dpop_experimental(stacklevel=2)
-    logliks_history, _, shared_history, unit_history = _panel_train(
+    return _panel_train(
         struct,
         shared_array,
         unit_array,
@@ -286,7 +289,6 @@ def panel_train(
         chunk_size,
         dpop,
     )
-    return logliks_history, shared_history, unit_history
 
 
 def _panel_train(
@@ -303,11 +305,7 @@ def _panel_train(
     chunk_size: int,
     dpop: bool,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer.
-
-    Also returns the per-unit negative log-likelihood trace, of shape
-    ``(n_reps, M + 1, U)``.
-    """
+    """Body of :func:`panel_train`, without the DPOP warning, for the OOP layer."""
     if keys.shape[1] != M + 1:
         # Indexing a missing slab would silently clamp to the last one.
         raise ValueError(

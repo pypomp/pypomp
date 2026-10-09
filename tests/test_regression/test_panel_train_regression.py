@@ -22,7 +22,7 @@ def test_panel_train_regression(lg_panel_struct, tol, num_regression):
         axis=1,
     )
 
-    neg_logliks, shared_history, unit_history = F.panel_train(
+    neg_logliks, _, shared_history, unit_history = F.panel_train(
         struct,
         shared0,
         unit0,

@@ -380,7 +380,7 @@ def test_panel_train_functional(panel_setup):
 
     keys = jax.random.split(key, n_reps * (M + 1) * U).reshape(n_reps, M + 1, U)
 
-    neg_logliks, shared_history, unit_history = F.panel_train(
+    neg_logliks, unit_neg_logliks, shared_history, unit_history = F.panel_train(
         struct,
         shared_array,
         unit_array,
@@ -395,6 +395,8 @@ def test_panel_train_functional(panel_setup):
     )
 
     assert neg_logliks.shape == (n_reps, M + 1)
+    assert unit_neg_logliks.shape == (n_reps, M + 1, U)
+    np.testing.assert_allclose(unit_neg_logliks.sum(axis=-1), neg_logliks, rtol=1e-5)
     assert shared_history.shape == (n_reps, M + 1, n_shared)
     assert unit_history.shape == (n_reps, M + 1, U, n_spec)
 
@@ -433,7 +435,7 @@ def test_panel_train_functional_scale_and_clip(panel_setup):
     eta = pp.LearningRate({name: 0.01 for name in all_param_names})
     keys = jax.random.split(key, n_reps * (M + 1) * U).reshape(n_reps, M + 1, U)
 
-    neg_logliks, shared_history, unit_history = F.panel_train(
+    neg_logliks, unit_neg_logliks, shared_history, unit_history = F.panel_train(
         struct,
         shared_array,
         unit_array,
@@ -479,12 +481,14 @@ def test_panel_dpop_train_functional():
     keys = jax.random.split(jax.random.key(0), (M + 1) * U).reshape(1, M + 1, U)
     eta = pp.LearningRate({name: 0.001 for name in struct.param_names})
 
-    neg_logliks, shared_history, unit_history = F.panel_train(
+    neg_logliks, unit_neg_logliks, shared_history, unit_history = F.panel_train(
         struct, shared, unit, 2, M, eta, keys, dpop=True
     )
 
     assert neg_logliks.shape == (1, M + 1)
     assert jnp.all(jnp.isfinite(neg_logliks))
+    assert unit_neg_logliks.shape == (1, M + 1, U)
+    np.testing.assert_allclose(unit_neg_logliks.sum(axis=-1), neg_logliks, rtol=1e-5)
     assert shared_history.shape == (1, M + 1, shared.shape[-1])
     assert unit_history.shape == (1, M + 1, U, unit.shape[-1])
 

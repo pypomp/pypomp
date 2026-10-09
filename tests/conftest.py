@@ -1,7 +1,9 @@
 import ctypes
 import gc
 import os
+import resource
 import sys
+import time
 
 import jax
 import pytest
@@ -57,10 +59,62 @@ def pytest_runtest_teardown(item, nextitem):
     trim. Both steps are needed to bound xdist worker RSS on the CI runners.
     """
     yield
-    if _malloc_trim is None:
-        return
     if nextitem is not None and nextitem.module is item.module:
+        return
+    _log_module_stats(item)
+    if _malloc_trim is None:
         return
     jax.clear_caches()
     gc.collect()
     _malloc_trim(0)
+
+
+# Per-module timing log, enabled by PYPOMP_TEST_DIAG_LOG=<path>. Lines are
+# appended as each module finishes so they survive a job killed mid-run.
+# cpu much less than wall points to a starved runner (steal or swap); many
+# misses point to a cold or mismatched persistent compilation cache.
+_diag_log = os.environ.get("PYPOMP_TEST_DIAG_LOG")
+_cache_events = {"hits": 0, "misses": 0}
+_module_start: dict[str, float] = {}
+
+
+def _count_cache_event(event: str, **kwargs: object) -> None:
+    if event == "/jax/compilation_cache/cache_hits":
+        _cache_events["hits"] += 1
+    elif event == "/jax/compilation_cache/cache_misses":
+        _cache_events["misses"] += 1
+
+
+if _diag_log:
+    jax.monitoring.register_event_listener(_count_cache_event)
+
+
+def _reset_module_stats() -> None:
+    _module_start.update(
+        wall=time.monotonic(), cpu=time.process_time(), **_cache_events
+    )
+
+
+def pytest_collection_finish(session):
+    _reset_module_stats()
+
+
+def _log_module_stats(item) -> None:
+    if not _diag_log:
+        return
+    # ru_maxrss is in KB on Linux and bytes on macOS.
+    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    maxrss_mb = maxrss / 1024**2 if sys.platform == "darwin" else maxrss / 1024
+    line = (
+        f"{time.strftime('%H:%M:%S')} "
+        f"{os.environ.get('PYTEST_XDIST_WORKER', 'main')} "
+        f"{item.module.__name__} "
+        f"wall={time.monotonic() - _module_start['wall']:.0f}s "
+        f"cpu={time.process_time() - _module_start['cpu']:.0f}s "
+        f"hits={_cache_events['hits'] - _module_start['hits']:.0f} "
+        f"misses={_cache_events['misses'] - _module_start['misses']:.0f} "
+        f"maxrss={maxrss_mb:.0f}MB\n"
+    )
+    with open(_diag_log, "a") as f:
+        f.write(line)
+    _reset_module_stats()

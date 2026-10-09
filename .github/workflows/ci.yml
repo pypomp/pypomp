@@ -103,18 +103,40 @@ jobs:
           restore-keys: |
             jax-${{ runner.os }}-${{ matrix.python-version }}-
 
+      # Runner speed varies several-fold between jobs; record the hardware so
+      # slow runs can be matched against it.
+      - name: Runner hardware
+        if: runner.os == 'Linux'
+        run: |
+          lscpu | grep -E '^(Model name|CPU\(s\)|Thread\(s\) per core)'
+          grep -qw avx512f /proc/cpuinfo && echo "avx512f: yes" || echo "avx512f: no"
+          free -m
+          python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
+
       # Limit Linux to 2 workers to fit in runner memory (4 workers causes OOM).
       # glibc keeps freed arenas per thread, which inflates RSS enough on the
       # Linux runners to swap or OOM; capping arenas keeps memory flat.
+      # The step timeout sits below the job's so the diagnostics step still runs.
       - name: Test with pytest
+        timeout-minutes: 65
         env:
           MALLOC_ARENA_MAX: 2
+          PYPOMP_TEST_DIAG_LOG: ${{ github.workspace }}/test-modules.log
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             set -- -n 2
+            vmstat -t 60 > vmstat.log 2>&1 &
           fi
           pytest "$@" --timeout=600 --timeout-method=thread \
             -m "not heavy" --cov --junitxml=junit.xml -o junit_family=legacy
+
+      # Per-module wall/CPU time, compile-cache hits/misses and peak RSS per
+      # worker, plus system CPU steal and swap from vmstat.
+      - name: Test diagnostics
+        if: always()
+        run: |
+          cat test-modules.log 2>/dev/null || echo "no module log"
+          cat vmstat.log 2>/dev/null || true
 
       # Save updated JAX compilation cache on main pushes, even if tests fail.
       - uses: actions/cache/save@v5

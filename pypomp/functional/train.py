@@ -1,7 +1,11 @@
+import warnings
+from collections.abc import Sequence
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 
-from ..core.algorithms.contexts import PanelTrainContext, TrainContext
+from ..core.algorithms.contexts import DPOP_STATE, PanelTrainContext, TrainContext
 from ..core.algorithms.train import (
     _vmapped_panel_train_internal,
     _vmapped_train_internal,
@@ -120,6 +124,68 @@ def train(
         thresh,
         n_monitors,
         dpop,
+    )
+
+
+def _warn_logw_without_dpop(
+    statenames: Sequence[str], dpop: bool, stacklevel: int
+) -> None:
+    """Warn when a model with a ``_logw`` state is trained without DPOP."""
+    if not dpop and DPOP_STATE in statenames:
+        warnings.warn(
+            f"The model has a '{DPOP_STATE}' state, which only DPOP uses; pass "
+            "dpop=True to train with the DPOP gradient.",
+            UserWarning,
+            stacklevel=stacklevel + 1,
+        )
+
+
+def _stalled_params(
+    traces: np.ndarray, eta: LearningRate, param_names: Sequence[str], M: int
+) -> list[str]:
+    """Parameters with a nonzero learning rate that never moved from their
+    starting values in any replicate.
+
+    ``traces`` has replicates on axis 0, iterations on axis 1 and parameters on
+    the last axis.
+    """
+    if M < 1 or len(param_names) == 0:
+        return []
+    rates = np.asarray(eta.to_array(list(param_names), M))
+    trained = np.any(rates != 0.0, axis=0)
+    unchanged = np.all(traces == traces[:, :1], axis=tuple(range(traces.ndim - 1)))
+    return [
+        name
+        for name, t, u in zip(param_names, trained, unchanged, strict=True)
+        if t and u
+    ]
+
+
+def _warn_stalled_params(stalled: Sequence[str], dpop: bool, stacklevel: int) -> None:
+    """Warn that training left parameters unchanged, which usually means their
+    gradient is zero."""
+    if not stalled:
+        return
+    if dpop:
+        hint = (
+            f"With dpop=True, rproc must add to '{DPOP_STATE}' the log-weight of "
+            "every random draw whose distribution depends on these parameters."
+        )
+    else:
+        hint = (
+            "If rproc draws discrete counts, such as Poisson or binomial "
+            "transitions, MOP gives no gradient for their parameters; use "
+            f"dpop=True with a '{DPOP_STATE}' state (see 'Process Models for "
+            "DPOP' in the documentation)."
+        )
+    warnings.warn(
+        f"Training did not change {list(stalled)}, although their learning "
+        "rates are nonzero, so their gradient is probably zero. "
+        + hint
+        + " A parameter that enters rinit only through rounding or random "
+        "draws gets no gradient from MOP or DPOP; give it a learning rate of 0.",
+        UserWarning,
+        stacklevel=stacklevel + 1,
     )
 
 

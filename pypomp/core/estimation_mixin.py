@@ -16,7 +16,12 @@ from pypomp import benchmarks
 from pypomp import functional as F
 from pypomp.core.algorithms.contexts import dpop_state_index
 from pypomp.functional.mop import _warn_dpop_experimental
-from pypomp.functional.train import _train
+from pypomp.functional.train import (
+    _stalled_params,
+    _train,
+    _warn_logw_without_dpop,
+    _warn_stalled_params,
+)
 from pypomp.maths import logmeanexp
 from pypomp.proposals import Proposal
 
@@ -556,6 +561,7 @@ class PompEstimationMixin(Base):
 
         if dpop:
             dpop_state_index(self.statenames)
+        _warn_logw_without_dpop(self.statenames, dpop, stacklevel=2)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jnp.array(jax.random.split(new_key, n_reps))
@@ -582,6 +588,11 @@ class PompEstimationMixin(Base):
 
         nLLs, theta_traces = jax.device_get((nLLs_jax, theta_traces_jax))
         del nLLs_jax, theta_traces_jax
+        _warn_stalled_params(
+            _stalled_params(theta_traces, eta, self.canonical_param_names, M),
+            dpop,
+            stacklevel=2,
+        )
 
         joined_array = xr.DataArray(
             np.concatenate(

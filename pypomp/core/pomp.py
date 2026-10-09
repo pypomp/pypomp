@@ -21,6 +21,7 @@ import pandas as pd
 
 from pypomp.functional.structs import PompStruct
 
+from .algorithms.contexts import DPOP_STATE
 from .algorithms.helpers import _calc_ys_covars
 from .analysis_mixin import PompAnalysisMixin
 from .estimation_mixin import PompEstimationMixin
@@ -251,6 +252,10 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 raise ValueError("accumvars must be a tuple or list of strings")
             if not all(name in statenames for name in accumvars):
                 raise ValueError("all accumvars must be in statenames")
+        # DPOP log-weights cover one observation interval, so every method resets them.
+        if DPOP_STATE in statenames and DPOP_STATE not in (accumvars or ()):
+            accumvars = [*(accumvars or ()), DPOP_STATE]
+        if accumvars is not None:
             self._accumvars_indices = tuple(
                 tuple(statenames).index(name) for name in accumvars
             )

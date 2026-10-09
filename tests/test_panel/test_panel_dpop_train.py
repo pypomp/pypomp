@@ -1,3 +1,4 @@
+import warnings
 from copy import deepcopy
 from typing import Any
 
@@ -382,6 +383,21 @@ def test_panel_dpop_train_requires_logw_state(lg_panel_setup_some_shared):
     eta = pp.LearningRate({name: 0.01 for name in panel.canonical_param_names})
     with pytest.raises(ValueError, match="state named '_logw'"):
         panel.train(J=2, M=1, eta=eta, dpop=True, key=jax.random.key(0))
+
+
+def test_panel_train_without_dpop_warns_for_logw_model():
+    """S_0 (shared) and I_0 (unit-specific) enter the SIR model only through
+    rounding in rinit, so training cannot move them."""
+    panel = sir_panel(sharing="some", shared_names=["S_0", "gamma"], times=_test_times)
+    eta = pp.LearningRate({name: 0.01 for name in panel.canonical_param_names})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        panel.train(J=2, M=1, eta=eta, dpop=False, key=jax.random.key(0))
+    messages = [str(w.message) for w in caught if w.category is UserWarning]
+    assert any("only DPOP uses" in m for m in messages)
+    stalled = [m for m in messages if "Training did not change" in m]
+    assert len(stalled) == 1
+    assert "'S_0'" in stalled[0] and "'I_0'" in stalled[0]
 
 
 def test_panel_dpop_train_invalid_optimizer(sir_panel_dpop):

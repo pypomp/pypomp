@@ -27,7 +27,12 @@ from ..core.results import (
 )
 from ..core.rw_sigma import RWSigma
 from ..functional.mop import _warn_dpop_experimental
-from ..functional.train import _panel_train
+from ..functional.train import (
+    _panel_train,
+    _stalled_params,
+    _warn_logw_without_dpop,
+    _warn_stalled_params,
+)
 from ..maths import logmeanexp
 
 if TYPE_CHECKING:
@@ -909,6 +914,7 @@ class PanelEstimationMixin(Base):
 
         if dpop:
             dpop_state_index(rep_unit.statenames)
+        _warn_logw_without_dpop(rep_unit.statenames, dpop, stacklevel=2)
         chunk_size = _divisor_chunk_size(chunk_size, U)
         struct = self.to_struct()
 
@@ -978,6 +984,13 @@ class PanelEstimationMixin(Base):
             unit_logliks_history_jax,
             shared_history_natural_jax,
             unit_history_natural_jax,
+        )
+
+        _warn_stalled_params(
+            _stalled_params(np.asarray(shared_history_natural), eta, shared_index, M)
+            + _stalled_params(np.asarray(unit_history_natural), eta, spec_index, M),
+            dpop,
+            stacklevel=2,
         )
 
         shared_traces = np.concatenate(

@@ -3,9 +3,11 @@ from copy import deepcopy
 
 import jax
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
+from pypomp.functional.train import _stalled_params
 
 J_DEFAULT = 2
 M_DEFAULT = 2
@@ -179,3 +181,115 @@ def test_dpop_train_warns_once(simple_sir_for_dpop):
     experimental = [w for w in caught if "experimental" in str(w.message)]
     assert len(experimental) == 1
     assert experimental[0].filename == __file__
+
+
+_TIMES = np.arange(1.0, 6.0)
+
+
+def _poisson_model(update_logw=True, accumvars=None, logw_step=None):
+    """X grows by Poisson(lam * dt) increments; ``y`` is X plus Gaussian noise.
+
+    ``logw_step`` replaces the Poisson log-weight with a constant per step.
+    """
+
+    def rinit(theta_, key, covars=None, t0=None):
+        return {"X": 5.0, "_logw": 0.0}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        mean = theta_["lam"] * dt
+        n = pp.random.fast_poisson(key, mean)
+        if logw_step is not None:
+            increment = logw_step
+        elif update_logw:
+            increment = pp.random.poisson_logw(n, mean)
+        else:
+            increment = 0.0
+        return {"X": X_["X"] + n, "_logw": X_["_logw"] + increment}
+
+    def dmeas(Y_, X_, theta_, covars=None, t=None):
+        return jax.scipy.stats.norm.logpdf(Y_["y"], X_["X"], 3.0)
+
+    def rmeas(X_, theta_, key, covars=None, t=None):
+        return {"y": X_["X"] + 3.0 * jax.random.normal(key)}
+
+    return pp.Pomp(
+        ys=pd.DataFrame({"y": 5.0 + 2.0 * _TIMES}, index=pd.Index(_TIMES)),
+        theta=pp.PompParameters({"lam": 1.0}),
+        statenames=["X", "_logw"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        rmeas=rmeas,
+        nstep=4,
+        accumvars=accumvars,
+    )
+
+
+def _train_user_warnings(model, dpop):
+    """Train briefly and return the messages of the UserWarnings raised."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        model.train(
+            J=20,
+            M=2,
+            eta=pp.LearningRate({"lam": 0.01}),
+            optimizer=pp.SGD(),
+            dpop=dpop,
+            key=jax.random.key(0),
+        )
+    return [str(w.message) for w in caught if w.category is UserWarning]
+
+
+@pytest.mark.parametrize(
+    "accumvars, expected",
+    [(None, ["_logw"]), (["X"], ["X", "_logw"]), (["_logw", "X"], ["_logw", "X"])],
+)
+def test_logw_is_always_an_accumvar(accumvars, expected):
+    model = _poisson_model(accumvars=accumvars)
+    assert model.accumvars == expected
+    assert model.rproc.accumvars == tuple(
+        model.statenames.index(name) for name in expected
+    )
+
+
+def test_simulate_resets_logw_each_interval():
+    """Every method, not only DPOP training, resets ``_logw``."""
+    model = _poisson_model(logw_step=-1.0)
+    X_sims, _ = model.simulate(key=jax.random.key(0), nsim=1)
+    np.testing.assert_allclose(X_sims["_logw"].to_numpy(), [0.0] + [-4.0] * len(_TIMES))
+
+
+def test_train_without_dpop_warns_for_logw_model():
+    messages = _train_user_warnings(_poisson_model(), dpop=False)
+    assert any("only DPOP uses" in m for m in messages)
+    stalled = [m for m in messages if "did not change ['lam']" in m]
+    assert len(stalled) == 1
+    assert "use dpop=True" in stalled[0]
+
+
+def test_dpop_train_warns_when_logw_is_not_updated():
+    messages = _train_user_warnings(_poisson_model(update_logw=False), dpop=True)
+    stalled = [m for m in messages if "did not change ['lam']" in m]
+    assert len(stalled) == 1
+    assert "rproc must add" in stalled[0]
+
+
+def test_dpop_train_does_not_warn_when_params_move():
+    assert _train_user_warnings(_poisson_model(), dpop=True) == []
+
+
+def test_stalled_params():
+    eta = pp.LearningRate({"a": 0.1, "b": 0.1, "c": 0.0, "d": 0.1})
+    names = ["a", "b", "c", "d"]
+    # (reps, iterations, params): a moves in one replicate only, b never
+    # moves, c has a zero rate, d becomes NaN.
+    traces = np.zeros((2, 3, 4))
+    traces[1, 2, 0] = 1.0
+    traces[0, 1:, 3] = np.nan
+    assert _stalled_params(traces, eta, names, M=2) == ["b"]
+    # Unit-specific traces carry a unit axis before the parameters.
+    unit_traces = np.zeros((1, 3, 2, 4))
+    unit_traces[0, 1, 1, 1] = 1.0
+    assert _stalled_params(unit_traces, eta, names, M=2) == ["a", "d"]
+    assert _stalled_params(traces[:, :1], eta, names, M=0) == []

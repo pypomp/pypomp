@@ -159,10 +159,10 @@ It is enabled with ``dpop=True`` in :meth:`~pypomp.Pomp.train` and :meth:`~pypom
 - The model has a state named ``_logw``, which ``rinit`` sets to ``0.0``.
   It is reset to zero at every observation time, so it need not be listed in ``accumvars``.
 - ``rproc`` adds to ``_logw`` the log-weight of every random draw whose distribution depends on the parameters and that has no pathwise gradient.
-  :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw`, :func:`~pypomp.random.multinomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
+  :func:`~pypomp.random.poisson_logw`, :func:`~pypomp.random.binomial_logw`, :func:`~pypomp.random.nbinomial_logw`, :func:`~pypomp.random.multinomial_logw` and :func:`~pypomp.random.euler_multinomial_logw` compute these.
   Each returns a surrogate with the gradient of the draw's log-probability, holding the draw fixed.
 - The draws themselves carry no gradient.
-  The Poisson, binomial and multinomial samplers in :mod:`pypomp.random` already satisfy this; wrap draws from other samplers in :func:`jax.lax.stop_gradient`, or their gradient is counted twice.
+  The Poisson, binomial, negative binomial and multinomial samplers in :mod:`pypomp.random` already satisfy this; wrap draws from other samplers in :func:`jax.lax.stop_gradient`, or their gradient is counted twice.
 - Draws with a pathwise gradient, such as :func:`~pypomp.random.fast_gamma` noise, are differentiated directly and need no log-weight.
 - The model's gradients are finite. NaN gradients are not masked.
 

@@ -28,7 +28,8 @@ gammainv
 
 Exported DPOP Log-Weights
 -------------------------
-poisson_logw, binomial_logw, multinomial_logw, euler_multinomial_logw
+poisson_logw, binomial_logw, nbinomial_logw, multinomial_logw,
+euler_multinomial_logw
     Log-weight increments of draws, for a DPOP model's ``_logw`` state.
 """
 
@@ -46,6 +47,7 @@ gammainv = gamma.gammainv
 
 poisson_logw = dpop.poisson_logw
 binomial_logw = dpop.binomial_logw
+nbinomial_logw = dpop.nbinomial_logw
 multinomial_logw = dpop.multinomial_logw
 euler_multinomial_logw = dpop.euler_multinomial_logw
 
@@ -60,6 +62,7 @@ __all__ = [
     "fast_poisson",
     "gammainv",
     "multinomial_logw",
+    "nbinomial_logw",
     "poisson_logw",
     "poissoninv",
 ]

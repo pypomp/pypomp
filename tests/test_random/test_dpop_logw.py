@@ -36,6 +36,45 @@ def test_logw_gradient_matches_logpmf(logw, logpmf, x, params):
     np.testing.assert_allclose(f(logw), f(logpmf), rtol=1e-5)
 
 
+def _nbinom_logpmf_mu(x, n, mu):
+    return stats.nbinom.logpmf(x, n, n / (n + mu))
+
+
+def _nbinom_logw_p(x, n, p):
+    return ppr.nbinomial_logw(x, n, p=p)
+
+
+def _nbinom_logw_mu(x, n, mu):
+    return ppr.nbinomial_logw(x, n, mu=mu)
+
+
+@pytest.mark.parametrize(
+    "logw, logpmf, theta",
+    [
+        (_nbinom_logw_p, stats.nbinom.logpmf, 0.06),
+        (_nbinom_logw_p, stats.nbinom.logpmf, 0.8),
+        (_nbinom_logw_mu, _nbinom_logpmf_mu, 0.3),
+        (_nbinom_logw_mu, _nbinom_logpmf_mu, 40.0),
+    ],
+    ids=["p-small", "p-large", "mu-small", "mu-large"],
+)
+def test_nbinomial_logw_gradient_matches_logpmf(logw, logpmf, theta):
+    """The gradient matches in both the size and the p or mu parameter."""
+    x, n = 6.0, 2.5
+
+    got = jax.grad(lambda n_, th: logw(x, n_, th), argnums=(0, 1))(n, theta)
+    want = jax.grad(lambda n_, th: logpmf(x, n_, th), argnums=(0, 1))(n, theta)
+
+    np.testing.assert_allclose(got, want, rtol=1e-5)
+
+
+def test_nbinomial_logw_requires_one_of_p_or_mu():
+    with pytest.raises(ValueError, match="Exactly one"):
+        ppr.nbinomial_logw(jnp.array(1.0), 2.0)
+    with pytest.raises(ValueError, match="Exactly one"):
+        ppr.nbinomial_logw(jnp.array(1.0), 2.0, p=0.5, mu=2.0)
+
+
 def test_euler_multinomial_logw_gradient_matches_logpmf():
     x = jnp.array([3.0, 1.0])
     n = jnp.array(40.0)
@@ -87,6 +126,7 @@ def test_logw_holds_draws_and_trials_fixed():
     assert dn == 0.0
     dx = jax.grad(ppr.multinomial_logw)(jnp.array([3.0, 1.0]), jnp.array([0.4, 0.6]))
     np.testing.assert_array_equal(dx, 0.0)
+    assert jax.grad(lambda x_: ppr.nbinomial_logw(x_, 2.5, mu=4.0))(x) == 0.0
 
 
 def test_logw_finite_at_zero_rates():
@@ -108,6 +148,10 @@ def test_logw_finite_at_zero_rates():
     value, grad = jax.value_and_grad(lambda lam: ppr.poisson_logw(zero, lam))(zero)
     assert jnp.isfinite(value) and jnp.isfinite(grad)
     value, grad = jax.value_and_grad(lambda p: ppr.binomial_logw(zero, 5.0, p))(zero)
+    assert jnp.isfinite(value) and jnp.isfinite(grad)
+    value, grad = jax.value_and_grad(lambda mu: ppr.nbinomial_logw(zero, 2.5, mu=mu))(
+        zero
+    )
     assert jnp.isfinite(value) and jnp.isfinite(grad)
 
 
@@ -136,3 +180,19 @@ def test_euler_multinomial_logw_layouts():
         jnp.stack([x0, x1], axis=-1), n, jnp.stack([r0, jnp.full(J, mu)], axis=-1), DT
     )
     np.testing.assert_allclose(stacked, want, rtol=1e-6)
+
+
+def test_nbinomial_logw_score_has_zero_mean_under_fast_nbinomial():
+    """The sampler and the log-weight share a parametrization: the score in
+    (n, mu) averages to zero over fast_nbinomial draws."""
+    n, mu, N = 2.5, 4.0, 200_000
+    x = ppr.fast_nbinomial(jax.random.key(0), jnp.full(N, n), mu=jnp.full(N, mu))
+
+    score = jax.vmap(
+        jax.grad(lambda n_, mu_, x_: ppr.nbinomial_logw(x_, n_, mu=mu_), (0, 1)),
+        in_axes=(None, None, 0),
+    )(n, mu, x)
+
+    for s in score:
+        se = jnp.std(s) / jnp.sqrt(N)
+        assert jnp.abs(jnp.mean(s)) < 4 * se

@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import gammaln
 
 # Floor on probabilities and rates before taking logs, so that a zero
 # probability gives a finite value and a zero gradient.
@@ -71,6 +72,45 @@ def binomial_logw(
     x = jax.lax.stop_gradient(x)
     n = jax.lax.stop_gradient(n)
     return x * _log(p) + (n - x) * _log(1.0 - p)
+
+
+def nbinomial_logw(
+    x: jax.Array,
+    n: jax.Array | float,
+    p: jax.Array | float | None = None,
+    mu: jax.Array | float | None = None,
+) -> jax.Array:
+    """DPOP log-weight of a negative binomial draw, such as from
+    :func:`~pypomp.random.fast_nbinomial`.
+
+    Parameters
+    ----------
+    x : jax.Array
+        The number of failures before ``n`` successes.
+    n : jax.Array or float
+        The size parameter.  Unlike the binomial's number of trials, it is
+        not held fixed, so its gradient is included.
+    p : jax.Array, float or None, optional
+        The success probability.  Mutually exclusive with ``mu``.
+    mu : jax.Array, float or None, optional
+        The mean, ``n * (1 - p) / p``.  Mutually exclusive with ``p``.
+
+    Returns
+    -------
+    jax.Array
+        ``lgamma(x + n) - lgamma(n) + n * log(p) + x * log(1 - p)``, with
+        ``p = n / (n + mu)`` when ``mu`` is given and ``x`` held fixed.
+    """
+    if (p is None) == (mu is None):
+        raise ValueError("Exactly one of p or mu must be provided.")
+    x = jax.lax.stop_gradient(x)
+    logw = gammaln(x + n) - gammaln(n)
+    if p is not None:
+        return logw + n * _log(p) + x * _log(1.0 - p)
+    assert mu is not None
+    # n / (n + mu) and mu / (n + mu) rather than 1 - p, which loses precision
+    # when mu is small relative to n.
+    return logw + n * _log(n / (n + mu)) + x * _log(mu / (n + mu))
 
 
 def multinomial_logw(x: jax.Array, p: jax.Array) -> jax.Array:

@@ -81,6 +81,30 @@ jobs:
       contents: write # push the tag and create the Release
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history and tags, for the release notes' commit range.
+          fetch-depth: 0
+
+      # Commits go to main without PRs, so GitHub's generated notes would be
+      # nearly empty. List user-facing conventional commits since the previous
+      # tag instead; test/ci/build/chore/style are omitted. Runs before any side
+      # effect so a failure here publishes nothing.
+      - name: Build release notes from commits
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          log=$(git log --format='- %s' "$PREV..HEAD")
+          section() {
+            lines=$(printf '%s\n' "$log" | grep -E "$2" || true)
+            if [ -n "$lines" ]; then printf '### %s\n%s\n\n' "$1" "$lines"; fi
+          }
+          {
+            section "Breaking changes" '^- [a-z]+(\([^)]*\))?!:'
+            section "Features"         '^- feat(\([^)]*\))?:'
+            section "Fixes"            '^- fix(\([^)]*\))?:'
+            section "Performance"      '^- perf(\([^)]*\))?:'
+            section "Changes"          '^- refactor(\([^)]*\))?:'
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
 
       - name: Download the tested distributions
         # Publishes the exact artifact the `build` job produced and smoke-tested
@@ -120,5 +144,7 @@ jobs:
         with:
           tag_name: ${{ needs.guard.outputs.tag }}
           files: dist/*
+          body_path: ${{ runner.temp }}/notes.md
+          # Appends the "Full Changelog" compare link after the notes above.
           generate_release_notes: true
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import (
     Any,
     Literal,
+    Self,
     cast,
     overload,
 )
@@ -14,10 +15,6 @@ import jax
 import numpy as np
 import xarray as xr
 
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
 from ..par_trans import ParTrans
 
 

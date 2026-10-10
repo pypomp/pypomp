@@ -17,12 +17,7 @@ def test_dpop_regression(sir_struct, tol, num_regression):
         theta_est
     )
 
-    # The gradient sums float32 score terms over every sampled transition, and
-    # XLA versions order those sums differently enough to move it by ~1e-4
-    # relative (jax 0.10 vs 0.11). MOP's process-parameter gradients are zero
-    # on this model, so a broken score term still shows up as an O(1) change.
     num_regression.check(
         {"dpop": np.asarray(value).ravel(), "grad": np.asarray(grad).ravel()},
         default_tolerance=tol,
-        tolerances={"grad": dict(tol, rtol=1e-3)},
     )

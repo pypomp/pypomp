@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       full-matrix:
-        description: "Test all supported Python versions (3.11-3.14)"
+        description: "Test all supported Python versions (3.12-3.14)"
         type: boolean
         default: false
       run-heavy:
@@ -79,7 +79,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         # Currently doesn't work on pypy due to dependencies.
         python-version: ${{ fromJSON(inputs.full-matrix
-          && '["3.11","3.12","3.13","3.14"]'
+          && '["3.12","3.13","3.14"]'
           || '["3.12","3.14"]') }}
     steps:
       - uses: actions/checkout@v5

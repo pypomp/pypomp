@@ -6,7 +6,7 @@ This document provides instructions for developers contributing to the Pypomp re
 
 ## 1. Local Environment Setup
 
-We recommend setting up a virtual environment using Python 3.14 (the primary target version configured for type checking). However, Python versions `[3.11, 3.12, 3.13]` are also fully supported.
+We recommend setting up a virtual environment using Python 3.14 (the primary target version configured for type checking). However, Python versions `[3.12, 3.13]` are also fully supported.
 
 To create and configure your local development environment:
 
@@ -174,7 +174,7 @@ Consecutive pushes cancel superseded runs, so only the latest commit is tested. 
 runs are exempt: release.yml passes a run-scoped `concurrency-key`, so a push to main cannot
 cancel a release in progress.
 
-To run the full Python matrix (3.11–3.14), the heavy tests, or the CPU parallel-scaling timings
+To run the full Python matrix (3.12–3.14), the heavy tests, or the CPU parallel-scaling timings
 without cutting a release, use **Actions → CI → Run workflow** and tick `full-matrix`,
 `run-heavy` and/or `run-cpu-scaling`. Doing this before a release is worthwhile, since heavy
 tests do not run on ordinary pushes. `run-cpu-scaling` is worth ticking after changes to the
@@ -223,7 +223,7 @@ Keep the two in sync by putting whatever form you want in `pyproject.toml` — a
 ```
 guard          version consistency; tag must not already exist; HEAD must be on main
   ↓
-ci.yml         full 3.11–3.14 matrix on Ubuntu and macOS, plus the heavy-test
+ci.yml         full 3.12–3.14 matrix on Ubuntu and macOS, plus the heavy-test
                job, checks / build / docs
   ↓
 publish        ⏸ pauses for manual approval

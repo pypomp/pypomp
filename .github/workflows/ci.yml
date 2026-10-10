@@ -108,7 +108,8 @@ jobs:
           echo "tag=$(echo "$model" | tr -cs 'A-Za-z0-9' '-' | sed 's/-$//')" >> "$GITHUB_OUTPUT"
 
       # Restore JAX compilation cache from main (restored entries are scoped to main to save cache space).
-      # Falls back to another CPU's cache, which still gives partial hits.
+      # No fallback to another CPU's cache: its entries never hit here, and
+      # every extra entry slows each cache write (see tools/prune_jax_cache.py).
       - uses: actions/cache/restore@v5
         id: jax-cache
         with:
@@ -116,7 +117,8 @@ jobs:
           key: jax-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
           restore-keys: |
             jax-${{ runner.os }}-${{ matrix.python-version }}-${{ steps.cpu.outputs.tag }}-
-            jax-${{ runner.os }}-${{ matrix.python-version }}-
+      - name: Record cache start time
+        run: echo "JAX_CACHE_SINCE_NS=$(python -c 'import time; print(time.time_ns())')" >> "$GITHUB_ENV"
 
       # Runner speed varies several-fold between jobs; record the hardware so
       # slow runs can be matched against it.
@@ -158,7 +160,11 @@ jobs:
           cat test-modules.log 2>/dev/null || echo "no module log"
           cat vmstat.log 2>/dev/null || true
 
-      # Save updated JAX compilation cache on main pushes, even if tests fail.
+      # Save updated JAX compilation cache on main pushes, even if tests fail,
+      # keeping only the entries this run used.
+      - name: Prune JAX cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
+        run: python tools/prune_jax_cache.py .pytest_cache/jax_cache "$JAX_CACHE_SINCE_NS"
       - uses: actions/cache/save@v5
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
         with:
@@ -204,11 +210,15 @@ jobs:
           key: jax-heavy-${{ runner.os }}-${{ steps.cpu.outputs.tag }}-${{ github.sha }}
           restore-keys: |
             jax-heavy-${{ runner.os }}-${{ steps.cpu.outputs.tag }}-
-            jax-heavy-${{ runner.os }}-
+      - name: Record cache start time
+        run: echo "JAX_CACHE_SINCE_NS=$(python -c 'import time; print(time.time_ns())')" >> "$GITHUB_ENV"
 
       - name: Test with pytest
         run: pytest -m heavy --cov --junitxml=junit.xml -o junit_family=legacy
 
+      - name: Prune JAX cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
+        run: python tools/prune_jax_cache.py .pytest_cache/jax_cache "$JAX_CACHE_SINCE_NS"
       - uses: actions/cache/save@v5
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.jax-cache.outputs.cache-hit != 'true' }}
         with:

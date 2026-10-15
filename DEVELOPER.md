@@ -163,6 +163,7 @@ Two workflows cover everything:
 | --- | --- |
 | `checks` | `pre-commit run --all-files` (ruff lint, ruff format, pyright) |
 | `test` | `pytest -m "not heavy"` on Python 3.12 and 3.14, Ubuntu and macOS |
+| `oldest-jax` | The same tests, except `tests/test_regression/`, on Python 3.12 with the JAX floor from `pyproject.toml` |
 | `build` | Builds the sdist and wheel, `twine check --strict`, installs the wheel into a clean venv and imports it |
 | `docs` | Builds the Sphinx documentation |
 

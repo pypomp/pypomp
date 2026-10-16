@@ -67,6 +67,8 @@ jobs:
           key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Run pre-commit
         run: pre-commit run --all-files --show-diff-on-failure
+      - name: Run docstring examples
+        run: pytest -o addopts="" --doctest-modules pypomp
 
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.python-version }})

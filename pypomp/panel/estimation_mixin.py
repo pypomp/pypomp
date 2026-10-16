@@ -28,9 +28,11 @@ from ..core.results import (
 from ..core.rw_sigma import RWSigma
 from ..functional.mop import _warn_dpop_experimental
 from ..functional.train import (
+    _nonfinite_replicates,
     _panel_train,
     _stalled_params,
     _warn_logw_without_dpop,
+    _warn_nonfinite_params,
     _warn_stalled_params,
 )
 from ..maths import logmeanexp
@@ -431,8 +433,10 @@ class PanelEstimationMixin(Base):
         theta : PanelParameters or None, optional
             Parameter sets to use.  If ``None``, defaults to ``self.theta``.
         thresh : float, optional
-            Resampling threshold.  If ``0.0`` (default), always resample at
-            each observation time.
+            Resampling threshold. Particles are resampled at an observation
+            time when the largest particle weight exceeds ``thresh`` times the
+            smallest. Values below 1, including the default ``0.0``, resample
+            at every observation time.
         reps : int, optional
             Number of replicates per parameter set.  Defaults to ``1``.
         chunk_size : int, optional
@@ -648,10 +652,19 @@ class PanelEstimationMixin(Base):
         theta : PanelParameters or None, optional
             Initial parameter estimates.  If ``None``, defaults to ``self.theta``.
         thresh : float, optional
-            Resampling threshold for the particle filter.  Defaults to ``0.0``.
+            Resampling threshold for the particle filter. Particles are
+            resampled at an observation time when the largest particle weight
+            exceeds ``thresh`` times the smallest. Values below 1, including
+            the default ``0.0``, resample at every observation time.
         n_monitors : int, optional
-            Number of unperturbed particle filter runs to estimate log-likelihood
-            at each iteration.  Defaults to ``0`` (use perturbed filter).
+            Number of unperturbed particle filter runs per unit averaged at
+            each iteration to replace that unit's perturbed log-likelihood in
+            the trace.  Defaults to ``0`` (keep the perturbed log-likelihoods).
+            Each unit's monitor is the unperturbed counterfactual of its
+            perturbed filter, estimated at the parameter means that filter
+            started from (including shared-parameter updates from earlier
+            units in the iteration), so row ``m``'s log-likelihoods are not
+            estimates at row ``m``'s parameters.
         block : bool, optional
             Whether to use block updates (MPIF).  If ``False``, uses standard PIF.
             Defaults to ``True``.
@@ -990,6 +1003,12 @@ class PanelEstimationMixin(Base):
             _stalled_params(np.asarray(shared_history_natural), eta, shared_index, M)
             + _stalled_params(np.asarray(unit_history_natural), eta, spec_index, M),
             dpop,
+            stacklevel=2,
+        )
+        _warn_nonfinite_params(
+            _nonfinite_replicates(
+                np.asarray(shared_history_natural), np.asarray(unit_history_natural)
+            ),
             stacklevel=2,
         )
 

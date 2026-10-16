@@ -74,8 +74,11 @@ def train(
     alpha_cooling : float, optional
         Cosine cooling multiplier for ``alpha``.  Defaults to ``1.0``.
     thresh : float, optional
-        ESS-based resampling threshold for the particle filters used by
-        ``n_monitors > 1`` and by line search.  Defaults to ``0.0``.
+        Resampling threshold for the particle filters used by ``n_monitors >
+        1`` and by line search. Particles are resampled at an observation time
+        when the largest particle weight exceeds ``thresh`` times the smallest.
+        Values below 1, including the default ``0.0``, resample at every
+        observation time.
     n_monitors : int, optional
         Number of unperturbed filter runs for log-likelihood monitoring.
         Defaults to ``1``.
@@ -184,6 +187,32 @@ def _warn_stalled_params(stalled: Sequence[str], dpop: bool, stacklevel: int) ->
         + hint
         + " A parameter that enters rinit only through rounding or random "
         "draws gets no gradient from MOP or DPOP; give it a learning rate of 0.",
+        UserWarning,
+        stacklevel=stacklevel + 1,
+    )
+
+
+def _nonfinite_replicates(*traces: np.ndarray) -> list[int]:
+    """Replicates whose parameter trace contains a NaN or infinite value.
+
+    Each trace has replicates on axis 0 and iterations on axis 1.
+    """
+    bad = np.zeros(traces[0].shape[0], dtype=bool)
+    for trace in traces:
+        trace = np.asarray(trace)
+        bad |= ~np.all(np.isfinite(trace.reshape(trace.shape[0], -1)), axis=1)
+    return [int(i) for i in np.flatnonzero(bad)]
+
+
+def _warn_nonfinite_params(replicates: Sequence[int], stacklevel: int) -> None:
+    """Warn that training produced non-finite parameter values."""
+    if not replicates:
+        return
+    warnings.warn(
+        f"Training produced NaN or infinite parameter values for replicate(s) "
+        f"{list(replicates)}, so the gradient was probably not finite. Check "
+        "rproc and dmeas for operations whose derivatives overflow, such as "
+        "sqrt or division near zero, or lower the learning rate.",
         UserWarning,
         stacklevel=stacklevel + 1,
     )

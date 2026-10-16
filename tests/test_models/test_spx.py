@@ -1,4 +1,5 @@
 import jax
+import numpy as np
 import pytest
 
 import pypomp as pp
@@ -58,3 +59,12 @@ def test_spx_vectorized():
     m_vec = pp.models.spx()
     assert m_vec.rproc._is_vectorized is True
     m_vec.pfilter(J=3, key=jax.random.key(1))
+
+
+def test_spx_train_stays_finite():
+    """MOP gradients of spx must be finite, or train turns every parameter NaN."""
+    spx_model = pp.models.spx()
+    eta = pp.LearningRate({n: 0.001 for n in spx_model.canonical_param_names})
+    spx_model.train(J=100, M=2, eta=eta, key=jax.random.key(1))
+    traces = spx_model.results_history[-1].traces_da.values
+    assert np.all(np.isfinite(traces)), traces

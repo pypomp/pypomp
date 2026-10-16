@@ -383,10 +383,12 @@ def lg(
 
     Examples
     --------
-    >>> lg()                                  # 2-D state, 2-D observation
-    >>> lg(A=np.array([[0.9]]))               # 1-D
-    >>> lg(A=np.eye(3), C=np.eye(2, 3))       # 3-D state, 2-D observation
-    >>> lg(X0=np.array([5.0, -5.0]))          # start away from the origin
+    >>> model = lg()                              # 2-D state, 2-D observation
+    >>> model = lg(A=np.array([[0.9]]))           # 1-D
+    >>> model = lg(X0=np.array([5.0, -5.0]))      # start away from the origin
+    >>> model = lg(A=np.eye(3), C=np.eye(2, 3))   # 3-D state, 2-D observation
+    >>> model.statenames
+    ['X1', 'X2', 'X3']
     """
     if key is None:
         key = jax.random.key(1)

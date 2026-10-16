@@ -12,6 +12,11 @@ from .pfilter import _vmapped_pfilter_internal
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
 
+# The perturbed filter's keys come from jax.random.split(key), which equal
+# fold_in(key, 0) and fold_in(key, 1), so monitors draw from fold_in(key, 2), a
+# stream it never touches.
+MONITOR_KEY_STREAM = 2
+
 
 def _mif_internal(
     theta: jax.Array,
@@ -81,10 +86,13 @@ def _mif_scan_body(
         context=context,
     )
 
-    # 2. Optionally run pfilter for unperturbed logLik
+    # 2. Optionally replace the perturbed logLik with its unperturbed
+    # counterfactual: a pfilter at the means this iteration started from.
     if context.n_monitors >= 1:
         current_theta_mean = jnp.mean(current_theta_Jd, axis=0)
-        mon_keys = jax.random.split(iter_key, context.n_monitors)
+        mon_keys = jax.random.split(
+            jax.random.fold_in(iter_key, MONITOR_KEY_STREAM), context.n_monitors
+        )
         neg_loglik_m = jnp.mean(
             _vmapped_pfilter_internal(
                 current_theta_mean,
@@ -227,7 +235,7 @@ def _perfilter_scan_body(
     norm_weights_updated, loglik_t = _normalize_weights(weights)
     loglik_updated = carry.loglik + loglik_t
 
-    # 7. Resample if necessary.
+    # 7. Resample when the largest weight exceeds thresh times the smallest.
     should_resample = jnp.max(norm_weights_updated) - jnp.min(
         norm_weights_updated
     ) > jnp.log(context.thresh)

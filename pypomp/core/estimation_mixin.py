@@ -17,9 +17,11 @@ from pypomp import functional as F
 from pypomp.core.algorithms.contexts import dpop_state_index
 from pypomp.functional.mop import _warn_dpop_experimental
 from pypomp.functional.train import (
+    _nonfinite_replicates,
     _stalled_params,
     _train,
     _warn_logw_without_dpop,
+    _warn_nonfinite_params,
     _warn_stalled_params,
 )
 from pypomp.maths import logmeanexp
@@ -137,8 +139,10 @@ class PompEstimationMixin(Base):
         theta : PompParameters or None, optional
             Parameter set(s) to evaluate.  Defaults to :attr:`theta`.
         thresh : float, optional
-            ESS-based resampling threshold in the interval :math:`[0, 1]`.
-            Defaults to ``0.0`` (resample at every step).
+            Resampling threshold. Particles are resampled at an observation
+            time when the largest particle weight exceeds ``thresh`` times the
+            smallest. Values below 1, including the default ``0.0``, resample
+            at every observation time.
         reps : int, optional
             Number of independent filter replicates per parameter set.
             Defaults to ``1``.
@@ -168,9 +172,12 @@ class PompEstimationMixin(Base):
 
         Examples
         --------
-        >>> model.fresh_key = jax.random.key(0)
-        >>> model.pfilter(J=1000)
-        >>> model.results()  # DataFrame with logLik and parameter columns
+        >>> import jax
+        >>> import pypomp as pp
+        >>> model = pp.models.lg()
+        >>> model.pfilter(J=100, key=jax.random.key(0))
+        >>> model.results().columns.tolist()[:3]  # then one column per parameter
+        ['theta_idx', 'logLik', 'se']
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -309,12 +316,18 @@ class PompEstimationMixin(Base):
         theta : PompParameters or None, optional
             Starting parameter set(s).  Defaults to :attr:`theta`.
         thresh : float, optional
-            ESS-based resampling threshold in the interval :math:`[0, 1]`.
-            Defaults to ``0.0``.
+            Resampling threshold. Particles are resampled at an observation
+            time when the largest particle weight exceeds ``thresh`` times the
+            smallest. Values below 1, including the default ``0.0``, resample
+            at every observation time.
         n_monitors : int, optional
-            Number of unperturbed particle filter runs to average for the
-            log-likelihood monitor at each iteration.  Defaults to ``0``
-            (uses the log-likelihood from the perturbed filter directly).
+            Number of unperturbed particle filter runs averaged at each
+            iteration to replace the perturbed log-likelihood in the trace.
+            Defaults to ``0`` (keep the perturbed log-likelihood).  The monitor
+            is the iteration's unperturbed counterfactual: it is estimated at
+            the parameter means the iteration started from, so row ``m``'s
+            ``logLik`` is estimated at row ``m - 1``'s parameters, and the
+            updated ``theta.logLik`` at the second-to-last row's.
 
         Returns
         -------
@@ -336,10 +349,14 @@ class PompEstimationMixin(Base):
 
         Examples
         --------
-        >>> rw = pp.RWSigma({"beta": 0.02, "gamma": 0.01}).geometric_cooling(0.5)
-        >>> model.fresh_key = jax.random.key(0)
-        >>> model.mif(J=1000, M=50, rw_sd=rw)
-        >>> model.traces()  # DataFrame with logLik and parameter traces
+        >>> import jax
+        >>> import pypomp as pp
+        >>> model = pp.models.lg()
+        >>> sigmas = {name: 0.02 for name in model.canonical_param_names}
+        >>> rw = pp.RWSigma(sigmas).geometric_cooling(0.5)
+        >>> model.mif(J=100, M=2, rw_sd=rw, key=jax.random.key(0))
+        >>> model.traces()["iteration"].tolist()  # logLik and parameter traces
+        [0, 1, 2]
         """
         start_time = time.time()
         thresh = float(max(0.0, thresh))
@@ -497,8 +514,11 @@ class PompEstimationMixin(Base):
             MOP discount factor controlling the bias-variance trade-off.
             Defaults to ``0.97``.
         thresh : float, optional
-            ESS-based resampling threshold for the particle filters used by
-            ``n_monitors > 1`` and by line search.  Defaults to ``0.0``.
+            Resampling threshold for the particle filters used by ``n_monitors
+            > 1`` and by line search. Particles are resampled at an observation
+            time when the largest particle weight exceeds ``thresh`` times the
+            smallest. Values below 1, including the default ``0.0``, resample
+            at every observation time.
         alpha_cooling : float, optional
             Cosine cooling multiplier for ``alpha``.  At the end of
             training, ``alpha`` is moved ``alpha_cooling`` of the way from
@@ -536,10 +556,13 @@ class PompEstimationMixin(Base):
 
         Examples
         --------
-        >>> eta = pp.LearningRate({"beta": 0.01, "gamma": 0.005})
-        >>> model.fresh_key = jax.random.key(0)
-        >>> model.train(J=100, M=200, eta=eta)
-        >>> model.results()
+        >>> import jax
+        >>> import pypomp as pp
+        >>> model = pp.models.lg()
+        >>> eta = pp.LearningRate({name: 0.01 for name in model.canonical_param_names})
+        >>> model.train(J=100, M=2, eta=eta, key=jax.random.key(0))
+        >>> model.traces()["iteration"].tolist()
+        [0, 1, 2]
         """
         if dpop:
             _warn_dpop_experimental(stacklevel=2)
@@ -593,6 +616,7 @@ class PompEstimationMixin(Base):
             dpop,
             stacklevel=2,
         )
+        _warn_nonfinite_params(_nonfinite_replicates(theta_traces), stacklevel=2)
 
         joined_array = xr.DataArray(
             np.concatenate(
@@ -674,7 +698,10 @@ class PompEstimationMixin(Base):
         theta : PompParameters, optional
             Starting parameter values. Defaults to :attr:`theta`.
         thresh : float, default 0.0
-            Adaptive resampling threshold passed to the particle filter.
+            Resampling threshold for the particle filter. Particles are
+            resampled at an observation time when the largest particle weight
+            exceeds ``thresh`` times the smallest. Values below 1, including
+            the default ``0.0``, resample at every observation time.
 
         Returns
         -------
@@ -965,9 +992,12 @@ class PompEstimationMixin(Base):
 
         Examples
         --------
-        >>> model.fresh_key = jax.random.key(1)
-        >>> states, obs = model.simulate(nsim=50)
-        >>> obs.head()
+        >>> import jax
+        >>> import pypomp as pp
+        >>> model = pp.models.lg()
+        >>> states, obs = model.simulate(nsim=2, key=jax.random.key(1))
+        >>> obs.columns.tolist()
+        ['theta_idx', 'sim', 'time', 'Y1', 'Y2']
         """
         if as_pomp:
             if nsim > 1:

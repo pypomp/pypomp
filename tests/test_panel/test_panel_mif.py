@@ -367,3 +367,30 @@ def test_panel_mif_untiled_holds_one_swarm():
     )
     # The final swarm output is one swarm; a second copy would push this past 2x.
     assert total < 2.0 * swarm_bytes
+
+
+def test_panel_mif_monitor_is_at_the_iteration_start():
+    """Each unit's monitored logLik in row m is estimated where iteration m started."""
+    panel = lg_panel(sharing="none", n_units=2)
+    theta0 = panel.theta
+    sigmas = {n: 0.0 for n in panel.canonical_param_names}
+    sigmas["R11"] = sigmas["R22"] = 2.0
+    panel.mif(
+        J=2000,
+        M=1,
+        rw_sd=pp.RWSigma(sigmas, init_names=[]),
+        key=jax.random.key(3),
+        n_monitors=8,
+    )
+    traces = panel.traces()
+    theta1 = panel.theta
+
+    def unit_logliks(theta):
+        panel.pfilter(J=2000, reps=8, theta=theta, key=jax.random.key(9))
+        return np.asarray(panel.theta.logLik_unit)[0]
+
+    ll0, ll1 = unit_logliks(theta0), unit_logliks(theta1)
+    for i, unit in enumerate(panel.get_unit_names()):
+        row = traces[(traces["unit"] == unit) & (traces["iteration"] == 1)]
+        reported = float(row["logLik"].iloc[0])
+        assert abs(reported - ll0[i]) < abs(reported - ll1[i])

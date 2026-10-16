@@ -36,8 +36,8 @@ def align_params(
     >>> import jax.numpy as jnp
     >>> import pypomp.functional as F
     >>> params = {"beta": jnp.array(0.5), "gamma": jnp.array(0.1)}
-    >>> F.align_params(params, names=["gamma", "beta"])
-    Array([0.1, 0.5], dtype=float32)
+    >>> print(F.align_params(params, names=["gamma", "beta"]))
+    [0.1 0.5]
     """
     try:
         return jnp.stack([jnp.asarray(params[name]) for name in names], axis=axis)

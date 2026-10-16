@@ -9,6 +9,7 @@ import pypomp as pp
 import pypomp.functional as F
 from pypomp.core.algorithms.contexts import MifContext
 from pypomp.core.algorithms.mif import _jv_mif_internal
+from tests.helpers.lg_accuracy import lg_1d
 
 
 @pytest.fixture(scope="module")
@@ -261,3 +262,32 @@ def test_mif_untiled_holds_one_swarm():
     # so only require that tiling inside the jit is cheaper.
     tiled = jnp.repeat(thetas[:, None], J, axis=1)
     assert total_bytes(thetas) < total_bytes(tiled)
+
+
+def test_mif_monitor_is_at_the_iteration_start():
+    """With n_monitors, row m's logLik is estimated where iteration m started."""
+    model = lg_1d(0.9, 0.3, 0.3, T=60, key=jax.random.key(4))
+    start = dict(model.theta[0], R11=3.0)
+    sigmas = {n: 0.0 for n in model.canonical_param_names}
+    sigmas["R11"] = 0.4
+    model.mif(
+        J=2000,
+        M=1,
+        rw_sd=pp.RWSigma(sigmas, init_names=[]),
+        theta=pp.PompParameters(start),
+        key=jax.random.key(2),
+        n_monitors=8,
+    )
+    rows = model.results_history[-1].traces_da.sel(theta_idx=0)
+    reported = float(rows.sel(iteration=1, variable="logLik"))
+
+    def loglik_at(iteration):
+        theta = {n: float(rows.sel(iteration=iteration, variable=n)) for n in start}
+        model.pfilter(
+            J=2000, reps=8, theta=pp.PompParameters(theta), key=jax.random.key(9)
+        )
+        return float(model.results_history[-1].logLiks.values.mean())
+
+    ll0, ll1 = loglik_at(0), loglik_at(1)
+    assert abs(ll1 - ll0) > 10
+    assert abs(reported - ll0) < 1

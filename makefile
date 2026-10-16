@@ -1,4 +1,4 @@
-.PHONY: test-light test-heavy test-all test-cpu-scaling bump check-version
+.PHONY: test-light test-heavy test-all test-doctest test-cpu-scaling bump check-version
 
 test-light:
 	.venv/bin/pytest -m "not heavy"
@@ -8,6 +8,11 @@ test-heavy:
 
 test-all:
 	.venv/bin/pytest
+
+# Run the examples in the package's docstrings. pytest.ini's addopts are
+# dropped because they parallelize over test files, not docstrings.
+test-doctest:
+	.venv/bin/pytest -o addopts="" --doctest-modules pypomp
 
 # Wall-clock CPU parallel-scaling checks. They time particle filters, so they
 # need the machine to themselves: `-n 0` keeps xdist from filling every core

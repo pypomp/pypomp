@@ -3,6 +3,7 @@ This file contains the classes for components that define the model mechanics.
 """
 
 import inspect
+import types
 from collections.abc import Callable
 from functools import partial
 from typing import (
@@ -110,6 +111,90 @@ def _align_by_type(user_func: Callable, internal_order: list[str]) -> dict[str, 
             f"Could not map arguments for: {missing}. Use pypomp.types or exact names."
         )
     return name_mapping
+
+
+# --- Function Equality ---
+
+
+def _code_names(code: types.CodeType) -> set[str]:
+    """Global and attribute names used by ``code`` and any code nested in it."""
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _code_names(const)
+    return names
+
+
+def _same_value(a: Any, b: Any, seen: set[tuple[int, int]]) -> bool:
+    """Whether two values captured by model functions are interchangeable."""
+    if a is b:
+        return True
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, types.FunctionType):
+        return _same_function(a, b, seen)
+    if isinstance(a, types.ModuleType):
+        return a.__name__ == b.__name__
+    if isinstance(a, (np.ndarray, jax.Array)):
+        return (
+            a.shape == b.shape
+            and a.dtype == b.dtype
+            and bool(np.array_equal(np.asarray(a), np.asarray(b)))
+        )
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
+
+
+def _same_function(f: Callable, g: Callable, seen: set[tuple[int, int]]) -> bool:
+    """Structural equality of plain Python functions.
+
+    Unpickling a function defined in ``__main__`` (or a notebook) creates a new
+    function object, so identity would make a model unequal to its own pickled
+    copy. Two functions are treated as equal when they have the same code,
+    defaults, closure contents, attributes, and referenced globals.
+    """
+    if f is g:
+        return True
+    if not (isinstance(f, types.FunctionType) and isinstance(g, types.FunctionType)):
+        return f == g
+    pair = (id(f), id(g))
+    if pair in seen:
+        return True
+    seen.add(pair)
+    if (
+        f.__code__ != g.__code__
+        or f.__qualname__ != g.__qualname__
+        or f.__module__ != g.__module__
+    ):
+        return False
+    if not _same_value(f.__defaults__, g.__defaults__, seen):
+        return False
+    if not _same_value(f.__kwdefaults__, g.__kwdefaults__, seen):
+        return False
+    if f.__dict__.keys() != g.__dict__.keys() or not all(
+        _same_value(f.__dict__[k], g.__dict__[k], seen) for k in f.__dict__
+    ):
+        return False
+    f_cells, g_cells = f.__closure__ or (), g.__closure__ or ()
+    if len(f_cells) != len(g_cells) or not all(
+        _same_value(a.cell_contents, b.cell_contents, seen)
+        for a, b in zip(f_cells, g_cells, strict=True)
+    ):
+        return False
+    for name in _code_names(f.__code__):
+        in_f, in_g = name in f.__globals__, name in g.__globals__
+        if in_f != in_g:
+            return False
+        if in_f and not _same_value(f.__globals__[name], g.__globals__[name], seen):
+            return False
+    return True
+
+
+def same_callable(f: Any, g: Any) -> bool:
+    """Whether two model functions (or ``None``) are interchangeable."""
+    return _same_value(f, g, set())
 
 
 # --- Base Component Class ---
@@ -299,7 +384,7 @@ class _ModelComponent:
         return (
             self.statenames == other.statenames  # type: ignore[attr-defined]
             and self.param_names == other.param_names  # type: ignore[attr-defined]
-            and self.original_func == other.original_func  # type: ignore[attr-defined]
+            and same_callable(self.original_func, other.original_func)  # type: ignore[attr-defined]
         )
 
 

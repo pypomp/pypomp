@@ -185,7 +185,10 @@ def fast_binomial(
     >>> from pypomp.random.binom import fast_binomial
     >>> key = jax.random.key(0)
     >>> fast_binomial(key, n=10, p=0.3)
-    Array(3., dtype=float32)
+    Array(..., dtype=float32)
+    >>> draws = fast_binomial(key, n=jax.numpy.full(100_000, 10.0), p=0.3)
+    >>> round(float(draws.mean()), 1)
+    3.0
     """
     dtype = check_and_canonicalize_user_dtype(float if dtype is None else dtype)
     assert dtype is not None

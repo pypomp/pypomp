@@ -610,50 +610,46 @@ def run_jax_batch_sharded(
         The outputs of `func`, merged and sliced back to the original replicate count.
 
     Examples:
-        **Example 1: Setting up multi-device CPU parallelization**
-        Configure the environment before importing JAX to simulate a multi-core CPU cluster:
+        Both examples must set ``XLA_FLAGS`` before JAX is first imported, so
+        run them as fresh scripts.
 
-        >>> import os
-        >>> os.environ["JAX_PLATFORMS"] = "cpu"
-        >>> os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
-        >>>
-        >>> import jax
-        >>> import pypomp as pp
-        >>>
-        >>> model = pp.models.lg()
-        >>> # If we run 10 replicates, run_jax_batch_sharded executes them in parallel
-        >>> # batches of 4 (i.e., batches of [4, 4, 4] where the last 2 replicates are padded).
-        >>> model.pfilter(J=1000, reps=10)
+        **Example 1: CPU parallelization through Pomp.** Only parameter sets
+        are sharded; ``reps`` run sequentially on each device.
 
-        **Example 2: Direct call to run_jax_batch_sharded**
-        We can run a custom sharded function across devices. Here is a simple example using 4 CPU cores:
+        .. code-block:: python
 
-        >>> import os
-        >>> os.environ["JAX_PLATFORMS"] = "cpu"
-        >>> os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
-        >>> import jax
-        >>> import jax.numpy as jnp
-        >>> from pypomp.core.algorithms.helpers import run_jax_batch_sharded
-        >>>
-        >>> # Define a simple function that adds a constant to a sharded input array
-        >>> def add_const(x, c):
-        ...     return x + c
-        >>>
-        >>> # Input data: 10 replicates, sharded along axis 0
-        >>> x = jnp.arange(10.0)
-        >>> const = 5.0
-        >>>
-        >>> # Call the helper. Shard axis of the 1st positional argument (index 0) is 0.
-        >>> # The output is also sharded along axis 0.
-        >>> result = run_jax_batch_sharded(
-        ...     add_const,
-        ...     shard_axes={0: 0},
-        ...     shard_output_axes=0,
-        ...     x,
-        ...     const
-        ... )
-        >>> print(result)
-        [ 5.  6.  7.  8.  9. 10. 11. 12. 13. 14.]
+            import os
+
+            os.environ["JAX_PLATFORMS"] = "cpu"
+            os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
+
+            import jax
+            import pypomp as pp
+
+            model = pp.models.lg()
+            # 10 parameter sets on 4 devices: three batches of 4, the last
+            # padded with 2 copies of the final set and then discarded.
+            theta = pp.PompParameters([model.theta[0]] * 10)
+            model.pfilter(J=1000, theta=theta, key=jax.random.key(0))
+
+        **Example 2: calling run_jax_batch_sharded directly.**
+
+        .. code-block:: python
+
+            import os
+
+            os.environ["JAX_PLATFORMS"] = "cpu"
+            os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=4"
+
+            import jax.numpy as jnp
+            from pypomp.core.algorithms.helpers import run_jax_batch_sharded
+
+            def add_const(x, c):
+                return x + c
+
+            # Shard axis 0 of positional argument 0; the output is sharded on axis 0.
+            result = run_jax_batch_sharded(add_const, {0: 0}, 0, jnp.arange(10.0), 5.0)
+            print(result)  # [ 5.  6.  7.  8.  9. 10. 11. 12. 13. 14.]
     """
     devices = jax.devices()
     num_devices = len(devices)

@@ -155,7 +155,7 @@ def _pfilter_step(
         prediction_mean_t = particlesP.mean(axis=0)
         prediction_mean_arr = prediction_mean_arr.at[i].set(prediction_mean_t)
 
-    # 7. Resample particles if criteria met.
+    # 7. Resample when the largest weight exceeds thresh times the smallest.
     resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(context.thresh)
     key, subkey = jax.random.split(key)
     counts, particlesF, norm_weights = jax.lax.cond(

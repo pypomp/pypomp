@@ -65,7 +65,10 @@ def fast_gamma(
     >>> import jax.numpy as jnp
     >>> from pypomp.random import fast_gamma
     >>> fast_gamma(jax.random.key(0), alpha=jnp.array(2.0))
-    Array(1.8..., dtype=float32)
+    Array(..., dtype=float32)
+    >>> draws = fast_gamma(jax.random.key(0), alpha=jnp.full(100_000, 2.0))
+    >>> round(float(draws.mean()), 1)
+    2.0
 
     References
     ----------

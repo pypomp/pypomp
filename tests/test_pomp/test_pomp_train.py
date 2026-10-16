@@ -1,10 +1,14 @@
+import warnings
 from copy import deepcopy
 
 import jax
+import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
+from tests.helpers.dummy import dummy_dmeas, dummy_rinit
 
 
 @pytest.fixture(scope="module")
@@ -231,3 +235,35 @@ def test_train_final_theta_loglik_1d_and_pruned(simple):
     assert pruned.logLik.ndim == 1
     assert pruned.logLik.shape == (1,)
     assert pruned.num_replicates() == 1
+
+
+def _nan_grad_rproc(X_, theta_, key, covars, t, dt):
+    # sqrt(sigma - sigma) is zero, but its derivative is inf * 0 = NaN.
+    drift = jnp.sqrt(theta_["sigma"] - theta_["sigma"])
+    return {"X": X_["X"] + drift + theta_["sigma"] * jax.random.normal(key, ())}
+
+
+def test_train_warns_on_nonfinite_params():
+    """A NaN gradient turns the parameters NaN; train should say so."""
+    model = pp.Pomp(
+        ys=pd.DataFrame({"y": [1.0, 2.0, 1.5]}, index=[1.0, 2.0, 3.0]),
+        theta=pp.PompParameters({"X0": 0.0, "sigma": 0.5}),
+        rinit=dummy_rinit,
+        rproc=_nan_grad_rproc,
+        dmeas=dummy_dmeas,
+        statenames=["X"],
+        t0=0.0,
+        nstep=1,
+    )
+    eta = pp.LearningRate({"X0": 0.01, "sigma": 0.01})
+    with pytest.warns(UserWarning, match="NaN or infinite parameter values"):
+        model.train(J=10, M=2, eta=eta, key=jax.random.key(0))
+    assert np.isnan(model.results_history[-1].traces_da.values).any()
+
+
+def test_train_finite_run_does_not_warn_nonfinite(simple):
+    LG, ys, covars, theta, J, key, M = simple
+    eta = pp.LearningRate({param: 0.01 for param in LG.canonical_param_names})
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*NaN or infinite parameter.*")
+        LG.train(J=J, M=M, eta=eta, key=key)

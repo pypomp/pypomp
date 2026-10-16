@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from pypomp.core.model_mechanics import same_callable
 from pypomp.core.pomp import Pomp
 
 if TYPE_CHECKING:
@@ -40,24 +41,29 @@ class PanelValidationMixin(Base):
                 raise ValueError("All units must have the same covar_names")
             if unit_obj.par_trans != unit_objs[0].par_trans:
                 raise ValueError("All units must have the same par_trans")
-            if getattr(unit_obj.rinit, "original_func", unit_obj.rinit) != getattr(
-                unit_objs[0].rinit, "original_func", unit_objs[0].rinit
+            if not same_callable(
+                getattr(unit_obj.rinit, "original_func", unit_obj.rinit),
+                getattr(unit_objs[0].rinit, "original_func", unit_objs[0].rinit),
             ):
                 raise ValueError("All units must have the same rinit")
-            if getattr(unit_obj.rproc, "original_func", unit_obj.rproc) != getattr(
-                unit_objs[0].rproc, "original_func", unit_objs[0].rproc
+            if not same_callable(
+                getattr(unit_obj.rproc, "original_func", unit_obj.rproc),
+                getattr(unit_objs[0].rproc, "original_func", unit_objs[0].rproc),
             ):
                 raise ValueError("All units must have the same rproc")
-            if getattr(unit_obj.dmeas, "original_func", unit_obj.dmeas) != getattr(
-                unit_objs[0].dmeas, "original_func", unit_objs[0].dmeas
+            if not same_callable(
+                getattr(unit_obj.dmeas, "original_func", unit_obj.dmeas),
+                getattr(unit_objs[0].dmeas, "original_func", unit_objs[0].dmeas),
             ):
                 raise ValueError("All units must have the same dmeas")
-            if getattr(unit_obj.rmeas, "original_func", unit_obj.rmeas) != getattr(
-                unit_objs[0].rmeas, "original_func", unit_objs[0].rmeas
+            if not same_callable(
+                getattr(unit_obj.rmeas, "original_func", unit_obj.rmeas),
+                getattr(unit_objs[0].rmeas, "original_func", unit_objs[0].rmeas),
             ):
                 raise ValueError("All units must have the same rmeas")
-            if getattr(unit_obj.dprior, "original_func", unit_obj.dprior) != getattr(
-                unit_objs[0].dprior, "original_func", unit_objs[0].dprior
+            if not same_callable(
+                getattr(unit_obj.dprior, "original_func", unit_obj.dprior),
+                getattr(unit_objs[0].dprior, "original_func", unit_objs[0].dprior),
             ):
                 raise ValueError("All units must have the same dprior")
 

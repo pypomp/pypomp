@@ -51,10 +51,15 @@ def mif(
     keys : jax.Array
         Random keys of shape ``(n_reps, ...)``.
     thresh : float, optional
-        ESS-based resampling threshold.  Defaults to ``0.0``.
+        Resampling threshold. Particles are resampled at an observation time
+        when the largest particle weight exceeds ``thresh`` times the smallest.
+        Values below 1, including the default ``0.0``, resample at every
+        observation time.
     n_monitors : int, optional
-        Number of unperturbed filter runs for log-likelihood monitoring.
-        Defaults to ``0``.
+        Number of unperturbed filter runs averaged at each iteration to
+        replace the perturbed log-likelihood.  Defaults to ``0``.  The monitor
+        is the iteration's unperturbed counterfactual, estimated at the
+        parameter means the iteration started from.
     return_swarm : bool, optional
         Whether to transform and return the final particle swarm.  Defaults to
         ``True``.
@@ -62,9 +67,12 @@ def mif(
     Returns
     -------
     tuple of (jax.Array, jax.Array, jax.Array)
-        - Log-likelihood history of shape ``(n_reps, M)``.
+        - Log-likelihood history of shape ``(n_reps, M)``.  Entry ``m``
+          belongs to iteration ``m``, whose parameters are row ``m + 1`` of
+          the trace; with monitors, it is estimated at row ``m``, where the
+          iteration started.
         - Parameter trace history of shape ``(n_reps, M+1, n_params)``
-        - on the natural scale.
+          on the natural scale.
         - Final particle swarm of shape ``(n_reps, J, n_params)`` on the
           natural scale (or zero-sized if ``return_swarm=False``).
 
@@ -189,12 +197,17 @@ def panel_mif(
     keys : jax.Array
         Random keys of shape ``(n_reps, ...)``.
     thresh : float, optional
-        Resampling threshold.  Defaults to ``0.0``.
+        Resampling threshold. Particles are resampled at an observation time
+        when the largest particle weight exceeds ``thresh`` times the smallest.
+        Values below 1, including the default ``0.0``, resample at every
+        observation time.
     block : bool, optional
         Whether to use block updates (MPIF).  Defaults to ``True``.
     n_monitors : int, optional
-        Number of monitor runs to perform at each iteration.  Defaults to
-        ``0``.
+        Number of unperturbed filter runs per unit averaged at each iteration
+        to replace that unit's perturbed log-likelihood.  Defaults to ``0``.
+        Each unit's monitor is the unperturbed counterfactual of its perturbed
+        filter, estimated at the parameter means that filter started from.
     return_swarm : bool, optional
         Whether to transform and return the final swarms.  Defaults to ``True``.
 

@@ -42,7 +42,10 @@ def pfilter(
     keys : jax.Array
         Random keys of shape ``(n_reps, reps, ...)``.
     thresh : float, optional
-        ESS-based resampling threshold.  Defaults to ``0.0``.
+        Resampling threshold. Particles are resampled at an observation time
+        when the largest particle weight exceeds ``thresh`` times the smallest.
+        Values below 1, including the default ``0.0``, resample at every
+        observation time.
     CLL : bool, optional
         Compute conditional log-likelihoods.  Defaults to ``False``.
     ESS : bool, optional
@@ -120,7 +123,10 @@ def panel_pfilter(
     keys : jax.Array
         Random keys of shape ``(n_reps, U_padded, ...)``.
     thresh : float, optional
-        Resampling threshold.  Defaults to ``0.0``.
+        Resampling threshold. Particles are resampled at an observation time
+        when the largest particle weight exceeds ``thresh`` times the smallest.
+        Values below 1, including the default ``0.0``, resample at every
+        observation time.
     chunk_size : int, optional
         Number of units to process per chunk.  Defaults to ``1``.
     CLL : bool, optional

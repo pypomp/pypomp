@@ -18,6 +18,10 @@ on:
         description: "Run the CPU parallel-scaling timings (needs an idle runner)"
         type: boolean
         default: false
+      run-oldest-jax:
+        description: "Test against the JAX floor declared in pyproject.toml"
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       full-matrix:
@@ -27,6 +31,9 @@ on:
         type: boolean
         default: false
       run-cpu-scaling:
+        type: boolean
+        default: false
+      run-oldest-jax:
         type: boolean
         default: false
       concurrency-key:
@@ -183,6 +190,9 @@ jobs:
 
   oldest-jax:
     name: Test (oldest supported JAX)
+    # Opt-in, run by releases: the floor changes rarely, so per-push runs add
+    # little signal for a cold-cache job.
+    if: ${{ inputs.run-oldest-jax }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:

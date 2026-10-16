@@ -26,12 +26,11 @@ keywords = ["POMP", "state-space models", "particle filter", "iterated filtering
 
 dependencies = [
     "jax>=0.8.0",
-    "tqdm>=4.66.4",
-    "numpy>=1.24",
-    "pandas",
-    "xarray",
-    "scipy",
-    "cloudpickle"
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "pandas>=2.2.2",
+    "xarray>=2024.10.0",
+    "cloudpickle>=3.0",
 ]
 
 [project.optional-dependencies]

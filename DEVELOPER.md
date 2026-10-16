@@ -174,17 +174,19 @@ Consecutive pushes cancel superseded runs, so only the latest commit is tested. 
 runs are exempt: release.yml passes a run-scoped `concurrency-key`, so a push to main cannot
 cancel a release in progress.
 
-To run the full Python matrix (3.12–3.14), the heavy tests, the oldest-JAX tests, or the CPU
+To run the full Python matrix (3.12–3.14), the heavy tests, the oldest-dependency tests, or the CPU
 parallel-scaling timings without cutting a release, use **Actions → CI → Run workflow** and tick
-`full-matrix`, `run-heavy`, `run-oldest-jax` and/or `run-cpu-scaling`. Doing this before a release is worthwhile, since heavy
-tests do not run on ordinary pushes. `run-cpu-scaling` is worth ticking after changes to the
-sharding code in `pypomp/core/algorithms/helpers.py`; note that a busy shared runner can fail
-those timings on its own.
+`full-matrix`, `run-heavy`, `run-oldest-deps` and/or `run-cpu-scaling`. Doing this before a
+release is worthwhile, since heavy tests do not run on ordinary pushes. `run-cpu-scaling` is
+worth ticking after changes to the sharding code in `pypomp/core/algorithms/helpers.py`; note
+that a busy shared runner can fail those timings on its own.
 
-The oldest-JAX job installs exactly the `jax>=` floor from `pyproject.toml` and runs the light
-tests on Python 3.12, skipping `tests/test_regression/`: those baselines are recorded with the
-latest JAX and differ at float32 rounding level on older releases. Releases run it, so a release
-cannot claim a floor that no longer works; tick `run-oldest-jax` after raising the floor.
+The oldest-dependency job pins every runtime dependency to its `>=` floor in `pyproject.toml`
+(via `tools/dependency_floors.py`, which rejects a dependency without one), installs them
+together on Python 3.12, and runs the light tests, skipping `tests/test_regression/`: those
+baselines are recorded with the latest JAX and differ at float32 rounding level on older
+releases. Releases run it, so a release cannot claim a floor that no longer works; tick
+`run-oldest-deps` after changing a floor or adding a dependency.
 
 Heavy tests run in their own single-cell job (Ubuntu, 3.14) rather than across the matrix:
 accuracy and convergence results should not vary by interpreter or OS, so running them on every
@@ -229,7 +231,7 @@ Keep the two in sync by putting whatever form you want in `pyproject.toml` — a
 guard          version consistency; tag must not already exist; HEAD must be on main
   ↓
 ci.yml         full 3.12–3.14 matrix on Ubuntu and macOS, plus the heavy-test
-               and oldest-JAX jobs, checks / build / docs
+               and oldest-dependency jobs, checks / build / docs
   ↓
 publish        ⏸ pauses for manual approval
   ↓            downloads the distributions ci.yml already built and smoke-tested

@@ -18,8 +18,8 @@ on:
         description: "Run the CPU parallel-scaling timings (needs an idle runner)"
         type: boolean
         default: false
-      run-oldest-jax:
-        description: "Test against the JAX floor declared in pyproject.toml"
+      run-oldest-deps:
+        description: "Test against the dependency floors declared in pyproject.toml"
         type: boolean
         default: false
   workflow_call:
@@ -33,7 +33,7 @@ on:
       run-cpu-scaling:
         type: boolean
         default: false
-      run-oldest-jax:
+      run-oldest-deps:
         type: boolean
         default: false
       concurrency-key:
@@ -188,11 +188,11 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  oldest-jax:
-    name: Test (oldest supported JAX)
-    # Opt-in, run by releases: the floor changes rarely, so per-push runs add
+  oldest-deps:
+    name: Test (oldest supported dependencies)
+    # Opt-in, run by releases: the floors change rarely, so per-push runs add
     # little signal for a cold-cache job.
-    if: ${{ inputs.run-oldest-jax }}
+    if: ${{ inputs.run-oldest-deps }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -201,14 +201,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      # Install the JAX floor declared in pyproject.toml so the two cannot drift.
+      # Floors interact (e.g. pandas and NumPy), so all of them are installed
+      # together, read from pyproject.toml so the two cannot drift.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[tests,benchmarks,viz]"
-          floor=$(python -c "import tomllib; deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print(next(d.removeprefix('jax>=') for d in deps if d.startswith('jax>=')))")
-          python -m pip install "jax==$floor" "jaxlib==$floor"
-          python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
+          python tools/dependency_floors.py > floors.txt
+          cat floors.txt
+          python -m pip install -e ".[tests,benchmarks,viz]" -r floors.txt
+          python -m pip list
 
       # Regression baselines are recorded with the latest JAX and differ at
       # float32 rounding level on older releases, so they are checked only in

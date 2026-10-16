@@ -59,7 +59,7 @@ jobs:
     with:
       full-matrix: true
       run-heavy: true
-      run-oldest-jax: true
+      run-oldest-deps: true
       # Run-scoped, so this CI run shares a concurrency group with nothing and
       # cannot be cancelled by a push to main mid-release.
       concurrency-key: release-ci-${{ github.run_id }}

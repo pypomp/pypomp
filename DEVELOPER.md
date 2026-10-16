@@ -92,6 +92,9 @@ pytest
 
 # Measure code coverage
 pytest --cov
+
+# Run the examples in docstrings (also `make test-doctest`; CI runs these)
+pytest -o addopts="" --doctest-modules pypomp
 ```
 
 > [!NOTE]
@@ -161,7 +164,7 @@ Two workflows cover everything:
 
 | Job | What it does |
 | --- | --- |
-| `checks` | `pre-commit run --all-files` (ruff lint, ruff format, pyright) |
+| `checks` | `pre-commit run --all-files` (ruff lint, ruff format, pyright) and the docstring examples |
 | `test` | `pytest -m "not heavy"` on Python 3.12 and 3.14, Ubuntu and macOS |
 | `build` | Builds the sdist and wheel, `twine check --strict`, installs the wheel into a clean venv and imports it |
 | `docs` | Builds the Sphinx documentation |

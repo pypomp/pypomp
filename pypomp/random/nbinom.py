@@ -87,8 +87,9 @@ def fast_nbinomial(
     >>> import jax
     >>> import jax.numpy as jnp
     >>> from pypomp.random import fast_nbinomial
-    >>> fast_nbinomial(jax.random.key(0), n=jnp.array(5.0), mu=jnp.array(3.0))
-    Array(2, dtype=int32)
+    >>> draws = fast_nbinomial(jax.random.key(0), n=jnp.full(100_000, 5.0), mu=3.0)
+    >>> round(float(draws.mean()), 1)
+    3.0
 
     See Also
     --------

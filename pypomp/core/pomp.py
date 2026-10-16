@@ -111,19 +111,17 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     --------
     Build a minimal SIR-like POMP model:
 
+    >>> import jax.numpy as jnp
     >>> import pandas as pd
-    >>> import jax
     >>> import pypomp as pp
-    >>> from pypomp.types import StateDict, ParamDict, TimeFloat, StepSizeFloat, RNGKey, ObservationDict
     >>>
-    >>> def my_rinit(theta_: ParamDict, t0: TimeFloat, key: RNGKey) -> StateDict:
+    >>> def my_rinit(theta_, key, covars, t0):
     ...     return {"S": 990.0, "I": 10.0, "R": 0.0}
     >>>
-    >>> def my_rproc(X_: StateDict, theta_: ParamDict, t: TimeFloat, dt: StepSizeFloat, key: RNGKey) -> StateDict:
+    >>> def my_rproc(X_, theta_, key, covars, t, dt):
     ...     return X_  # identity placeholder
     >>>
-    >>> def my_dmeas(Y_: ObservationDict, X_: StateDict, theta_: ParamDict, t: TimeFloat) -> float:
-    ...     import jax.numpy as jnp
+    >>> def my_dmeas(Y_, X_, theta_, covars, t):
     ...     return jnp.array(0.0)
     >>>
     >>> ys = pd.DataFrame({"cases": [10, 12, 15]}, index=[1.0, 2.0, 3.0])
@@ -132,6 +130,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     ...     ys=ys, theta=theta, statenames=["S", "I", "R"], t0=0.0,
     ...     rinit=my_rinit, rproc=my_rproc, dmeas=my_dmeas, dt=0.1,
     ... )
+    >>> model.statenames
+    ['S', 'I', 'R']
 
     See Also
     --------
@@ -752,24 +752,21 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 kwargs = {}
                 if state.get("_rproc_dt") is not None:
                     kwargs["dt"] = state["_rproc_dt"]
-                if (
-                    state.get("_rproc_nstep") is not None
-                    and state.get("_rproc_dt") is None
-                ):
+                elif state.get("_rproc_nstep") is not None:
                     kwargs["nstep"] = state["_rproc_nstep"]
                 if state.get("_rproc_accumvars") is not None:
                     kwargs["accumvars"] = state["_rproc_accumvars"]
+                # nstep_array lets a dt-specified model recover the fixed step
+                # count that its interpolated rproc (and so train) relies on.
                 self.rproc = _RProc(
                     mechanics=obj_rproc,
                     statenames=self.statenames,
                     param_names=self.canonical_param_names,
                     covar_names=self.covar_names,
                     par_trans=self.par_trans,
+                    nstep_array=state.get("_nstep_array"),
                     **kwargs,
                 )
-                if state.get("_rproc_nstep") is not None:
-                    if state.get("_rproc_dt") is not None:
-                        self.rproc.nstep = state["_rproc_nstep"]
 
         # Reconstruct dmeas
         obj_dmeas = _load_func("dmeas")
@@ -846,6 +843,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             "_rmeas_func_bytes",
             "_rmeas_func_name",
             "_rmeas_module",
+            "_dprior_func_bytes",
+            "_dprior_func_name",
+            "_dprior_module",
             "_fresh_key_data",
         ]:
             if key in self.__dict__:

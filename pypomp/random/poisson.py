@@ -73,8 +73,12 @@ def fast_poisson(
     --------
     >>> import jax
     >>> from pypomp.random import fast_poisson
+    >>> import jax.numpy as jnp
     >>> fast_poisson(jax.random.key(0), lam=5.0)
-    Array(5, dtype=int32)
+    Array(..., dtype=int32)
+    >>> draws = fast_poisson(jax.random.key(0), lam=jnp.full(100_000, 5.0))
+    >>> round(float(draws.mean()), 1)
+    5.0
 
     References
     ----------

@@ -51,6 +51,12 @@ theta = {
 
 statenames = ["V", "S"]
 
+# Floor on the variance state. It must stay well above float32's smallest
+# normal number: at the floor, the derivative of the 1/sqrt(V) terms is of
+# order V**-1.5, which overflows float32 (and so makes MOP gradients NaN) for
+# floors much below 1e-12.
+_V_FLOOR = 1e-12
+
 
 def _rinit(
     theta_: ParamDict,
@@ -87,10 +93,10 @@ def _rproc(
     dWs = (y_prev - mu + 0.5 * V) / jnp.sqrt(V)
 
     dWv = rho * dWs + jnp.sqrt(1 - rho**2) * dZ
-    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, 1e-32)) * dWs)
+    S = S + S * (mu + jnp.sqrt(jnp.maximum(V, _V_FLOOR)) * dWs)
     V = V + kappa * (theta_val - V) + xi * jnp.sqrt(V) * dWv
 
-    V = jnp.maximum(V, 1e-32)
+    V = jnp.maximum(V, _V_FLOOR)
     return {"V": V, "S": S}
 
 

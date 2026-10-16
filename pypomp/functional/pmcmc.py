@@ -49,8 +49,10 @@ def pmcmc(
     keys : jax.Array
         PRNG keys, shape ``(n_chains, ...)``.
     thresh : float, optional
-        Adaptive resampling threshold for the particle filter.
-        Default is 0.0.
+        Resampling threshold for the particle filter. Particles are resampled
+        at an observation time when the largest particle weight exceeds
+        ``thresh`` times the smallest. Values below 1, including the default
+        ``0.0``, resample at every observation time.
     dprior : Callable or None, optional
         Pure-JAX log-prior function or ``None`` to use ``struct.dprior_pf``
         (or, if that is absent too, defaults to a flat prior on the natural parameter

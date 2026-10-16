@@ -91,7 +91,7 @@ def test_setstate_prewrapped_components(dprior_pomp):
 
 
 def test_setstate_rproc_dt_and_nstep_both_present(base_pomp):
-    """Cover the raw-function rproc reconstruction path when both dt and nstep are set."""
+    """With dt set, the step count is recovered from the pickled step grid."""
     state = base_pomp.__getstate__()
     state["_rproc_func_bytes"] = cloudpickle.dumps(base_pomp.rproc.original_func)
     state["_rproc_dt"] = 0.5
@@ -103,7 +103,7 @@ def test_setstate_rproc_dt_and_nstep_both_present(base_pomp):
     pomp_unpickled.__setstate__(state)
 
     assert pomp_unpickled.rproc is not None
-    assert pomp_unpickled.rproc.nstep == 3
+    assert pomp_unpickled.rproc.nstep == int(base_pomp._nstep_array[0])
 
 
 def test_setstate_rproc_missing_defaults_to_none(base_pomp):
@@ -153,3 +153,52 @@ def test_accumvars_success(base_pomp):
     )
     assert pomp._accumvars_indices == (0,)
     assert pomp.accumvars == ["X"]
+
+
+def _local_model(dt: float = 0.25, scale: float = 1.0) -> pp.Pomp:
+    """A model whose functions are local, so cloudpickle stores them by value
+    exactly as it does for functions defined in ``__main__`` or a notebook."""
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": theta_["x0"]}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        noise = theta_["s"] * jnp.sqrt(dt) * jax.random.normal(key)
+        return {"X": X_["X"] - scale * theta_["a"] * X_["X"] * dt + noise}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        return jax.scipy.stats.norm.logpdf(Y_["Y"], X_["X"], 0.5)
+
+    return pp.Pomp(
+        ys=pd.DataFrame({"Y": [0.1, -0.2, 0.3, 0.0]}, index=[1.0, 2.0, 3.0, 4.0]),
+        theta=pp.PompParameters({"a": 0.5, "s": 0.5, "x0": 0.0}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        dt=dt,
+    )
+
+
+def test_unpickled_dt_model_can_train():
+    """A dt-specified model keeps its fixed step count, which train needs."""
+    model = pickle_roundtrip(_local_model())
+    assert model.rproc.nstep == 4
+    eta = pp.LearningRate({"a": 0.01, "s": 0.01, "x0": 0.01})
+    model.train(J=10, M=1, eta=eta, key=jax.random.key(0))
+
+
+def test_unpickled_local_functions_equal_and_merge():
+    """Unpickling makes new function objects; the copy must still match."""
+    model = _local_model()
+    copy = pickle_roundtrip(model)
+    assert copy == model
+    merged = pp.Pomp.merge(model, copy)
+    assert merged.theta.num_replicates() == 2
+
+
+def test_models_differing_in_closure_are_unequal():
+    assert _local_model(scale=1.0) != _local_model(scale=2.0)
+    with pytest.raises(ValueError, match="same rinit and rproc"):
+        pp.Pomp.merge(_local_model(scale=1.0), _local_model(scale=2.0))

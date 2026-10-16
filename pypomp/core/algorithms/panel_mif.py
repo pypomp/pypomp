@@ -10,7 +10,7 @@ from .carries import (
     UnitStepInputs,
 )
 from .contexts import PanelMifContext, PfilterContext
-from .mif import _perfilter_internal
+from .mif import MONITOR_KEY_STREAM, _perfilter_internal
 from .pfilter import _vmapped_pfilter_internal
 
 
@@ -196,10 +196,13 @@ def _panel_mif_unit_scan_fn(
         context=mif_context,
     )
 
-    # 4. Compute monitored log-likelihood (optional)
+    # 4. Optionally replace the perturbed logLik with its unperturbed
+    # counterfactual: a pfilter at the means this unit's filter started from.
     if context.n_monitors >= 1:
         current_theta_mean = jnp.mean(thetas_unit_order, axis=0)
-        mon_keys = jax.random.split(unit.key, context.n_monitors)
+        mon_keys = jax.random.split(
+            jax.random.fold_in(unit.key, MONITOR_KEY_STREAM), context.n_monitors
+        )
         unit_context_pf = replace(
             context_pf,
             series=replace(context_pf.series, ys=unit.ys, covars_extended=covariates),

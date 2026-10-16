@@ -155,3 +155,15 @@ def test_pfilter_validation(simple):
     # Invalid J should raise ValueError
     with pytest.raises(ValueError, match="J should be greater than 0"):
         LG.pfilter(J=0, key=key)
+
+
+def test_thresh_is_a_weight_ratio(simple):
+    """thresh compares the max/min weight ratio, so values below 1 always resample."""
+    LG, key, _ = simple
+    logliks = {}
+    for thresh in [0.0, 0.5, 0.99, 1e6]:
+        LG.pfilter(J=200, key=key, thresh=thresh)
+        logliks[thresh] = LG.results_history[-1].logLiks.item()
+    assert logliks[0.5] == logliks[0.0]
+    assert logliks[0.99] == logliks[0.0]
+    assert logliks[1e6] != logliks[0.0]

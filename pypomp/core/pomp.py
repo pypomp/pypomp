@@ -431,7 +431,34 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def to_struct(self) -> PompStruct:
+    def set_rproc_backend(self, backend: str = "xla", *, rng: str = "philox") -> None:
+        """Choose how the process model is compiled for filtering and simulation.
+
+        Parameters
+        ----------
+        backend : {"xla", "cute"}
+            ``"xla"`` (default) is pypomp's usual path. ``"cute"`` runs every Euler
+            step of an observation interval in one CuTe kernel on an NVIDIA GPU, one
+            particle per thread, for every filter of the call at once. The ``rproc``
+            is translated from its jaxpr, so it is used as written. It needs the
+            optional ``nvidia-cutlass-dsl`` package and the same number of Euler steps
+            in every interval. If those are missing, or the ``rproc`` uses an
+            operation the translator does not handle, pypomp warns and uses XLA.
+            Gradient-based methods (``train``) use XLA.
+        rng : {"philox", "threefry"}
+            Random numbers inside the CuTe kernel. ``"philox"`` (default) is
+            Philox4x32-10 using all four output words (see
+            :mod:`pypomp.random.philox`). ``"threefry"`` reproduces ``jax.random``'s
+            default stream exactly, which is slower.
+        """
+        if backend not in ("xla", "cute"):
+            raise ValueError(f"backend must be 'xla' or 'cute', got {backend!r}")
+        if rng not in ("philox", "threefry"):
+            raise ValueError(f"rng must be 'philox' or 'threefry', got {rng!r}")
+        self._rproc_backend = (backend, rng)
+        self.__dict__.pop("_cute_fns", None)
+
+    def to_struct(self, rproc_backend: str | None = None) -> PompStruct:
         """Export the model to a lightweight JAX-compatible struct.
 
         Packs the static data arrays and compiled simulator callables into a
@@ -448,7 +475,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         pypomp.functional.pfilter : Functional particle filter.
         pypomp.functional.mif : Functional iterated filter.
         """
-        return PompStruct(
+        struct = PompStruct(
             ys=jnp.array(self.ys),
             dt_array_extended=jnp.array(self._dt_array_extended),
             nstep_array=jnp.array(self._nstep_array),
@@ -471,6 +498,17 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
         )
+        backend, rng = getattr(self, "_rproc_backend", ("xla", "philox"))
+        if (rproc_backend or backend) == "cute":
+            # Built once per model: new functions would make every call recompile.
+            if "_cute_fns" not in self.__dict__:
+                from pypomp.cute import build
+
+                self._cute_fns = build(self, struct.accumvars, rng)
+            if self._cute_fns is not None:
+                rproc_pf, rproc_per = self._cute_fns
+                struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
+        return struct
 
     def print_metadata(self) -> None:
         """Display environment and version metadata for this model instance.
@@ -675,6 +713,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         state.pop("rmeas", None)
         state.pop("dprior", None)
         state.pop("fresh_key", None)
+        state.pop("_cute_fns", None)
 
         return state
 

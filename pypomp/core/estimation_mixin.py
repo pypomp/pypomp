@@ -595,7 +595,7 @@ class PompEstimationMixin(Base):
             _train,
             {1: 0, 5: 0},
             [0, 0],
-            self.to_struct(),
+            self.to_struct(rproc_backend="xla"),
             theta_array,
             J,
             M,

@@ -33,7 +33,7 @@ euler_multinomial_logw
     Log-weight increments of draws, for a DPOP model's ``_logw`` state.
 """
 
-from . import _dtype_helpers, binom, dpop, gamma, nbinom, poisson
+from . import _dtype_helpers, binom, dpop, gamma, nbinom, philox, poisson
 
 fast_poisson = poisson.fast_poisson
 fast_binomial = binom.fast_binomial
@@ -51,7 +51,10 @@ nbinomial_logw = dpop.nbinomial_logw
 multinomial_logw = dpop.multinomial_logw
 euler_multinomial_logw = dpop.euler_multinomial_logw
 
+PHILOX = philox.PHILOX
+
 __all__ = [
+    "PHILOX",
     "binomial_logw",
     "binominv",
     "euler_multinomial_logw",
@@ -67,4 +70,4 @@ __all__ = [
     "poissoninv",
 ]
 
-del poisson, binom, dpop, gamma, nbinom, _dtype_helpers
+del poisson, binom, dpop, gamma, nbinom, philox, _dtype_helpers

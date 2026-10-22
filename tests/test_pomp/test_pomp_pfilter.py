@@ -52,6 +52,14 @@ def test_reps_batch_size_matches_parallel(simple):
         assert jnp.allclose(LG.results_history[-1].logLiks.values, parallel, rtol=1e-5)
 
 
+def test_reps_batch_for_memory_budget():
+    from pypomp.functional.pfilter import reps_batch_for
+
+    assert reps_batch_for(100, 1000, 10) is None  # fits: all at once
+    assert reps_batch_for(1000, 1000, 10) == 8  # budget 800, about 100 per replicate
+    assert reps_batch_for(10**12, 1000, 10) == 1  # never below one replicate
+
+
 def test_reps_batch_size_validation(simple):
     LG, key, J = simple
     with pytest.raises(ValueError, match="reps_batch_size"):

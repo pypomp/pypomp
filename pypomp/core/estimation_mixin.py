@@ -160,10 +160,12 @@ class PompEstimationMixin(Base):
             Whether to compute and store the predicted state mean at each
             observation time.  Defaults to ``False``.
         reps_batch_size : int or None, optional
-            How many of the ``reps`` filters per parameter set to run at once.
-            ``None`` runs all of them in parallel.  A smaller value runs them in
-            sequential batches of that size, which uses less memory.  Defaults
-            to ``None``.
+            How many of the ``reps`` filters per parameter set to run at once;
+            smaller batches run one after another and use less memory.  ``None``
+            (default) chooses: on a GPU, all of them at once if XLA's memory
+            estimate for that fits in 80% of the free device memory, otherwise
+            the largest batch that fits; on CPU, one at a time, which is faster
+            there.
 
         Returns
         -------

@@ -444,7 +444,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             optional ``nvidia-cutlass-dsl`` package and the same number of Euler steps
             in every interval. If those are missing, or the ``rproc`` uses an
             operation the translator does not handle, pypomp warns and uses XLA.
-            Gradient-based methods (``train``) use XLA.
+            ``train`` differentiates through a second, generated CuTe kernel.
         rng : {"philox", "threefry"}
             Random numbers inside the CuTe kernel. ``"philox"`` (default) is
             Philox4x32-10 using all four output words (see

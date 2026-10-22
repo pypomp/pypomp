@@ -117,3 +117,55 @@ def test_unsupported_rproc_falls_back_to_xla():
         s = model2.to_struct()
     assert any("sort" in str(x.message) for x in w)
     assert s.rproc_pf is model2.rproc.mechanics_pf_interp
+
+
+@pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation_scale"])
+@pytest.mark.parametrize("make", [sde_model, he10_model], ids=["per_particle_sde", "vectorized_he10"])
+def test_cute_gradients_match_xla(make, should_trans):
+    model = make()
+    xla = model.to_struct()
+    cm = deepcopy(model)
+    cm.set_rproc_backend("cute")
+    cute = cm.to_struct()
+    th = model.theta.to_jax_array(model.canonical_param_names)[0]
+    if should_trans:
+        th = jnp.asarray(model.par_trans.to_est_array(th, model.canonical_param_names)) \
+            if hasattr(model.par_trans, "to_est_array") else th
+    J, R, i_obs = 256, 2, 3
+    cov0 = None if xla.covars_extended is None else xla.covars_extended[0]
+    X0 = jax.vmap(lambda k: xla.rinit_pf(model.theta.to_jax_array(model.canonical_param_names)[0],
+                                         jax.random.split(k, J), cov0, xla.t0, False))(
+        jax.random.split(jax.random.key(9), R))
+    nsteps = np.asarray(xla.nstep_array)
+    t_idx = int(nsteps[:i_obs].sum())
+    t = float(np.asarray(xla.times)[i_obs - 1])
+    keys = jax.random.split(jax.random.key(5, impl=pp.random.PHILOX), R)
+    w = jnp.cos(0.1 * jnp.arange(X0.size, dtype=jnp.float32)).reshape(X0.shape)
+
+    def loss(struct, X, th):
+        out = jax.vmap(lambda X, k: struct.rproc_pf(X, th, k, struct.covars_extended, struct.dt_array_extended, t,
+                                                    t_idx, int(nsteps[i_obs]), struct.accumvars, should_trans)[0]
+                       )(X, keys)
+        return jnp.sum(out * w)
+
+    ga = jax.jit(jax.grad(lambda X, th: loss(xla, X, th), argnums=(0, 1)))(X0, th)
+    gb = jax.jit(jax.grad(lambda X, th: loss(cute, X, th), argnums=(0, 1)))(X0, th)
+    for a, b in zip(ga, gb):
+        a, b = np.asarray(a), np.asarray(b)
+        rel = np.abs(a - b) / (np.abs(a) + 1e-3 * np.abs(a).max() + 1e-12)
+        assert np.median(rel) < 1e-4, np.median(rel)
+        assert (rel > 1e-2).mean() < 0.01
+
+
+def test_train_on_cute_matches_xla():
+    model = sde_model()
+    cm = deepcopy(model)
+    cm.set_rproc_backend("cute")
+    eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
+    key = jax.random.key(2, impl=pp.random.PHILOX)
+    model.train(J=256, M=3, eta=eta, optimizer=pp.Adam(scale=True), key=key)
+    cm.train(J=256, M=3, eta=eta, optimizer=pp.Adam(scale=True), key=key)
+    a = np.asarray(model.results_history[-1].traces_da.sel(theta_idx=0))
+    b = np.asarray(cm.results_history[-1].traces_da.sel(theta_idx=0))
+    assert np.isfinite(b).all()
+    np.testing.assert_allclose(b, a, rtol=2e-3, atol=2e-3)

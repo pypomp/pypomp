@@ -40,8 +40,9 @@ def build(model, accumvars, rng: str = "philox"):
         return None
     from . import kernel
 
-    step_j, prep_j, _ = kernel.trace_step(model)
-    bad = kernel.unsupported(step_j) | kernel.unsupported(prep_j)
+    step_j, prep_j, _, step_vjp_j, prep_vjp_j = kernel.trace_step(model)
+    bad = (kernel.unsupported(step_j) | kernel.unsupported(prep_j) | kernel.unsupported(step_vjp_j)
+           | kernel.unsupported(prep_vjp_j))
     if bad:
         warnings.warn(f"rproc uses {sorted(bad)}, which the CuTe backend does not translate. Using XLA.",
                       stacklevel=3)

@@ -251,7 +251,7 @@ def _ew(name, args, params, out_dtype, in_dtypes):
     x = a[0]
     f = np.issubdtype(np.dtype(in_dtypes[0]), np.floating)
     m = cute.math
-    if name == "add":
+    if name in ("add", "add_any"):
         return x + a[1]
     if name == "sub":
         return x - a[1]
@@ -322,7 +322,7 @@ def _ew(name, args, params, out_dtype, in_dtypes):
     raise NotImplementedError(name)
 
 
-ELEMENTWISE = {"add", "sub", "mul", "div", "rem", "neg", "max", "min", "abs", "sign", "exp", "log", "sqrt",
+ELEMENTWISE = {"add", "add_any", "sub", "mul", "div", "rem", "neg", "max", "min", "abs", "sign", "exp", "log", "sqrt",
                "rsqrt", "expm1", "log1p", "tanh", "sin", "cos", "erf", "erfc", "floor", "ceil", "exp2", "log2",
                "round", "pow", "integer_pow", "square", "logistic", "erf_inv", "is_finite", "eq", "ne", "lt",
                "le", "gt", "ge", "and", "or", "xor", "not", "shift_left", "shift_right_logical",

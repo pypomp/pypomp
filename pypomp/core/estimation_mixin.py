@@ -118,6 +118,7 @@ class PompEstimationMixin(Base):
         ESS: bool = False,
         filter_mean: bool = False,
         prediction_mean: bool = False,
+        reps_batch_size: int | None = None,
     ) -> None:
         """Evaluate the log-likelihood via the bootstrap particle filter.
 
@@ -158,6 +159,11 @@ class PompEstimationMixin(Base):
         prediction_mean : bool, optional
             Whether to compute and store the predicted state mean at each
             observation time.  Defaults to ``False``.
+        reps_batch_size : int or None, optional
+            How many of the ``reps`` filters per parameter set to run at once.
+            ``None`` runs all of them in parallel.  A smaller value runs them in
+            sequential batches of that size, which uses less memory.  Defaults
+            to ``None``.
 
         Returns
         -------
@@ -193,6 +199,9 @@ class PompEstimationMixin(Base):
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
+        if reps_batch_size is not None and reps_batch_size < 1:
+            raise ValueError("reps_batch_size should be None or greater than 0.")
+
         thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         rep_keys = jax.random.split(new_key, n_theta_reps * reps).reshape(
@@ -212,6 +221,7 @@ class PompEstimationMixin(Base):
             ESS,
             filter_mean,
             prediction_mean,
+            reps_batch_size=reps_batch_size,
         )
 
         results = jax.device_get(results_jax)

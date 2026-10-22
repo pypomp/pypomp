@@ -191,7 +191,10 @@ def _mapped_pfilter_internal_reps(
     def body(key):
         return _pfilter_internal(theta, key, context)
 
-    return jax.lax.map(body, keys)
+    # All replicates run in parallel unless reps_batch_size asks for sequential
+    # batches, which use less memory.
+    batch_size = context.reps_batch_size or keys.shape[0]
+    return jax.lax.map(body, keys, batch_size=min(batch_size, keys.shape[0]))
 
 
 # Map over key
@@ -200,7 +203,7 @@ _vmapped_pfilter_internal = jax.vmap(
     in_axes=(None, 0, None),
 )
 
-# Map over theta and lax.map over key
+# Map over theta, and over key in batches of context.reps_batch_size
 _vmapped_pfilter_internal2 = jax.vmap(
     _mapped_pfilter_internal_reps,
     in_axes=(0, 0, None),

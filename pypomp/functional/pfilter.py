@@ -18,6 +18,7 @@ def pfilter(
     ESS: bool = False,
     filter_mean: bool = False,
     prediction_mean: bool = False,
+    reps_batch_size: int | None = None,
 ) -> dict[str, jax.Array]:
     """Run the bootstrap particle filter on a POMP model struct.
 
@@ -54,6 +55,10 @@ def pfilter(
         Compute filtered state means.  Defaults to ``False``.
     prediction_mean : bool, optional
         Compute predicted state means.  Defaults to ``False``.
+    reps_batch_size : int or None, optional
+        How many replicate filters per parameter set to run at once.  ``None``
+        runs all of them in parallel.  A smaller value runs them in sequential
+        batches of that size, which uses less memory.  Defaults to ``None``.
 
     Returns
     -------
@@ -83,6 +88,7 @@ def pfilter(
         filter_mean=filter_mean,
         prediction_mean=prediction_mean,
         should_trans=False,
+        reps_batch_size=reps_batch_size,
     )
     results = _vmapped_pfilter_internal2(
         thetas_array,

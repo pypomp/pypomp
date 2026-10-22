@@ -11,11 +11,13 @@ The surrounding filter is pypomp's own: the substep keys are split as
 (``translate.Ctx.rng``). A per-particle ``rproc`` gets the key
 ``split(substep_key, J)[j]``, derived the same way.
 
-Gradients: a second kernel, attached with ``jax.custom_vjp``, replays the interval
-forward from its starting state (keeping each step's state in thread-local memory),
-then runs the VJP of the user's step, which JAX derives with ``jax.vjp`` and the
-translator emits, over the steps in reverse. The random numbers are regenerated from
-the same Philox counters, so nothing random is stored.
+Gradients (``jax.custom_vjp``): when JAX differentiates through the interval, the
+forward kernel also writes each Euler step's input state to a buffer (nstep x ns
+floats per particle; pypomp checkpoints each observation step, so this exists for one
+interval at a time). A second kernel then runs the VJP of the user's step, which JAX
+derives with ``jax.vjp`` and the translator emits, over the steps in reverse, reading
+the states from that buffer. Random numbers are regenerated from the same Philox
+counters rather than stored.
 """
 
 from __future__ import annotations
@@ -135,13 +137,23 @@ def _store(OUT, g, xs):
         OUT[s, g] = x
 
 
-def _save(HIST, k, xs):
+def _save(H, g, k, xs):
+    """Store step k's input state in particle g's row of the state buffer."""
+    ns = len(xs)
     for s, x in enumerate(xs):
-        HIST[k, s] = x
+        H[g, k * ns + s] = x
 
 
-def _hist(HIST, k, ns):
-    return tuple(HIST[k, s] for s in range(ns))
+def _hist(H, g, k, ns):
+    return tuple(H[g, k * ns + s] for s in range(ns))
+
+
+def _load_th(TH, g, b, nth, per_particle):
+    row = g if per_particle else b
+    th = np.empty(nth, dtype=object)
+    for k in range(nth):
+        th[k] = TH[row, k]
+    return th
 
 
 def _load_g(G, g, ns):
@@ -216,16 +228,52 @@ def make(step_j, prep_j, vec, J, ns, nth, nc, NSTEP, acc, per_particle, transfor
 """
 
 
+_SRC_SAVE = """
+import cutlass
+import cutlass.cute as cute
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save
+
+
+def make(step_j, prep_j, vec, J, ns, nth, nc, NSTEP, acc, per_particle, transform, rng, block):
+    @cute.kernel
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
+               H: cute.Tensor, N: cutlass.Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        g = bidx * block + tidx
+        if g < N:
+            b = g // J
+            j = (g - b * J).to(cutlass.Uint32)
+            xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
+            if cutlass.const_expr(transform):
+                th = _prep(prep_j, th, rng)
+            {xs} = xs0
+            for k in range(NSTEP):
+                _save(H, g, k, ({xs}))
+                {xs} = _step_once(step_j, vec, J, ns, nc, rng, ({xs}), th, KEYS, TAB, b, j, k)
+            _store(OUT, g, ({xs}))
+
+    @cute.jit
+    def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
+               OUT: cute.Tensor, H: cute.Tensor):
+        N = cute.size(X, mode=[1])
+        kernel(X, TH, KEYS, TAB, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
+                                                   block=[block, 1, 1], stream=stream)
+
+    return launch
+"""
+
+
 _SRC_BWD = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _save, _hist, _load_g, _zeros, _vjp_once, _store_bwd
+from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_once, _store_bwd
 
 
 def make(step_j, prep_j, step_vjp_j, prep_vjp_j, vec, J, ns, nth, nc, NSTEP, acc, per_particle, transform,
          rng, block):
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
+    def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
                DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -233,28 +281,23 @@ def make(step_j, prep_j, step_vjp_j, prep_vjp_j, vec, J, ns, nth, nc, NSTEP, acc
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
-            xs0, th_raw = _load(X, TH, g, b, ns, nth, acc, per_particle)
+            th_raw = _load_th(TH, g, b, nth, per_particle)
             th = th_raw
             if cutlass.const_expr(transform):
                 th = _prep(prep_j, th_raw, rng)
-            HIST = cute.make_rmem_tensor((NSTEP, ns), cutlass.Float32)
-            {xs} = xs0
-            for k in range(NSTEP):
-                _save(HIST, k, ({xs}))
-                {xs} = _step_once(step_j, vec, J, ns, nc, rng, ({xs}), th, KEYS, TAB, b, j, k)
             {gs} = _load_g(G, g, ns)
             {ths} = _zeros(nth)
             for kk in range(NSTEP):
                 k = NSTEP - 1 - kk
-                {gs} {ths} = _vjp_once(step_vjp_j, vec, J, ns, nth, nc, rng, _hist(HIST, k, ns), th, KEYS, TAB,
+                {gs} {ths} = _vjp_once(step_vjp_j, vec, J, ns, nth, nc, rng, _hist(H, g, k, ns), th, KEYS, TAB,
                                        b, j, k, ({gs}), ({ths}))
             _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform, rng)
 
     @cute.jit
-    def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
+    def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
                DX: cute.Tensor, DTH: cute.Tensor):
-        N = cute.size(X, mode=[1])
-        kernel(X, TH, KEYS, TAB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        N = cute.size(G, mode=[1])
+        kernel(H, TH, KEYS, TAB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                        block=[block, 1, 1], stream=stream)
 
     return launch
@@ -281,16 +324,11 @@ def _build_bwd_launcher(step_j, prep_j, step_vjp_j, prep_vjp_j, vec, J, ns, nth,
                                        per_particle, transform, rng, block)
 
 
-def _build_launcher(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc, per_particle, transform, rng, block):
-    src = _SRC.replace("{xs}", "".join(f"x{s}, " for s in range(ns)).rstrip())
-    path = os.path.join(tempfile.gettempdir(), f"pypomp_cute_{hashlib.md5(src.encode()).hexdigest()[:12]}.py")
-    if not os.path.exists(path):
-        with open(path, "w") as fh:
-            fh.write(src)
-    spec = importlib.util.spec_from_file_location(os.path.basename(path)[:-3], path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.make(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc, per_particle, transform, rng, block)
+def _build_launcher(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc, per_particle, transform, rng, block,
+                    save=False):
+    src = (_SRC_SAVE if save else _SRC).replace("{xs}", "".join(f"x{s}, " for s in range(ns)).rstrip())
+    return _import_generated(src).make(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc, per_particle, transform,
+                                       rng, block)
 
 
 def make_rprocess_interp(model, accumvars, *, per_particle: bool, rng: str = "philox", block: int = 128):
@@ -310,11 +348,11 @@ def make_rprocess_interp(model, accumvars, *, per_particle: bool, rng: str = "ph
                 rng, block)
         return launchers["bwd", J, transform]
 
-    def launcher(J, transform):
-        if (J, transform) not in launchers:
-            launchers[J, transform] = _build_launcher(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc,
-                                                      per_particle, transform, rng, block)
-        return launchers[J, transform]
+    def launcher(J, transform, save=False):
+        if (J, transform, save) not in launchers:
+            launchers[J, transform, save] = _build_launcher(step_j, prep_j, vec, J, ns, nth, nc, nstep, acc,
+                                                            per_particle, transform, rng, block, save)
+        return launchers[J, transform, save]
 
     def make_core(transform):
         @jax.custom_batching.custom_vmap
@@ -338,24 +376,43 @@ def make_rprocess_interp(model, accumvars, *, per_particle: bool, rng: str = "ph
             return core(*args), True
 
         @jax.custom_batching.custom_vmap
-        def core_bwd(Xp, th, sk, tab, gout):
+        def core_save(Xp, th, sk, tab):
+            # As core, plus the per-step input states: H (..., J, nstep * ns).
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
             X = Xp.reshape(B * J, ns).T
+            TH = th.reshape(B * J if per_particle else B, nth)
+            SK = sk.reshape(B, nstep, 2)
+            TAB = tab.reshape(B, nstep, 2 + nc)[0]
+            out, H = cutlass_call(launcher(J, transform, save=True), output_shape_dtype=(
+                jax.ShapeDtypeStruct(X.shape, jnp.float32),
+                jax.ShapeDtypeStruct((B * J, nstep * ns), jnp.float32)))(X, TH, SK, TAB)
+            return out.T.reshape(lead + (J, ns)), H.reshape(lead + (J, nstep * ns))
+
+        @core_save.def_vmap
+        def _rule_save(axis_size, in_batched, Xp, th, sk, tab):
+            args = [a if bat else jnp.broadcast_to(a, (axis_size,) + a.shape)
+                    for a, bat in zip((Xp, th, sk, tab), in_batched)]
+            return core_save(*args), (True, True)
+
+        @jax.custom_batching.custom_vmap
+        def core_bwd(H, th, sk, tab, gout):
+            lead, J = gout.shape[:-2], gout.shape[-2]
+            B = math.prod(lead)
             G = gout.reshape(B * J, ns).T
             TH = th.reshape(B * J if per_particle else B, nth)
             SK = sk.reshape(B, nstep, 2)
             TAB = tab.reshape(B, nstep, 2 + nc)[0]
             dX, dTH = cutlass_call(bwd_launcher(J, transform), output_shape_dtype=(
-                jax.ShapeDtypeStruct(X.shape, jnp.float32), jax.ShapeDtypeStruct((B * J, nth), jnp.float32)))(
-                X, TH, SK, TAB, G)
+                jax.ShapeDtypeStruct(G.shape, jnp.float32), jax.ShapeDtypeStruct((B * J, nth), jnp.float32)))(
+                H.reshape(B * J, nstep * ns), TH, SK, TAB, G)
             dTH = dTH.reshape(lead + (J, nth))
             return dX.T.reshape(lead + (J, ns)), (dTH if per_particle else dTH.sum(-2))
 
         @core_bwd.def_vmap
-        def _rule_bwd(axis_size, in_batched, Xp, th, sk, tab, gout):
+        def _rule_bwd(axis_size, in_batched, H, th, sk, tab, gout):
             args = [a if bat else jnp.broadcast_to(a, (axis_size,) + a.shape)
-                    for a, bat in zip((Xp, th, sk, tab, gout), in_batched)]
+                    for a, bat in zip((H, th, sk, tab, gout), in_batched)]
             return core_bwd(*args), (True, True)
 
         @jax.custom_vjp
@@ -363,11 +420,12 @@ def make_rprocess_interp(model, accumvars, *, per_particle: bool, rng: str = "ph
             return core(Xp, th, sk, tab)
 
         def diff_fwd(Xp, th, sk, tab):
-            return core(Xp, th, sk, tab), (Xp, th, sk, tab)
+            out, H = core_save(Xp, th, sk, tab)
+            return out, (H, th, sk, tab)
 
         def diff_bwd(res, gout):
-            Xp, th, sk, tab = res
-            dX, dth = core_bwd(Xp, th, sk, tab, gout)
+            H, th, sk, tab = res
+            dX, dth = core_bwd(H, th, sk, tab, gout)
             return dX, dth, np.zeros(sk.shape, jax.dtypes.float0), jnp.zeros_like(tab)
 
         diff_core.defvjp(diff_fwd, diff_bwd)

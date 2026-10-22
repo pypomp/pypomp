@@ -331,7 +331,7 @@ IDENTITY = {"stop_gradient", "optimization_barrier", "copy", "copy_p", "reduce_p
 CALLS = {"pjit", "jit", "closed_call", "core_call", "remat", "checkpoint", "custom_jvp_call",
          "custom_vjp_call", "custom_vjp_call_jaxpr", "custom_lin"}
 SUPPORTED = ELEMENTWISE | IDENTITY | CALLS | {
-    "select_n", "polynomial", "broadcast_in_dim", "reshape", "squeeze", "expand_dims", "transpose", "slice",
+    "select_n", "polynomial", "pad", "broadcast_in_dim", "reshape", "squeeze", "expand_dims", "transpose", "slice",
     "dynamic_slice", "dynamic_update_slice", "concatenate", "split", "unstack", "stack", "iota", "reduce_sum",
     "reduce_prod", "reduce_max", "reduce_min", "reduce_and", "reduce_or", "dot_general", "cond", "while",
     "scan", "random_wrap", "random_unwrap", "random_fold_in", "random_split", "random_bits"}
@@ -487,6 +487,18 @@ def _eval_eqn(eqn, name, ins, in_dt, out_avals, ctx):
         st = [int(np.clip(int(s), 0, n - k)) for s, n, k in zip(starts, x.shape, upd.shape)]
         x[tuple(slice(a, a + k) for a, k in zip(st, upd.shape))] = upd
         return [x]
+    if name == "pad":  # also the transpose of slice in gradients
+        x, pv = obj(ins[0]), obj(ins[1]).reshape(())[()]
+        cfg = eqn.params["padding_config"]
+        shape = out_avals[0].shape
+        out = np.empty(shape, dtype=object)
+        for idx in np.ndindex(*shape) if shape else [()]:
+            out[idx] = pv
+        for idx in np.ndindex(*x.shape) if x.shape else [()]:
+            pos = tuple(lo + i * (interior + 1) for i, (lo, _, interior) in zip(idx, cfg))
+            if all(0 <= q < n for q, n in zip(pos, shape)):
+                out[pos] = x[idx]
+        return [out]
     if name == "concatenate":
         return [np.concatenate([obj(v) for v in ins], axis=eqn.params["dimension"])]
     if name == "split":
@@ -538,8 +550,14 @@ def _eval_eqn(eqn, name, ins, in_dt, out_avals, ctx):
             for k in np.ndindex(*bt.shape[:-1]) if bt.ndim > 1 else [()]:
                 r = None
                 for x, y in zip(at[i], bt[k]):
-                    p = _ew("mul", [x, y], {}, dt, [dt, dt]) or np.asarray(x * y, dt)
-                    r = p if r is None else (_ew("add", [r, p], {}, dt, [dt, dt]) or np.asarray(r + p, dt))
+                    p = _ew("mul", [x, y], {}, dt, [dt, dt])
+                    if p is None:
+                        p = np.asarray(np.asarray(x, dt) * np.asarray(y, dt), dt)
+                    if r is None:
+                        r = p
+                    else:
+                        rp = _ew("add", [r, p], {}, dt, [dt, dt])
+                        r = rp if rp is not None else np.asarray(np.asarray(r, dt) + np.asarray(p, dt), dt)
                 out[i + k] = r
         return [out]
 

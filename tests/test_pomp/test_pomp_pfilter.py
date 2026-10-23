@@ -53,11 +53,11 @@ def test_reps_batch_size_matches_parallel(simple):
 
 
 def test_reps_batch_for_memory_budget():
-    from pypomp.functional.pfilter import reps_batch_for
+    from pypomp.functional.pfilter import _reps_batch_for
 
-    assert reps_batch_for(100, 1000, 10) is None  # fits: all at once
-    assert reps_batch_for(1000, 1000, 10) == 8  # budget 800, about 100 per replicate
-    assert reps_batch_for(10**12, 1000, 10) == 1  # never below one replicate
+    assert _reps_batch_for(100, 1000, 10) is None
+    assert _reps_batch_for(1000, 1000, 10) == 8
+    assert _reps_batch_for(10**12, 1000, 10) == 1
 
 
 def test_reps_batch_size_validation(simple):

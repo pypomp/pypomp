@@ -401,6 +401,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             if comp is not None:
                 comp.par_trans = value
                 comp._build_mechanics()
+        # CuTe kernels built for the old transform are stale.
+        self.__dict__.pop("_cute_fns", None)
 
     def _prepare_theta_input(
         self,
@@ -470,7 +472,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         The CuTe kernel draws Philox4x32-10 random numbers (see
         :mod:`pypomp.random.philox`), so for a given key its results differ from
         those of the XLA path, which uses the key's own generator. Gradients for
-        :meth:`train` go through a second generated kernel.
+        :meth:`train` go through a second generated kernel; optimizers that need
+        Hessians, and float64 particles, use XLA.
         """
         _check_rproc_backend(backend)
         self._rproc_backend = backend

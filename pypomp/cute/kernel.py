@@ -19,10 +19,13 @@ Philox numbers instead of storing them.
 
 from __future__ import annotations
 
+import atexit
+import functools
 import hashlib
 import importlib.util
 import math
 import os
+import shutil
 import tempfile
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -44,6 +47,9 @@ _Tensor = Any
 _Scalar = ct._Scalar
 # CUDA threads per block.
 _BLOCK = 128
+# Particles in the trace that finds a @vectorized rproc's particle axis: a prime that
+# no other axis length is likely to equal.
+_PROBE_J = 1031
 # _trace_step's output: step, transform, whether vectorized, and their VJPs.
 _Traced = tuple[ct.ClosedJaxpr, ct.ClosedJaxpr, bool, ct.ClosedJaxpr, ct.ClosedJaxpr]
 
@@ -120,22 +126,40 @@ def _trace_step(model: Pomp) -> _Traced:
     return step_j, prep_j, vec, step_vjp_j, prep_vjp_j
 
 
-def _unsupported(cj: ct.ClosedJaxpr) -> set[str]:
-    """Return the primitives in `cj`, recursively, that the translator lacks."""
-    bad = set()
+def _vectorized_jaxpr(model: Pomp, J: int) -> ct.ClosedJaxpr:
+    """Return the jaxpr of a ``@vectorized`` rproc's Euler step on J particles."""
+    rp = model.rproc
+    snames = list(rp.statenames)
+    ns, d, nc = len(snames), len(rp.param_names), len(rp.covar_names)
 
-    def walk(jaxpr: Any) -> None:
-        for e in jaxpr.eqns:
-            if e.primitive.name not in ct._SUPPORTED:
-                bad.add(e.primitive.name)
-            for p in e.params.values():
-                for q in p if isinstance(p, (tuple, list)) else (p,):
-                    j = getattr(q, "jaxpr", None)
-                    if j is not None:
-                        walk(j if hasattr(j, "eqns") else j.jaxpr)
+    def step(x, th, kd, cov, t, dt):
+        res = rp._call_original(
+            X_={n: x[i] for i, n in enumerate(snames)},
+            theta_=rp._prepare_theta(th, False),
+            key=jax.random.wrap_key_data(kd),
+            covars=rp._unpack_covars(cov) if nc else {},
+            t=t,
+            dt=dt,
+        )
+        return jnp.stack([jnp.broadcast_to(res[n], (J,)) for n in snames])
 
-    walk(cj.jaxpr)
-    return bad
+    f32 = jnp.float32
+    return jax.make_jaxpr(step)(
+        jnp.zeros((ns, J), f32),
+        jnp.ones(d, f32),
+        jnp.zeros(2, jnp.uint32),
+        jnp.ones(max(nc, 1), f32)[:nc],
+        f32(0.0),
+        f32(0.01),
+    )
+
+
+def _particle_mixing(model: Pomp) -> set[str]:
+    """Return what in a ``@vectorized`` rproc couples particles, which the kernel
+    can't run with one particle per thread."""
+    two = _vectorized_jaxpr(model, 2).jaxpr
+    probe = _vectorized_jaxpr(model, _PROBE_J).jaxpr
+    return ct._particle_mixing(two, probe, _PROBE_J)
 
 
 # The functions below run at trace time inside a kernel, for one thread's particle.
@@ -428,11 +452,18 @@ def make(spec, J, transform, block):
 """
 
 
+@functools.cache
+def _generated_dir() -> str:
+    """Return a directory that only this user can write, removed at exit."""
+    path = tempfile.mkdtemp(prefix="pypomp_cute_")
+    atexit.register(shutil.rmtree, path, ignore_errors=True)
+    return path
+
+
 def _import_generated(src: str) -> Any:
     """Import generated kernel source `src` as a module, cached by its hash."""
     path = os.path.join(
-        tempfile.gettempdir(),
-        f"pypomp_cute_{hashlib.md5(src.encode()).hexdigest()[:12]}.py",
+        _generated_dir(), f"pypomp_cute_{hashlib.md5(src.encode()).hexdigest()[:12]}.py"
     )
     if not os.path.exists(path):
         with open(path, "w") as fh:
@@ -486,6 +517,7 @@ def _make_rprocess_interp(
     """
     rp = model.rproc
     assert rp.nstep is not None
+    xla = rp.mechanics_per_interp if per_particle else rp.mechanics_pf_interp
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
     spec = _Spec(
         step_j=step_j,
@@ -607,6 +639,19 @@ def _make_rprocess_interp(
         should_trans: bool,
     ) -> tuple[jax.Array, jax.Array]:
         """Advance the particles over one observation interval with the kernel."""
+        if X_.dtype != jnp.float32:  # the kernel is float32; keep x64 runs on XLA
+            return xla(
+                X_,
+                theta_,
+                keys,
+                covars_extended,
+                dt_array_extended,
+                t,
+                t_idx,
+                nstep_dynamic,
+                accumvars_,
+                should_trans,
+            )
         if jnp.ndim(keys) != 0:
             keys = keys[0]
         subkeys, ts, dts, covs = [], [], [], []
@@ -628,7 +673,7 @@ def _make_rprocess_interp(
             cols.append(jnp.stack(covs).astype(jnp.float32))
         tab = jnp.concatenate(cols, axis=1)
         out = cores[bool(should_trans)](
-            X_.astype(jnp.float32),
+            X_,
             jnp.asarray(theta_, jnp.float32),
             jnp.stack(subkeys),
             tab,

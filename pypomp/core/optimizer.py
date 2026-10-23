@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -33,6 +34,8 @@ class Optimizer:
     ls: bool = False
     c: float = 0.1
     max_ls_itn: int = 10
+    uses_hessian: ClassVar[bool] = False
+    """Whether :meth:`step` needs the objective's Hessian."""
 
     def init_state(self, theta: jax.Array) -> tuple:
         """Initialize the optimizer state buffers.
@@ -270,6 +273,8 @@ class BFGS(Optimizer):
 class Newton(Optimizer):
     """Classic Second-Order Newton-Raphson optimizer."""
 
+    uses_hessian: ClassVar[bool] = True
+
     def init_state(self, theta: jax.Array) -> tuple:
         return ()
 
@@ -291,6 +296,8 @@ class Newton(Optimizer):
 @dataclass(frozen=True)
 class WeightedNewton(Optimizer):
     """Weighted Newton optimizer with decaying history."""
+
+    uses_hessian: ClassVar[bool] = True
 
     def init_state(self, theta: jax.Array) -> tuple:
         return (jnp.eye(theta.shape[-1]),)

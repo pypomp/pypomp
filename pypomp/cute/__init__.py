@@ -64,12 +64,15 @@ def _build(
     if quiet and int(model.rproc.nstep) == 1:
         return None
     from . import kernel
+    from .translate import _untranslatable
 
     traced = kernel._trace_step(model)
-    step_j, prep_j, _, step_vjp_j, prep_vjp_j = traced
+    step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
     bad = set().union(
-        *(kernel._unsupported(j) for j in (step_j, prep_j, step_vjp_j, prep_vjp_j))
+        *(_untranslatable(j) for j in (step_j, prep_j, step_vjp_j, prep_vjp_j))
     )
+    if vec:
+        bad |= kernel._particle_mixing(model)
     if bad:
         return skip(
             f"rproc uses {sorted(bad)}, which the CuTe backend cannot translate."

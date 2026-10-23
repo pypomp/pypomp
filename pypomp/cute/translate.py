@@ -421,7 +421,6 @@ _IDENTITY = {
     "optimization_barrier",
     "copy",
     "copy_p",
-    "reduce_precision",
     "pvary",
 }
 _CALLS = {
@@ -627,7 +626,10 @@ def _eval_eqn(
             expanded[d] = x.shape[i]
         return [np.broadcast_to(x.reshape(expanded), shape).copy()]
     if name == "reshape":
-        return [_obj(ins[0]).reshape(eqn.params["new_sizes"])]
+        x = _obj(ins[0])
+        if eqn.params.get("dimensions") is not None:
+            x = np.transpose(x, eqn.params["dimensions"])
+        return [x.reshape(eqn.params["new_sizes"])]
     if name == "squeeze":
         return [np.squeeze(_obj(ins[0]), axis=tuple(eqn.params["dimensions"]))]
     if name == "expand_dims":
@@ -885,3 +887,222 @@ def _counter(f: int, shape: tuple[int, ...], ctx: _Ctx) -> _Scalar:
         # f indexes the leading axes; the particle axis has length J at run time.
         return _as_dsl(np.uint32(f * ctx.vectorized_J), np.uint32) + ctx.particle
     return np.uint32(f)
+
+
+# Checks run before CuTe is chosen, for uses the translator can't run exactly.
+
+_REDUCTIONS = {
+    "reduce_sum",
+    "reduce_prod",
+    "reduce_max",
+    "reduce_min",
+    "reduce_and",
+    "reduce_or",
+    "argmax",
+    "argmin",
+}
+# Primitives that act on each particle separately, wherever the particle axis is.
+_PARTICLEWISE = (
+    _ELEMENTWISE
+    | _IDENTITY
+    | _CALLS
+    | {
+        "select_n",
+        "polynomial",
+        "broadcast_in_dim",
+        "squeeze",
+        "expand_dims",
+        "transpose",
+        "stack",
+        "cond",
+        "while",
+        "random_wrap",
+        "random_unwrap",
+        "random_fold_in",
+    }
+)
+
+
+def _untranslatable(cj: ClosedJaxpr) -> set[str]:
+    """Return the primitives and uses in `cj` that the translator can't run."""
+    bad: set[str] = set()
+    _runtime(cj.jaxpr, [True] * len(cj.jaxpr.invars), bad)
+    return bad
+
+
+def _runtime(jaxpr: Any, marks: list[bool], bad: set[str]) -> list[bool]:
+    """Return which outputs of `jaxpr` depend on runtime inputs, noting misuses."""
+    env = dict(zip(jaxpr.invars, marks, strict=True))
+
+    def rt(v: Any) -> bool:
+        return not isinstance(v, Literal) and env.get(v, False)
+
+    for eqn in jaxpr.eqns:
+        name, p = eqn.primitive.name, eqn.params
+        ins = [rt(v) for v in eqn.invars]
+        if name not in _SUPPORTED:
+            bad.add(name)
+        for v in eqn.outvars:
+            dt = getattr(v.aval, "dtype", None)
+            if dt is not None and not _is_key(dt) and np.dtype(dt) not in _DSL:
+                bad.add(f"{np.dtype(dt)} values")
+        if (name == "dynamic_slice" and any(ins[1:])) or (
+            name == "dynamic_update_slice" and any(ins[2:])
+        ):
+            bad.add(f"{name} with a runtime index")
+        if name == "dot_general" and any(p["dimension_numbers"][1]):
+            bad.add("batched dot_general")
+        if name == "random_bits" and p["bit_width"] != 32:
+            bad.add("random_bits with bit_width != 32")
+        if name in _CALLS:
+            outs = _runtime(_sub_jaxpr(eqn).jaxpr, ins, bad)
+        elif name == "cond":
+            branches = [_runtime(b.jaxpr, ins[1:], bad) for b in p["branches"]]
+            outs = [ins[0] or any(o) for o in zip(*branches, strict=True)]
+        elif name == "while":
+            cn, bn = p["cond_nconsts"], p["body_nconsts"]
+            body = p["body_jaxpr"].jaxpr
+            outs = _loop(body, ins[cn : cn + bn], ins[cn + bn :], [], bad)
+            if any(_runtime(p["cond_jaxpr"].jaxpr, ins[:cn] + outs, bad)):
+                bad.add("while loop with a runtime trip count")
+        elif name == "scan":
+            nc, ncarry = p["num_consts"], p["num_carry"]
+            consts, carry, xs = ins[:nc], ins[nc : nc + ncarry], ins[nc + ncarry :]
+            outs = _loop(p["jaxpr"].jaxpr, consts, carry, xs, bad)
+        else:
+            outs = [any(ins)] * len(eqn.outvars)
+        env.update(zip(eqn.outvars, outs, strict=True))
+    return [rt(v) for v in jaxpr.outvars]
+
+
+def _loop(
+    body: Any, consts: list[bool], carry: list[bool], xs: list[bool], bad: set[str]
+) -> list[bool]:
+    """Return the runtime marks of a loop's carry and stacked outputs."""
+    while True:
+        outs = _runtime(body, consts + carry + xs, bad)
+        new = [a or b for a, b in zip(carry, outs, strict=False)]
+        if new == carry:
+            return new + outs[len(carry) :]
+        carry = new
+
+
+def _particle_mixing(two: Any, probe: Any, J: int) -> set[str]:
+    """Return what in a ``@vectorized`` rproc couples its particles.
+
+    `two` and `probe` are jaxprs of one Euler step on 2 and on J particles; an axis
+    of length J in `probe` is the particle axis. The kernel runs each particle on
+    its own, as if J were 1, so a reduction, slice or concatenation over particles,
+    a random draw without particles as its last axis, or a constant that depends on
+    J would compute something other than XLA does.
+    """
+    bad: set[str] = set()
+    _compare(two, probe, J, bad)
+    return bad
+
+
+def _particle_axis(shape: tuple[int, ...], J: int) -> int | None:
+    """Return the index of the axis of length J in `shape`, or None."""
+    axes = [i for i, n in enumerate(shape) if n == J]
+    return axes[0] if axes else None
+
+
+def _shape(v: Any) -> tuple[int, ...]:
+    """Return the shape of a jaxpr variable or literal."""
+    return tuple(getattr(v.aval, "shape", ()))
+
+
+def _sub_jaxprs(eqn: Any) -> list[Any]:
+    """Return the jaxprs that an equation calls, in a fixed order."""
+    p = eqn.params
+    if eqn.primitive.name in _CALLS:
+        return [_sub_jaxpr(eqn).jaxpr]
+    if eqn.primitive.name == "cond":
+        return [b.jaxpr for b in p["branches"]]
+    if eqn.primitive.name == "while":
+        return [p["cond_jaxpr"].jaxpr, p["body_jaxpr"].jaxpr]
+    if eqn.primitive.name == "scan":
+        return [p["jaxpr"].jaxpr]
+    return []
+
+
+def _compare(two: Any, probe: Any, J: int, bad: set[str]) -> None:
+    """Walk two traces of a step together, noting uses that couple particles."""
+    if len(two.eqns) != len(probe.eqns):
+        bad.add("operations that depend on the number of particles")
+        return
+    for e2, e in zip(two.eqns, probe.eqns, strict=True):
+        name, p = e.primitive.name, e.params
+        if e2.primitive.name != name:
+            bad.add("operations that depend on the number of particles")
+            return
+        for v2, v in zip(e2.invars, e.invars, strict=True):
+            if isinstance(v2, Literal) != isinstance(v, Literal) or (
+                isinstance(v, Literal) and not _same_constant(v2.val, v.val)
+            ):
+                bad.add("constants that depend on the number of particles")
+        shapes = [_shape(v) for v in [*e.invars, *e.outvars]]
+        if any(s.count(J) > 1 for s in shapes):
+            bad.add("several particle axes")
+        ax = [_particle_axis(_shape(v), J) for v in e.invars]
+        if name in ("random_bits", "random_split"):
+            shape = tuple(p["shape"])
+            k = _particle_axis(shape, J)
+            if k is not None and k != len(shape) - 1:
+                bad.add(f"{name} with particles on a non-trailing axis")
+            if k is None and tuple(e2.params["shape"])[-1:] == (1,):
+                bad.add(f"{name} with a trailing axis of length 1")
+        elif name == "iota" and _particle_axis(_shape(e.outvars[0]), J) is not None:
+            bad.add("iota over particles")
+        elif name in _REDUCTIONS:
+            if ax[0] is not None and ax[0] in p["axes"]:
+                bad.add(f"{name} over particles")
+        elif name == "dot_general":
+            (lc, rc), _ = p["dimension_numbers"]
+            if ax[0] in lc or ax[1] in rc:
+                bad.add("dot_general over particles")
+        elif name == "scan":
+            if any(a == 0 for a in ax[p["num_consts"] + p["num_carry"] :]):
+                bad.add("scan over particles")
+        elif any(a is not None for a in ax) and name not in _PARTICLEWISE:
+            if not _keeps_particles(e, ax, J):
+                bad.add(f"{name} across particles")
+        for s2, s in zip(_sub_jaxprs(e2), _sub_jaxprs(e), strict=True):
+            _compare(s2, s, J, bad)
+
+
+def _same_constant(a: Any, b: Any) -> bool:
+    """Return whether two literals are equal, counting NaN as equal to NaN."""
+    a, b = np.asarray(a), np.asarray(b)
+    if np.issubdtype(a.dtype, np.inexact) and np.issubdtype(b.dtype, np.inexact):
+        return bool(np.array_equal(a, b, equal_nan=True))
+    return bool(np.array_equal(a, b))
+
+
+def _keeps_particles(eqn: Any, ax: list[int | None], J: int) -> bool:
+    """Return whether a shape operation leaves every particle's values in place."""
+    name, p, k = eqn.primitive.name, eqn.params, ax[0]
+    if name == "slice":
+        strides = p["strides"] or (1,) * len(p["start_indices"])
+        return k is None or (
+            p["start_indices"][k] == 0
+            and p["limit_indices"][k] == J
+            and strides[k] == 1
+        )
+    if name == "dynamic_slice":
+        return k is None or p["slice_sizes"][k] == J
+    if name == "dynamic_update_slice":
+        return k is None or _shape(eqn.invars[1])[k] == J
+    if name == "pad":
+        return k is None or tuple(p["padding_config"][k]) == (0, 0, 0)
+    if name in ("concatenate", "split", "unstack"):
+        dim = p["dimension"] if name == "concatenate" else p["axis"]
+        return dim not in ax
+    if name == "reshape":
+        out = _particle_axis(_shape(eqn.outvars[0]), J)
+        if k is None or out is None:
+            return k is None and out is None
+        return math.prod(_shape(eqn.invars[0])[:k]) == math.prod(
+            _shape(eqn.outvars[0])[:out]
+        )
+    return False

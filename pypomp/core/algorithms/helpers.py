@@ -389,7 +389,7 @@ def _scan_jit(
         total_args_count = (
             len(shard_axes_static) + len(static_idxs_static) + len(dynamic_idxs_static)
         )
-        current_args = [None] * total_args_count
+        current_args: list[Any] = [None] * total_args_count
 
         # 1. Fill sharded inputs
         for arg_idx, sliced in step_inputs.items():

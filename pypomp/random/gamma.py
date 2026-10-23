@@ -167,7 +167,7 @@ def gammainv(
     if dtype is None:
         dtype = jnp.result_type(u, alpha)
         if not dtypes.issubdtype(dtype, np.floating):
-            dtype = jnp.float32
+            dtype = jnp.dtype(jnp.float32)
 
     dtype = check_and_canonicalize_user_dtype(dtype)
     assert dtype is not None

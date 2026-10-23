@@ -161,8 +161,7 @@ def dmeas(
     z_hi = (y + 0.5 - m) / sqrt_v_tol
     z_lo = (y - 0.5 - m) / sqrt_v_tol
 
-    # log(P + tol) with P computed in log space; subtracting the CDFs cancels to 0
-    # in float32 once y is about 5.4 sd above m.
+    # log(P + tol) in log space: the CDF difference cancels in float32 far above m.
     log_lik = jnp.where(y > tol, log_ndtr_diff(z_hi, z_lo), jspecial.log_ndtr(z_hi))
     log_lik = jnp.logaddexp(log_lik, jnp.log(tol))
 

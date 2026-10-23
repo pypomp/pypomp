@@ -280,3 +280,19 @@ def test_auto_uses_cute_only_with_several_steps_per_observation():
         warnings.simplefilter("error")
         s = one_step.to_struct()
     assert s.rproc_pf is one_step.rproc.mechanics_pf_interp
+
+
+def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
+    from pypomp.cute import kernel
+
+    model = sde_model()
+    make = kernel._make_rprocess_interp
+
+    def off(model, traced, accumvars, per_particle):
+        pf = make(model, traced, accumvars, per_particle)
+        return lambda X_, *args: (pf(X_, *args)[0] + 0.1, pf(X_, *args)[1])
+
+    monkeypatch.setattr(kernel, "_make_rprocess_interp", off)
+    with pytest.warns(UserWarning, match="differ"):
+        s = model.to_struct()
+    assert s.rproc_pf is model.rproc.mechanics_pf_interp

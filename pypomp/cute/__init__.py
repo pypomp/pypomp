@@ -46,11 +46,12 @@ def _build(
     """Return CuTe replacements for (rproc_pf, rproc_per), or None to keep XLA.
 
     Warns before returning None unless `quiet`. The "auto" backend is quiet and also
-    keeps XLA for a model with one Euler step per observation.
+    keeps XLA for a model with one Euler step per observation. A kernel that doesn't
+    match XLA is a translator bug, so that always warns.
     """
 
-    def skip(msg: str) -> None:
-        if not quiet:
+    def skip(msg: str, always: bool = False) -> None:
+        if always or not quiet:
             warnings.warn(msg + " Using XLA.", stacklevel=4)
 
     ok, why = available()
@@ -65,6 +66,7 @@ def _build(
         return None
     from . import kernel
     from .translate import _untranslatable
+    from .verify import _check
 
     traced = kernel._trace_step(model)
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
@@ -77,7 +79,8 @@ def _build(
         return skip(
             f"rproc uses {sorted(bad)}, which the CuTe backend cannot translate."
         )
-    return (
-        kernel._make_rprocess_interp(model, traced, accumvars, False),
-        kernel._make_rprocess_interp(model, traced, accumvars, True),
-    )
+    pf = kernel._make_rprocess_interp(model, traced, accumvars, False)
+    why = _check(model, pf, vec)
+    if why is not None:
+        return skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
+    return pf, kernel._make_rprocess_interp(model, traced, accumvars, True)

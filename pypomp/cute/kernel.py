@@ -37,6 +37,7 @@ import numpy as np
 import cutlass  # pyright: ignore[reportMissingImports]
 from cutlass.jax import cutlass_call  # pyright: ignore[reportMissingImports]
 
+from . import KernelRProc
 from . import translate as ct
 
 if TYPE_CHECKING:
@@ -228,7 +229,7 @@ def _step_once(
     k0, k1 = _step_keys(vec, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
-        cov[c] = TAB[k, 2 + c]
+        cov[c] = TAB[b, k, 2 + c]
     (out,) = ct._interpret(
         step_j,
         [
@@ -236,8 +237,8 @@ def _step_once(
             th,
             ct._obj([k0, k1]),
             cov,
-            ct._obj(TAB[k, 0]),
-            ct._obj(TAB[k, 1]),
+            ct._obj(TAB[b, k, 0]),
+            ct._obj(TAB[b, k, 1]),
         ],
         ctx,
     )
@@ -294,7 +295,7 @@ def _vjp_once(
     k0, k1 = _step_keys(vec, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
-        cov[c] = TAB[k, 2 + c]
+        cov[c] = TAB[b, k, 2 + c]
     gx, gth = ct._interpret(
         step_vjp_j,
         [
@@ -302,8 +303,8 @@ def _vjp_once(
             th,
             ct._obj([k0, k1]),
             cov,
-            ct._obj(TAB[k, 0]),
-            ct._obj(TAB[k, 1]),
+            ct._obj(TAB[b, k, 0]),
+            ct._obj(TAB[b, k, 1]),
             ct._obj(list(gs)),
         ],
         ctx,
@@ -504,11 +505,8 @@ def _broadcast_unbatched(
 
 
 def _make_rprocess_interp(
-    model: Pomp,
-    traced: _Traced,
-    accumvars: tuple[int, ...] | None,
-    per_particle: bool,
-) -> Callable:
+    model: Pomp, traced: _Traced, per_particle: bool
+) -> KernelRProc:
     """Return a CuTe replacement for the model's ``rprocess_interp``.
 
     With `per_particle`, every particle has its own parameters, as in iterated
@@ -529,23 +527,23 @@ def _make_rprocess_interp(
         nth=len(rp.param_names),
         nc=len(rp.covar_names),
         nstep=int(rp.nstep),
-        acc=tuple(int(a) for a in (accumvars or ())),
+        acc=(),
         per_particle=per_particle,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
-    launchers: dict[tuple[str, int, bool], Any] = {}
+    launchers: dict[tuple[str, int, bool, tuple[int, ...]], Any] = {}
 
-    def launcher(kind: str, J: int, transform: bool) -> Any:
-        if (kind, J, transform) not in launchers:
-            launchers[kind, J, transform] = _build_launcher(kind, spec, J, transform)
-        return launchers[kind, J, transform]
+    def launcher(kind: str, J: int, transform: bool, acc: tuple[int, ...]) -> Any:
+        k = (kind, J, transform, acc)
+        if k not in launchers:
+            launchers[k] = _build_launcher(kind, spec._replace(acc=acc), J, transform)
+        return launchers[k]
 
     def flatten(th: jax.Array, sk: jax.Array, tab: jax.Array, B: int, J: int):
-        # Time and covariates are the same for every filter, so one table serves all.
         TH = th.reshape(B * J if per_particle else B, nth)
-        return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, 2 + nc)[0]
+        return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, 2 + nc)
 
-    def make_core(transform: bool) -> Callable:
+    def make_core(transform: bool, acc: tuple[int, ...]) -> Callable:
         # Shapes: Xp (..., J, ns); th (..., d), or (..., J, d) per particle;
         # sk (..., nstep, 2); tab (..., nstep, 2 + nc).
         @jax.custom_batching.custom_vmap
@@ -554,7 +552,7 @@ def _make_rprocess_interp(
             B = math.prod(lead)
             X = Xp.reshape(B * J, ns).T
             out = cutlass_call(
-                launcher("fwd", J, transform),
+                launcher("fwd", J, transform, acc),
                 output_shape_dtype=jax.ShapeDtypeStruct(X.shape, jnp.float32),
             )(X, *flatten(th, sk, tab, B, J))
             return out.T.reshape(lead + (J, ns))
@@ -570,7 +568,7 @@ def _make_rprocess_interp(
             B = math.prod(lead)
             X = Xp.reshape(B * J, ns).T
             out, H = cutlass_call(
-                launcher("save", J, transform),
+                launcher("save", J, transform, acc),
                 output_shape_dtype=(
                     jax.ShapeDtypeStruct(X.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nstep * ns), jnp.float32),
@@ -592,7 +590,7 @@ def _make_rprocess_interp(
             G = gout.reshape(B * J, ns).T
             TH, SK, TAB = flatten(th, sk, tab, B, J)
             dX, dTH = cutlass_call(
-                launcher("bwd", J, transform),
+                launcher("bwd", J, transform, acc),
                 output_shape_dtype=(
                     jax.ShapeDtypeStruct(G.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
@@ -624,7 +622,7 @@ def _make_rprocess_interp(
         diff_core.defvjp(diff_fwd, diff_bwd)
         return diff_core
 
-    cores = {False: make_core(False), True: make_core(True)}
+    cores: dict[tuple[bool, tuple[int, ...]], Callable] = {}
 
     def rprocess_interp(
         X_: jax.Array,
@@ -639,7 +637,10 @@ def _make_rprocess_interp(
         should_trans: bool,
     ) -> tuple[jax.Array, jax.Array]:
         """Advance the particles over one observation interval with the kernel."""
-        if X_.dtype != jnp.float32:  # the kernel is float32; keep x64 runs on XLA
+        key = keys[0] if jnp.ndim(keys) != 0 else keys
+        # The kernel is float32 and reads keys of two 32-bit words, as Philox and
+        # threefry keys are; anything else (x64, rbg keys) stays on XLA.
+        if X_.dtype != jnp.float32 or jax.random.key_data(key).shape != (2,):
             return xla(
                 X_,
                 theta_,
@@ -652,12 +653,10 @@ def _make_rprocess_interp(
                 accumvars_,
                 should_trans,
             )
-        if jnp.ndim(keys) != 0:
-            keys = keys[0]
         subkeys, ts, dts, covs = [], [], [], []
         tk = t
         for k in range(nstep):  # the same key chain and clock as _time_interp
-            keys, sub = jax.random.split(keys)
+            key, sub = jax.random.split(key)
             subkeys.append(jax.random.key_data(sub))
             dt = dt_array_extended[t_idx + k]
             ts.append(tk)
@@ -672,7 +671,10 @@ def _make_rprocess_interp(
         if nc:
             cols.append(jnp.stack(covs).astype(jnp.float32))
         tab = jnp.concatenate(cols, axis=1)
-        out = cores[bool(should_trans)](
+        acc = tuple(sorted({int(a) for a in (accumvars_ or ())}))
+        if (bool(should_trans), acc) not in cores:
+            cores[bool(should_trans), acc] = make_core(bool(should_trans), acc)
+        out = cores[bool(should_trans), acc](
             X_,
             jnp.asarray(theta_, jnp.float32),
             jnp.stack(subkeys),
@@ -680,4 +682,4 @@ def _make_rprocess_interp(
         )
         return out, t_idx + nstep
 
-    return rprocess_interp
+    return KernelRProc(kernel=rprocess_interp, xla=xla)

@@ -43,9 +43,30 @@ def vectorized_rproc(X_, theta_, key, covars, t, dt):
     return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
 
 
-def sde_model(rproc=sde_rproc):
+def int_ops_rproc(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    n = jnp.round(z * 100).astype(jnp.int32)  # negative, as z is near log(0.2)
+    m = (
+        n // 7
+        + jax.lax.rem(n, 7)
+        + jax.lax.div(n, 3)
+        + jax.lax.shift_right_logical(n, 28)
+        + jax.lax.shift_right_arithmetic(n, 3)
+    )
+    w = jnp.sign(z) * jnp.fmod(z, 0.3)
+    return sde_rproc({"x": z + (0.01 * m + w) * dt}, theta_, key, covars, t, dt)
+
+
+def dpop_rproc(X_, theta_, key, covars, t, dt):
+    out = sde_rproc(X_, theta_, key, covars, t, dt)
+    # Any function of theta shows whether _logw is reset at each observation.
+    return {"x": out["x"], "_logw": X_["_logw"] + theta_["r"] * out["x"] * dt}
+
+
+def sde_model(rproc=sde_rproc, statenames=("x",)):
     def rinit(theta_, key, covars, t0):
-        return {"x": theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)}
+        x0 = theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)
+        return {"x": x0, **{n: 0.0 for n in statenames[1:]}}
 
     def dmeas(Y_, X_, theta_, covars, t):
         return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], theta_["tau"])
@@ -59,7 +80,7 @@ def sde_model(rproc=sde_rproc):
     return pp.Pomp(
         ys=ys,
         theta=pp.PompParameters(theta),
-        statenames=["x"],
+        statenames=list(statenames),
         t0=0.0,
         rinit=rinit,
         rproc=rproc,
@@ -126,8 +147,9 @@ def interval(model, struct, J, R, i_obs=3):
         he10_model,
         lambda: sde_model(reshape_rproc),
         lambda: sde_model(vectorized_rproc),
+        lambda: sde_model(int_ops_rproc),
     ],
-    ids=["sde", "he10", "reshape", "vectorized"],
+    ids=["sde", "he10", "reshape", "vectorized", "int_ops"],
 )
 def test_cute_matches_xla_with_the_same_philox_words(make):
     model = make()
@@ -174,6 +196,39 @@ def test_cute_gradients_match_xla(make, should_trans):
         assert (rel > 1e-2).mean() < 0.01
 
 
+def test_filters_with_different_times_share_a_launch():
+    model = he10_model()
+    xla, cute = xla_and_cute(model)
+    X0, th, _ = interval(model, xla, 512, 2)
+    keys = jax.random.split(jax.random.key(5, impl=PHILOX), 2)
+    nsteps = np.asarray(xla.nstep_array)
+    i_obs = np.array([3, 7])  # different times and covariates for each filter
+    ts = jnp.asarray(np.asarray(xla.times)[i_obs - 1])
+    t_idx = jnp.asarray(np.cumsum(nsteps)[i_obs - 1])
+
+    def run(s):
+        def f(X, k, t, t_i):
+            return s.rproc_pf(
+                X,
+                th,
+                k,
+                s.covars_extended,
+                s.dt_array_extended,
+                t,
+                t_i,
+                int(nsteps[3]),
+                s.accumvars,
+                False,
+            )[0]
+
+        return jax.jit(jax.vmap(f))(X0, keys, ts, t_idx)
+
+    a, b = run(xla), run(cute)
+    rel = np.asarray(jnp.abs(a - b) / (jnp.abs(a) + 1.0))
+    assert (rel.max(-1) > 1e-4).mean() < 0.005
+    assert np.median(rel) < 1e-6
+
+
 def test_cute_loglik_agrees_with_xla():
     model = sde_model()
     xla, cute = xla_and_cute(model)
@@ -202,6 +257,22 @@ def test_mif_and_train_on_cute():
     key = jax.random.key(2, impl=PHILOX)
     model.train(J=256, M=3, eta=eta, optimizer=pp.Adam(scale=True), key=key)
     cm.train(J=256, M=3, eta=eta, optimizer=pp.Adam(scale=True), key=key)
+    a = np.asarray(model.results_history[-1].traces_da.sel(theta_idx=0))
+    b = np.asarray(cm.results_history[-1].traces_da.sel(theta_idx=0))
+    np.testing.assert_allclose(b, a, rtol=2e-3, atol=2e-3)
+
+
+def test_dpop_train_on_cute():
+    model = sde_model(dpop_rproc, statenames=("x", "_logw"))
+    assert model.rproc.accumvars is None  # DPOP resets _logw at each observation
+    model.set_rproc_backend("xla")
+    cm = deepcopy(model)
+    cm.set_rproc_backend("cute")
+    eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
+    key = jax.random.key(2, impl=PHILOX)
+    opt = pp.Adam(scale=True)
+    model.train(J=256, M=3, eta=eta, optimizer=opt, key=key, dpop=True)
+    cm.train(J=256, M=3, eta=eta, optimizer=opt, key=key, dpop=True)
     a = np.asarray(model.results_history[-1].traces_da.sel(theta_idx=0))
     b = np.asarray(cm.results_history[-1].traces_da.sel(theta_idx=0))
     np.testing.assert_allclose(b, a, rtol=2e-3, atol=2e-3)
@@ -262,6 +333,25 @@ def test_newton_training_uses_xla():
     assert np.isfinite(np.asarray(model.results_history[-1].traces_da)).all()
 
 
+def test_rbg_keys_run_on_xla():
+    model = sde_model()
+    model.set_rproc_backend("cute")
+    model.pfilter(J=100, key=jax.random.key(0, impl="rbg"))
+    assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
+
+
+def test_rbg_default_keeps_xla_quietly():
+    jax.config.update("jax_default_prng_impl", "rbg")
+    try:
+        model = sde_model()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            s = model.to_struct()
+        assert s.rproc_pf is model.rproc.mechanics_pf_interp
+    finally:
+        jax.config.update("jax_default_prng_impl", "threefry2x32")
+
+
 def test_float64_particles_run_on_xla():
     jax.config.update("jax_enable_x64", True)
     try:
@@ -288,8 +378,8 @@ def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     model = sde_model()
     make = kernel._make_rprocess_interp
 
-    def off(model, traced, accumvars, per_particle):
-        pf = make(model, traced, accumvars, per_particle)
+    def off(model, traced, per_particle):
+        pf = make(model, traced, per_particle)
         return lambda X_, *args: (pf(X_, *args)[0] + 0.1, pf(X_, *args)[1])
 
     monkeypatch.setattr(kernel, "_make_rprocess_interp", off)

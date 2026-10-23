@@ -11,10 +11,39 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from ..core.pomp import Pomp
+    from ..functional.structs import PanelPompStruct, PompStruct
+
+    _S = TypeVar("_S", PompStruct, PanelPompStruct)
+
+
+@dataclass(frozen=True)
+class KernelRProc:
+    """An ``rprocess_interp`` run by the CuTe kernel, with the XLA one it replaces.
+
+    The kernel's derivative has no derivative of its own, so code that needs
+    forward-mode or second-order derivatives swaps `xla` back in (see
+    :func:`_with_xla_rproc`).
+    """
+
+    kernel: Callable
+    xla: Callable
+
+    def __call__(self, *args: Any) -> Any:
+        return self.kernel(*args)
+
+
+def _with_xla_rproc(struct: _S) -> _S:
+    """Return `struct` with any CuTe process model replaced by its XLA original."""
+    pf, per = struct.rproc_pf, struct.rproc_per
+    return struct._replace(
+        rproc_pf=pf.xla if isinstance(pf, KernelRProc) else pf,
+        rproc_per=per.xla if isinstance(per, KernelRProc) else per,
+    )
 
 
 def available() -> tuple[bool, str]:
@@ -40,14 +69,12 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
-def _build(
-    model: Pomp, accumvars: tuple[int, ...] | None, quiet: bool
-) -> tuple[Callable, Callable] | None:
+def _build(model: Pomp, quiet: bool) -> tuple[KernelRProc, KernelRProc] | None:
     """Return CuTe replacements for (rproc_pf, rproc_per), or None to keep XLA.
 
     Warns before returning None unless `quiet`. The "auto" backend is quiet and also
     keeps XLA for a model with one Euler step per observation. A kernel that doesn't
-    match XLA is a translator bug, so that always warns.
+    match XLA, or fails to build, is a translator bug, so that always warns.
     """
 
     def skip(msg: str, always: bool = False) -> None:
@@ -64,6 +91,35 @@ def _build(
         )
     if quiet and int(model.rproc.nstep) == 1:
         return None
+    if model._theta is None:
+        return skip("CuTe rproc backend needs model.theta to check the kernel.")
+    import jax
+
+    if jax.random.key_data(jax.random.key(0)).shape != (2,):
+        return skip(
+            "CuTe rproc backend needs a default PRNG implementation whose keys are "
+            "two 32-bit words, such as threefry."
+        )
+    try:
+        return _build_kernels(model)
+    except _Skip as e:
+        return skip(e.msg, e.always)
+    except Exception as e:  # noqa: BLE001
+        return skip(
+            f"Building the CuTe rproc failed ({type(e).__name__}: {e}).", always=True
+        )
+
+
+class _Skip(Exception):
+    """Raised by :func:`_build_kernels` to keep XLA, with the warning to give."""
+
+    def __init__(self, msg: str, always: bool = False) -> None:
+        super().__init__(msg)
+        self.msg, self.always = msg, always
+
+
+def _build_kernels(model: Pomp) -> tuple[KernelRProc, KernelRProc]:
+    """Translate, build and check the kernels, as :func:`_build` describes."""
     from . import kernel
     from .translate import _untranslatable
     from .verify import _check
@@ -76,11 +132,12 @@ def _build(
     if vec:
         bad |= kernel._particle_mixing(model)
     if bad:
-        return skip(
+        raise _Skip(
             f"rproc uses {sorted(bad)}, which the CuTe backend cannot translate."
         )
-    pf = kernel._make_rprocess_interp(model, traced, accumvars, False)
-    why = _check(model, pf, vec)
+    pf = kernel._make_rprocess_interp(model, traced, False)
+    per = kernel._make_rprocess_interp(model, traced, True)
+    why = _check(model, pf, per, vec)
     if why is not None:
-        return skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
-    return pf, kernel._make_rprocess_interp(model, traced, accumvars, True)
+        raise _Skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
+    return pf, per

@@ -529,12 +529,16 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         if backend != "xla":
             # Built once per backend: new functions would make every call recompile.
             built = self.__dict__.setdefault("_cute_fns", {})
+            fns = built.get(backend)
             if backend not in built:
                 from pypomp.cute import _build
 
-                built[backend] = _build(self, struct.accumvars, backend == "auto")
-            if built[backend] is not None:
-                rproc_pf, rproc_per = built[backend]
+                fns = _build(self, backend == "auto")
+                # Without theta the kernel can't be checked, so decide again later.
+                if self._theta is not None:
+                    built[backend] = fns
+            if fns is not None:
+                rproc_pf, rproc_per = fns
                 struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
         return struct
 

@@ -229,6 +229,36 @@ def _erf_inv32(x: _Scalar) -> _Scalar:
     return p * x
 
 
+def _ir(op: str, dtype: Any, *xs: _Scalar) -> _Scalar:
+    """Return MLIR ``arith`` op `op` on DSL scalars, as a DSL scalar of `dtype`.
+
+    Used where the DSL's Python operators follow Python's semantics (floor
+    division, for one) rather than XLA's.
+    """
+    return _DSL[np.dtype(dtype)](getattr(_arith, op)(*(x.ir_value() for x in xs)))
+
+
+def _shift(name: str, x: _Scalar, s: _Scalar, dtype: Any) -> _Scalar:
+    """Return `x` shifted by `s` as XLA defines it, including shifts by a negative
+    amount or by at least the bit width, which LLVM leaves undefined."""
+    dt = np.dtype(dtype)
+    bits = dt.itemsize * 8
+    op = {
+        "shift_left": "shli",
+        "shift_right_logical": "shrui",
+        "shift_right_arithmetic": "shrsi",
+    }[name]
+    out = s >= _const(bits, dt)
+    if np.issubdtype(dt, np.signedinteger):
+        out = out | (s < _const(0, dt))
+    fill = (
+        _ir("shrsi", dt, x, _const(bits - 1, dt))
+        if name == "shift_right_arithmetic"
+        else _const(0, dt)
+    )
+    return _select(out, fill, _ir(op, dt, x, s), dt)
+
+
 def _ipow(x: _Scalar, n: int) -> _Scalar:
     """Return x**n for an integer n by repeated squaring."""
     if n == 0:
@@ -264,15 +294,13 @@ def _ew(
         return x - a[1]
     if name == "mul":
         return x * a[1]
-    if name == "div":
-        return x / a[1] if f else x // a[1]
-    if name == "rem":
+    signed = np.issubdtype(np.dtype(in_dtypes[0]), np.signedinteger)
+    if name == "div":  # integer division truncates toward zero, as in C
+        return x / a[1] if f else _ir("divsi" if signed else "divui", in_dtypes[0], *a)
+    if name == "rem":  # the sign of the dividend, as in C's fmod and %
         if f:
-            q = x / a[1]
-            return x - a[1] * _select(
-                q < cutlass.Float32(0.0), m.ceil(q), m.floor(q), np.float32
-            )
-        return x % a[1]
+            return _ir("remf", in_dtypes[0], *a)
+        return _ir("remsi" if signed else "remui", in_dtypes[0], *a)
     if name == "neg":
         return -x
     if name == "max":
@@ -283,12 +311,12 @@ def _ew(
         return (
             m.abs(x) if f else _select(x < _const(0, in_dtypes[0]), -x, x, in_dtypes[0])
         )
-    if name == "sign":
+    if name == "sign":  # x itself for zeros and NaN, as XLA returns
         z = _const(0, in_dtypes[0])
         return _select(
             x > z,
             _const(1, in_dtypes[0]),
-            _select(x < z, _const(-1, in_dtypes[0]), z, in_dtypes[0]),
+            _select(x < z, _const(-1, in_dtypes[0]), x, in_dtypes[0]),
             in_dtypes[0],
         )
     if name in (
@@ -345,10 +373,8 @@ def _ew(
         return x ^ a[1]
     if name == "not":
         return ~x
-    if name == "shift_left":
-        return x << a[1]
-    if name in ("shift_right_logical", "shift_right_arithmetic"):
-        return x >> a[1]
+    if name in ("shift_left", "shift_right_logical", "shift_right_arithmetic"):
+        return _shift(name, x, a[1], in_dtypes[0])
     if name == "convert_element_type":
         return x.to(_DSL[np.dtype(out_dtype)])
     if name == "bitcast_convert_type":

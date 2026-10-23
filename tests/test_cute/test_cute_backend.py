@@ -1,5 +1,7 @@
 """The CuTe rproc backend. Needs nvidia-cutlass-dsl and a GPU; skipped otherwise."""
 
+import os
+import stat
 import warnings
 from copy import deepcopy
 
@@ -21,6 +23,22 @@ pytestmark = pytest.mark.skipif(not ok, reason=f"CuTe backend unavailable: {why}
 def sde_rproc(X_, theta_, key, covars, t, dt):
     z = X_["x"]
     eps = jax.random.normal(key)
+    drift = theta_["r"] * (1 - jnp.exp(z)) - theta_["sig"] ** 2 / 2
+    return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
+
+
+def reshape_rproc(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    m = jnp.stack([z, 2 * z, 3 * z, 4 * z]).reshape(2, 2)
+    v = jax.lax.reshape(m, (4,), dimensions=(1, 0))  # [z, 3z, 2z, 4z]
+    return sde_rproc({"x": z + (v[1] - v[2]) * dt}, theta_, key, covars, t, dt)
+
+
+@pp.vectorized
+def vectorized_rproc(X_, theta_, key, covars, t, dt):
+    z = jnp.stack([X_["x"], 2 * X_["x"]])[0]  # stacking keeps each particle's values
+    z = jnp.where(jnp.isnan(z), jnp.nan, z)  # a NaN constant, the same at any J
+    eps = jax.random.normal(key, z.shape)
     drift = theta_["r"] * (1 - jnp.exp(z)) - theta_["sig"] ** 2 / 2
     return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
 
@@ -101,7 +119,16 @@ def interval(model, struct, J, R, i_obs=3):
     return X0, th, advance
 
 
-@pytest.mark.parametrize("make", [sde_model, he10_model], ids=["sde", "he10"])
+@pytest.mark.parametrize(
+    "make",
+    [
+        sde_model,
+        he10_model,
+        lambda: sde_model(reshape_rproc),
+        lambda: sde_model(vectorized_rproc),
+    ],
+    ids=["sde", "he10", "reshape", "vectorized"],
+)
 def test_cute_matches_xla_with_the_same_philox_words(make):
     model = make()
     xla, cute = xla_and_cute(model)
@@ -118,6 +145,9 @@ def test_cute_matches_xla_with_the_same_philox_words(make):
     # All filters share one launch; a filter on its own gives the same particles.
     b0 = jax.jit(lambda X, k: adv_cute(X, th, k))(X0[0], keys[0])
     np.testing.assert_array_equal(np.asarray(b0), np.asarray(b[0]))
+    from pypomp.cute import kernel
+
+    assert stat.S_IMODE(os.stat(kernel._generated_dir()).st_mode) == 0o700
 
 
 @pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation"])
@@ -177,16 +207,69 @@ def test_mif_and_train_on_cute():
     np.testing.assert_allclose(b, a, rtol=2e-3, atol=2e-3)
 
 
-def test_unsupported_rproc_falls_back_to_xla():
-    def rproc(X_, theta_, key, covars, t, dt):
-        z = X_["x"]
-        return {"x": z + jnp.sort(jnp.stack([z, -z]))[0] * dt}
+def sorts(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    return {"x": z + jnp.sort(jnp.stack([z, -z]))[0] * dt}
 
+
+def runtime_index(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    i = jnp.asarray(t > 1.0, jnp.int32)
+    return {"x": z + jax.lax.dynamic_index_in_dim(jnp.stack([z, -z]), i, 0, False) * dt}
+
+
+def rounds(X_, theta_, key, covars, t, dt):
+    return {"x": jax.lax.reduce_precision(X_["x"], exponent_bits=8, mantissa_bits=7)}
+
+
+@pp.vectorized
+def particle_mean(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    return {"x": z + jnp.mean(z) * dt + 0.1 * jax.random.normal(key, z.shape)}
+
+
+@pp.vectorized
+def particles_first(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    return {"x": z + 0.1 * jax.random.normal(key, (z.shape[0], 2))[:, 0]}
+
+
+@pp.vectorized
+def uses_J(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    return {"x": z + dt / z.shape[0]}
+
+
+@pytest.mark.parametrize(
+    "rproc",
+    [sorts, runtime_index, rounds, particle_mean, particles_first, uses_J],
+    ids=lambda f: f.__name__,
+)
+def test_rprocs_the_kernel_cannot_run_exactly_stay_on_xla(rproc):
     model = sde_model(rproc)
     model.set_rproc_backend("cute")
-    with pytest.warns(UserWarning, match="sort"):
+    with pytest.warns(UserWarning, match="Using XLA"):
         s = model.to_struct()
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
+
+
+def test_newton_training_uses_xla():
+    model = sde_model()
+    model.set_rproc_backend("cute")
+    eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
+    with pytest.warns(UserWarning, match="Hessians"):
+        model.train(J=64, M=1, eta=eta, optimizer=pp.Newton(), key=jax.random.key(0))
+    assert np.isfinite(np.asarray(model.results_history[-1].traces_da)).all()
+
+
+def test_float64_particles_run_on_xla():
+    jax.config.update("jax_enable_x64", True)
+    try:
+        model = sde_model()
+        model.pfilter(J=100, key=jax.random.key(0))
+        assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
+    finally:
+        jax.config.update("jax_enable_x64", False)
 
 
 def test_auto_uses_cute_only_with_several_steps_per_observation():

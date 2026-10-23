@@ -181,3 +181,11 @@ def test_default_rproc_backend_falls_back_quietly(simple):
         warnings.simplefilter("error")
         s = LG.to_struct()
     assert s.rproc_pf is LG.rproc.mechanics_pf_interp
+
+
+def test_par_trans_change_drops_built_rproc_backends(simple):
+    LG, key, J = simple
+    LG.to_struct()
+    assert "_cute_fns" in LG.__dict__
+    LG.par_trans = LG.par_trans
+    assert "_cute_fns" not in LG.__dict__

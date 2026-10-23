@@ -167,6 +167,7 @@ class PfilterContext:
     filter_mean: bool = static(default=False)
     prediction_mean: bool = static(default=False)
     should_trans: bool = static(default=False)
+    reps_batch_size: int | None = static(default=None)
 
     @classmethod
     def from_struct(
@@ -179,6 +180,7 @@ class PfilterContext:
         filter_mean: bool = False,
         prediction_mean: bool = False,
         should_trans: bool = False,
+        reps_batch_size: int | None = None,
     ) -> PfilterContext:
         return cls(
             series=SeriesData.from_struct(struct),
@@ -190,6 +192,7 @@ class PfilterContext:
             filter_mean=filter_mean,
             prediction_mean=prediction_mean,
             should_trans=should_trans,
+            reps_batch_size=reps_batch_size,
         )
 
     @classmethod

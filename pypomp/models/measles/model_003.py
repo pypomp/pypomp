@@ -5,10 +5,10 @@ He10 model with continuous process model.
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jspecial
-from jax.scipy.special import log_ndtr
 
 from pypomp.core.model_mechanics import vectorized
 from pypomp.models.measles import _samplers as smp
+from pypomp.models.measles._dmeas import log_ndtr_diff
 from pypomp.types import (
     CovarDict,
     InitialTimeFloat,
@@ -187,17 +187,9 @@ def log_cdf_single(z: jax.Array) -> jax.Array:
     return log_cdf_diff(z, -jnp.inf)
 
 
-def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
-    return a + jnp.log1p(-jnp.exp(b - a))
-
-
 @jax.custom_jvp
 def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
-    a: jax.Array = log_ndtr(zh)
-    b: jax.Array = log_ndtr(zl)
-    hi = jnp.maximum(a, b)
-    lo = jnp.minimum(a, b)
-    return _log_sub_exp_stable(hi, lo)
+    return log_ndtr_diff(jnp.maximum(zh, zl), jnp.minimum(zh, zl))
 
 
 @log_cdf_diff.defjvp

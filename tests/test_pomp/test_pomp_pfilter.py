@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import pytest
 
 import pypomp as pp
+import pypomp.functional as F
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +42,36 @@ def test_reps_default(simple):
     val1 = LG.results_history[-1].logLiks
     assert val1.shape == (2, 2)
     assert LG.results_history[-1].CLL_da is None
+
+
+def test_reps_batch_size_matches_parallel(simple):
+    LG, key, J = simple
+    LG.pfilter(J=J, key=key, reps=4)
+    parallel = LG.results_history[-1].logLiks.values
+    for batch in (1, 3):
+        LG.pfilter(J=J, key=key, reps=4, reps_batch_size=batch)
+        assert jnp.allclose(LG.results_history[-1].logLiks.values, parallel, rtol=1e-5)
+
+
+def test_reps_batch_for_memory_budget():
+    from pypomp.functional.pfilter import _reps_batch_for
+
+    assert _reps_batch_for(100, 600, 1000, 10) is None
+    # Budget 800: 600 fixed leaves room for one replicate's 140 of workspace.
+    assert _reps_batch_for(600, 1400, 1000, 10) == 1
+    assert _reps_batch_for(0, 1000, 1000, 10) == 8
+    assert _reps_batch_for(10**12, 10**12, 1000, 10) == 1
+
+
+def test_reps_batch_size_validation(simple):
+    LG, key, J = simple
+    with pytest.raises(ValueError, match="reps_batch_size"):
+        LG.pfilter(J=J, key=key, reps=2, reps_batch_size=0)
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    keys = jax.random.split(key, 2)[None]
+    with pytest.raises(ValueError, match="reps_batch_size"):
+        F.pfilter(struct, th, J, keys, reps_batch_size=-1)
 
 
 @pytest.mark.parametrize(

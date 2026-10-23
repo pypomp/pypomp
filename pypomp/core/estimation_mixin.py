@@ -600,11 +600,23 @@ class PompEstimationMixin(Base):
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
+        # The CuTe kernel's derivative has no derivative of its own, so an optimizer
+        # that needs Hessians runs on XLA.
+        backend = None
+        if optimizer.uses_hessian and self._rproc_backend != "xla":
+            if self._rproc_backend == "cute":
+                warnings.warn(
+                    f"{type(optimizer).__name__} needs Hessians, which the CuTe "
+                    "backend doesn't provide. Using XLA.",
+                    stacklevel=2,
+                )
+            backend = "xla"
+
         nLLs_jax, theta_traces_jax = run_jax_batch_sharded(
             _train,
             {1: 0, 5: 0},
             [0, 0],
-            self.to_struct(),
+            self.to_struct(rproc_backend=backend),
             theta_array,
             J,
             M,

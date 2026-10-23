@@ -32,6 +32,12 @@ from .parameters import PompParameters
 from .results import ResultsHistory
 
 
+def _check_rproc_backend(backend: str) -> None:
+    """Raise ValueError unless `backend` is a process model backend."""
+    if backend not in ("auto", "cute", "xla"):
+        raise ValueError(f"backend must be 'auto', 'cute' or 'xla', got {backend!r}")
+
+
 class Pomp(PompEstimationMixin, PompAnalysisMixin):
     """
     Define and fit a partially observed Markov process (POMP) model.
@@ -269,6 +275,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.t0 = float(t0)
         self.results_history = ResultsHistory()
         self.fresh_key = None
+        self._rproc_backend = "auto"
         self.metadata = ModelMetadata()
 
         if covars is not None:
@@ -394,6 +401,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             if comp is not None:
                 comp.par_trans = value
                 comp._build_mechanics()
+        # CuTe kernels built for the old transform are stale.
+        self.__dict__.pop("_cute_fns", None)
 
     def _prepare_theta_input(
         self,
@@ -431,12 +440,56 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def to_struct(self) -> PompStruct:
+    def set_rproc_backend(self, backend: str) -> None:
+        """Choose how the process model runs in filtering and estimation.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"}
+            ``"xla"`` compiles ``rproc`` with XLA. ``"cute"`` runs every Euler step
+            of an observation interval in one CUDA kernel on an NVIDIA GPU, one
+            particle per thread, for all filters of a call at once. ``rproc`` is
+            translated from its jaxpr, so it is used as written. CuTe needs the
+            optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``),
+            a GPU and the same number of Euler steps in every observation interval;
+            without them, or if ``rproc`` uses an operation the translator does not
+            handle, pypomp warns and uses XLA. ``"auto"``, the default for a new
+            model, uses CuTe when all of that holds and there is more than one
+            Euler step per observation, and XLA otherwise, without a warning.
+
+        Returns
+        -------
+        None
+            Sets the backend that :meth:`to_struct` and the estimation methods use.
+
+        Raises
+        ------
+        ValueError
+            If `backend` is not one of the three options.
+
+        Notes
+        -----
+        The CuTe kernel draws Philox4x32-10 random numbers (see
+        :mod:`pypomp.random.philox`), so for a given key its results differ from
+        those of the XLA path, which uses the key's own generator. Gradients for
+        :meth:`train` go through a second generated kernel; optimizers that need
+        Hessians, and float64 particles, use XLA.
+        """
+        _check_rproc_backend(backend)
+        self._rproc_backend = backend
+
+    def to_struct(self, rproc_backend: str | None = None) -> PompStruct:
         """Export the model to a lightweight JAX-compatible struct.
 
         Packs the static data arrays and compiled simulator callables into a
         :class:`~pypomp.functional.PompStruct` NamedTuple suitable for use
         with the functional API (``pypomp.functional``).
+
+        Parameters
+        ----------
+        rproc_backend : {"auto", "cute", "xla"} or None, optional
+            Process model backend for this struct (see :meth:`set_rproc_backend`).
+            Defaults to None, which uses the model's backend.
 
         Returns
         -------
@@ -448,7 +501,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         pypomp.functional.pfilter : Functional particle filter.
         pypomp.functional.mif : Functional iterated filter.
         """
-        return PompStruct(
+        struct = PompStruct(
             ys=jnp.array(self.ys),
             dt_array_extended=jnp.array(self._dt_array_extended),
             nstep_array=jnp.array(self._nstep_array),
@@ -471,6 +524,23 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
         )
+        backend = self._rproc_backend if rproc_backend is None else rproc_backend
+        _check_rproc_backend(backend)
+        if backend != "xla":
+            # Built once per backend: new functions would make every call recompile.
+            built = self.__dict__.setdefault("_cute_fns", {})
+            fns = built.get(backend)
+            if backend not in built:
+                from pypomp.cute import _build
+
+                fns = _build(self, backend == "auto")
+                # Without theta the kernel can't be checked, so decide again later.
+                if self._theta is not None:
+                    built[backend] = fns
+            if fns is not None:
+                rproc_pf, rproc_per = fns
+                struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
+        return struct
 
     def print_metadata(self) -> None:
         """Display environment and version metadata for this model instance.
@@ -675,6 +745,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         state.pop("rmeas", None)
         state.pop("dprior", None)
         state.pop("fresh_key", None)
+        state.pop("_cute_fns", None)
 
         return state
 
@@ -685,6 +756,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         """
         # Restore basic attributes
         self.__dict__.update(state)
+        self.__dict__.setdefault("_rproc_backend", "auto")
         if "par_trans" in state and "_par_trans" not in state:
             self._par_trans = state["par_trans"]
 

@@ -198,3 +198,25 @@ def test_thresh_is_a_weight_ratio(simple):
     assert logliks[0.5] == logliks[0.0]
     assert logliks[0.99] == logliks[0.0]
     assert logliks[1e6] != logliks[0.0]
+
+
+def test_default_rproc_backend_falls_back_quietly(simple):
+    import warnings
+
+    from pypomp.cute import available
+
+    LG, key, J = simple
+    if available()[0]:
+        pytest.skip("CuTe is available here; covered by tests/test_cute")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = LG.to_struct()
+    assert s.rproc_pf is LG.rproc.mechanics_pf_interp
+
+
+def test_par_trans_change_drops_built_rproc_backends(simple):
+    LG, key, J = simple
+    LG.to_struct()
+    assert "_cute_fns" in LG.__dict__
+    LG.par_trans = LG.par_trans
+    assert "_cute_fns" not in LG.__dict__

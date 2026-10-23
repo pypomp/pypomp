@@ -37,6 +37,7 @@ dependencies = [
 benchmarks = ["statsmodels"]
 tests = ["pytest", "pytest-cov", "pytest-xdist", "pytest-timeout", "pytest-regressions", "pandas-stubs", "scipy-stubs", "pre-commit", "pyright", "plotnine"]
 viz = ["plotly"]
+cute = ["nvidia-cutlass-dsl>=4.7"]
 
 
 [project.urls]

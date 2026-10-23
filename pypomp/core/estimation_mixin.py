@@ -201,9 +201,6 @@ class PompEstimationMixin(Base):
         if J < 1:
             raise ValueError("J should be greater than 0.")
 
-        if reps_batch_size is not None and reps_batch_size < 1:
-            raise ValueError("reps_batch_size should be None or greater than 0.")
-
         thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
         rep_keys = jax.random.split(new_key, n_theta_reps * reps).reshape(

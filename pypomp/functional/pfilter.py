@@ -86,6 +86,8 @@ def pfilter(
     align_params : Parameter alignment utility.
     """
 
+    if reps_batch_size is not None and reps_batch_size < 1:
+        raise ValueError("reps_batch_size should be None or greater than 0.")
     thresh = float(max(0.0, thresh))
     context = PfilterContext.from_struct(
         struct,
@@ -107,13 +109,15 @@ def pfilter(
 _MEMORY_HEADROOM = 0.8
 
 
-def _reps_batch_for(peak_bytes: int, free_bytes: int, n_reps: int) -> int | None:
+def _reps_batch_for(
+    fixed_bytes: int, temp_bytes: int, free_bytes: int, n_reps: int
+) -> int | None:
     """Return the largest replicate batch that fits in memory, or None if all do."""
     budget = _MEMORY_HEADROOM * free_bytes
-    if peak_bytes <= budget:
+    if fixed_bytes + temp_bytes <= budget:
         return None
-    # Assumes memory grows linearly with the batch size.
-    return max(1, int(budget // (peak_bytes / n_reps)))
+    # Inputs and outputs are full size at any batch size; the workspace scales.
+    return max(1, int((budget - fixed_bytes) // (temp_bytes / n_reps)))
 
 
 def _free_device_bytes(arrays: tuple[jax.Array, ...]) -> int | None:
@@ -128,17 +132,14 @@ def _free_device_bytes(arrays: tuple[jax.Array, ...]) -> int | None:
     return min(free) if free else None
 
 
-def _peak_bytes(compiled: Compiled) -> int | None:
-    """Return XLA's estimate of the peak memory of a compiled function, if known."""
+def _memory_bytes(compiled: Compiled) -> tuple[int, int] | None:
+    """Return XLA's estimate of a compiled function's input and output memory and
+    its workspace, if known."""
     m = compiled.memory_analysis()
     if m is None:
         return None
-    return (
-        m.argument_size_in_bytes
-        + m.output_size_in_bytes
-        + m.temp_size_in_bytes
-        - m.alias_size_in_bytes
-    )
+    fixed = m.argument_size_in_bytes + m.output_size_in_bytes - m.alias_size_in_bytes
+    return fixed, m.temp_size_in_bytes
 
 
 def _run_reps(
@@ -151,17 +152,18 @@ def _run_reps(
         return _vmapped_pfilter_internal2(
             thetas_array, keys, replace(context, reps_batch_size=1)
         )
-    if any(isinstance(x, Tracer) for x in (thetas_array, keys)):
+    leaves = jax.tree_util.tree_leaves((thetas_array, keys, context))
+    if any(isinstance(x, Tracer) for x in leaves):
         return _vmapped_pfilter_internal2(thetas_array, keys, context)
     # The all-at-once compile is needed anyway when it fits, so reuse it to measure memory.
     compiled = (
         jax.jit(_vmapped_pfilter_internal2).lower(thetas_array, keys, context).compile()
     )
-    peak, free = _peak_bytes(compiled), _free_device_bytes((thetas_array, keys))
+    mem, free = _memory_bytes(compiled), _free_device_bytes((thetas_array, keys))
     batch = (
         None
-        if peak is None or free is None
-        else _reps_batch_for(peak, free, keys.shape[1])
+        if mem is None or free is None
+        else _reps_batch_for(*mem, free, keys.shape[1])
     )
     if batch is None:
         return compiled(thetas_array, keys, context)

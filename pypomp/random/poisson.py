@@ -212,10 +212,17 @@ def poissoninv(
     float_dtype = _get_available_dtype(float_dtype)
     assert float_dtype is not None
 
-    if u_arr.ndim == 0:
+    if u_arr.size == 1:
+        # Unbatched, the lax.conds stay branches, so only the needed region is
+        # computed (as in the CuTe kernel, which traces one particle at a time);
+        # vmap would turn them into selects of every region.
         res = _poissoninv_scalar(
-            u_arr, lam_arr, float_dtype, max_newton_loops, max_inverse_cdf_loops
-        )
+            u_arr.reshape(()),
+            lam_arr.reshape(()),
+            float_dtype,
+            max_newton_loops,
+            max_inverse_cdf_loops,
+        ).reshape(u_arr.shape)
     else:
         flat_u = u_arr.reshape(-1)
         flat_lam = lam_arr.reshape(-1)

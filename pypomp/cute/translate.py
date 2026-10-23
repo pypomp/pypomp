@@ -20,6 +20,7 @@ Unsupported primitives raise NotImplementedError naming the primitive.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +33,7 @@ from jax.extend.core import Literal
 import cutlass  # pyright: ignore[reportMissingImports]
 import cutlass.cute as cute  # pyright: ignore[reportMissingImports]
 from cutlass._mlir.dialects import arith as _arith  # pyright: ignore[reportMissingImports]
+from cutlass._mlir.dialects import llvm as _llvm  # pyright: ignore[reportMissingImports]
 
 # A CuTe DSL scalar, or a numpy or Python constant.
 _Scalar = Any
@@ -468,6 +470,8 @@ _SUPPORTED = (
     | {
         "select_n",
         "polynomial",
+        "empty",
+        "empty2",
         "pad",
         "broadcast_in_dim",
         "reshape",
@@ -580,6 +584,14 @@ def _eval_eqn(
     ctx: _Ctx,
 ) -> list[Any]:
     """Return the outputs of one jaxpr equation, emitting DSL code as needed."""
+    if name in ("empty", "empty2"):
+        # Unset buffers, such as residuals that a differentiated cond's branch
+        # doesn't produce; keys among them are carried as their data.
+        av = out_avals[0]
+        key = _is_key(av.dtype)
+        return [
+            np.zeros(av.shape + ((2,) if key else ()), np.uint32 if key else av.dtype)
+        ]
     if (
         _all_const(ins)
         and name not in _CALLS
@@ -812,19 +824,7 @@ def _eval_eqn(
             raise NotImplementedError("cond with a batched index")
         if not _is_dsl(idx):
             return _interpret(branches[int(idx)], ops, ctx)
-        results = [_interpret(b, ops, ctx) for b in branches]  # both sides, then select
-        outs = []
-        for k, av in enumerate(out_avals):
-            shape = av.shape
-            cs = [np.broadcast_to(_obj(r[k]), shape) for r in results]
-            out = np.empty(shape, dtype=object)
-            for p in np.ndindex(*shape) if shape else [()]:
-                r = cs[-1][p]
-                for c in range(len(cs) - 2, -1, -1):
-                    r = _select(idx == _const(c, in_dt[0]), cs[c][p], r, av.dtype)
-                out[p] = r
-            outs.append(out)
-        return outs
+        return _branch(idx, in_dt[0], branches, ops, out_avals, ctx)
     if name == "while":
         cn, bn = eqn.params["cond_nconsts"], eqn.params["body_nconsts"]
         cconsts, bconsts, carry = ins[:cn], ins[cn : cn + bn], ins[cn + bn :]
@@ -905,6 +905,65 @@ def _eval_eqn(
         return [out]
 
     raise NotImplementedError(name)
+
+
+def _branch(
+    idx: _Scalar,
+    idx_dtype: Any,
+    branches: list[ClosedJaxpr],
+    ops: list[Any],
+    out_avals: list[Any],
+    ctx: _Ctx,
+) -> list[np.ndarray]:
+    """Return the outputs of the branch that runtime index `idx` picks, running only
+    that branch.
+
+    Each thread branches on its own index. A warp whose threads pick different
+    branches runs each of them in turn, so this costs at most what computing every
+    branch and selecting would, and skips the branches no thread in a warp needs.
+    """
+    # Keys are carried as their uint32 data, with a trailing axis of 2.
+    shapes = [av.shape + ((2,) if _is_key(av.dtype) else ()) for av in out_avals]
+    dtypes = [
+        np.dtype(np.uint32 if _is_key(av.dtype) else av.dtype) for av in out_avals
+    ]
+    types = [
+        _DSL[dt]
+        for sh, dt in zip(shapes, dtypes, strict=True)
+        for _ in range(math.prod(sh))
+    ]
+
+    def body(b: int) -> Callable[[], list[_Scalar]]:
+        def run() -> list[_Scalar]:
+            # An empty asm with side effects can't be speculated, so LLVM keeps the
+            # branch instead of if-converting it back into running every branch and
+            # selecting, which it otherwise does for side-effect-free branches.
+            _llvm.inline_asm(None, [], "", "", has_side_effects=True)
+            outs = _interpret(branches[b], ops, ctx)
+            return [
+                _as_dsl(v, dt)
+                for o, sh, dt in zip(outs, shapes, dtypes, strict=True)
+                for v in np.broadcast_to(_obj(o), sh).flat
+            ]
+
+        return run
+
+    def pick(b: int) -> list[_Scalar]:
+        if b == len(branches) - 1:
+            return body(b)()
+        r = cutlass.if_generate(
+            idx == _const(b, idx_dtype), body(b), lambda: pick(b + 1), [], types
+        )
+        return [r] if len(types) == 1 else list(r)
+
+    flat = iter(pick(0))
+    outs = []
+    for sh in shapes:
+        out = np.empty(sh, dtype=object)
+        for p in np.ndindex(*sh) if sh else [()]:
+            out[p] = next(flat)
+        outs.append(out)
+    return outs
 
 
 def _counter(f: int, shape: tuple[int, ...], ctx: _Ctx) -> _Scalar:

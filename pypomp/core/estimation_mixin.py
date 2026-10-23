@@ -118,6 +118,7 @@ class PompEstimationMixin(Base):
         ESS: bool = False,
         filter_mean: bool = False,
         prediction_mean: bool = False,
+        reps_batch_size: int | None = None,
     ) -> None:
         """Evaluate the log-likelihood via the bootstrap particle filter.
 
@@ -158,6 +159,13 @@ class PompEstimationMixin(Base):
         prediction_mean : bool, optional
             Whether to compute and store the predicted state mean at each
             observation time.  Defaults to ``False``.
+        reps_batch_size : int or None, optional
+            How many of the ``reps`` filters per parameter set to run at once;
+            smaller batches run one after another and use less memory.  ``None``
+            (default) chooses: on a GPU, all of them at once if XLA's memory
+            estimate for that fits in 80% of the free device memory, otherwise
+            the largest batch that fits; on CPU, one at a time, which is faster
+            there.
 
         Returns
         -------
@@ -212,6 +220,7 @@ class PompEstimationMixin(Base):
             ESS,
             filter_mean,
             prediction_mean,
+            reps_batch_size=reps_batch_size,
         )
 
         results = jax.device_get(results_jax)

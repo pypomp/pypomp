@@ -1,4 +1,4 @@
-"""CuTe backend for the process model, on NVIDIA GPUs (opt in with ``Pomp.set_rproc_backend``).
+"""CuTe backend for the process model, on NVIDIA GPUs (see ``Pomp.set_rproc_backend``).
 
 The model's ``rproc`` is translated from its jaxpr into a CuTe DSL kernel that runs
 every Euler step of an observation interval for one particle per thread. It needs the
@@ -28,15 +28,22 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
-def build(model, accumvars, rng: str = "philox"):
-    """(rproc_pf, rproc_per) CuTe replacements for `model`, or None after a warning."""
+def build(model, accumvars, rng: str = "philox", quiet: bool = False):
+    """(rproc_pf, rproc_per) CuTe replacements for `model`, or None (with a warning
+    unless `quiet`, which is the "auto" backend; that also skips one-step models)."""
+
+    def skip(msg):
+        if not quiet:
+            warnings.warn(msg + " Using XLA.", stacklevel=4)
+        return None
+
     ok, why = available()
     if not ok:
-        warnings.warn(f"CuTe rproc backend unavailable: {why}. Using XLA.", stacklevel=3)
-        return None
+        return skip(f"CuTe rproc backend unavailable: {why}.")
     if model.rproc.nstep is None:
-        warnings.warn("CuTe rproc backend needs the same number of Euler steps in every observation "
-                      "interval (nstep, or a dt that divides the intervals evenly). Using XLA.", stacklevel=3)
+        return skip("CuTe rproc backend needs the same number of Euler steps in every observation "
+                    "interval (nstep, or a dt that divides the intervals evenly).")
+    if quiet and int(model.rproc.nstep) == 1:
         return None
     from . import kernel
 
@@ -44,8 +51,6 @@ def build(model, accumvars, rng: str = "philox"):
     bad = (kernel.unsupported(step_j) | kernel.unsupported(prep_j) | kernel.unsupported(step_vjp_j)
            | kernel.unsupported(prep_vjp_j))
     if bad:
-        warnings.warn(f"rproc uses {sorted(bad)}, which the CuTe backend does not translate. Using XLA.",
-                      stacklevel=3)
-        return None
+        return skip(f"rproc uses {sorted(bad)}, which the CuTe backend does not translate.")
     return (kernel.make_rprocess_interp(model, accumvars, per_particle=False, rng=rng),
             kernel.make_rprocess_interp(model, accumvars, per_particle=True, rng=rng))

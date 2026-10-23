@@ -66,7 +66,7 @@ def one_interval(model, struct, key, i_obs=3, J=1024, R=2):
 @pytest.mark.parametrize("make", [sde_model, he10_model], ids=["per_particle_sde", "vectorized_he10"])
 def test_cute_matches_xla_with_the_same_philox_words(make):
     model = make()
-    xla = model.to_struct()
+    xla = model.to_struct(rproc_backend="xla")
     cm = deepcopy(model)
     cm.set_rproc_backend("cute")
     cute = cm.to_struct()
@@ -87,7 +87,7 @@ def test_cute_loglik_agrees_with_stock_threefry():
     cm.set_rproc_backend("cute")
     th = jnp.tile(model.theta.to_jax_array(model.canonical_param_names), (200, 1))
     keys = jax.random.split(jax.random.key(0), 200)[:, None]
-    stock = np.asarray(F.pfilter(model.to_struct(), th, 500, keys)["logLik"]).ravel()
+    stock = np.asarray(F.pfilter(model.to_struct(rproc_backend="xla"), th, 500, keys)["logLik"]).ravel()
     cute = np.asarray(F.pfilter(cm.to_struct(), th, 500, keys)["logLik"]).ravel()
     se = np.sqrt(stock.var() / stock.size + cute.var() / cute.size)
     assert abs(stock.mean() - cute.mean()) < 4 * se
@@ -123,7 +123,7 @@ def test_unsupported_rproc_falls_back_to_xla():
 @pytest.mark.parametrize("make", [sde_model, he10_model], ids=["per_particle_sde", "vectorized_he10"])
 def test_cute_gradients_match_xla(make, should_trans):
     model = make()
-    xla = model.to_struct()
+    xla = model.to_struct(rproc_backend="xla")
     cm = deepcopy(model)
     cm.set_rproc_backend("cute")
     cute = cm.to_struct()
@@ -159,6 +159,7 @@ def test_cute_gradients_match_xla(make, should_trans):
 
 def test_train_on_cute_matches_xla():
     model = sde_model()
+    model.set_rproc_backend("xla")
     cm = deepcopy(model)
     cm.set_rproc_backend("cute")
     eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
@@ -169,3 +170,13 @@ def test_train_on_cute_matches_xla():
     b = np.asarray(cm.results_history[-1].traces_da.sel(theta_idx=0))
     assert np.isfinite(b).all()
     np.testing.assert_allclose(b, a, rtol=2e-3, atol=2e-3)
+
+
+def test_auto_is_the_default_and_skips_one_step_models():
+    model = sde_model()
+    assert model.to_struct().rproc_pf is not model.rproc.mechanics_pf_interp  # auto picked CuTe
+    one_step = pp.models.lg(T=10)  # one process step per observation
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # auto never warns
+        s = one_step.to_struct()
+    assert s.rproc_pf is one_step.rproc.mechanics_pf_interp

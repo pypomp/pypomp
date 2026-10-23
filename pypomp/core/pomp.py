@@ -431,19 +431,22 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def set_rproc_backend(self, backend: str = "xla", *, rng: str = "philox") -> None:
+    def set_rproc_backend(self, backend: str = "auto", *, rng: str = "philox") -> None:
         """Choose how the process model is compiled for filtering and simulation.
 
         Parameters
         ----------
-        backend : {"xla", "cute"}
-            ``"xla"`` (default) is pypomp's usual path. ``"cute"`` runs every Euler
-            step of an observation interval in one CuTe kernel on an NVIDIA GPU, one
-            particle per thread, for every filter of the call at once. The ``rproc``
-            is translated from its jaxpr, so it is used as written. It needs the
-            optional ``nvidia-cutlass-dsl`` package and the same number of Euler steps
-            in every interval. If those are missing, or the ``rproc`` uses an
-            operation the translator does not handle, pypomp warns and uses XLA.
+        backend : {"auto", "cute", "xla"}
+            ``"cute"`` runs every Euler step of an observation interval in one CuTe
+            kernel on an NVIDIA GPU, one particle per thread, for every filter of the
+            call at once. The ``rproc`` is translated from its jaxpr, so it is used as
+            written. It needs the optional ``nvidia-cutlass-dsl`` package and the same
+            number of Euler steps in every interval. If those are missing, or the
+            ``rproc`` uses an operation the translator does not handle, pypomp warns
+            and uses XLA. ``"auto"`` (the default) uses CuTe when all of that holds
+            and there is more than one Euler step per observation (with one step
+            there is no loop to fuse), and XLA otherwise, without warning.
+            ``"xla"`` always uses XLA.
             ``train`` differentiates through a second, generated CuTe kernel.
         rng : {"philox", "threefry"}
             Random numbers inside the CuTe kernel. ``"philox"`` (default) is
@@ -451,8 +454,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             :mod:`pypomp.random.philox`). ``"threefry"`` reproduces ``jax.random``'s
             default stream exactly, which is slower.
         """
-        if backend not in ("xla", "cute"):
-            raise ValueError(f"backend must be 'xla' or 'cute', got {backend!r}")
+        if backend not in ("auto", "cute", "xla"):
+            raise ValueError(f"backend must be 'auto', 'cute' or 'xla', got {backend!r}")
         if rng not in ("philox", "threefry"):
             raise ValueError(f"rng must be 'philox' or 'threefry', got {rng!r}")
         self._rproc_backend = (backend, rng)
@@ -498,13 +501,14 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
         )
-        backend, rng = getattr(self, "_rproc_backend", ("xla", "philox"))
-        if (rproc_backend or backend) == "cute":
+        backend, rng = getattr(self, "_rproc_backend", ("auto", "philox"))
+        backend = rproc_backend or backend
+        if backend in ("auto", "cute"):
             # Built once per model: new functions would make every call recompile.
             if "_cute_fns" not in self.__dict__:
                 from pypomp.cute import build
 
-                self._cute_fns = build(self, struct.accumvars, rng)
+                self._cute_fns = build(self, struct.accumvars, rng, quiet=backend == "auto")
             if self._cute_fns is not None:
                 rproc_pf, rproc_per = self._cute_fns
                 struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)

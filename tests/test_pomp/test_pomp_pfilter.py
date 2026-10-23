@@ -43,6 +43,29 @@ def test_reps_default(simple):
     assert LG.results_history[-1].CLL_da is None
 
 
+def test_reps_batch_size_matches_parallel(simple):
+    LG, key, J = simple
+    LG.pfilter(J=J, key=key, reps=4)
+    parallel = LG.results_history[-1].logLiks.values
+    for batch in (1, 3):
+        LG.pfilter(J=J, key=key, reps=4, reps_batch_size=batch)
+        assert jnp.allclose(LG.results_history[-1].logLiks.values, parallel, rtol=1e-5)
+
+
+def test_reps_batch_for_memory_budget():
+    from pypomp.functional.pfilter import reps_batch_for
+
+    assert reps_batch_for(100, 1000, 10) is None  # fits: all at once
+    assert reps_batch_for(1000, 1000, 10) == 8  # budget 800, about 100 per replicate
+    assert reps_batch_for(10**12, 1000, 10) == 1  # never below one replicate
+
+
+def test_reps_batch_size_validation(simple):
+    LG, key, J = simple
+    with pytest.raises(ValueError, match="reps_batch_size"):
+        LG.pfilter(J=J, key=key, reps=2, reps_batch_size=0)
+
+
 @pytest.mark.parametrize(
     "theta_spec, reps, expected_shape",
     [

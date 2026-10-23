@@ -24,6 +24,7 @@ import jax.scipy.special as jspecial
 
 from pypomp.core.model_mechanics import vectorized
 from pypomp.models.measles import _samplers as smp
+from pypomp.models.measles._dmeas import log_ndtr_diff
 from pypomp.types import (
     CovarDict,
     ParamDict,
@@ -155,21 +156,16 @@ def dmeas(Y_, X_, theta_, covars=None, t=None):
     v = m * (1.0 - rho + psi**2 * m)
     sqrt_v_tol = jnp.sqrt(v) + tol
 
-    upper_cdf = jax.scipy.stats.norm.cdf(y + 0.5, m, sqrt_v_tol)
-    lower_cdf = jax.scipy.stats.norm.cdf(y - 0.5, m, sqrt_v_tol)
+    z_hi = (y + 0.5 - m) / sqrt_v_tol
+    z_lo = (y - 0.5 - m) / sqrt_v_tol
 
-    lik = (
-        jnp.where(
-            y > tol,
-            upper_cdf - lower_cdf,
-            upper_cdf,
-        )
-        + tol
-    )
+    # log(P + tol) with P computed in log space; subtracting the CDFs cancels to 0
+    # in float32 once y is about 5.4 sd above m.
+    log_lik = jnp.where(y > tol, log_ndtr_diff(z_hi, z_lo), jspecial.log_ndtr(z_hi))
+    log_lik = jnp.logaddexp(log_lik, jnp.log(tol))
 
-    lik = jnp.where(C < 0, 0.0, lik)
-    lik = jnp.where(jnp.isnan(y), 1.0, lik)
-    return jnp.log(lik)
+    log_lik = jnp.where(C < 0, -jnp.inf, log_lik)
+    return jnp.where(jnp.isnan(y), 0.0, log_lik)
 
 
 def rmeas(X_, theta_, key, covars=None, t=None):

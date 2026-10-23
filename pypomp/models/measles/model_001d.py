@@ -10,10 +10,10 @@ Gradient stability fixes:
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jspecial
-from jax.scipy.special import log_ndtr
 
 from pypomp.core.model_mechanics import vectorized
 from pypomp.models.measles import _samplers as smp
+from pypomp.models.measles._dmeas import log_ndtr_diff
 from pypomp.random import euler_multinomial_logw, poisson_logw
 from pypomp.types import ParamDict
 
@@ -28,19 +28,10 @@ def _log_phi(z: jax.Array) -> jax.Array:
     return -0.5 * z * z - LOG_SQRT_2PI
 
 
-def _log_sub_exp_stable(a: jax.Array, b: jax.Array) -> jax.Array:
-    """Stable log(exp(a) - exp(b)) assuming a >= b"""
-    return a + jnp.log1p(-jnp.exp(b - a))
-
-
 @jax.custom_jvp
 def log_cdf_diff(zh: jax.Array, zl: jax.Array) -> jax.Array:
     """log(Φ(zh) - Φ(zl)) with custom JVP for gradient stability"""
-    a: jax.Array = log_ndtr(zh)
-    b: jax.Array = log_ndtr(zl)
-    hi = jnp.maximum(a, b)
-    lo = jnp.minimum(a, b)
-    return _log_sub_exp_stable(hi, lo)
+    return log_ndtr_diff(jnp.maximum(zh, zl), jnp.minimum(zh, zl))
 
 
 @log_cdf_diff.defjvp

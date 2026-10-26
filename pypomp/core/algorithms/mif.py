@@ -200,6 +200,9 @@ def _perfilter_scan_body(
     perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
         shape=carry.thetas.shape, key=key_perturb
     )
+    # Draw the perturbations once: otherwise XLA may fuse the draws into each of
+    # their consumers (dmeasure, the resampling gather) and draw them twice.
+    perturbed_thetas = jax.lax.optimization_barrier(perturbed_thetas)
 
     # 3. Propagate the particles for one observation interval.
     particlesP_Jx, updated_t_idx = context.per.rprocess_interp(

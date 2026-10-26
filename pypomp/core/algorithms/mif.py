@@ -7,7 +7,7 @@ from .carries import (
     PerfilterStepInputs,
 )
 from .contexts import MifContext, PfilterContext
-from .helpers import _no_resampler_thetas, _normalize_weights, _resampler_thetas
+from .helpers import _normalize_weights, _resample_where
 from .pfilter import _vmapped_pfilter_internal
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
@@ -200,6 +200,9 @@ def _perfilter_scan_body(
     perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
         shape=carry.thetas.shape, key=key_perturb
     )
+    # Draw the perturbations once: otherwise XLA may fuse the draws into each of
+    # their consumers (dmeasure, the resampling gather) and draw them twice.
+    perturbed_thetas = jax.lax.optimization_barrier(perturbed_thetas)
 
     # 3. Propagate the particles for one observation interval.
     particlesP_Jx, updated_t_idx = context.per.rprocess_interp(
@@ -239,27 +242,22 @@ def _perfilter_scan_body(
     should_resample = jnp.max(norm_weights_updated) - jnp.min(
         norm_weights_updated
     ) > jnp.log(context.thresh)
-    counts_resampled, particlesF_resampled, norm_weights_resampled, thetas_resampled = (
-        jax.lax.cond(
-            should_resample,
-            _resampler_thetas,
-            _no_resampler_thetas,
-            *(
-                carry.counts,
-                particlesP_Jx,
-                norm_weights_updated,
-                perturbed_thetas,
-                key_resample,
-            ),
-        )
+    (
+        counts_resampled,
+        norm_weights_resampled,
+        (particlesF_resampled, thetas_resampled),
+    ) = _resample_where(
+        should_resample,
+        carry.counts,
+        norm_weights_updated,
+        key_resample,
+        (particlesP_Jx, perturbed_thetas),
     )
 
     # 8. Update the ancestry (used for PIF, i.e., Panel.mif with block=False).
     if context.return_ancestry:
-        step_indices = jax.lax.cond(
-            should_resample,
-            lambda: counts_resampled,
-            lambda: jnp.arange(context.J),
+        step_indices = jnp.where(
+            should_resample, counts_resampled, jnp.arange(context.J)
         )
         ancestry_updated = carry.ancestry[step_indices]
     else:

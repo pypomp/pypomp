@@ -18,9 +18,9 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 from jax._src import dtypes
-from jax.scipy import special as jsp_special
 
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
+from ._ndtri import ndtri
 
 
 @partial(
@@ -305,34 +305,26 @@ def _bottom_up(
         x_init: jax.Array, s0: jax.Array, del0: jax.Array, lami: jax.Array
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
 
-        x = x_init
-        s = s0
-        delta = del0
-        t = jnp.array(0.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
         one = jnp.array(1.0, dtype=dtype)
 
-        active = jnp.array(True)
-
-        # vanilla for loops are used because they are more efficient than jax.lax.fori_loop by a long shot in this case
-        for _ in range(max_inverse_cdf_loops):
-            current_cond = s < zero
-
-            keep_going = jnp.logical_and(active, current_cond)
-
+        def step(x, s, delta):
             x_next = x + one
             t_next = x_next * lami
-            delta_next = t_next * delta
-            s_next = t_next * s + one
+            return x_next, t_next * s + one, t_next * delta
 
-            x = jax.lax.select(keep_going, x_next, x)
-            s = jax.lax.select(keep_going, s_next, s)
-            delta = jax.lax.select(keep_going, delta_next, delta)
-            t = jax.lax.select(keep_going, t_next, t)
+        # Stop once s >= 0: the search never resumes, and unbatched each cond
+        # stays a branch (in the CuTe kernel too), so later steps are skipped.
+        def search(i: int, x, s, delta):
+            if i == max_inverse_cdf_loops:
+                return x, s, delta
+            return lax.cond(
+                s < zero,
+                lambda: search(i + 1, *step(x, s, delta)),
+                lambda: (x, s, delta),
+            )
 
-            active = keep_going
-
-        return x, s, delta
+        return search(0, x_init, s0, del0)
 
     x_init = jnp.array(0.0, dtype=dtype)
     x, s, delta = _find_quantile(x_init, s0, del0, lami)
@@ -396,7 +388,7 @@ def _poissoninv_scalar(
     lam_safe = jnp.where(lam_invalid, one, lam)
 
     def large_lambda_case(_: Any) -> jax.Array:
-        s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
+        s = ndtri(u) * lax.rsqrt(lam_safe)
 
         def central(_: Any) -> jax.Array:
             return _central_region(s, lam_safe, dtype)

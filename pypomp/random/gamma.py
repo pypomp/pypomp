@@ -12,9 +12,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax._src import dtypes
-from jax.scipy.special import ndtri
 
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
+from ._ndtri import ndtri
 
 
 @partial(jax.jit, static_argnames=["adjustment_size", "dtype", "newton_steps"])

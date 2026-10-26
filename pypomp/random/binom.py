@@ -16,10 +16,11 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax import lax
 from jax._src import dtypes
-from jax.scipy.stats import norm
 
 from ._branch import where_lazy
+from ._ndtri import ndtri
 from ._dtype_helpers import (
     _get_available_dtype,
     check_and_canonicalize_user_dtype,
@@ -368,7 +369,7 @@ def binominv(
 
     def approx() -> jax.Array:
         """The asymptotic expansion's quantile."""
-        w = norm.ppf(u_safe)
+        w = jnp.asarray(ndtri(u_safe), float)  # as norm.ppf returns it
         w2 = w * w
         npq_ = np_ * q
         sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(float_dtype).tiny))
@@ -447,30 +448,43 @@ def _binom_bottom_up(
 
     result = jnp.zeros_like(u)
 
-    for i in range(1, max_k):
-        k_curr_val = i
-        k_curr = jnp.full_like(result, k_curr_val)
-        k_prev = i - 1
+    # Check for numerical stall:
+    # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further.
+    # We claim any remaining u values belong to this tail bucket.
+    stall_threshold = 1.0 - (epsilon * 10.0)
 
-        num = jnp.maximum(n - k_prev, 0.0)
-        den = k_curr_val
-
-        pmf = pmf * (num / den) * ratio_multiplier
+    def step(i: int, pmf, cdf, result, found):
+        num = jnp.maximum(n - (i - 1), 0.0)
+        pmf = pmf * (num / i) * ratio_multiplier
         cdf = cdf + pmf
-
-        # Check for numerical stall:
-        # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further.
-        # We claim any remaining u values belong to this tail bucket.
-        stall_threshold = 1.0 - (epsilon * 10.0)
         is_stalled = (cdf > stall_threshold) & (pmf < epsilon)
         found_now = (cdf >= u) | is_stalled
-
         is_new_discovery = jnp.logical_and(~found, found_now)
-        result = jnp.where(is_new_discovery, k_curr, result)
+        result = jnp.where(is_new_discovery, jnp.full_like(result, i), result)
+        return pmf, cdf, result, jnp.logical_or(found, found_now)
 
-        found = jnp.logical_or(found, found_now)
+    if jnp.ndim(u) == 0:
+        # Unbatched, stop at the quantile: later terms can't change it, and the
+        # CuTe kernel turns each cond into a branch. A check costs a branch, so it
+        # comes before every other term from the third, by when most small-mean
+        # draws are found.
+        def from_(i: int, state):
+            if i == max_k:
+                return state[2], state[3]
+            if i < 3 or i % 2 == 0:
+                return from_(i + 1, step(i, *state))
+            return lax.cond(
+                state[3],
+                lambda: (state[2], state[3]),
+                lambda: from_(i + 1, step(i, *state)),
+            )
 
-    return result, found
+        return from_(1, (pmf, cdf, result, found))
+
+    state = (pmf, cdf, result, found)
+    for i in range(1, max_k):
+        state = step(i, *state)
+    return state[2], state[3]
 
 
 def _q_n0(

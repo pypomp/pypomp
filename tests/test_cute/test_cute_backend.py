@@ -14,6 +14,7 @@ import pytest
 import pypomp as pp
 import pypomp.functional as F
 from pypomp.cute import available
+from pypomp.random import binominv
 from pypomp.random.philox import PHILOX
 
 ok, why = available()
@@ -55,6 +56,16 @@ def int_ops_rproc(X_, theta_, key, covars, t, dt):
     )
     w = jnp.sign(z) * jnp.fmod(z, 0.3)
     return sde_rproc({"x": z + (0.01 * m + w) * dt}, theta_, key, covars, t, dt)
+
+
+def two_binomials_rproc(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    u = jax.random.uniform(key, (2,))
+    n = jnp.round(100 * jnp.exp(z))
+    # Runtime p in both calls, so they share one pattern of constant inputs.
+    a = binominv(u[0], n, theta_["sig"])
+    b = binominv(u[1], n + 7.0, 0.1 * theta_["sig"])
+    return sde_rproc({"x": z + 0.01 * (a - 30 * b) * dt}, theta_, key, covars, t, dt)
 
 
 def dpop_rproc(X_, theta_, key, covars, t, dt):
@@ -227,6 +238,31 @@ def test_filters_with_different_times_share_a_launch():
     rel = np.asarray(jnp.abs(a - b) / (jnp.abs(a) + 1.0))
     assert (rel.max(-1) > 1e-4).mean() < 0.005
     assert np.median(rel) < 1e-6
+
+
+def test_repeated_calls_share_a_device_function(monkeypatch):
+    from pypomp.cute import translate
+
+    defined, called = [], []
+    define, call = translate._define, translate._call_outlined
+
+    def spy(log, f):
+        return lambda *a: log.append(id(a[0])) or f(*a)
+
+    monkeypatch.setattr(translate, "_define", spy(defined, define))
+    monkeypatch.setattr(translate, "_call_outlined", spy(called, call))
+    model = sde_model(two_binomials_rproc)
+    xla, cute = xla_and_cute(model)
+    X0, th, adv_xla = interval(model, xla, 1024, 2)
+    _, _, adv_cute = interval(model, cute, 1024, 2)
+    keys = jax.random.split(jax.random.key(5, impl=PHILOX), 2)
+    a = jax.jit(jax.vmap(lambda X, k: adv_xla(X, th, k)))(X0, keys)
+    b = jax.jit(jax.vmap(lambda X, k: adv_cute(X, th, k)))(X0, keys)
+    rel = np.asarray(jnp.abs(a - b) / (jnp.abs(a) + 1.0))
+    assert (rel.max(-1) > 1e-4).mean() < 0.005
+    assert np.median(rel) < 1e-6
+    # Each kernel emits binominv once and calls it twice.
+    assert any(called.count(j) == 2 * defined.count(j) for j in set(defined))
 
 
 def test_cute_loglik_agrees_with_xla():

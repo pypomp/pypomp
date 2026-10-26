@@ -5,7 +5,8 @@ write CUDA kernels. ``_interpret(closed_jaxpr, args, ctx)`` walks a jaxpr inside
 ``@cute.kernel`` and returns, for each output, a numpy object array of DSL scalars
 (or plain constants). Each jaxpr value keeps its small per-particle shape as an
 object array, so slices, reshapes and reductions are bookkeeping at trace time, and
-the emitted code is straight-line scalar math in registers.
+the emitted code is straight-line scalar math in registers, apart from branches
+for runtime conds and calls of large sub-jaxprs that run more than once.
 
 Random numbers are Philox4x32-10 with all four output words used, in the layout of
 :mod:`pypomp.random.philox`: element (l, m) of a draw of shape (..., L) is word
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import jax
@@ -33,6 +34,7 @@ from jax.extend.core import Literal
 import cutlass  # pyright: ignore[reportMissingImports]
 import cutlass.cute as cute  # pyright: ignore[reportMissingImports]
 from cutlass._mlir.dialects import arith as _arith  # pyright: ignore[reportMissingImports]
+from cutlass._mlir import ir as _mlir_ir  # pyright: ignore[reportMissingImports]
 from cutlass._mlir.dialects import llvm as _llvm  # pyright: ignore[reportMissingImports]
 
 # A CuTe DSL scalar, or a numpy or Python constant.
@@ -58,6 +60,8 @@ class _Ctx:
     """J for a ``@vectorized`` rproc traced with J = 1, otherwise None."""
     particle: _Scalar
     """This thread's particle index within its filter, or None."""
+    outlined: dict[Any, Any] = field(default_factory=dict)
+    """The device functions emitted so far, by sub-jaxpr and constant inputs."""
 
 
 def _is_dsl(x: Any) -> bool:
@@ -815,7 +819,10 @@ def _eval_eqn(
         return [out]
 
     if name in _CALLS:
-        return _interpret(_sub_jaxpr(eqn), ins, ctx)
+        sub = _sub_jaxpr(eqn)
+        if _outlinable(sub, ins):
+            return _call_outlined(sub, ins, out_avals, ctx)
+        return _interpret(sub, ins, ctx)
     if name == "cond":
         index, ops = ins[0], ins[1:]
         branches = eqn.params["branches"]
@@ -964,6 +971,203 @@ def _branch(
             out[p] = next(flat)
         outs.append(out)
     return outs
+
+
+# Emitted inline, every call of a sampler gets its own copy of the sampler's code,
+# and a step with several no longer fits in the instruction cache. So a call of a
+# sub-jaxpr with at least this many equations, counting nested ones, becomes a
+# device function, which is kept out of line once it is called twice.
+_OUTLINE_MIN_EQNS = 60
+_RANDOM = {
+    "random_bits",
+    "random_split",
+    "random_fold_in",
+    "random_wrap",
+    "random_seed",
+}
+_LLVM_TYPE = {
+    np.dtype("float32"): "f32",
+    np.dtype("int32"): "i32",
+    np.dtype("uint32"): "i32",
+    np.dtype("bool"): "i1",
+}
+
+
+@dataclass
+class _Outlined:
+    """A sub-jaxpr emitted as an ``llvm.func`` for one pattern of constant inputs."""
+
+    name: str
+    func: Any
+    struct: Any
+    outs: list[np.ndarray]
+    """Its outputs: constants where the body computes one, else the index of the
+    result in the returned struct and its numpy dtype."""
+    cj: ClosedJaxpr
+    """Held so that its id, in the cache key, isn't reused."""
+    calls: list[Any] = field(default_factory=list)
+
+
+def _size(cj: Any) -> int:
+    """Return the number of equations in `cj`, counting those of nested jaxprs."""
+    jaxpr = getattr(cj, "jaxpr", cj)
+    n = 0
+    for eqn in jaxpr.eqns:
+        n += 1
+        if eqn.primitive.name in _CALLS:
+            n += _size(_sub_jaxpr(eqn))
+        for b in eqn.params.get("branches", ()):
+            n += _size(b)
+    return n
+
+
+def _uses_random(cj: Any) -> bool:
+    """Return whether `cj` or a jaxpr it calls draws or derives random numbers."""
+    jaxpr = getattr(cj, "jaxpr", cj)
+    for eqn in jaxpr.eqns:
+        if eqn.primitive.name in _RANDOM:
+            return True
+        subs = [_sub_jaxpr(eqn)] if eqn.primitive.name in _CALLS else []
+        subs += list(eqn.params.get("branches", ()))
+        for k in ("cond_jaxpr", "body_jaxpr"):
+            if k in eqn.params:
+                subs.append(eqn.params[k])
+        if eqn.primitive.name == "scan":
+            subs.append(eqn.params["jaxpr"])
+        if any(_uses_random(b) for b in subs):
+            return True
+    return False
+
+
+def _outlinable(cj: ClosedJaxpr, ins: list[Any]) -> bool:
+    """Return whether a call of `cj` on `ins` should become a device function.
+
+    Random draws read the thread's particle index from the caller, so jaxprs that
+    draw stay inline, as do keys, which aren't plain scalars.
+    """
+    if _all_const(ins):
+        return False
+    avals = [v.aval for v in [*cj.jaxpr.invars, *cj.jaxpr.outvars]]
+    if any(_is_key(a.dtype) or np.dtype(a.dtype) not in _LLVM_TYPE for a in avals):
+        return False
+    return _size(cj) >= _OUTLINE_MIN_EQNS and not _uses_random(cj)
+
+
+def _gpu_module() -> Any:
+    """Return the ``gpu.module`` that the code being emitted belongs to."""
+    op = _mlir_ir.InsertionPoint.current.block.owner.operation
+    while op.name != "gpu.module":
+        op = op.parent
+    return op
+
+
+def _call_outlined(
+    cj: ClosedJaxpr, ins: list[Any], out_avals: list[Any], ctx: _Ctx
+) -> list[np.ndarray]:
+    """Return the outputs of `cj` on `ins`, computed by a call to a device function.
+
+    Runtime input elements become the function's arguments and constant ones are
+    folded into its body, so each pattern of constants gets its own function.
+    """
+    in_dt = [np.dtype(getattr(v.aval, "dtype", None)) for v in cj.jaxpr.invars]
+    flat = [
+        np.broadcast_to(_obj(a), _shape(v))
+        for a, v in zip(ins, cj.jaxpr.invars, strict=True)
+    ]
+    pattern = tuple(
+        tuple(None if _is_dsl(x) else np.asarray(x, dt).tobytes() for x in a.flat)
+        for a, dt in zip(flat, in_dt, strict=True)
+    )
+    args = [x for a in flat for x in a.flat if _is_dsl(x)]
+    key = (id(cj), pattern)
+    fn = ctx.outlined.get(key)
+    if fn is None:
+        fn = _define(cj, flat, in_dt, out_avals, ctx)
+        ctx.outlined[key] = fn
+    call = _llvm.CallOp(fn.struct, [a.ir_value() for a in args], [], [], callee=fn.name)
+    fn.calls.append(call)
+    if len(fn.calls) == 2:
+        fn.func.no_inline = True
+    outs = []
+    for o in fn.outs:
+        out = np.empty(o.shape, dtype=object)
+        for idx in np.ndindex(*o.shape) if o.shape else [()]:
+            v = o[idx]
+            if isinstance(v, tuple):
+                i, dt = v
+                ty = _mlir_ir.Type.parse(_LLVM_TYPE[dt])
+                out[idx] = _DSL[dt](_llvm.ExtractValueOp(ty, call.result, [i]).result)
+            else:
+                out[idx] = v
+        outs.append(out)
+    return outs
+
+
+def _define(
+    cj: ClosedJaxpr,
+    flat: list[np.ndarray],
+    in_dt: list[np.dtype],
+    out_avals: list[Any],
+    ctx: _Ctx,
+) -> _Outlined:
+    """Emit `cj` as an ``llvm.func`` taking the runtime elements of `flat`."""
+    arg_dt = [
+        dt for a, dt in zip(flat, in_dt, strict=True) for x in a.flat if _is_dsl(x)
+    ]
+    module = _gpu_module()
+    # Unique within the module, which may hold functions from other translations.
+    name = f"pypomp_fn{len(module.regions[0].blocks[0].operations)}"
+    with _mlir_ir.InsertionPoint.at_block_begin(module.regions[0].blocks[0]):
+        # The result type is set once the body shows which outputs are runtime values.
+        placeholder = _mlir_ir.Type.parse("!llvm.struct<()>")
+        ftype = _mlir_ir.Type.parse(
+            f"!llvm.func<{placeholder} ("
+            + ", ".join(_LLVM_TYPE[d] for d in arg_dt)
+            + ")>"
+        )
+        func = _llvm.LLVMFuncOp(
+            name,
+            _mlir_ir.TypeAttr.get(ftype),
+            linkage=_mlir_ir.Attribute.parse("#llvm.linkage<internal>"),
+        )
+        entry = func.body.blocks.append(
+            *[_mlir_ir.Type.parse(_LLVM_TYPE[d]) for d in arg_dt]
+        )
+        with _mlir_ir.InsertionPoint(entry):
+            it = iter(entry.arguments)
+            sub_ins = []
+            for a, dt in zip(flat, in_dt, strict=True):
+                x = np.empty(a.shape, dtype=object)
+                for idx in np.ndindex(*a.shape) if a.shape else [()]:
+                    x[idx] = _DSL[dt](next(it)) if _is_dsl(a[idx]) else a[idx]
+                sub_ins.append(x)
+            body_ctx = _Ctx(vectorized_J=None, particle=None, outlined=ctx.outlined)
+            res = _interpret(cj, sub_ins, body_ctx)
+            outs, vals = [], []
+            for r, av in zip(res, out_avals, strict=True):
+                dt = np.dtype(av.dtype)
+                rb = np.broadcast_to(_obj(r), av.shape)
+                o = np.empty(av.shape, dtype=object)
+                for idx in np.ndindex(*av.shape) if av.shape else [()]:
+                    v = rb[idx]
+                    if _is_dsl(v):
+                        o[idx] = (len(vals), dt)
+                        vals.append((v, dt))
+                    else:
+                        o[idx] = v
+                outs.append(o)
+            struct = _mlir_ir.Type.parse(
+                "!llvm.struct<(" + ", ".join(_LLVM_TYPE[dt] for _, dt in vals) + ")>"
+            )
+            s = _llvm.UndefOp(struct).result
+            for i, (v, dt) in enumerate(vals):
+                s = _llvm.InsertValueOp(s, _as_dsl(v, dt).ir_value(), [i]).result
+            _llvm.ReturnOp(arg=s)
+        ftype = _mlir_ir.Type.parse(
+            f"!llvm.func<{struct} (" + ", ".join(_LLVM_TYPE[d] for d in arg_dt) + ")>"
+        )
+        func.attributes["function_type"] = _mlir_ir.TypeAttr.get(ftype)
+    return _Outlined(name, func, struct, outs, cj)
 
 
 def _counter(f: int, shape: tuple[int, ...], ctx: _Ctx) -> _Scalar:

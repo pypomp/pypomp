@@ -435,8 +435,8 @@ def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     model = sde_model()
     make = kernel._make_rprocess_interp
 
-    def off(model, traced, per_particle, rng):
-        pf = make(model, traced, per_particle, rng)
+    def off(model, traced, per_particle, rng, dm_j):
+        pf = make(model, traced, per_particle, rng, dm_j)
         return lambda X_, *args: (pf(X_, *args)[0] + 0.1, pf(X_, *args)[1])
 
     monkeypatch.setattr(kernel, "_make_rprocess_interp", off)

@@ -9,12 +9,14 @@ would be dropped. The comparisons then require the kernel to match XLA with one
 parameter vector on the natural scale (as in filtering), with per-particle
 parameters on the estimation scale (as in iterated filtering), and in the
 gradients of the latter, which run the parameter transform's and the step's VJPs.
+A kernel that also evaluates the measurement density must match XLA's density at
+the states it ends the interval in.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -47,6 +49,9 @@ class _Interval(NamedTuple):
     """Per-particle parameters on the estimation scale, (J, d)."""
     run: Callable[[Callable, jax.Array, jax.Array, bool], jax.Array]
     """run(rproc, X, theta, should_trans) advances X over the interval."""
+    rest: tuple
+    """The remaining ``rprocess_interp`` arguments after X and theta, up to
+    ``should_trans``."""
 
 
 def _interval(model: Pomp, rng: str) -> _Interval:
@@ -73,7 +78,7 @@ def _interval(model: Pomp, rng: str) -> _Interval:
     ) -> jax.Array:
         return rproc(X, theta, key, cov, dts, model.t0, 0, nstep, acc, should_trans)[0]
 
-    return _Interval(X0, th, th_per, run)
+    return _Interval(X0, th, th_per, run, (key, cov, dts, model.t0, 0, nstep, acc))
 
 
 def _forward(iv: _Interval, rproc: Callable, theta: jax.Array, trans: bool) -> Callable:
@@ -158,4 +163,84 @@ def _check(
         return (
             f"{d:.0%} of particles' gradients differ from XLA on a test interval{per}"
         )
+    return None
+
+
+def _check_dmeas(model: Pomp, cute_pf: Any, cute_per: Any, rng: str) -> str | None:
+    """Return why the kernels' fused measurement density can't be used, or None.
+
+    Each particle's density from the kernel must match XLA's density at the state the
+    kernel ends the test interval in.
+    """
+    iv = _interval(model, rng)
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
+    t_obs = jnp.float32(model.ys.index[0])
+    cov = iv.rest[1]
+    cases = (
+        (cute_pf, iv.th, False, ""),
+        (cute_per, iv.th_per, True, " with per-particle parameters"),
+    )
+    for rproc, theta, trans, what in cases:
+
+        def run(X, rproc=rproc, theta=theta, trans=trans):
+            out, t_end, w = rproc.with_dmeasure(X, theta, *iv.rest, trans, y, t_obs)
+            cov_t = None if cov is None else cov[t_end]
+            return w, rproc.dmeasure(y, out, theta, cov_t, t_obs, trans)
+
+        w, ref = (np.asarray(a)[:, None] for a in jax.jit(run)(iv.X0))
+        d = _different(ref, w, np.abs(ref) + 1.0, _PARTICLE_RTOL, _MEDIAN_RTOL)
+        if d is not None:
+            return f"{d:.0%} of particles' measurement densities differ from XLA{what}"
+    return None
+
+
+def _check_perturb_step(model: Pomp, cute_per: Any, rng: str) -> str | None:
+    """Return why the iterated filtering kernel can't be used, or None.
+
+    From ancestors that repeat and reorder the test particles, its parameter draws must
+    equal XLA's, its states must match XLA's rproc from the same particles and
+    parameters, and its densities XLA's density at its states.
+    """
+    from .kernel import _perturbation
+
+    iv = _interval(model, rng)
+    J, d = iv.th_per.shape
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
+    t_obs = jnp.float32(model.ys.index[0])
+    cov = iv.rest[1]
+    anc = jax.random.randint(jax.random.key(4), (J,), 0, J, jnp.int32)
+    key_perturb = jax.random.key(
+        3, impl="threefry2x32" if rng == "threefry" else PHILOX
+    )
+    sig = jnp.full(d, 0.05, jnp.float32)
+
+    def run(X):
+        out, th, t_end, w = cute_per.perturb_step(
+            X, iv.th_per, anc, key_perturb, sig, *iv.rest, True, y, t_obs
+        )
+        th_ref = iv.th_per[anc] + sig * _perturbation(rng, key_perturb, J, d)
+        out_ref = iv.run(model.rproc.mechanics_per_interp, X[anc], th_ref, True)
+        cov_t = None if cov is None else cov[t_end]
+        return (
+            th,
+            th_ref,
+            out,
+            out_ref,
+            w,
+            cute_per.dmeasure(y, out, th, cov_t, t_obs, True),
+        )
+
+    th, th_ref, out, out_ref, w, w_ref = (np.asarray(a) for a in jax.jit(run)(iv.X0))
+    scale = np.abs(th_ref) + 1.0
+    if _different(th_ref, th, scale, _PARTICLE_RTOL, _MEDIAN_RTOL) is not None:
+        return "its parameter perturbations differ from XLA's"
+    d_out = _different(
+        out_ref, out, np.abs(out_ref) + 1.0, _PARTICLE_RTOL, _MEDIAN_RTOL
+    )
+    if d_out is not None:
+        return f"{d_out:.0%} of particles differ from XLA when resampled on load"
+    w, w_ref = w[:, None], w_ref[:, None]
+    d_w = _different(w_ref, w, np.abs(w_ref) + 1.0, _PARTICLE_RTOL, _MEDIAN_RTOL)
+    if d_w is not None:
+        return f"{d_w:.0%} of measurement densities differ when resampled on load"
     return None

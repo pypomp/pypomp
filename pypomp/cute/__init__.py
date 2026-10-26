@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
@@ -32,6 +32,17 @@ class KernelRProc:
 
     kernel: Callable
     xla: Callable
+    resample: Callable | None = None
+    """A replacement for ``_resample`` that runs on the same device, if any."""
+    with_dmeasure: Callable | None = None
+    """``kernel`` that also returns each particle's measurement log-density, if the
+    model's ``dmeasure`` translates; see :func:`_with_dmeasure`."""
+    dmeasure: Callable | None = None
+    """The XLA measurement density that ``with_dmeasure`` evaluates."""
+    perturb_step: Callable | None = None
+    """For per-particle parameters with a fused density: an interval of iterated
+    filtering, from the ancestors through the parameter perturbation to the density;
+    see :func:`_perturb_step`."""
 
     def __call__(self, *args: Any) -> Any:
         return self.kernel(*args)
@@ -44,6 +55,22 @@ def _with_xla_rproc(struct: _S) -> _S:
         rproc_pf=pf.xla if isinstance(pf, KernelRProc) else pf,
         rproc_per=per.xla if isinstance(per, KernelRProc) else per,
     )
+
+
+def _with_dmeasure(rproc: Callable, dmeasure: Callable) -> Callable | None:
+    """Return `rproc`'s fused process-and-density kernel when it evaluates
+    `dmeasure`, otherwise None."""
+    if isinstance(rproc, KernelRProc) and rproc.dmeasure is dmeasure:
+        return rproc.with_dmeasure
+    return None
+
+
+def _perturb_step(rproc: Callable, dmeasure: Callable) -> Callable | None:
+    """Return `rproc`'s iterated filtering kernel when it evaluates `dmeasure`,
+    otherwise None."""
+    if isinstance(rproc, KernelRProc) and rproc.dmeasure is dmeasure:
+        return rproc.perturb_step
+    return None
 
 
 def available() -> tuple[bool, str]:
@@ -134,7 +161,7 @@ def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
     """Translate, build and check the kernels, as :func:`_build` describes."""
     from . import kernel
     from .translate import _untranslatable
-    from .verify import _check
+    from .verify import _check, _check_dmeas, _check_perturb_step
 
     traced = kernel._trace_step(model)
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
@@ -147,9 +174,41 @@ def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
         raise _Skip(
             f"rproc uses {sorted(bad)}, which the CuTe backend cannot translate."
         )
-    pf = kernel._make_rprocess_interp(model, traced, False, rng)
-    per = kernel._make_rprocess_interp(model, traced, True, rng)
+    pf = kernel._make_rprocess_interp(model, traced, False, rng, None)
+    per = kernel._make_rprocess_interp(model, traced, True, rng, None)
     why = _check(model, pf, per, vec, rng)
     if why is not None:
         raise _Skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
-    return pf, per
+    # The density joins the kernel only if it translates and matches XLA; otherwise
+    # it stays a separate XLA computation.
+    try:
+        dm_j = kernel._trace_dmeas(model)
+    except Exception:  # noqa: BLE001
+        dm_j = None
+    if dm_j is None or _untranslatable(dm_j):
+        return pf, per
+    pf_dm = kernel._make_rprocess_interp(model, traced, False, rng, dm_j)
+    per_dm = kernel._make_rprocess_interp(model, traced, True, rng, dm_j)
+    try:
+        why = _check_dmeas(model, pf_dm, per_dm, rng)
+    except Exception as e:  # noqa: BLE001
+        why = f"{type(e).__name__}: {e}"
+    if why is not None:
+        warnings.warn(
+            f"CuTe kernel with the measurement density failed its check ({why}); "
+            "evaluating the density separately.",
+            stacklevel=4,
+        )
+        return pf, per
+    try:
+        why = _check_perturb_step(model, per_dm, rng)
+    except Exception as e:  # noqa: BLE001
+        why = f"{type(e).__name__}: {e}"
+    if why is not None:
+        warnings.warn(
+            f"CuTe iterated filtering kernel failed its check ({why}); resampling "
+            "and perturbing the parameters separately.",
+            stacklevel=4,
+        )
+        per_dm = replace(per_dm, perturb_step=None)
+    return pf_dm, per_dm

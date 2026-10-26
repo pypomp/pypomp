@@ -89,6 +89,7 @@ def _resample_where(
     norm_weights: jax.Array,
     subkey: jax.Array,
     particles: _P,
+    resample_fn: Callable[[jax.Array, jax.Array], jax.Array] | None = None,
 ) -> tuple[jax.Array, jax.Array, _P]:
     """
     Resamples when `resample` holds; otherwise returns the inputs unchanged.
@@ -105,13 +106,16 @@ def _resample_where(
         subkey: The random key for sampling.
         particles: Per-particle arrays to resample along their leading axis, e.g.
             the particles from a prediction procedure and their parameters.
+        resample_fn: Computes the indices in place of :func:`_resample`, e.g. a
+            kernel that ``rprocess_interp`` carries as its ``resample``.
 
     Returns:
         tuple: The ancestor indices of the latest resampling, and the normalized
             log-weights and `particles` after it.
     """
     J = norm_weights.shape[-1]
-    idx = jnp.where(resample, _resample(norm_weights, subkey=subkey), jnp.arange(J))
+    resampled = (resample_fn or _resample)(norm_weights, subkey)
+    idx = jnp.where(resample, resampled, jnp.arange(J))
     nw_c = norm_weights[idx]
     nw_resampled = jnp.where(
         jnp.isfinite(nw_c),

@@ -68,6 +68,9 @@ class _Ctx:
     """This thread's particle index within its filter, or None."""
     rng: str
     """The generator draws follow: "threefry" or "philox"."""
+    counter_offset: _Scalar = None
+    """Added to every threefry counter: the flattened index of this thread's first
+    element in a draw over all particles, so its draws are that draw's; or None."""
     outlined: dict[Any, Any] = field(default_factory=dict)
     """The device functions emitted so far, by sub-jaxpr and constant inputs."""
 
@@ -198,6 +201,8 @@ def _draw_threefry(
     for f in range(flat.size):
         if J and shape[-1] == 1:  # the particle axis, of length J at run time
             cnt = _as_dsl(np.uint32(f * J), np.uint32) + ctx.particle
+        elif ctx.counter_offset is not None:
+            cnt = _add(ctx.counter_offset, np.uint32(f))
         else:
             cnt = np.uint32(f)
         y0, y1 = _threefry2x32(k0, k1, 0, cnt)

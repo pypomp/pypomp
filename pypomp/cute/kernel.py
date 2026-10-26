@@ -41,6 +41,7 @@ from cutlass.jax import cutlass_call  # pyright: ignore[reportMissingImports]
 
 from . import KernelRProc
 from . import translate as ct
+from .resample import resample as _resample_kernel
 
 if TYPE_CHECKING:
     from ..core.pomp import Pomp
@@ -72,6 +73,10 @@ class _Spec(NamedTuple):
     acc: tuple[int, ...]
     per_particle: bool
     rng: str
+    dm_j: ct.ClosedJaxpr | None
+    ny: int
+    ncd: int
+    noise_j: ct.ClosedJaxpr
 
 
 def _trace_step(model: Pomp) -> _Traced:
@@ -128,6 +133,39 @@ def _trace_step(model: Pomp) -> _Traced:
     step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
     prep_vjp_j = jax.make_jaxpr(prep_vjp)(jnp.zeros(d, f32), jnp.zeros(d, f32))
     return step_j, prep_j, vec, step_vjp_j, prep_vjp_j
+
+
+def _trace_noise(d: int) -> ct.ClosedJaxpr:
+    """Return the jaxpr of d standard normal draws from a key's data."""
+    return jax.make_jaxpr(
+        lambda kd: jax.random.normal(jax.random.wrap_key_data(kd), (d,), jnp.float32)
+    )(jnp.zeros(2, jnp.uint32))
+
+
+def _trace_dmeas(model: Pomp) -> ct.ClosedJaxpr | None:
+    """Return the per-particle jaxpr of the measurement density, or None without one.
+
+    It maps (y, x, theta, covariates, t) to the log-density, with theta on the natural
+    scale.
+    """
+    dm = model.dmeas
+    if dm is None:
+        return None
+    ny, ns = len(dm.y_names), len(dm.statenames)
+    d, nc = len(dm.param_names), len(dm.covar_names)
+
+    def dmeas(y, x, th, cov, t):
+        out = dm.mechanics(y, x, th, cov if nc else None, t, False)
+        return jnp.asarray(out, jnp.float32).reshape(())
+
+    f32 = jnp.float32
+    return jax.make_jaxpr(dmeas)(
+        jnp.zeros(ny, f32),
+        jnp.zeros(ns, f32),
+        jnp.ones(d, f32),
+        jnp.ones(max(nc, 1), f32)[:nc],
+        f32(0.0),
+    )
 
 
 def _vectorized_jaxpr(model: Pomp, J: int) -> ct.ClosedJaxpr:
@@ -191,7 +229,7 @@ def _load(
     per_particle: bool,
 ) -> tuple[tuple[_Scalar, ...], np.ndarray]:
     """Return particle g's state, with accumulators reset, and its parameters."""
-    xs = [X[s, g] for s in range(ns)]
+    xs = [X[g, s] for s in range(ns)]
     for a in acc:
         xs[a] = cutlass.Float32(0.0)
     return tuple(xs), _load_th(TH, g, b, nth, per_particle)
@@ -250,10 +288,69 @@ def _step_once(
     return tuple(ct._as_dsl(out[s], np.float32) for s in range(ns))
 
 
+def _dmeas_once(
+    dm_j: ct.ClosedJaxpr,
+    rng: str,
+    ny: int,
+    ncd: int,
+    xs: tuple[_Scalar, ...],
+    th: np.ndarray,
+    OBS: _Tensor,
+    b: _Scalar,
+) -> _Scalar:
+    """Return the measurement log-density of state `xs`; OBS[b] holds filter b's
+    observation, then the observation time and its covariates."""
+    y = np.empty(ny, dtype=object)
+    for i in range(ny):
+        y[i] = OBS[b, i]
+    cov = np.empty(ncd, dtype=object)
+    for c in range(ncd):
+        cov[c] = OBS[b, ny + 1 + c]
+    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+    (out,) = ct._interpret(
+        dm_j, [y, ct._obj(list(xs)), th, cov, ct._obj(OBS[b, ny])], ctx
+    )
+    return ct._as_dsl(np.asarray(out, dtype=object).reshape(-1)[0], np.float32)
+
+
+def _perturb(
+    noise_j: ct.ClosedJaxpr,
+    rng: str,
+    nth: int,
+    th: np.ndarray,
+    PK: _Tensor,
+    SIG: _Tensor,
+    THO: _Tensor,
+    b: _Scalar,
+    j: _Scalar,
+    g: _Scalar,
+) -> np.ndarray:
+    """Return parameters `th` plus SIG[b] times standard normal draws, and write
+    them to row g of THO.
+
+    With threefry the draws are row j of ``normal(key, (J, nth))`` for key PK[b], as
+    iterated filtering on XLA draws them. Philox can't place a row of that draw in
+    one thread, so it draws ``normal(split(key, J)[j], (nth,))``.
+    """
+    if rng == "threefry":
+        k0, k1 = PK[b, 0], PK[b, 1]
+        offset = j * cutlass.Uint32(nth)
+        ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng, counter_offset=offset)
+    else:
+        k0, k1 = ct._key_derive(rng, PK[b, 0], PK[b, 1], j)
+        ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+    (z,) = ct._interpret(noise_j, [ct._obj([k0, k1])], ctx)
+    out = np.empty(nth, dtype=object)
+    for k in range(nth):
+        out[k] = th[k] + SIG[b, k] * ct._as_dsl(z[k], np.float32)
+        THO[g, k] = out[k]
+    return out
+
+
 def _store(OUT: _Tensor, g: _Scalar, xs: tuple[_Scalar, ...]) -> None:
     """Write particle g's state."""
     for s, x in enumerate(xs):
-        OUT[s, g] = x
+        OUT[g, s] = x
 
 
 def _save(H: _Tensor, g: _Scalar, k: _Scalar, xs: tuple[_Scalar, ...]) -> None:
@@ -270,7 +367,7 @@ def _hist(H: _Tensor, g: _Scalar, k: _Scalar, ns: int) -> tuple[_Scalar, ...]:
 
 def _load_g(G: _Tensor, g: _Scalar, ns: int) -> tuple[_Scalar, ...]:
     """Return the cotangent of particle g's output state."""
-    return tuple(G[s, g] for s in range(ns))
+    return tuple(G[g, s] for s in range(ns))
 
 
 def _zeros(n: int) -> tuple[_Scalar, ...]:
@@ -335,7 +432,7 @@ def _store_bwd(
     """Write particle g's input-state and parameter cotangents."""
     for s, v in enumerate(gx):
         # Accumulators are reset at the start of the interval, so get no gradient.
-        DX[s, g] = cutlass.Float32(0.0) if s in acc else v
+        DX[g, s] = cutlass.Float32(0.0) if s in acc else v
     if transform:
         ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
         (out,) = ct._interpret(prep_vjp_j, [th_raw, ct._obj(list(gth))], ctx)
@@ -354,7 +451,7 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
                N: cutlass.Int32):
@@ -375,7 +472,7 @@ def make(spec, J, transform, block):
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
                OUT: cute.Tensor):
-        N = cute.size(X, mode=[1])
+        N = cute.size(X, mode=[0])
         kernel(X, TH, KEYS, TAB, OUT, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                 block=[block, 1, 1], stream=stream)
 
@@ -390,7 +487,7 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
                H: cute.Tensor, N: cutlass.Int32):
@@ -412,9 +509,87 @@ def make(spec, J, transform, block):
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
                OUT: cute.Tensor, H: cute.Tensor):
-        N = cute.size(X, mode=[1])
+        N = cute.size(X, mode=[0])
         kernel(X, TH, KEYS, TAB, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                    block=[block, 1, 1], stream=stream)
+
+    return launch
+"""
+
+
+_SRC_DM = """
+import cutlass
+import cutlass.cute as cute
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once
+
+
+def make(spec, J, transform, block):
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    @cute.kernel
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor,
+               OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        g = bidx * block + tidx
+        if g < N:
+            b = g // J
+            j = (g - b * J).to(cutlass.Uint32)
+            xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
+            if cutlass.const_expr(transform):
+                th = _prep(prep_j, th, rng)
+            {xs} = xs0
+            for k in range(NSTEP):
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+            _store(OUT, g, ({xs}))
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, b)
+
+    @cute.jit
+    def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
+               OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor):
+        N = cute.size(X, mode=[0])
+        kernel(X, TH, KEYS, TAB, OBS, OUT, W, N).launch(grid=[(N + block - 1) // block, 1, 1],
+                                                        block=[block, 1, 1], stream=stream)
+
+    return launch
+"""
+
+
+_SRC_PER = """
+import cutlass
+import cutlass.cute as cute
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _perturb
+
+
+def make(spec, J, transform, block):
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    @cute.kernel
+    def kernel(X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor, SIG: cute.Tensor,
+               KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor, THO: cute.Tensor,
+               W: cute.Tensor, N: cutlass.Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        g = bidx * block + tidx
+        if g < N:
+            b = g // J
+            j = (g - b * J).to(cutlass.Uint32)
+            xs0, th = _load(X, TH, b * J + ANC[g], b, ns, nth, acc, per_particle)
+            th = _perturb(noise_j, rng, nth, th, PK, SIG, THO, b, j, g)
+            if cutlass.const_expr(transform):
+                th = _prep(prep_j, th, rng)
+            {xs} = xs0
+            for k in range(NSTEP):
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+            _store(OUT, g, ({xs}))
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, b)
+
+    @cute.jit
+    def launch(stream, X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor,
+               SIG: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor,
+               OUT: cute.Tensor, THO: cute.Tensor, W: cute.Tensor):
+        # OUT and THO are inputs aliased to outputs, so cutlass_call passes them once.
+        N = cute.size(X, mode=[0])
+        kernel(X, TH, ANC, PK, SIG, KEYS, TAB, OBS, OUT, THO, W, N).launch(
+            grid=[(N + block - 1) // block, 1, 1], block=[block, 1, 1], stream=stream)
 
     return launch
 """
@@ -427,7 +602,7 @@ from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_onc
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
     @cute.kernel
     def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
                DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
@@ -452,7 +627,7 @@ def make(spec, J, transform, block):
     @cute.jit
     def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
                DX: cute.Tensor, DTH: cute.Tensor):
-        N = cute.size(G, mode=[1])
+        N = cute.size(G, mode=[0])
         kernel(H, TH, KEYS, TAB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                        block=[block, 1, 1], stream=stream)
 
@@ -489,10 +664,17 @@ def _state_names(prefix: str, n: int) -> str:
 
 
 def _build_launcher(kind: str, spec: _Spec, J: int, transform: bool) -> Any:
-    """Return the launcher of the "fwd", "save" or "bwd" kernel for J particles."""
+    """Return the launcher of the "fwd", "save", "bwd", "dm" or "per" kernel for J
+    particles."""
     gs, ths = _state_names("g", spec.ns), _state_names("a", spec.nth)
     src = (
-        {"fwd": _SRC, "save": _SRC_SAVE, "bwd": _SRC_BWD}[kind]
+        {
+            "fwd": _SRC,
+            "save": _SRC_SAVE,
+            "bwd": _SRC_BWD,
+            "dm": _SRC_DM,
+            "per": _SRC_PER,
+        }[kind]
         .replace("{xs}", _state_names("x", spec.ns).rstrip())
         .replace("{gs} {ths}", gs + ths.rstrip())
         .replace("{gs}", gs.rstrip())
@@ -520,19 +702,40 @@ def _is_threefry(key: jax.Array) -> bool:
     )
 
 
+def _perturbation(
+    rng: str, key: jax.Array, J: int, d: int, dtype: Any = jnp.float32
+) -> jax.Array:
+    """Return the (J, d) standard normal draws the iterated filtering kernel adds,
+    scaled, to the parameters: with threefry, XLA's ``normal(key, (J, d))``."""
+    if rng == "threefry":
+        return jax.random.normal(key, (J, d), dtype)
+    return jax.vmap(lambda k: jax.random.normal(k, (d,), dtype))(
+        jax.random.split(key, J)
+    )
+
+
 def _make_rprocess_interp(
-    model: Pomp, traced: _Traced, per_particle: bool, rng: str
+    model: Pomp,
+    traced: _Traced,
+    per_particle: bool,
+    rng: str,
+    dm_j: ct.ClosedJaxpr | None,
 ) -> KernelRProc:
     """Return a CuTe replacement for the model's ``rprocess_interp``.
 
     With `per_particle`, every particle has its own parameters, as in iterated
     filtering (``mechanics_per_interp``); otherwise every filter has one parameter
     vector (``mechanics_pf_interp``). The kernel draws with `rng`, "threefry" or
-    "philox".
+    "philox". Given the measurement density's jaxpr `dm_j`, it also carries
+    ``with_dmeasure``, which evaluates the density at the end of the interval in
+    the same kernel, while each particle's state is still in registers.
     """
-    rp = model.rproc
+    rp, dm = model.rproc, model.dmeas
     assert rp.nstep is not None
     xla = rp.mechanics_per_interp if per_particle else rp.mechanics_pf_interp
+    dmeas_xla = None
+    if dm is not None:
+        dmeas_xla = dm.mechanics_per if per_particle else dm.mechanics_pf
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
     spec = _Spec(
         step_j=step_j,
@@ -547,8 +750,13 @@ def _make_rprocess_interp(
         acc=(),
         per_particle=per_particle,
         rng=rng,
+        dm_j=dm_j,
+        ny=0 if dm is None else len(dm.y_names),
+        ncd=0 if dm is None else len(dm.covar_names),
+        noise_j=_trace_noise(len(rp.param_names)),
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
+    ny, ncd = spec.ny, spec.ncd
     launchers: dict[tuple[str, int, bool, tuple[int, ...]], Any] = {}
 
     def launcher(kind: str, J: int, transform: bool, acc: tuple[int, ...]) -> Any:
@@ -568,12 +776,12 @@ def _make_rprocess_interp(
         def core(Xp, th, sk, tab):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
-            X = Xp.reshape(B * J, ns).T
+            X = Xp.reshape(B * J, ns)
             out = cutlass_call(
                 launcher("fwd", J, transform, acc),
                 output_shape_dtype=jax.ShapeDtypeStruct(X.shape, jnp.float32),
             )(X, *flatten(th, sk, tab, B, J))
-            return out.T.reshape(lead + (J, ns))
+            return out.reshape(lead + (J, ns))
 
         @core.def_vmap
         def _rule(axis_size, in_batched, *args):
@@ -584,7 +792,7 @@ def _make_rprocess_interp(
             # As core, plus each step's input state: H (..., J, nstep * ns).
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
-            X = Xp.reshape(B * J, ns).T
+            X = Xp.reshape(B * J, ns)
             out, H = cutlass_call(
                 launcher("save", J, transform, acc),
                 output_shape_dtype=(
@@ -592,7 +800,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct((B * J, nstep * ns), jnp.float32),
                 ),
             )(X, *flatten(th, sk, tab, B, J))
-            return out.T.reshape(lead + (J, ns)), H.reshape(lead + (J, nstep * ns))
+            return out.reshape(lead + (J, ns)), H.reshape(lead + (J, nstep * ns))
 
         @core_save.def_vmap
         def _rule_save(axis_size, in_batched, *args):
@@ -605,7 +813,7 @@ def _make_rprocess_interp(
         def core_bwd(H, th, sk, tab, gout):
             lead, J = gout.shape[:-2], gout.shape[-2]
             B = math.prod(lead)
-            G = gout.reshape(B * J, ns).T
+            G = gout.reshape(B * J, ns)
             TH, SK, TAB = flatten(th, sk, tab, B, J)
             dX, dTH = cutlass_call(
                 launcher("bwd", J, transform, acc),
@@ -615,7 +823,7 @@ def _make_rprocess_interp(
                 ),
             )(H.reshape(B * J, nstep * ns), TH, SK, TAB, G)
             dTH = dTH.reshape(lead + (J, nth))
-            return dX.T.reshape(lead + (J, ns)), (dTH if per_particle else dTH.sum(-2))
+            return dX.reshape(lead + (J, ns)), (dTH if per_particle else dTH.sum(-2))
 
         @core_bwd.def_vmap
         def _rule_bwd(axis_size, in_batched, *args):
@@ -638,44 +846,119 @@ def _make_rprocess_interp(
             return dX, dth, np.zeros(sk.shape, jax.dtypes.float0), jnp.zeros_like(tab)
 
         diff_core.defvjp(diff_fwd, diff_bwd)
-        return diff_core
+        if dm_j is None or dmeas_xla is None:
+            return diff_core, None, None
 
-    cores: dict[tuple[bool, tuple[int, ...]], Callable] = {}
+        # obs (..., ny + 1 + ncd): the observation, its time and its covariates.
+        @jax.custom_batching.custom_vmap
+        def core_dm(Xp, th, sk, tab, obs):
+            lead, J = Xp.shape[:-2], Xp.shape[-2]
+            B = math.prod(lead)
+            X = Xp.reshape(B * J, ns)
+            out, w = cutlass_call(
+                launcher("dm", J, transform, acc),
+                output_shape_dtype=(
+                    jax.ShapeDtypeStruct(X.shape, jnp.float32),
+                    jax.ShapeDtypeStruct((B * J,), jnp.float32),
+                ),
+            )(X, *flatten(th, sk, tab, B, J), obs.reshape(B, ny + 1 + ncd))
+            return out.reshape(lead + (J, ns)), w.reshape(lead + (J,))
 
-    def rprocess_interp(
-        X_: jax.Array,
-        theta_: jax.Array,
+        @core_dm.def_vmap
+        def _rule_dm(axis_size, in_batched, *args):
+            return core_dm(*_broadcast_unbatched(axis_size, in_batched, args)), (
+                True,
+                True,
+            )
+
+        def dmeas(out, th, obs):
+            cov = obs[ny + 1 :] if ncd else None
+            return dmeas_xla(obs[:ny], out, th, cov, obs[ny], transform)
+
+        # Derivatives go through the unfused kernels and XLA's density.
+        @jax.custom_vjp
+        def diff_dm(Xp, th, sk, tab, obs):
+            return core_dm(Xp, th, sk, tab, obs)
+
+        def dm_fwd(Xp, th, sk, tab, obs):
+            out, H = core_save(Xp, th, sk, tab)
+            w, pull = jax.vjp(lambda o, t: dmeas(o, t, obs), out, th)
+            return (out, w), (H, th, sk, tab, obs, pull)
+
+        def dm_bwd(res, g):
+            H, th, sk, tab, obs, pull = res
+            gout, gw = g
+            gx_dm, gth_dm = pull(gw)
+            dX, dth = core_bwd(H, th, sk, tab, gout + gx_dm)
+            return (
+                dX,
+                dth + gth_dm,
+                np.zeros(sk.shape, jax.dtypes.float0),
+                jnp.zeros_like(tab),
+                jnp.zeros_like(obs),
+            )
+
+        diff_dm.defvjp(dm_fwd, dm_bwd)
+        if not per_particle:
+            return diff_core, diff_dm, None
+
+        # Iterated filtering's step, which no one differentiates: anc (..., J) are the
+        # ancestors of the last resampling, pk (..., 2) the perturbation key's data,
+        # sig (..., d) the random walk's standard deviations, and Xs and ths spent
+        # buffers shaped as Xp and th that the new states and parameters overwrite.
+        @jax.custom_batching.custom_vmap
+        def core_per(Xp, th, anc, pk, sig, sk, tab, obs, Xs, ths):
+            lead, J = Xp.shape[:-2], Xp.shape[-2]
+            B = math.prod(lead)
+            out, tho, w = cutlass_call(
+                launcher("per", J, transform, acc),
+                output_shape_dtype=(
+                    jax.ShapeDtypeStruct((B * J, ns), jnp.float32),
+                    jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
+                    jax.ShapeDtypeStruct((B * J,), jnp.float32),
+                ),
+                input_output_aliases={8: 0, 9: 1},
+            )(
+                Xp.reshape(B * J, ns),
+                th.reshape(B * J, nth),
+                anc.reshape(B * J),
+                pk.reshape(B, 2),
+                sig.reshape(B, nth),
+                sk.reshape(B, nstep, 2),
+                tab.reshape(B, nstep, 2 + nc),
+                obs.reshape(B, ny + 1 + ncd),
+                Xs.reshape(B * J, ns),
+                ths.reshape(B * J, nth),
+            )
+            return (
+                out.reshape(lead + (J, ns)),
+                tho.reshape(lead + (J, nth)),
+                w.reshape(lead + (J,)),
+            )
+
+        @core_per.def_vmap
+        def _rule_per(axis_size, in_batched, *args):
+            return core_per(*_broadcast_unbatched(axis_size, in_batched, args)), (
+                True,
+                True,
+                True,
+            )
+
+        return diff_core, diff_dm, core_per
+
+    cores: dict[tuple[bool, tuple[int, ...]], tuple[Callable, ...]] = {}
+
+    def kernel_inputs(
         keys: jax.Array,
         covars_extended: jax.Array | None,
         dt_array_extended: jax.Array,
         t: jax.Array,
         t_idx: jax.Array,
-        nstep_dynamic: jax.Array,
         accumvars_: tuple[int, ...] | None,
         should_trans: bool,
-    ) -> tuple[jax.Array, jax.Array]:
-        """Advance the particles over one observation interval with the kernel."""
+    ) -> tuple[tuple[Callable, ...], jax.Array, jax.Array]:
+        """Return the kernels for this call, the substep keys and the step table."""
         key = keys[0] if jnp.ndim(keys) != 0 else keys
-        # The kernel is float32 and reads keys of two 32-bit words. Its threefry
-        # draws are XLA's only for threefry keys, so other keys (rbg, Philox) stay on
-        # XLA then, as do float64 particles.
-        if (
-            X_.dtype != jnp.float32
-            or jax.random.key_data(key).shape != (2,)
-            or (rng == "threefry" and not _is_threefry(key))
-        ):
-            return xla(
-                X_,
-                theta_,
-                keys,
-                covars_extended,
-                dt_array_extended,
-                t,
-                t_idx,
-                nstep_dynamic,
-                accumvars_,
-                should_trans,
-            )
         subkeys, ts, dts, covs = [], [], [], []
         tk = t
         for k in range(nstep):  # the same key chain and clock as _time_interp
@@ -697,12 +980,170 @@ def _make_rprocess_interp(
         acc = tuple(sorted({int(a) for a in (accumvars_ or ())}))
         if (bool(should_trans), acc) not in cores:
             cores[bool(should_trans), acc] = make_core(bool(should_trans), acc)
-        out = cores[bool(should_trans), acc](
-            X_,
-            jnp.asarray(theta_, jnp.float32),
-            jnp.stack(subkeys),
-            tab,
+        return cores[bool(should_trans), acc], jnp.stack(subkeys), tab
+
+    def on_kernel(X_: jax.Array, keys: jax.Array) -> bool:
+        """Return whether the kernel can run these inputs."""
+        key = keys[0] if jnp.ndim(keys) != 0 else keys
+        # The kernel is float32 and reads keys of two 32-bit words. Its threefry
+        # draws are XLA's only for threefry keys, so other keys (rbg, Philox) stay on
+        # XLA then, as do float64 particles.
+        return (
+            X_.dtype == jnp.float32
+            and jax.random.key_data(key).shape == (2,)
+            and not (rng == "threefry" and not _is_threefry(key))
         )
+
+    def rprocess_interp(
+        X_: jax.Array,
+        theta_: jax.Array,
+        keys: jax.Array,
+        covars_extended: jax.Array | None,
+        dt_array_extended: jax.Array,
+        t: jax.Array,
+        t_idx: jax.Array,
+        nstep_dynamic: jax.Array,
+        accumvars_: tuple[int, ...] | None,
+        should_trans: bool,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Advance the particles over one observation interval with the kernel."""
+        if not on_kernel(X_, keys):
+            return xla(
+                X_,
+                theta_,
+                keys,
+                covars_extended,
+                dt_array_extended,
+                t,
+                t_idx,
+                nstep_dynamic,
+                accumvars_,
+                should_trans,
+            )
+        (core, *_), sk, tab = kernel_inputs(
+            keys, covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans
+        )
+        out = core(X_, jnp.asarray(theta_, jnp.float32), sk, tab)
         return out, t_idx + nstep
 
-    return KernelRProc(kernel=rprocess_interp, xla=xla)
+    def with_dmeasure(
+        X_: jax.Array,
+        theta_: jax.Array,
+        keys: jax.Array,
+        covars_extended: jax.Array | None,
+        dt_array_extended: jax.Array,
+        t: jax.Array,
+        t_idx: jax.Array,
+        nstep_dynamic: jax.Array,
+        accumvars_: tuple[int, ...] | None,
+        should_trans: bool,
+        y: jax.Array,
+        t_obs: jax.Array,
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """As ``rprocess_interp``, plus the measurement log-density of observation `y`
+        at time `t_obs` for each particle at the end of the interval."""
+        assert dmeas_xla is not None
+        args = (covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans)
+        if not on_kernel(X_, keys):
+            X, t_end = rprocess_interp(
+                X_, theta_, keys, *args[:4], nstep_dynamic, *args[4:]
+            )
+            cov = None if covars_extended is None else covars_extended[t_end]
+            return X, t_end, dmeas_xla(y, X, theta_, cov, t_obs, should_trans)
+        (_, core_dm, _), sk, tab = kernel_inputs(keys, *args)
+        assert core_dm is not None
+        obs = obs_row(y, t_obs, covars_extended, t_idx + nstep)
+        out, w = core_dm(X_, jnp.asarray(theta_, jnp.float32), sk, tab, obs)
+        return out, t_idx + nstep, w
+
+    def obs_row(
+        y: jax.Array, t_obs: jax.Array, covars_extended: jax.Array | None, t_end: Any
+    ) -> jax.Array:
+        """Return the kernel's row for an observation: y, its time, its covariates."""
+        cols = [jnp.asarray(y, jnp.float32), jnp.asarray(t_obs, jnp.float32)[None]]
+        if ncd:
+            assert covars_extended is not None
+            cols.append(covars_extended[t_end].astype(jnp.float32))
+        return jnp.concatenate(cols)
+
+    def perturb_step(
+        X_: jax.Array,
+        theta_: jax.Array,
+        ancestors: jax.Array,
+        key_perturb: jax.Array,
+        sigmas: jax.Array,
+        keys: jax.Array,
+        covars_extended: jax.Array | None,
+        dt_array_extended: jax.Array,
+        t: jax.Array,
+        t_idx: jax.Array,
+        nstep_dynamic: jax.Array,
+        accumvars_: tuple[int, ...] | None,
+        should_trans: bool,
+        y: jax.Array,
+        t_obs: jax.Array,
+        scratch: tuple[jax.Array, jax.Array] | None = None,
+    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+        """One interval of iterated filtering in one kernel.
+
+        Particle j starts from particle ``ancestors[j]`` of `X_` and `theta_`, which
+        the last resampling picked, and its parameters move by `sigmas` times row j
+        of standard normal draws, :func:`_perturbation` of `key_perturb`. Returns the
+        states
+        at the end of the interval, the perturbed parameters, the time index and
+        the measurement log-density of observation `y` at time `t_obs`.
+
+        The states and parameters are written over `scratch`, buffers shaped as
+        `X_` and `theta_` whose values are no longer needed, if given. A loop that
+        swaps them with its carry every step, two steps per iteration, then keeps
+        XLA from copying the kernel's outputs into the carry.
+        """
+        assert dmeas_xla is not None
+        J = X_.shape[-2]
+        if not (on_kernel(X_, keys) and on_kernel(X_, key_perturb)):
+            th = theta_[ancestors] + sigmas * _perturbation(
+                rng, key_perturb, J, nth, theta_.dtype
+            )
+            X, t_end = rprocess_interp(
+                X_[ancestors],
+                th,
+                keys,
+                covars_extended,
+                dt_array_extended,
+                t,
+                t_idx,
+                nstep_dynamic,
+                accumvars_,
+                should_trans,
+            )
+            cov = None if covars_extended is None else covars_extended[t_end]
+            return X, th, t_end, dmeas_xla(y, X, th, cov, t_obs, should_trans)
+        args = (covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans)
+        (_, _, core_per), sk, tab = kernel_inputs(keys, *args)
+        assert core_per is not None
+        if scratch is None:
+            scratch = (
+                jnp.zeros(X_.shape, jnp.float32),
+                jnp.zeros(theta_.shape, jnp.float32),
+            )
+        out, tho, w = core_per(
+            X_,
+            jnp.asarray(theta_, jnp.float32),
+            jnp.asarray(ancestors, jnp.int32),
+            jax.random.key_data(key_perturb),
+            jnp.asarray(sigmas, jnp.float32),
+            sk,
+            tab,
+            obs_row(y, t_obs, covars_extended, t_idx + nstep),
+            *scratch,
+        )
+        return out, tho, t_idx + nstep, w
+
+    return KernelRProc(
+        kernel=rprocess_interp,
+        xla=xla,
+        resample=_resample_kernel,
+        with_dmeasure=None if dm_j is None else with_dmeasure,
+        dmeasure=dmeas_xla,
+        perturb_step=perturb_step if per_particle and dm_j is not None else None,
+    )

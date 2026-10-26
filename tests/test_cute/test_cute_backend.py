@@ -264,7 +264,7 @@ def test_mif_and_train_on_cute():
 
 def test_dpop_train_on_cute():
     model = sde_model(dpop_rproc, statenames=("x", "_logw"))
-    assert model.rproc.accumvars is None  # DPOP resets _logw at each observation
+    assert model.rproc.accumvars == (1,)  # _logw is zeroed at each observation
     model.set_rproc_backend("xla")
     cm = deepcopy(model)
     cm.set_rproc_backend("cute")

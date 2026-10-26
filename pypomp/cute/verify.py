@@ -1,7 +1,8 @@
 """Numerical checks run once before the CuTe backend is chosen for a model.
 
-All run the model's first observation interval on ``_CHECK_J`` particles with a
-Philox key, so XLA and the kernel draw the same random numbers. The coupling probe
+All run the model's first observation interval on ``_CHECK_J`` particles with a key
+of the kernel's generator (threefry, or pypomp's Philox), so XLA and the kernel draw
+the same random numbers. The coupling probe
 perturbs one particle of a ``@vectorized`` rproc and requires the others to stay
 bit-identical on XLA: the kernel runs every particle on its own, so any coupling
 would be dropped. The comparisons then require the kernel to match XLA with one
@@ -48,8 +49,9 @@ class _Interval(NamedTuple):
     """run(rproc, X, theta, should_trans) advances X over the interval."""
 
 
-def _interval(model: Pomp) -> _Interval:
-    """Return the test interval for `model`, which must have parameters."""
+def _interval(model: Pomp, rng: str) -> _Interval:
+    """Return the test interval for `model`, which must have parameters, with a key
+    of generator `rng`."""
     names = model.canonical_param_names
     th = model.theta.to_jax_array(names)[0]
     th_est = model.par_trans._transform_array(th[None], names, direction="to_est")[0]
@@ -62,7 +64,7 @@ def _interval(model: Pomp) -> _Interval:
     X0 = model.rinit.mechanics_pf(
         th, keys, None if cov is None else cov[0], model.t0, False
     )
-    key = jax.random.key(1, impl=PHILOX)
+    key = jax.random.key(1, impl="threefry2x32" if rng == "threefry" else PHILOX)
     dts = jnp.asarray(model._dt_array_extended)
     nstep, acc = int(model._nstep_array[0]), model.rproc.accumvars
 
@@ -111,10 +113,11 @@ def _different(
 
 
 def _check(
-    model: Pomp, cute_pf: Callable, cute_per: Callable, vectorized: bool
+    model: Pomp, cute_pf: Callable, cute_per: Callable, vectorized: bool, rng: str
 ) -> str | None:
-    """Return why the CuTe rproc can't be used for `model`, or None if it can."""
-    iv = _interval(model)
+    """Return why the CuTe rproc, drawing with `rng`, can't be used for `model`, or
+    None if it can."""
+    iv = _interval(model, rng)
     rp = model.rproc
     xla = _forward(iv, rp.mechanics_pf_interp, iv.th, False)
     a = xla(iv.X0)

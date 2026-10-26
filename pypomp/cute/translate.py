@@ -8,7 +8,10 @@ object array, so slices, reshapes and reductions are bookkeeping at trace time, 
 the emitted code is straight-line scalar math in registers, apart from branches
 for runtime conds and calls of large sub-jaxprs that run more than once.
 
-Random numbers are Philox4x32-10 with all four output words used, in the layout of
+Random numbers follow ``ctx.rng``. With "threefry" they are JAX's (partitionable)
+threefry: element f of a flattened draw is the XOR of the two Threefry2x32-20 words
+for counter (0, f), and split and fold_in keys are both words. With "philox" they
+are Philox4x32-10 with all four output words used, in the layout of
 :mod:`pypomp.random.philox`: element (l, m) of a draw of shape (..., L) is word
 l % 4 of the call with counter (l // 4) * L + m. An rproc written over all J
 particles at once (``@vectorized``) is traced with J = 1, and ``ctx.vectorized_J``
@@ -50,6 +53,9 @@ _DSL = {
 # Philox4x32-10 multipliers and key increments (Salmon et al., 2011).
 _PM0, _PM1 = 0xD2511F53, 0xCD9E8D57
 _PW0, _PW1 = np.uint32(0x9E3779B9), np.uint32(0xBB67AE85)
+# Threefry2x32-20 rotations and key-schedule parity (Salmon et al., 2011).
+_TF_ROT = ((13, 15, 26, 6), (17, 29, 16, 24))
+_TF_PARITY = np.uint32(0x1BD11BDA)
 
 
 @dataclass
@@ -60,6 +66,8 @@ class _Ctx:
     """J for a ``@vectorized`` rproc traced with J = 1, otherwise None."""
     particle: _Scalar
     """This thread's particle index within its filter, or None."""
+    rng: str
+    """The generator draws follow: "threefry" or "philox"."""
     outlined: dict[Any, Any] = field(default_factory=dict)
     """The device functions emitted so far, by sub-jaxpr and constant inputs."""
 
@@ -145,14 +153,62 @@ def _philox4x32(
     return x0, x1, x2, x3
 
 
-def _key_derive(k0: _Scalar, k1: _Scalar, cnt: _Scalar) -> tuple[_Scalar, _Scalar]:
+def _rotl(x: _Scalar, r: int) -> _Scalar:
+    """Return the uint32 `x` rotated left by `r` bits."""
+    if not _is_dsl(x):
+        v = int(x)
+        return np.uint32(((v << r) | (v >> (32 - r))) & 0xFFFFFFFF)
+    return (x << cutlass.Uint32(r)) | (x >> cutlass.Uint32(32 - r))
+
+
+def _threefry2x32(
+    k0: _Scalar, k1: _Scalar, x0: _Scalar, x1: _Scalar
+) -> tuple[_Scalar, _Scalar]:
+    """Return the two Threefry2x32-20 words for key (k0, k1) and counter (x0, x1)."""
+    k0, k1, x0, x1 = (_u32(v) for v in (k0, k1, x0, x1))
+    ks = (k0, k1, _xor(_xor(k0, k1), _TF_PARITY))
+    x0, x1 = _add(x0, ks[0]), _add(x1, ks[1])
+    for i in range(5):
+        for r in _TF_ROT[i % 2]:
+            x0 = _add(x0, x1)
+            x1 = _xor(x0, _rotl(x1, r))
+        x0 = _add(x0, ks[(i + 1) % 3])
+        x1 = _add(x1, _add(ks[(i + 2) % 3], np.uint32(i + 1)))
+    return x0, x1
+
+
+def _key_derive(
+    rng: str, k0: _Scalar, k1: _Scalar, cnt: _Scalar
+) -> tuple[_Scalar, _Scalar]:
     """Return the key that split and fold_in derive from key (k0, k1) and `cnt`."""
+    if rng == "threefry":
+        return _threefry2x32(k0, k1, 0, cnt)
     y = _philox4x32(k0, k1, 0, 0, 0, cnt)
     return y[0], y[1]
 
 
+def _draw_threefry(
+    ctx: _Ctx, k0: _Scalar, k1: _Scalar, shape: tuple[int, ...]
+) -> np.ndarray:
+    """Return the 32-bit words of a draw of `shape`, as partitionable threefry
+    lays them out: element f of the flattened draw hashes counter (0, f)."""
+    out = np.empty(shape, dtype=object)
+    flat = out.reshape(-1)
+    J = ctx.vectorized_J
+    for f in range(flat.size):
+        if J and shape[-1] == 1:  # the particle axis, of length J at run time
+            cnt = _as_dsl(np.uint32(f * J), np.uint32) + ctx.particle
+        else:
+            cnt = np.uint32(f)
+        y0, y1 = _threefry2x32(k0, k1, 0, cnt)
+        flat[f] = _xor(y0, y1)
+    return out
+
+
 def _draw(ctx: _Ctx, k0: _Scalar, k1: _Scalar, shape: tuple[int, ...]) -> np.ndarray:
     """Return the 32-bit words of a draw of `shape` from key (k0, k1)."""
+    if ctx.rng == "threefry":
+        return _draw_threefry(ctx, k0, k1, shape)
     out = np.empty(shape, dtype=object)
     n = math.prod(shape)
     if n == 0:
@@ -877,7 +933,7 @@ def _eval_eqn(
         out = np.empty(bshape + (2,), dtype=object)
         for idx in np.ndindex(*bshape) if bshape else [()]:
             out[idx + (0,)], out[idx + (1,)] = _key_derive(
-                kb[idx + (0,)], kb[idx + (1,)], _u32(mb[idx])
+                ctx.rng, kb[idx + (0,)], kb[idx + (1,)], _u32(mb[idx])
             )
         return [out]
     if name == "random_split":
@@ -889,7 +945,7 @@ def _eval_eqn(
             for f, idx in enumerate(np.ndindex(*shape) if shape else [()]):
                 cnt = _counter(f, shape, ctx)
                 out[kidx + idx + (0,)], out[kidx + idx + (1,)] = _key_derive(
-                    keys[kidx + (0,)], keys[kidx + (1,)], cnt
+                    ctx.rng, keys[kidx + (0,)], keys[kidx + (1,)], cnt
                 )
         return [out]
     if name == "random_bits":
@@ -902,9 +958,9 @@ def _eval_eqn(
         for kidx in np.ndindex(*kshape) if kshape else [()]:
             if shape:
                 out[kidx] = _draw(ctx, keys[kidx + (0,)], keys[kidx + (1,)], shape)
-            else:  # a scalar draw is shared, not one per particle: word 0 of call 0
+            else:  # a scalar draw is shared, not one per particle: element 0
                 out[kidx] = _draw(
-                    _Ctx(vectorized_J=None, particle=None),
+                    _Ctx(vectorized_J=None, particle=None, rng=ctx.rng),
                     keys[kidx + (0,)],
                     keys[kidx + (1,)],
                     (1,),
@@ -1141,7 +1197,9 @@ def _define(
                 for idx in np.ndindex(*a.shape) if a.shape else [()]:
                     x[idx] = _DSL[dt](next(it)) if _is_dsl(a[idx]) else a[idx]
                 sub_ins.append(x)
-            body_ctx = _Ctx(vectorized_J=None, particle=None, outlined=ctx.outlined)
+            body_ctx = _Ctx(
+                vectorized_J=None, particle=None, rng=ctx.rng, outlined=ctx.outlined
+            )
             res = _interpret(cj, sub_ins, body_ctx)
             outs, vals = [], []
             for r, av in zip(res, out_avals, strict=True):

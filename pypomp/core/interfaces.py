@@ -46,6 +46,7 @@ class PompInterface(Protocol):
     fresh_key: jax.Array | None
     metadata: ModelMetadata
     _rproc_backend: str
+    _rproc_rng: str
 
     @property
     def theta(self) -> PompParameters: ...
@@ -68,7 +69,9 @@ class PompInterface(Protocol):
         self, key: jax.Array | None = None
     ) -> tuple[jax.Array, jax.Array]: ...
 
-    def to_struct(self, rproc_backend: str | None = None) -> PompStruct: ...
+    def to_struct(
+        self, rproc_backend: str | None = None, rng: str | None = None
+    ) -> PompStruct: ...
 
     @overload
     def simulate(

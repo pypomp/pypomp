@@ -69,8 +69,11 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
-def _build(model: Pomp, quiet: bool) -> tuple[KernelRProc, KernelRProc] | None:
-    """Return CuTe replacements for (rproc_pf, rproc_per), or None to keep XLA.
+def _build(
+    model: Pomp, quiet: bool, rng: str
+) -> tuple[KernelRProc, KernelRProc] | None:
+    """Return CuTe replacements for (rproc_pf, rproc_per), drawing with `rng`
+    ("threefry" or "philox"), or None to keep XLA.
 
     Warns before returning None unless `quiet`. The "auto" backend is quiet and also
     keeps XLA for a model with one Euler step per observation. A kernel that doesn't
@@ -95,13 +98,22 @@ def _build(model: Pomp, quiet: bool) -> tuple[KernelRProc, KernelRProc] | None:
         return skip("CuTe rproc backend needs model.theta to check the kernel.")
     import jax
 
-    if jax.random.key_data(jax.random.key(0)).shape != (2,):
+    if rng == "threefry":
+        from .kernel import _is_threefry
+
+        if not _is_threefry(jax.random.key(0)):
+            return skip(
+                "CuTe rproc backend with rng='threefry' needs JAX's default PRNG "
+                "implementation to be threefry2x32, with jax_threefry_partitionable "
+                "on; rng='philox' takes any keys of two 32-bit words."
+            )
+    elif jax.random.key_data(jax.random.key(0)).shape != (2,):
         return skip(
             "CuTe rproc backend needs a default PRNG implementation whose keys are "
             "two 32-bit words, such as threefry."
         )
     try:
-        return _build_kernels(model)
+        return _build_kernels(model, rng)
     except _Skip as e:
         return skip(e.msg, e.always)
     except Exception as e:  # noqa: BLE001
@@ -118,7 +130,7 @@ class _Skip(Exception):
         self.msg, self.always = msg, always
 
 
-def _build_kernels(model: Pomp) -> tuple[KernelRProc, KernelRProc]:
+def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
     """Translate, build and check the kernels, as :func:`_build` describes."""
     from . import kernel
     from .translate import _untranslatable
@@ -135,9 +147,9 @@ def _build_kernels(model: Pomp) -> tuple[KernelRProc, KernelRProc]:
         raise _Skip(
             f"rproc uses {sorted(bad)}, which the CuTe backend cannot translate."
         )
-    pf = kernel._make_rprocess_interp(model, traced, False)
-    per = kernel._make_rprocess_interp(model, traced, True)
-    why = _check(model, pf, per, vec)
+    pf = kernel._make_rprocess_interp(model, traced, False, rng)
+    per = kernel._make_rprocess_interp(model, traced, True, rng)
+    why = _check(model, pf, per, vec, rng)
     if why is not None:
         raise _Skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
     return pf, per

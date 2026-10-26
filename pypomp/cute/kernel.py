@@ -7,14 +7,16 @@ iterated filtering searches) goes into the same launch: a ``custom_vmap`` rule f
 each batch dimension into the kernel's particle axis.
 
 The rest of the particle filter is pypomp's own. The substep keys are split as
-``_time_interp`` splits them, and the kernel draws from them with Philox4x32-10.
+``_time_interp`` splits them, and the kernel draws from them with the generator that
+``rng`` names: JAX's threefry, so its random numbers are XLA's, or pypomp's
+Philox4x32-10 (:mod:`pypomp.random.philox`), which costs fewer instructions.
 
 Gradients go through ``jax.custom_vjp``. When JAX differentiates through an interval,
 the forward kernel also stores each Euler step's input state (nstep x ns floats per
 particle, for one interval at a time, since pypomp checkpoints each observation). A
 second kernel runs the vector-Jacobian product (VJP) of the user's step, from
 ``jax.vjp`` through the translator, over the steps in reverse. It regenerates the
-Philox numbers instead of storing them.
+random numbers instead of storing them.
 """
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ class _Spec(NamedTuple):
     nstep: int
     acc: tuple[int, ...]
     per_particle: bool
+    rng: str
 
 
 def _trace_step(model: Pomp) -> _Traced:
@@ -194,25 +197,27 @@ def _load(
     return tuple(xs), _load_th(TH, g, b, nth, per_particle)
 
 
-def _prep(prep_j: ct.ClosedJaxpr, th: np.ndarray) -> np.ndarray:
+def _prep(prep_j: ct.ClosedJaxpr, th: np.ndarray, rng: str) -> np.ndarray:
     """Return the parameters `th` moved from the estimation to the natural scale."""
-    (out,) = ct._interpret(prep_j, [th], ct._Ctx(vectorized_J=None, particle=None))
+    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+    (out,) = ct._interpret(prep_j, [th], ctx)
     return np.array([ct._as_dsl(v, np.float32) for v in out], dtype=object)
 
 
 def _step_keys(
-    vec: bool, KEYS: _Tensor, b: _Scalar, j: _Scalar, k: _Scalar
+    vec: bool, rng: str, KEYS: _Tensor, b: _Scalar, j: _Scalar, k: _Scalar
 ) -> tuple[_Scalar, _Scalar]:
     """Return particle j's key for step k of filter b, as pypomp derives it."""
     k0, k1 = KEYS[b, k, 0], KEYS[b, k, 1]
     if vec:
         return k0, k1
-    return ct._key_derive(k0, k1, j)  # split(substep_key, J)[j]
+    return ct._key_derive(rng, k0, k1, j)  # split(substep_key, J)[j]
 
 
 def _step_once(
     step_j: ct.ClosedJaxpr,
     vec: bool,
+    rng: str,
     J: int,
     ns: int,
     nc: int,
@@ -225,8 +230,8 @@ def _step_once(
     k: _Scalar,
 ) -> tuple[_Scalar, ...]:
     """Return the state after Euler step k; k may be a runtime loop index."""
-    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j)
-    k0, k1 = _step_keys(vec, KEYS, b, j, k)
+    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng)
+    k0, k1 = _step_keys(vec, rng, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
         cov[c] = TAB[b, k, 2 + c]
@@ -276,6 +281,7 @@ def _zeros(n: int) -> tuple[_Scalar, ...]:
 def _vjp_once(
     step_vjp_j: ct.ClosedJaxpr,
     vec: bool,
+    rng: str,
     J: int,
     ns: int,
     nth: int,
@@ -291,8 +297,8 @@ def _vjp_once(
     acc_th: tuple[_Scalar, ...],
 ) -> tuple[_Scalar, ...]:
     """Return the state cotangent before step k and the summed theta cotangent."""
-    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j)
-    k0, k1 = _step_keys(vec, KEYS, b, j, k)
+    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng)
+    k0, k1 = _step_keys(vec, rng, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
         cov[c] = TAB[b, k, 2 + c]
@@ -324,13 +330,14 @@ def _store_bwd(
     prep_vjp_j: ct.ClosedJaxpr,
     th_raw: np.ndarray,
     transform: bool,
+    rng: str,
 ) -> None:
     """Write particle g's input-state and parameter cotangents."""
     for s, v in enumerate(gx):
         # Accumulators are reset at the start of the interval, so get no gradient.
         DX[s, g] = cutlass.Float32(0.0) if s in acc else v
     if transform:
-        ctx = ct._Ctx(vectorized_J=None, particle=None)
+        ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
         (out,) = ct._interpret(prep_vjp_j, [th_raw, ct._obj(list(gth))], ctx)
         gth = tuple(ct._as_dsl(v, np.float32) for v in out)
     for i, v in enumerate(gth):
@@ -347,7 +354,7 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
                N: cutlass.Int32):
@@ -359,10 +366,10 @@ def make(spec, J, transform, block):
             j = (g - b * J).to(cutlass.Uint32)
             xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th)
+                th = _prep(prep_j, th, rng)
             {xs} = xs0
             for k in range(NSTEP):
-                {xs} = _step_once(step_j, vec, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
             _store(OUT, g, ({xs}))
 
     @cute.jit
@@ -383,7 +390,7 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
                H: cute.Tensor, N: cutlass.Int32):
@@ -395,11 +402,11 @@ def make(spec, J, transform, block):
             j = (g - b * J).to(cutlass.Uint32)
             xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th)
+                th = _prep(prep_j, th, rng)
             {xs} = xs0
             for k in range(NSTEP):
                 _save(H, g, k, ({xs}))
-                {xs} = _step_once(step_j, vec, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
             _store(OUT, g, ({xs}))
 
     @cute.jit
@@ -420,7 +427,7 @@ from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_onc
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng = spec
     @cute.kernel
     def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
                DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
@@ -433,14 +440,14 @@ def make(spec, J, transform, block):
             th_raw = _load_th(TH, g, b, nth, per_particle)
             th = th_raw
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th_raw)
+                th = _prep(prep_j, th_raw, rng)
             {gs} = _load_g(G, g, ns)
             {ths} = _zeros(nth)
             for kk in range(NSTEP):
                 k = NSTEP - 1 - kk
-                {gs} {ths} = _vjp_once(step_vjp_j, vec, J, ns, nth, nc, _hist(H, g, k, ns), th, KEYS, TAB,
+                {gs} {ths} = _vjp_once(step_vjp_j, vec, rng, J, ns, nth, nc, _hist(H, g, k, ns), th, KEYS, TAB,
                                        b, j, k, ({gs}), ({ths}))
-            _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform)
+            _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform, rng)
 
     @cute.jit
     def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
@@ -504,14 +511,24 @@ def _broadcast_unbatched(
     ]
 
 
+def _is_threefry(key: jax.Array) -> bool:
+    """Return whether `key` draws as the kernel's "threefry" generator does: with
+    JAX's threefry, in its partitionable layout."""
+    threefry = jax.random.key_impl(jax.random.key(0, impl="threefry2x32"))
+    return bool(jax.config.jax_threefry_partitionable) and (
+        jax.random.key_impl(key) == threefry
+    )
+
+
 def _make_rprocess_interp(
-    model: Pomp, traced: _Traced, per_particle: bool
+    model: Pomp, traced: _Traced, per_particle: bool, rng: str
 ) -> KernelRProc:
     """Return a CuTe replacement for the model's ``rprocess_interp``.
 
     With `per_particle`, every particle has its own parameters, as in iterated
     filtering (``mechanics_per_interp``); otherwise every filter has one parameter
-    vector (``mechanics_pf_interp``).
+    vector (``mechanics_pf_interp``). The kernel draws with `rng`, "threefry" or
+    "philox".
     """
     rp = model.rproc
     assert rp.nstep is not None
@@ -529,6 +546,7 @@ def _make_rprocess_interp(
         nstep=int(rp.nstep),
         acc=(),
         per_particle=per_particle,
+        rng=rng,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
     launchers: dict[tuple[str, int, bool, tuple[int, ...]], Any] = {}
@@ -638,9 +656,14 @@ def _make_rprocess_interp(
     ) -> tuple[jax.Array, jax.Array]:
         """Advance the particles over one observation interval with the kernel."""
         key = keys[0] if jnp.ndim(keys) != 0 else keys
-        # The kernel is float32 and reads keys of two 32-bit words, as Philox and
-        # threefry keys are; anything else (x64, rbg keys) stays on XLA.
-        if X_.dtype != jnp.float32 or jax.random.key_data(key).shape != (2,):
+        # The kernel is float32 and reads keys of two 32-bit words. Its threefry
+        # draws are XLA's only for threefry keys, so other keys (rbg, Philox) stay on
+        # XLA then, as do float64 particles.
+        if (
+            X_.dtype != jnp.float32
+            or jax.random.key_data(key).shape != (2,)
+            or (rng == "threefry" and not _is_threefry(key))
+        ):
             return xla(
                 X_,
                 theta_,

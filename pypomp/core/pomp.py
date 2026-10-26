@@ -38,6 +38,12 @@ def _check_rproc_backend(backend: str) -> None:
         raise ValueError(f"backend must be 'auto', 'cute' or 'xla', got {backend!r}")
 
 
+def _check_rproc_rng(rng: str) -> None:
+    """Raise ValueError unless `rng` is a CuTe kernel generator."""
+    if rng not in ("threefry", "philox"):
+        raise ValueError(f"rng must be 'threefry' or 'philox', got {rng!r}")
+
+
 class Pomp(PompEstimationMixin, PompAnalysisMixin):
     """
     Define and fit a partially observed Markov process (POMP) model.
@@ -276,6 +282,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.results_history = ResultsHistory()
         self.fresh_key = None
         self._rproc_backend = "auto"
+        self._rproc_rng = "threefry"
         self.metadata = ModelMetadata()
 
         if covars is not None:
@@ -440,7 +447,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def set_rproc_backend(self, backend: str) -> None:
+    def set_rproc_backend(self, backend: str, rng: str = "threefry") -> None:
         """Choose how the process model runs in filtering and estimation.
 
         Parameters
@@ -456,6 +463,16 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             handle, pypomp warns and uses XLA. ``"auto"``, the default for a new
             model, uses CuTe when all of that holds and there is more than one
             Euler step per observation, and XLA otherwise, without a warning.
+        rng : {"threefry", "philox"}, optional
+            The random numbers the CuTe kernel draws. ``"threefry"``, the default,
+            draws JAX's threefry numbers, so for a given key the kernel's results
+            match XLA's up to float rounding; keys of another generator, or a
+            default generator other than threefry, run on XLA. ``"philox"`` draws
+            pypomp's own Philox4x32-10 stream (:mod:`pypomp.random.philox`, not
+            JAX's ``rbg`` keys) from the data of any key of two 32-bit words. It
+            costs fewer instructions per random number (about 20% less kernel time
+            for the UK measles model), but for a given key its results differ from
+            XLA's. Ignored by ``"xla"``, and so by ``"auto"`` when it picks XLA.
 
         Returns
         -------
@@ -465,20 +482,21 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         Raises
         ------
         ValueError
-            If `backend` is not one of the three options.
+            If `backend` or `rng` is not one of its options.
 
         Notes
         -----
-        The CuTe kernel draws Philox4x32-10 random numbers (see
-        :mod:`pypomp.random.philox`), so for a given key its results differ from
-        those of the XLA path, which uses the key's own generator. Gradients for
-        :meth:`train` go through a second generated kernel; optimizers that need
-        Hessians, and float64 particles, use XLA.
+        Gradients for :meth:`train` go through a second generated kernel; optimizers
+        that need Hessians, and float64 particles, use XLA.
         """
         _check_rproc_backend(backend)
+        _check_rproc_rng(rng)
         self._rproc_backend = backend
+        self._rproc_rng = rng
 
-    def to_struct(self, rproc_backend: str | None = None) -> PompStruct:
+    def to_struct(
+        self, rproc_backend: str | None = None, rng: str | None = None
+    ) -> PompStruct:
         """Export the model to a lightweight JAX-compatible struct.
 
         Packs the static data arrays and compiled simulator callables into a
@@ -490,6 +508,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         rproc_backend : {"auto", "cute", "xla"} or None, optional
             Process model backend for this struct (see :meth:`set_rproc_backend`).
             Defaults to None, which uses the model's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers (see :meth:`set_rproc_backend`).
+            Defaults to None, which uses the model's.
 
         Returns
         -------
@@ -525,18 +546,21 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             statenames=tuple(self.statenames),
         )
         backend = self._rproc_backend if rproc_backend is None else rproc_backend
+        rng = self._rproc_rng if rng is None else rng
         _check_rproc_backend(backend)
+        _check_rproc_rng(rng)
         if backend != "xla":
-            # Built once per backend: new functions would make every call recompile.
+            # Built once per backend and generator: new functions would make every
+            # call recompile.
             built = self.__dict__.setdefault("_cute_fns", {})
-            fns = built.get(backend)
-            if backend not in built:
+            fns = built.get((backend, rng))
+            if (backend, rng) not in built:
                 from pypomp.cute import _build
 
-                fns = _build(self, backend == "auto")
+                fns = _build(self, backend == "auto", rng)
                 # Without theta the kernel can't be checked, so decide again later.
                 if self._theta is not None:
-                    built[backend] = fns
+                    built[backend, rng] = fns
             if fns is not None:
                 rproc_pf, rproc_per = fns
                 struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
@@ -757,6 +781,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         # Restore basic attributes
         self.__dict__.update(state)
         self.__dict__.setdefault("_rproc_backend", "auto")
+        self.__dict__.setdefault("_rproc_rng", "threefry")
         if "par_trans" in state and "_par_trans" not in state:
             self._par_trans = state["par_trans"]
 

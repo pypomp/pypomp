@@ -372,6 +372,19 @@ def test_auto_uses_cute_only_with_several_steps_per_observation():
     assert s.rproc_pf is one_step.rproc.mechanics_pf_interp
 
 
+def test_builds_without_a_cpu_backend(monkeypatch):
+    devices = jax.devices
+
+    def no_cpu(backend=None):
+        if backend == "cpu":
+            raise RuntimeError("Unknown backend cpu. Available backends are ['cuda']")
+        return devices(backend)
+
+    monkeypatch.setattr(jax, "devices", no_cpu)
+    model = sde_model()
+    assert model.to_struct().rproc_pf is not model.rproc.mechanics_pf_interp
+
+
 def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     from pypomp.cute import kernel
 

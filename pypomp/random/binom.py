@@ -391,12 +391,17 @@ def binominv(
     x_cutoff = 10
     np_cutoff = 4.0
 
-    def large_mean() -> jax.Array:
-        k = approx()
-        return where_lazy(k < x_cutoff, lambda: exact(lambda: k), lambda: k)
-
-    # Each method is computed only where it is used (see where_lazy).
-    k_approx = where_lazy(np_ < np_cutoff, lambda: exact(approx), large_mean)
+    # The exact sum serves small means, and large means whose asymptotic estimate
+    # is below x_cutoff. It appears once, so a backend that branches runs it once
+    # for both kinds of element. Each method is computed only where it is used
+    # (see where_lazy).
+    small = np_ < np_cutoff
+    k_large = where_lazy(small, lambda: jnp.zeros_like(np_), approx)
+    k_approx = where_lazy(
+        small | (k_large < x_cutoff),
+        lambda: exact(lambda: where_lazy(small, approx, lambda: k_large)),
+        lambda: k_large,
+    )
 
     k_flipped = jnp.where(flip, n_safe - k_approx, k_approx)
 

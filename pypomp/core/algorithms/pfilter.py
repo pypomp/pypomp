@@ -7,7 +7,7 @@ from jax import jit
 
 from .carries import PfilterState
 from .contexts import PfilterContext, SeriesData
-from .helpers import _no_resampler, _normalize_weights, _resampler
+from .helpers import _normalize_weights, _resample_where
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 
@@ -158,11 +158,8 @@ def _pfilter_step(
     # 7. Resample when the largest weight exceeds thresh times the smallest.
     resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(context.thresh)
     key, subkey = jax.random.split(key)
-    counts, particlesF, norm_weights = jax.lax.cond(
-        resample,
-        _resampler,
-        _no_resampler,
-        *(state.counts, particlesP, norm_weights, subkey),
+    counts, norm_weights, particlesF = _resample_where(
+        resample, state.counts, norm_weights, subkey, particlesP
     )
 
     # 8. Return the updated filter state.

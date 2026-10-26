@@ -4,11 +4,13 @@ This module implements helper functions for POMP algorithms.
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeVar
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+_P = TypeVar("_P")
 
 
 def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
@@ -81,50 +83,58 @@ def _normalize_weights(weights: jax.Array) -> tuple[jax.Array, jax.Array]:
     return norm_weights, loglik_t
 
 
-def _resampler(
-    counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+def _resample_where(
+    resample: jax.Array | bool,
+    counts: jax.Array,
+    norm_weights: jax.Array,
+    subkey: jax.Array,
+    particles: _P,
+) -> tuple[jax.Array, jax.Array, _P]:
     """
-    Resamples the particles based on the weighted resampling rule determined by
-    norm_weights and the original particles generated from the previous
-    prediction.
+    Resamples when `resample` holds; otherwise returns the inputs unchanged.
+
+    Choosing between resampled and identity ancestor indices, rather than branching
+    with lax.cond, matters under vmap: a cond with a batched predicate computes both
+    branches and then selects between whole copies of the particles.
 
     Args:
+        resample: Whether to resample.
         counts (array-like): Indices of the resampled particles from a previous
             resampling procedure.
-        particlesP (array-like): The original particles before resampling
-            generated from a prediction procedure.
         norm_weights (array-like): The normalized log-weights of the particles.
         subkey: The random key for sampling.
+        particles: Per-particle arrays to resample along their leading axis, e.g.
+            the particles from a prediction procedure and their parameters.
 
     Returns:
-        tuple: A tuple containing:
-            - counts (array-like): The indices of the resampled particles after
-                the latest resampling.
-            - particlesF (array-like): The particles after resampling generated
-                from the filtering procedure.
-            - norm_weights (array-like): The normalized log-weights of the
-                resampled particles.
+        tuple: The ancestor indices of the latest resampling, and the normalized
+            log-weights and `particles` after it.
     """
     J = norm_weights.shape[-1]
-    counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
-    particlesF = particlesP[counts]
-    nw_c = norm_weights[counts]
-    norm_weights = jnp.where(
+    idx = jnp.where(resample, _resample(norm_weights, subkey=subkey), jnp.arange(J))
+    nw_c = norm_weights[idx]
+    nw_resampled = jnp.where(
         jnp.isfinite(nw_c),
         nw_c - jax.lax.stop_gradient(nw_c) - jnp.log(J),
         -jnp.inf,
     )
-    return counts, particlesF, norm_weights
+    return (
+        jnp.where(resample, idx.astype(counts.dtype), counts),
+        jnp.where(resample, nw_resampled, norm_weights),
+        jax.tree.map(lambda x: x[idx], particles),
+    )
 
 
-def _no_resampler(
+def _resampler(
     counts: jax.Array, particlesP: jax.Array, norm_weights: jax.Array, subkey: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
-    Obtains the original input arguments without resampling.
+    Resamples the particles; see :func:`_resample_where`.
     """
-    return counts, particlesP, norm_weights
+    counts, norm_weights, particlesF = _resample_where(
+        True, counts, norm_weights, subkey, particlesP
+    )
+    return counts, particlesF, norm_weights
 
 
 def _resampler_thetas(
@@ -135,54 +145,12 @@ def _resampler_thetas(
     subkey: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
-    Resamples the particles for perturbed particle filtering method, with their
-    corresponding parameters also resampled
-
-    Args:
-        counts (array-like): Indices of the resampled particles from a previous
-            resampling procedure.
-        particlesP (array-like): The original particles before resampling
-            generated from a prediction procedure.
-        norm_weights (array-like): The normalized log-weights of the particles.
-        thetas (array-like): Perturbed parameters associated with the particles.
-        subkey: The random key for sampling.
-
-    Returns:
-        tuple: A tuple containing:
-            - counts (array-like): The indices of the resampled particles after
-                the latest resampling.
-            - particlesF (array-like): The particles after resampling generated
-                from the filtering procedure.
-            - norm_weights (array-like): The normalized log-weights of the
-                resampled particles.
-            - thetasF (array-like): The perturbed parameters corresponding to
-                the latest perturbed particles (particlesF).
+    Resamples the particles and their parameters; see :func:`_resample_where`.
     """
-    J = norm_weights.shape[-1]
-    counts = _resample(norm_weights, subkey=subkey).astype(counts.dtype)
-    particlesF = particlesP[counts]
-    nw_c = norm_weights[counts]
-    norm_weights = jnp.where(
-        jnp.isfinite(nw_c),
-        nw_c - jax.lax.stop_gradient(nw_c) - jnp.log(J),
-        -jnp.inf,
+    counts, norm_weights, (particlesF, thetasF) = _resample_where(
+        True, counts, norm_weights, subkey, (particlesP, thetas)
     )
-    thetasF = thetas[counts]
     return counts, particlesF, norm_weights, thetasF
-
-
-def _no_resampler_thetas(
-    counts: jax.Array,
-    particlesP: jax.Array,
-    norm_weights: jax.Array,
-    thetas: jax.Array,
-    subkey: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """
-    Obtains the original input arguments without resampling for perturbed
-    filtering method.
-    """
-    return counts, particlesP, norm_weights, thetas
 
 
 def _num_fixedstep_steps(

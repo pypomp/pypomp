@@ -570,10 +570,18 @@ _SUPPORTED = (
 )
 
 
+def _fold_device() -> Any:
+    """Return a CPU device, or the default device if JAX runs without a CPU backend."""
+    try:
+        return jax.devices("cpu")[0]
+    except RuntimeError:
+        return jax.devices()[0]
+
+
 def _fold(eqn: Any, vals: list[np.ndarray]) -> list[np.ndarray]:
-    """Evaluate equation `eqn` on constant inputs, eagerly on the CPU."""
+    """Evaluate equation `eqn` on constant inputs, eagerly on the CPU if JAX has one."""
     # This runs while JAX traces the CuTe call, so evaluation must be forced eager.
-    with jax.ensure_compile_time_eval(), jax.default_device(jax.devices("cpu")[0]):
+    with jax.ensure_compile_time_eval(), jax.default_device(_fold_device()):
         out = eqn.primitive.bind(*[jnp.asarray(v) for v in vals], **eqn.params)
     outs = out if eqn.primitive.multiple_results else [out]
     return [np.asarray(o) for o in outs]

@@ -13,7 +13,7 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
-from pypomp.cute import available
+from pypomp.cute import KernelRProc, available
 from pypomp.random import binominv
 from pypomp.random.philox import PHILOX
 
@@ -68,13 +68,34 @@ def two_binomials_rproc(X_, theta_, key, covars, t, dt):
     return sde_rproc({"x": z + 0.01 * (a - 30 * b) * dt}, theta_, key, covars, t, dt)
 
 
+# Tables read at runtime indices: a unit's row, picked by a covariate, at the current
+# week; its neighbours' rows; and grid points picked by the state, one of them read
+# in "fill" mode, which the state takes out of range now and then.
+_WEEKLY = np.random.default_rng(3).normal(size=(4, 60)).astype(np.float32)
+_NEAR = np.array([[1, 2], [0, 3], [3, 0], [2, 1]], np.int32)
+_GRID = np.linspace(-1.0, 1.0, 101, dtype=np.float32)
+
+
+def table_rproc(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    i = jnp.round(covars["u"]).astype(jnp.int32)
+    k = jnp.clip(jnp.floor(t), 0, 59).astype(jnp.int32)
+    own = jnp.asarray(_WEEKLY)[i][k]
+    near = jnp.asarray(_WEEKLY)[jnp.asarray(_NEAR)[i], k]
+    g = jnp.floor((z + 2.0) * 25.0).astype(jnp.int32)
+    grid = jnp.asarray(_GRID)[jnp.clip(g, 0, 100)]
+    edge = jnp.asarray(_GRID).at[g].get(mode="fill", fill_value=-5.0)
+    nudge = 0.1 * own + 0.05 * near.sum() + 0.1 * grid + 0.01 * edge
+    return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
+
+
 def dpop_rproc(X_, theta_, key, covars, t, dt):
     out = sde_rproc(X_, theta_, key, covars, t, dt)
     # Any function of theta shows whether _logw is reset at each observation.
     return {"x": out["x"], "_logw": X_["_logw"] + theta_["r"] * out["x"] * dt}
 
 
-def sde_model(rproc=sde_rproc, statenames=("x",)):
+def sde_model(rproc=sde_rproc, statenames=("x",), covars=None):
     def rinit(theta_, key, covars, t0):
         x0 = theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)
         return {"x": x0, **{n: 0.0 for n in statenames[1:]}}
@@ -97,7 +118,13 @@ def sde_model(rproc=sde_rproc, statenames=("x",)):
         rproc=rproc,
         dmeas=dmeas,
         nstep=10,
+        covars=covars,
     )
+
+
+def table_model(u=2):
+    covars = pd.DataFrame({"u": float(u)}, index=np.arange(0.0, 41.0))
+    return sde_model(table_rproc, covars=covars)
 
 
 def he10_model():
@@ -164,8 +191,9 @@ def interval(model, struct, J, R, i_obs=3):
         lambda: sde_model(reshape_rproc),
         lambda: sde_model(vectorized_rproc),
         lambda: sde_model(int_ops_rproc),
+        table_model,
     ],
-    ids=["sde", "he10", "reshape", "vectorized", "int_ops"],
+    ids=["sde", "he10", "reshape", "vectorized", "int_ops", "tables"],
 )
 @pytest.mark.parametrize("rng", ["threefry", "philox"])
 def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
@@ -190,7 +218,9 @@ def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
 
 
 @pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation"])
-@pytest.mark.parametrize("make", [sde_model, he10_model], ids=["sde", "he10"])
+@pytest.mark.parametrize(
+    "make", [sde_model, he10_model, table_model], ids=["sde", "he10", "tables"]
+)
 def test_cute_gradients_match_xla(make, should_trans):
     model = make()
     xla, cute = xla_and_cute(model)
@@ -280,6 +310,71 @@ def test_cute_loglik_agrees_with_xla():
     b = np.asarray(F.pfilter(cute, th, 500, keys)["logLik"]).ravel()
     se = np.sqrt(a.var() / a.size + b.var() / b.size)
     assert abs(a.mean() - b.mean()) < 4 * se
+
+
+def table_panel():
+    units = {f"u{u}": table_model(u) for u in (1, 3)}
+    names = units["u1"].canonical_param_names
+    vals = units["u1"].theta.to_jax_array(names)[0]
+    v = dict(zip(names, np.asarray(vals, float).tolist(), strict=True))
+    # One unit-specific parameter, so that the parameters name the units.
+    shared = pd.DataFrame(
+        {"shared": [v[n] for n in names if n != "z0m"]},
+        index=[n for n in names if n != "z0m"],
+    )
+    unit = pd.DataFrame({u: [v["z0m"]] for u in units}, index=["z0m"])
+    theta = pp.PanelParameters({"shared": shared, "unit_specific": unit})
+    return pp.PanelPomp(units, theta), names, vals
+
+
+@pytest.mark.parametrize("rng", ["threefry", "philox"])
+def test_panel_runs_its_first_units_kernel_for_every_unit(rng):
+    panel, names, th = table_panel()
+    panel.set_rproc_backend("cute", rng)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        cute = panel.to_struct()
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.rproc_per, KernelRProc)
+    assert all(u._theta is None for u in panel.unit_objects.values())
+    xla = panel.to_struct(rproc_backend="xla")
+    assert xla.rproc_pf is panel.unit_objects["u1"].rproc.mechanics_pf_interp
+
+    # Each unit's covariate picks its own rows of the tables.
+    J, i_obs = 1024, 3
+    nsteps = np.asarray(xla.nstep_array)
+    t, t_idx = float(np.asarray(xla.times)[i_obs - 1]), int(nsteps[:i_obs].sum())
+    covs = xla.covars_per_unit
+    X0 = jax.vmap(
+        lambda k, c: xla.rinit_pf(th, jax.random.split(k, J), c[0], xla.t0, False)
+    )(jax.random.split(jax.random.key(9), 2), covs)
+    keys = jax.random.split(rng_key(5, rng), 2)
+
+    def advance(s):
+        def f(X, k, c):
+            return s.rproc_pf(
+                X,
+                th,
+                k,
+                c,
+                s.dt_array_extended,
+                t,
+                t_idx,
+                int(nsteps[i_obs]),
+                s.accumvars,
+                False,
+            )[0]
+
+        return np.asarray(jax.jit(jax.vmap(f))(X0, keys, covs))
+
+    a, b = advance(xla), advance(cute)
+    assert not np.allclose(a[0], a[1])
+    rel = np.abs(a - b) / (np.abs(a) + 1.0)
+    assert (rel.max(-1) > 1e-4).mean() < 0.005
+    assert np.median(rel) < 1e-6
+
+    panel.pfilter(J=256, key=jax.random.key(0))
+    assert np.isfinite(panel.results()["shared logLik"].to_numpy(dtype=float)).all()
 
 
 def test_mif_and_train_on_cute():

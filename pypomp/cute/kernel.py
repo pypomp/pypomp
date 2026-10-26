@@ -10,6 +10,8 @@ The rest of the particle filter is pypomp's own. The substep keys are split as
 ``_time_interp`` splits them, and the kernel draws from them with the generator that
 ``rng`` names: JAX's threefry, so its random numbers are XLA's, or pypomp's
 Philox4x32-10 (:mod:`pypomp.random.philox`), which costs fewer instructions.
+Constant tables that the step reads at runtime indices reach every kernel in one
+buffer argument (see ``translate.py``).
 
 Gradients go through ``jax.custom_vjp``. When JAX differentiates through an interval,
 the forward kernel also stores each Euler step's input state (nstep x ns floats per
@@ -77,6 +79,9 @@ class _Spec(NamedTuple):
     ny: int
     ncd: int
     noise_j: ct.ClosedJaxpr
+    offsets: dict[tuple, int]
+    """Where each table the step reads at runtime indices starts in the kernels'
+    table buffer (see :func:`translate._runtime_tables`)."""
 
 
 def _trace_step(model: Pomp) -> _Traced:
@@ -235,9 +240,16 @@ def _load(
     return tuple(xs), _load_th(TH, g, b, nth, per_particle)
 
 
-def _prep(prep_j: ct.ClosedJaxpr, th: np.ndarray, rng: str) -> np.ndarray:
+def _tables(TB: _Tensor, offsets: dict[tuple, int]) -> ct._Tables:
+    """Return the kernel's table buffer `TB` for the translator."""
+    return ct._Tables(TB, offsets)
+
+
+def _prep(
+    prep_j: ct.ClosedJaxpr, th: np.ndarray, rng: str, tb: ct._Tables
+) -> np.ndarray:
     """Return the parameters `th` moved from the estimation to the natural scale."""
-    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng, tables=tb)
     (out,) = ct._interpret(prep_j, [th], ctx)
     return np.array([ct._as_dsl(v, np.float32) for v in out], dtype=object)
 
@@ -263,12 +275,13 @@ def _step_once(
     th: np.ndarray,
     KEYS: _Tensor,
     TAB: _Tensor,
+    tb: ct._Tables,
     b: _Scalar,
     j: _Scalar,
     k: _Scalar,
 ) -> tuple[_Scalar, ...]:
     """Return the state after Euler step k; k may be a runtime loop index."""
-    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng)
+    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng, tables=tb)
     k0, k1 = _step_keys(vec, rng, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
@@ -296,6 +309,7 @@ def _dmeas_once(
     xs: tuple[_Scalar, ...],
     th: np.ndarray,
     OBS: _Tensor,
+    tb: ct._Tables,
     b: _Scalar,
 ) -> _Scalar:
     """Return the measurement log-density of state `xs`; OBS[b] holds filter b's
@@ -306,7 +320,7 @@ def _dmeas_once(
     cov = np.empty(ncd, dtype=object)
     for c in range(ncd):
         cov[c] = OBS[b, ny + 1 + c]
-    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+    ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng, tables=tb)
     (out,) = ct._interpret(
         dm_j, [y, ct._obj(list(xs)), th, cov, ct._obj(OBS[b, ny])], ctx
     )
@@ -387,6 +401,7 @@ def _vjp_once(
     th: np.ndarray,
     KEYS: _Tensor,
     TAB: _Tensor,
+    tb: ct._Tables,
     b: _Scalar,
     j: _Scalar,
     k: _Scalar,
@@ -394,7 +409,7 @@ def _vjp_once(
     acc_th: tuple[_Scalar, ...],
 ) -> tuple[_Scalar, ...]:
     """Return the state cotangent before step k and the summed theta cotangent."""
-    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng)
+    ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng, tables=tb)
     k0, k1 = _step_keys(vec, rng, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
     for c in range(nc):
@@ -428,13 +443,14 @@ def _store_bwd(
     th_raw: np.ndarray,
     transform: bool,
     rng: str,
+    tb: ct._Tables,
 ) -> None:
     """Write particle g's input-state and parameter cotangents."""
     for s, v in enumerate(gx):
         # Accumulators are reset at the start of the interval, so get no gradient.
         DX[g, s] = cutlass.Float32(0.0) if s in acc else v
     if transform:
-        ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng)
+        ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng, tables=tb)
         (out,) = ct._interpret(prep_vjp_j, [th_raw, ct._obj(list(gth))], ctx)
         gth = tuple(ct._as_dsl(v, np.float32) for v in out)
     for i, v in enumerate(gth):
@@ -447,33 +463,34 @@ def _store_bwd(
 _SRC = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets = spec
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
-               N: cutlass.Int32):
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               OUT: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         g = bidx * block + tidx
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
+            tb = _tables(TB, offsets)
             xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th, rng)
+                th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(NSTEP):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
             _store(OUT, g, ({xs}))
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               OUT: cute.Tensor):
+               TB: cute.Tensor, OUT: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, OUT, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, OUT, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                 block=[block, 1, 1], stream=stream)
 
     return launch
@@ -483,34 +500,35 @@ def make(spec, J, transform, block):
 _SRC_SAVE = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets = spec
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OUT: cute.Tensor,
-               H: cute.Tensor, N: cutlass.Int32):
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               OUT: cute.Tensor, H: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         g = bidx * block + tidx
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
+            tb = _tables(TB, offsets)
             xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th, rng)
+                th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(NSTEP):
                 _save(H, g, k, ({xs}))
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
             _store(OUT, g, ({xs}))
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               OUT: cute.Tensor, H: cute.Tensor):
+               TB: cute.Tensor, OUT: cute.Tensor, H: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                    block=[block, 1, 1], stream=stream)
 
     return launch
@@ -520,34 +538,35 @@ def make(spec, J, transform, block):
 _SRC_DM = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets = spec
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor,
-               OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         g = bidx * block + tidx
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
+            tb = _tables(TB, offsets)
             xs0, th = _load(X, TH, g, b, ns, nth, acc, per_particle)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th, rng)
+                th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(NSTEP):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
             _store(OUT, g, ({xs}))
-            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, b)
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor):
+               TB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, OBS, OUT, W, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, OBS, OUT, W, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                         block=[block, 1, 1], stream=stream)
 
     return launch
@@ -557,38 +576,39 @@ def make(spec, J, transform, block):
 _SRC_PER = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _perturb
+from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _perturb, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets = spec
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor, SIG: cute.Tensor,
-               KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor, THO: cute.Tensor,
-               W: cute.Tensor, N: cutlass.Int32):
+               KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor,
+               THO: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         g = bidx * block + tidx
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
+            tb = _tables(TB, offsets)
             xs0, th = _load(X, TH, b * J + ANC[g], b, ns, nth, acc, per_particle)
             th = _perturb(noise_j, rng, nth, th, PK, SIG, THO, b, j, g)
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th, rng)
+                th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(NSTEP):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
             _store(OUT, g, ({xs}))
-            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, b)
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor,
-               SIG: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, OBS: cute.Tensor,
-               OUT: cute.Tensor, THO: cute.Tensor, W: cute.Tensor):
+               SIG: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               OBS: cute.Tensor, OUT: cute.Tensor, THO: cute.Tensor, W: cute.Tensor):
         # OUT and THO are inputs aliased to outputs, so cutlass_call passes them once.
         N = cute.size(X, mode=[0])
-        kernel(X, TH, ANC, PK, SIG, KEYS, TAB, OBS, OUT, THO, W, N).launch(
+        kernel(X, TH, ANC, PK, SIG, KEYS, TAB, TB, OBS, OUT, THO, W, N).launch(
             grid=[(N + block - 1) // block, 1, 1], block=[block, 1, 1], stream=stream)
 
     return launch
@@ -598,37 +618,38 @@ def make(spec, J, transform, block):
 _SRC_BWD = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_once, _store_bwd
+from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_once, _store_bwd, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j = spec
+    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets = spec
     @cute.kernel
-    def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
-               DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
+    def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         g = bidx * block + tidx
         if g < N:
             b = g // J
             j = (g - b * J).to(cutlass.Uint32)
+            tb = _tables(TB, offsets)
             th_raw = _load_th(TH, g, b, nth, per_particle)
             th = th_raw
             if cutlass.const_expr(transform):
-                th = _prep(prep_j, th_raw, rng)
+                th = _prep(prep_j, th_raw, rng, tb)
             {gs} = _load_g(G, g, ns)
             {ths} = _zeros(nth)
             for kk in range(NSTEP):
                 k = NSTEP - 1 - kk
                 {gs} {ths} = _vjp_once(step_vjp_j, vec, rng, J, ns, nth, nc, _hist(H, g, k, ns), th, KEYS, TAB,
-                                       b, j, k, ({gs}), ({ths}))
-            _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform, rng)
+                                       tb, b, j, k, ({gs}), ({ths}))
+            _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform, rng, tb)
 
     @cute.jit
-    def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, G: cute.Tensor,
-               DX: cute.Tensor, DTH: cute.Tensor):
+    def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
+               TB: cute.Tensor, G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor):
         N = cute.size(G, mode=[0])
-        kernel(H, TH, KEYS, TAB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(H, TH, KEYS, TAB, TB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                        block=[block, 1, 1], stream=stream)
 
     return launch
@@ -737,6 +758,10 @@ def _make_rprocess_interp(
     if dm is not None:
         dmeas_xla = dm.mechanics_per if per_particle else dm.mechanics_pf
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
+    jaxprs = [step_j, prep_j, step_vjp_j, prep_vjp_j]
+    if dm_j is not None:
+        jaxprs.append(dm_j)
+    data, offsets = ct._pack_tables(ct._runtime_tables(jaxprs))
     spec = _Spec(
         step_j=step_j,
         prep_j=prep_j,
@@ -754,6 +779,7 @@ def _make_rprocess_interp(
         ny=0 if dm is None else len(dm.y_names),
         ncd=0 if dm is None else len(dm.covar_names),
         noise_j=_trace_noise(len(rp.param_names)),
+        offsets=offsets,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
     ny, ncd = spec.ny, spec.ncd
@@ -780,7 +806,7 @@ def _make_rprocess_interp(
             out = cutlass_call(
                 launcher("fwd", J, transform, acc),
                 output_shape_dtype=jax.ShapeDtypeStruct(X.shape, jnp.float32),
-            )(X, *flatten(th, sk, tab, B, J))
+            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data))
             return out.reshape(lead + (J, ns))
 
         @core.def_vmap
@@ -799,7 +825,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct(X.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nstep * ns), jnp.float32),
                 ),
-            )(X, *flatten(th, sk, tab, B, J))
+            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data))
             return out.reshape(lead + (J, ns)), H.reshape(lead + (J, nstep * ns))
 
         @core_save.def_vmap
@@ -821,7 +847,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct(G.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
                 ),
-            )(H.reshape(B * J, nstep * ns), TH, SK, TAB, G)
+            )(H.reshape(B * J, nstep * ns), TH, SK, TAB, jnp.asarray(data), G)
             dTH = dTH.reshape(lead + (J, nth))
             return dX.reshape(lead + (J, ns)), (dTH if per_particle else dTH.sum(-2))
 
@@ -861,7 +887,12 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct(X.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J,), jnp.float32),
                 ),
-            )(X, *flatten(th, sk, tab, B, J), obs.reshape(B, ny + 1 + ncd))
+            )(
+                X,
+                *flatten(th, sk, tab, B, J),
+                jnp.asarray(data),
+                obs.reshape(B, ny + 1 + ncd),
+            )
             return out.reshape(lead + (J, ns)), w.reshape(lead + (J,))
 
         @core_dm.def_vmap
@@ -917,7 +948,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
                     jax.ShapeDtypeStruct((B * J,), jnp.float32),
                 ),
-                input_output_aliases={8: 0, 9: 1},
+                input_output_aliases={9: 0, 10: 1},
             )(
                 Xp.reshape(B * J, ns),
                 th.reshape(B * J, nth),
@@ -926,6 +957,7 @@ def _make_rprocess_interp(
                 sig.reshape(B, nth),
                 sk.reshape(B, nstep, 2),
                 tab.reshape(B, nstep, 2 + nc),
+                jnp.asarray(data),
                 obs.reshape(B, ny + 1 + ncd),
                 Xs.reshape(B * J, ns),
                 ths.reshape(B * J, nth),

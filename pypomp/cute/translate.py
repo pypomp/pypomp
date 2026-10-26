@@ -8,6 +8,11 @@ object array, so slices, reshapes and reductions are bookkeeping at trace time, 
 the emitted code is straight-line scalar math in registers, apart from branches
 for runtime conds and calls of large sub-jaxprs that run more than once.
 
+Constant tables that the function indexes at runtime, such as a table of weekly
+data read at the current week, can't be registers. :func:`_runtime_tables` finds
+them, the kernel takes them in one buffer, and a runtime-indexed slice of one is a
+:class:`_View` whose elements are loaded where they are used.
+
 Random numbers follow ``ctx.rng``. With "threefry" they are JAX's (partitionable)
 threefry: element f of a flattened draw is the XOR of the two Threefry2x32-20 words
 for counter (0, f), and split and fold_in keys are both words. With "philox" they
@@ -23,6 +28,7 @@ Unsupported primitives raise NotImplementedError naming the primitive.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -73,6 +79,48 @@ class _Ctx:
     element in a draw over all particles, so its draws are that draw's; or None."""
     outlined: dict[Any, Any] = field(default_factory=dict)
     """The device functions emitted so far, by sub-jaxpr and constant inputs."""
+    tables: _Tables | None = None
+    """The kernel's table buffer, or None where there is none."""
+
+
+@dataclass(frozen=True)
+class _Tables:
+    """The constant tables a kernel reads at runtime indices, packed in one buffer."""
+
+    buf: Any
+    """A 1-D uint32 ``cute.Tensor`` holding every table's bits."""
+    offsets: dict[tuple, int]
+    """Each table's first element in `buf`, by :func:`_table_key`."""
+
+
+@dataclass(frozen=True)
+class _View:
+    """Part of a table in the kernel's buffer: element ``idx`` is at buffer offset
+    ``base + sum(idx * strides)``, and ``base`` may be a runtime value."""
+
+    base: _Scalar
+    shape: tuple[int, ...]
+    strides: tuple[int, ...]
+    dtype: np.dtype
+
+
+def _table_key(a: np.ndarray) -> tuple:
+    """Return the key of constant `a` in :attr:`_Tables.offsets`."""
+    a = np.ascontiguousarray(a)
+    return (a.dtype.str, a.shape, hashlib.blake2b(a.tobytes(), digest_size=16).digest())
+
+
+def _pack_tables(tables: list[np.ndarray]) -> tuple[np.ndarray, dict[tuple, int]]:
+    """Return the uint32 buffer holding `tables` and each one's offset in it."""
+    parts, offsets, n = [], {}, 0
+    for a in tables:
+        if np.dtype(a.dtype).itemsize != 4:
+            raise NotImplementedError(f"runtime-indexed {a.dtype} table")
+        offsets[_table_key(a)] = n
+        parts.append(np.ascontiguousarray(a).reshape(-1).view(np.uint32))
+        n += a.size
+    # A kernel argument can't be empty.
+    return np.concatenate(parts or [np.zeros(1, np.uint32)]), offsets
 
 
 def _is_dsl(x: Any) -> bool:
@@ -546,6 +594,7 @@ _SUPPORTED = (
         "slice",
         "dynamic_slice",
         "dynamic_update_slice",
+        "gather",
         "concatenate",
         "split",
         "unstack",
@@ -567,6 +616,12 @@ _SUPPORTED = (
         "random_split",
         "random_bits",
     }
+)
+# Primitives that take a view of a table as it is; the rest get its elements.
+_VIEW_OPS = (
+    _CALLS
+    | _IDENTITY
+    | {"dynamic_slice", "gather", "slice", "squeeze", "reshape", "expand_dims"}
 )
 
 
@@ -605,6 +660,7 @@ def _all_const(vals: list[Any]) -> bool:
             and any(_is_dsl(e) for e in v.flat)
         )
         and not _is_dsl(v)
+        and not isinstance(v, _View)
         for v in vals
     )
 
@@ -617,8 +673,157 @@ def _as_np_const(v: Any, dtype: Any) -> np.ndarray:
     return v
 
 
-def _interpret(cj: ClosedJaxpr, args: list[Any], ctx: _Ctx) -> list[np.ndarray]:
-    """Evaluate `cj` on object arrays, emitting DSL code, and return its outputs."""
+def _index(x: Any) -> _Scalar:
+    """Return the scalar index `x`, which may be a 0-d array, as an int, or as an
+    Int32 if it is a runtime value."""
+    if isinstance(x, np.ndarray):
+        x = _obj(x).reshape(())[()]
+    return x.to(cutlass.Int32) if _is_dsl(x) else int(x)
+
+
+def _clamp(s: Any, hi: int) -> _Scalar:
+    """Return the index `s` clamped to [0, hi], as XLA clamps slice starts."""
+    s = _index(s)
+    if not _is_dsl(s):
+        return min(max(s, 0), hi)
+    lo = _select(s < cutlass.Int32(0), cutlass.Int32(0), s, np.int32)
+    return _select(lo > cutlass.Int32(hi), cutlass.Int32(hi), lo, np.int32)
+
+
+def _table_view(a: Any, dtype: Any, ctx: _Ctx) -> _View:
+    """Return the whole of constant table `a` as a view of the kernel's buffer."""
+    a = _as_np_const(a, dtype)
+    off = None if ctx.tables is None else ctx.tables.offsets.get(_table_key(a))
+    if off is None:
+        raise NotImplementedError("a runtime-indexed table the kernel wasn't given")
+    strides = tuple(int(s) // a.itemsize for s in np.ascontiguousarray(a).strides)
+    return _View(off, a.shape, strides, np.dtype(a.dtype))
+
+
+def _offset(v: _View, idx: tuple[_Scalar, ...]) -> _Scalar:
+    """Return the buffer offset of the element of `v` at `idx`."""
+    off = v.base
+    for i, s in zip(idx, v.strides, strict=True):
+        if s and (_is_dsl(i) or int(i)):
+            off = off + _index(i) * s
+    return off
+
+
+def _load(ctx: _Ctx, off: _Scalar, dtype: np.dtype) -> _Scalar:
+    """Return the table element at buffer offset `off`."""
+    assert ctx.tables is not None
+    bits = ctx.tables.buf[_as_dsl(off, np.int32)]
+    return bits if dtype == np.uint32 else bits.bitcast(_DSL[dtype])
+
+
+def _materialize(v: Any, ctx: _Ctx) -> Any:
+    """Return `v` with the elements of a view loaded, so as an object array."""
+    if not isinstance(v, _View):
+        return v
+    out = np.empty(v.shape, dtype=object)
+    for idx in np.ndindex(*v.shape) if v.shape else [()]:
+        out[idx] = _load(ctx, _offset(v, idx), v.dtype)
+    return out
+
+
+def _view_slice(
+    v: _View, starts: list[_Scalar], sizes: tuple[int, ...], steps: tuple[int, ...]
+) -> _View:
+    """Return the part of `v` from `starts`, `sizes` elements long in steps."""
+    return _View(
+        _offset(v, tuple(starts)),
+        tuple(sizes),
+        tuple(s * k for s, k in zip(v.strides, steps, strict=True)),
+        v.dtype,
+    )
+
+
+def _view_reshape(v: _View, shape: tuple[int, ...]) -> _View | None:
+    """Return `v` reshaped to `shape` if that only adds or drops axes of length 1."""
+    kept = [(n, s) for n, s in zip(v.shape, v.strides, strict=True) if n != 1]
+    if [n for n, _ in kept] != [n for n in shape if n != 1]:
+        return None
+    it = iter(s for _, s in kept)
+    strides = tuple(0 if n == 1 else next(it) for n in shape)
+    return _View(v.base, tuple(shape), strides, v.dtype)
+
+
+def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
+    """Return XLA's gather of operand `x` at start indices `idx`.
+
+    `x` is a view, a constant table or an object array; a runtime start index
+    needs one of the first two, whose elements are then loaded.
+    """
+    p = eqn.params
+    dn = p["dimension_numbers"]
+    if dn.operand_batching_dims:
+        raise NotImplementedError("gather with batching dimensions")
+    idx = _obj(idx)
+    shape = eqn.outvars[0].aval.shape
+    offset_dims, collapsed = tuple(dn.offset_dims), set(dn.collapsed_slice_dims)
+    sizes = p["slice_sizes"]
+    ndim = len(sizes)
+    offset_src = [d for d in range(ndim) if d not in collapsed]
+    runtime = any(_is_dsl(e) for e in idx.flat)
+    if runtime and not isinstance(x, _View):
+        if isinstance(x, np.ndarray) and x.dtype == object and not _all_const([x]):
+            raise NotImplementedError("gather from runtime values at a runtime index")
+        x = _table_view(x, dtype, ctx)
+    # Out-of-bounds starts are clamped, except that "fill" mode returns its fill
+    # value for the whole slice.
+    fill = "FILL" in str(p["mode"])
+    fv = _fill_value(p.get("fill_value"), dtype) if fill else None
+    out = np.empty(shape, dtype=object)
+    batch_dims = [d for d in range(len(shape)) if d not in offset_dims]
+    for o in np.ndindex(*shape) if shape else [()]:
+        b = tuple(o[d] for d in batch_dims)
+        pos: list[_Scalar] = [0] * ndim
+        inside: list[_Scalar] = []
+        for k, d in enumerate(dn.start_index_map):
+            s, hi = idx[b + (k,)], x.shape[d] - sizes[d]
+            if fill:
+                si = _index(s)
+                inside.append(
+                    (si >= cutlass.Int32(0)) & (si <= cutlass.Int32(hi))
+                    if _is_dsl(si)
+                    else 0 <= si <= hi
+                )
+            pos[d] = _clamp(s, hi)
+        for od, d in zip(offset_dims, offset_src, strict=True):
+            pos[d] = pos[d] + o[od]
+        if isinstance(x, _View):
+            val = _load(ctx, _offset(x, tuple(pos)), x.dtype)
+        else:
+            val = _obj(x)[tuple(int(q) for q in pos)]
+        for ok in inside:
+            val = _select(ok, val, fv, dtype)
+        out[o] = val
+    return out
+
+
+def _fill_value(fv: Any, dtype: Any) -> Any:
+    """Return gather's fill value for `dtype`, given its ``fill_value`` parameter."""
+    dt = np.dtype(dtype)
+    if fv is None:
+        if np.issubdtype(dt, np.inexact):
+            fv = np.nan
+        elif np.issubdtype(dt, np.signedinteger):
+            fv = np.iinfo(dt).min
+        elif np.issubdtype(dt, np.integer):
+            fv = np.iinfo(dt).max
+        else:
+            fv = True
+    return np.asarray(fv, dt)[()]
+
+
+def _interpret(
+    cj: ClosedJaxpr, args: list[Any], ctx: _Ctx, keep_views: bool = False
+) -> list[Any]:
+    """Evaluate `cj` on object arrays, emitting DSL code, and return its outputs.
+
+    Outputs that are views of tables stay views if `keep_views`, as for a call
+    whose caller goes on to index them; otherwise their elements are loaded.
+    """
     jaxpr = cj.jaxpr
     env = {}
 
@@ -635,12 +840,15 @@ def _interpret(cj: ClosedJaxpr, args: list[Any], ctx: _Ctx) -> list[np.ndarray]:
     for eqn in jaxpr.eqns:
         name = eqn.primitive.name
         ins = [read(v) for v in eqn.invars]
+        if name not in _VIEW_OPS:
+            ins = [_materialize(v, ctx) for v in ins]
         in_dt = [getattr(v.aval, "dtype", None) for v in eqn.invars]
         out_avals = [v.aval for v in eqn.outvars]
         outs = _eval_eqn(eqn, name, ins, in_dt, out_avals, ctx)
         for v, o in zip(eqn.outvars, outs, strict=True):
             env[v] = o
-    return [read(v) for v in jaxpr.outvars]
+    outs = [read(v) for v in jaxpr.outvars]
+    return outs if keep_views else [_materialize(v, ctx) for v in outs]
 
 
 def _is_key(dtype: Any) -> bool:
@@ -736,6 +944,13 @@ def _eval_eqn(
         for i, d in enumerate(bdims):
             expanded[d] = x.shape[i]
         return [np.broadcast_to(x.reshape(expanded), shape).copy()]
+    if isinstance(ins[0], _View) and name in ("reshape", "squeeze", "expand_dims"):
+        v = None
+        if name != "reshape" or eqn.params.get("dimensions") is None:
+            v = _view_reshape(ins[0], out_avals[0].shape)
+        if v is not None:
+            return [v]
+        ins = [_materialize(ins[0], ctx), *ins[1:]]
     if name == "reshape":
         x = _obj(ins[0])
         if eqn.params.get("dimensions") is not None:
@@ -754,6 +969,8 @@ def _eval_eqn(
             eqn.params["strides"],
         )
         strd = strd or (1,) * len(st)
+        if isinstance(ins[0], _View):
+            return [_view_slice(ins[0], list(st), out_avals[0].shape, strd)]
         return [
             _obj(ins[0])[
                 tuple(slice(a, b, c) for a, b, c in zip(st, lim, strd, strict=True))
@@ -761,10 +978,21 @@ def _eval_eqn(
         ]
     if name == "dynamic_slice":
         starts = ins[1:]
-        if not _all_const(starts):
-            raise NotImplementedError("dynamic_slice with a runtime index")
-        x = _obj(ins[0])
         sizes = eqn.params["slice_sizes"]
+        if isinstance(ins[0], _View) or not _all_const(starts):
+            # A runtime start needs the operand in memory: a table, or part of one.
+            x = ins[0]
+            if not isinstance(x, _View):
+                if not _all_const([x]):
+                    raise NotImplementedError(
+                        "dynamic_slice of runtime values at a runtime index"
+                    )
+                x = _table_view(x, in_dt[0], ctx)
+            st = [
+                _clamp(s, n - k) for s, n, k in zip(starts, x.shape, sizes, strict=True)
+            ]
+            return [_view_slice(x, st, sizes, (1,) * len(sizes))]
+        x = _obj(ins[0])
         st = [
             int(np.clip(int(s), 0, n - k))
             for s, n, k in zip(starts, x.shape, sizes, strict=True)
@@ -887,11 +1115,14 @@ def _eval_eqn(
                 out[i + k] = r
         return [out]
 
+    if name == "gather":
+        return [_gather(eqn, ins[0], in_dt[0], ins[1], ctx)]
+
     if name in _CALLS:
         sub = _sub_jaxpr(eqn)
-        if _outlinable(sub, ins):
+        if not any(isinstance(v, _View) for v in ins) and _outlinable(sub, ins):
             return _call_outlined(sub, ins, out_avals, ctx)
-        return _interpret(sub, ins, ctx)
+        return _interpret(sub, ins, ctx, keep_views=True)
     if name == "cond":
         index, ops = ins[0], ins[1:]
         branches = eqn.params["branches"]
@@ -1111,15 +1342,20 @@ def _uses_random(cj: Any) -> bool:
 def _outlinable(cj: ClosedJaxpr, ins: list[Any]) -> bool:
     """Return whether a call of `cj` on `ins` should become a device function.
 
-    Random draws read the thread's particle index from the caller, so jaxprs that
-    draw stay inline, as do keys, which aren't plain scalars.
+    Random draws read the thread's particle index from the caller, and table reads
+    the kernel's table buffer, so jaxprs that do either stay inline, as do keys,
+    which aren't plain scalars.
     """
     if _all_const(ins):
         return False
     avals = [v.aval for v in [*cj.jaxpr.invars, *cj.jaxpr.outvars]]
     if any(_is_key(a.dtype) or np.dtype(a.dtype) not in _LLVM_TYPE for a in avals):
         return False
-    return _size(cj) >= _OUTLINE_MIN_EQNS and not _uses_random(cj)
+    return (
+        _size(cj) >= _OUTLINE_MIN_EQNS
+        and not _uses_random(cj)
+        and not _runtime_tables([cj])
+    )
 
 
 def _gpu_module() -> Any:
@@ -1283,6 +1519,72 @@ _PARTICLEWISE = (
 )
 
 
+def _runtime_tables(cjs: list[ClosedJaxpr]) -> list[np.ndarray]:
+    """Return the constants that `cjs` slice or gather at runtime indices, which
+    the kernel must hold in memory.
+
+    Constants are folded as the translator folds them, so each table found is the
+    array the translator meets. Loop carries count as runtime values, which may
+    find a table that the translator then indexes at constant indices.
+    """
+    found: dict[tuple, np.ndarray] = {}
+    for cj in cjs:
+        _find_tables(cj, [None] * len(cj.jaxpr.invars), found)
+    return list(found.values())
+
+
+def _find_tables(
+    cj: ClosedJaxpr, args: list[np.ndarray | None], found: dict[tuple, np.ndarray]
+) -> list[np.ndarray | None]:
+    """Return the outputs of `cj` that are constants (None for runtime values),
+    adding the tables it indexes at runtime to `found`."""
+    jaxpr = cj.jaxpr
+    env: dict[Any, np.ndarray | None] = {
+        v: np.asarray(c) for v, c in zip(jaxpr.constvars, cj.consts, strict=True)
+    }
+    env.update(zip(jaxpr.invars, args, strict=True))
+
+    def read(v: Any) -> np.ndarray | None:
+        return np.asarray(v.val) if isinstance(v, Literal) else env.get(v)
+
+    for eqn in jaxpr.eqns:
+        name, p = eqn.primitive.name, eqn.params
+        ins = [read(v) for v in eqn.invars]
+        n_out = len(eqn.outvars)
+        known = all(x is not None for x in ins)
+        if name in ("dynamic_slice", "gather") and ins[0] is not None and not known:
+            found.setdefault(_table_key(ins[0]), ins[0])
+        if name in _CALLS:
+            outs = _find_tables(_sub_jaxpr(eqn), ins, found)
+        elif name == "cond" and ins[0] is not None:
+            outs = _find_tables(p["branches"][int(ins[0])], ins[1:], found)
+        elif name == "cond":
+            for b in p["branches"]:
+                _find_tables(b, ins[1:], found)
+            outs = [None] * n_out
+        elif name == "while":
+            cn, bn = p["cond_nconsts"], p["body_nconsts"]
+            carry = [None] * (len(ins) - cn - bn)
+            _find_tables(p["cond_jaxpr"], ins[:cn] + carry, found)
+            _find_tables(p["body_jaxpr"], ins[cn : cn + bn] + carry, found)
+            outs = [None] * n_out
+        elif name == "scan":
+            nc = p["num_consts"]
+            _find_tables(p["jaxpr"], ins[:nc] + [None] * (len(ins) - nc), found)
+            outs = [None] * n_out
+        elif (
+            known
+            and name not in ("empty", "empty2")
+            and not any(_is_key(getattr(v.aval, "dtype", None)) for v in eqn.invars)
+            and not any(_is_key(v.aval.dtype) for v in eqn.outvars)
+        ):
+            outs = _fold(eqn, ins)
+        else:
+            outs = [None] * n_out
+        env.update(zip(eqn.outvars, outs, strict=True))
+    return [read(v) for v in jaxpr.outvars]
+
+
 def _untranslatable(cj: ClosedJaxpr) -> set[str]:
     """Return the primitives and uses in `cj` that the translator can't run."""
     bad: set[str] = set()
@@ -1290,12 +1592,23 @@ def _untranslatable(cj: ClosedJaxpr) -> set[str]:
     return bad
 
 
-def _runtime(jaxpr: Any, marks: list[bool], bad: set[str]) -> list[bool]:
-    """Return which outputs of `jaxpr` depend on runtime inputs, noting misuses."""
+# The mark of a runtime value that is a table, or part of one, still in memory.
+_MEM = "in memory"
+
+
+def _runtime(jaxpr: Any, marks: list[Any], bad: set[str]) -> list[Any]:
+    """Return which outputs of `jaxpr` depend on runtime inputs, noting misuses.
+
+    A mark is False for a constant, True for a runtime value in registers and
+    :data:`_MEM` for a table or part of one, which a runtime index may read.
+    """
     env = dict(zip(jaxpr.invars, marks, strict=True))
 
-    def rt(v: Any) -> bool:
+    def rt(v: Any) -> Any:
         return not isinstance(v, Literal) and env.get(v, False)
+
+    def reg(ms: list[Any]) -> list[bool]:
+        return [bool(m) for m in ms]
 
     for eqn in jaxpr.eqns:
         name, p = eqn.primitive.name, eqn.params
@@ -1306,10 +1619,12 @@ def _runtime(jaxpr: Any, marks: list[bool], bad: set[str]) -> list[bool]:
             dt = getattr(v.aval, "dtype", None)
             if dt is not None and not _is_key(dt) and np.dtype(dt) not in _DSL:
                 bad.add(f"{np.dtype(dt)} values")
-        if (name == "dynamic_slice" and any(ins[1:])) or (
-            name == "dynamic_update_slice" and any(ins[2:])
-        ):
-            bad.add(f"{name} with a runtime index")
+        if (
+            name in ("dynamic_slice", "gather") and any(ins[1:]) and ins[0] is True
+        ) or (name == "dynamic_update_slice" and any(ins[2:])):
+            bad.add(f"{name} of runtime values at a runtime index")
+        if name == "gather" and p["dimension_numbers"].operand_batching_dims:
+            bad.add("gather with batching dimensions")
         if name == "dot_general" and any(p["dimension_numbers"][1]):
             bad.add("batched dot_general")
         if name == "random_bits" and p["bit_width"] != 32:
@@ -1317,22 +1632,40 @@ def _runtime(jaxpr: Any, marks: list[bool], bad: set[str]) -> list[bool]:
         if name in _CALLS:
             outs = _runtime(_sub_jaxpr(eqn).jaxpr, ins, bad)
         elif name == "cond":
-            branches = [_runtime(b.jaxpr, ins[1:], bad) for b in p["branches"]]
-            outs = [ins[0] or any(o) for o in zip(*branches, strict=True)]
+            branches = [_runtime(b.jaxpr, reg(ins[1:]), bad) for b in p["branches"]]
+            outs = [bool(ins[0]) or any(o) for o in zip(*branches, strict=True)]
         elif name == "while":
             cn, bn = p["cond_nconsts"], p["body_nconsts"]
             body = p["body_jaxpr"].jaxpr
-            outs = _loop(body, ins[cn : cn + bn], ins[cn + bn :], [], bad)
-            if any(_runtime(p["cond_jaxpr"].jaxpr, ins[:cn] + outs, bad)):
+            outs = _loop(body, reg(ins[cn : cn + bn]), reg(ins[cn + bn :]), [], bad)
+            if any(_runtime(p["cond_jaxpr"].jaxpr, reg(ins[:cn]) + outs, bad)):
                 bad.add("while loop with a runtime trip count")
         elif name == "scan":
             nc, ncarry = p["num_consts"], p["num_carry"]
+            ins = reg(ins)
             consts, carry, xs = ins[:nc], ins[nc : nc + ncarry], ins[nc + ncarry :]
             outs = _loop(p["jaxpr"].jaxpr, consts, carry, xs, bad)
+        elif name == "dynamic_slice" and (ins[0] is _MEM or (not ins[0] and any(ins))):
+            outs = [_MEM]
+        elif name in ("slice", "squeeze", "expand_dims") and ins[0] is _MEM:
+            outs = [_MEM]
+        elif name == "reshape" and ins[0] is _MEM:
+            outs = [_MEM if _keeps_view(eqn) else True]
+        elif name in _IDENTITY:
+            outs = ins[: len(eqn.outvars)]
         else:
             outs = [any(ins)] * len(eqn.outvars)
         env.update(zip(eqn.outvars, outs, strict=True))
     return [rt(v) for v in jaxpr.outvars]
+
+
+def _keeps_view(eqn: Any) -> bool:
+    """Return whether the translator keeps a view through reshape `eqn`, as
+    :func:`_view_reshape` does, rather than loading its elements."""
+    if eqn.params.get("dimensions") is not None:
+        return False
+    before, after = _shape(eqn.invars[0]), _shape(eqn.outvars[0])
+    return [n for n in before if n != 1] == [n for n in after if n != 1]
 
 
 def _loop(

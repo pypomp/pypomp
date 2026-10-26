@@ -2,13 +2,14 @@
 This module implements the OOP structure for PanelPOMP models.
 """
 
+from collections.abc import Callable
 from copy import deepcopy
 
 import jax
 import jax.numpy as jnp
 
 from pypomp.core.metadata import ModelMetadata
-from pypomp.core.parameters import PanelParameters
+from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.core.results import ResultsHistory
 from pypomp.functional.structs import PanelPompStruct
@@ -96,11 +97,45 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         return list(self.unit_objects.keys())
 
-    def to_struct(self) -> PanelPompStruct:
+    def set_rproc_backend(self, backend: str, rng: str = "threefry") -> None:
+        """Choose how the process model runs in filtering and estimation.
+
+        Sets the backend of every unit; see :meth:`pypomp.Pomp.set_rproc_backend`.
+        The panel runs the first unit's process model for all units, so with CuTe
+        one kernel advances every unit's particles, and it is checked against XLA
+        on the first unit at the first parameter set.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"}
+            The process model backend.
+        rng : {"threefry", "philox"}, optional
+            The random numbers the CuTe kernel draws.
+
+        Raises
+        ------
+        ValueError
+            If `backend` or `rng` is not one of its options.
+        """
+        for unit in self.unit_objects.values():
+            unit.set_rproc_backend(backend, rng)
+
+    def to_struct(
+        self, rproc_backend: str | None = None, rng: str | None = None
+    ) -> PanelPompStruct:
         """Export static data and compiled simulators into a JAX PyTree.
 
         Converts the panel model into a :class:`PanelPompStruct` suitable for
         use with pure-functional algorithms in :mod:`pypomp.functional`.
+
+        Parameters
+        ----------
+        rproc_backend : {"auto", "cute", "xla"} or None, optional
+            Process model backend for this struct (see :meth:`set_rproc_backend`).
+            Defaults to None, which uses the first unit's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers. Defaults to None, which uses the
+            first unit's.
 
         Returns
         -------
@@ -110,6 +145,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
         unit_names = self.get_unit_names()
         rep_unit = self.unit_objects[unit_names[0]]
+        rproc_pf, rproc_per = self._rproc_fns(rproc_backend, rng)
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
@@ -129,12 +165,12 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             covars_per_unit=covars_per_unit,
             accumvars=rep_unit.rproc.accumvars,
             rinit_pf=rep_unit.rinit.mechanics_pf,
-            rproc_pf=rep_unit.rproc.mechanics_pf_interp,
+            rproc_pf=rproc_pf,
             dmeas_pf=rep_unit.dmeas.mechanics_pf
             if rep_unit.dmeas is not None
             else None,
             rinit_per=rep_unit.rinit.mechanics_per,
-            rproc_per=rep_unit.rproc.mechanics_per_interp,
+            rproc_per=rproc_per,
             dmeas_per=rep_unit.dmeas.mechanics_per
             if rep_unit.dmeas is not None
             else None,
@@ -149,6 +185,25 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit_names=unit_names,
             statenames=tuple(rep_unit.statenames),
         )
+
+    def _rproc_fns(
+        self, rproc_backend: str | None, rng: str | None
+    ) -> tuple[Callable, Callable]:
+        """Return the first unit's (rproc_pf, rproc_per) for `rproc_backend`
+        and `rng`.
+
+        Units of a panel hold no parameters, so the first unit gets the panel's
+        first parameter set while a CuTe kernel is checked against XLA.
+        """
+        name = self.get_unit_names()[0]
+        unit = self.unit_objects[name]
+        if unit._theta is not None:
+            return unit._rproc_fns(rproc_backend, rng)
+        unit._theta = PompParameters(self.get_unit_parameters(name)[0])
+        try:
+            return unit._rproc_fns(rproc_backend, rng)
+        finally:
+            unit._theta = None
 
     def print_metadata(self) -> None:
         """

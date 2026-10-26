@@ -545,6 +545,18 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
         )
+        rproc_pf, rproc_per = self._rproc_fns(rproc_backend, rng)
+        return struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
+
+    def _rproc_fns(
+        self, rproc_backend: str | None = None, rng: str | None = None
+    ) -> tuple[Callable, Callable]:
+        """Return the process model's (rproc_pf, rproc_per) for `rproc_backend`
+        and `rng`.
+
+        The CuTe kernels are checked against XLA at ``self.theta``; see
+        :meth:`set_rproc_backend`.
+        """
         backend = self._rproc_backend if rproc_backend is None else rproc_backend
         rng = self._rproc_rng if rng is None else rng
         _check_rproc_backend(backend)
@@ -562,9 +574,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
                 if self._theta is not None:
                     built[backend, rng] = fns
             if fns is not None:
-                rproc_pf, rproc_per = fns
-                struct = struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
-        return struct
+                return fns
+        return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
 
     def print_metadata(self) -> None:
         """Display environment and version metadata for this model instance.

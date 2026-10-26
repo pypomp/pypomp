@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import jax
+import jax.numpy as jnp
 from jax.core import Tracer
 from jax.stages import Compiled
 
@@ -142,11 +143,29 @@ def _memory_bytes(compiled: Compiled) -> tuple[int, int] | None:
     return fixed, m.temp_size_in_bytes
 
 
+def _flat_reps(
+    thetas_array: jax.Array, keys: jax.Array, context: PfilterContext
+) -> dict[str, jax.Array]:
+    """Run every replicate at once, with parameter sets and replicates in one batch."""
+    # Nested inside the parameter sets' vmap, the replicates make XLA copy data on
+    # every Euler step.
+    n, reps = keys.shape[:2]
+    flat_keys = keys.reshape(n * reps, 1, *keys.shape[2:])
+    out = _vmapped_pfilter_internal2(
+        jnp.repeat(thetas_array, reps, axis=0), flat_keys, context
+    )
+    return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[2:]), out)
+
+
 def _run_reps(
     thetas_array: jax.Array, keys: jax.Array, context: PfilterContext
 ) -> dict[str, jax.Array]:
     """Run the filters, choosing the replicate batch size when it is not given."""
-    if context.reps_batch_size is not None or keys.shape[1] == 1:
+    if keys.shape[1] == 1:
+        return _vmapped_pfilter_internal2(thetas_array, keys, context)
+    if context.reps_batch_size is not None:
+        if context.reps_batch_size >= keys.shape[1]:
+            return _flat_reps(thetas_array, keys, context)
         return _vmapped_pfilter_internal2(thetas_array, keys, context)
     if jax.default_backend() == "cpu":
         return _vmapped_pfilter_internal2(
@@ -154,11 +173,9 @@ def _run_reps(
         )
     leaves = jax.tree_util.tree_leaves((thetas_array, keys, context))
     if any(isinstance(x, Tracer) for x in leaves):
-        return _vmapped_pfilter_internal2(thetas_array, keys, context)
+        return _flat_reps(thetas_array, keys, context)
     # The all-at-once compile is needed anyway when it fits, so reuse it to measure memory.
-    compiled = (
-        jax.jit(_vmapped_pfilter_internal2).lower(thetas_array, keys, context).compile()
-    )
+    compiled = jax.jit(_flat_reps).lower(thetas_array, keys, context).compile()
     mem, free = _memory_bytes(compiled), _free_device_bytes((thetas_array, keys))
     batch = (
         None

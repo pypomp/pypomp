@@ -53,6 +53,21 @@ def test_reps_batch_size_matches_parallel(simple):
         assert jnp.allclose(LG.results_history[-1].logLiks.values, parallel, rtol=1e-5)
 
 
+def test_all_replicates_at_once_match_one_at_a_time(simple):
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    th = jnp.concatenate([th, th * 1.1])
+    keys = jax.random.split(key, 6).reshape(2, 3)
+    one, flat = (
+        F.pfilter(struct, th, J, keys, CLL=True, filter_mean=True, reps_batch_size=b)
+        for b in (1, 3)
+    )
+    for k in one:
+        assert flat[k].shape == one[k].shape
+        assert jnp.allclose(flat[k], one[k], rtol=1e-5)
+
+
 def test_reps_batch_for_memory_budget():
     from pypomp.functional.pfilter import _reps_batch_for
 

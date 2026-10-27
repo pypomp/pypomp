@@ -31,8 +31,9 @@ def log_weights(key, R, J):
 
 @pytest.mark.parametrize("J", [1, 7, 256, 5003])
 def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
-    resample = sde_model().to_struct(rproc_backend="cute").rproc_pf.resample
-    assert resample is not None
+    rp = sde_model().to_struct(rproc_backend="cute").rproc_pf
+    assert isinstance(rp, KernelRProc) and rp.resample is not None
+    resample = rp.resample
     R = 64
     W = log_weights(jax.random.key(J), R, J)
     K = jax.random.split(jax.random.key(J + 1), R)
@@ -50,7 +51,9 @@ def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
 
 
 def test_few_filters_of_many_particles_resample_on_xla():
-    resample = sde_model().to_struct(rproc_backend="cute").rproc_pf.resample
+    rp = sde_model().to_struct(rproc_backend="cute").rproc_pf
+    assert isinstance(rp, KernelRProc) and rp.resample is not None
+    resample = rp.resample
     R, J = 2, 20011
     W = log_weights(jax.random.key(3), R, J)
     K = jax.random.split(jax.random.key(4), R)
@@ -119,6 +122,9 @@ def test_fused_density_gradients_match_the_separate_one(should_trans):
     model = he10_model()
     _, cute = xla_and_cute(model)
     rp = cute.rproc_per if should_trans else cute.rproc_pf
+    assert isinstance(rp, KernelRProc)
+    with_dmeasure, dmeasure = rp.with_dmeasure, rp.dmeasure
+    assert with_dmeasure is not None and dmeasure is not None
     names = model.canonical_param_names
     th_nat = model.theta.to_jax_array(names)[0]
     th = th_nat
@@ -137,13 +143,13 @@ def test_fused_density_gradients_match_the_separate_one(should_trans):
     key = jax.random.key(5)
 
     def fused(X, th):
-        out, _, w = rp.with_dmeasure(X, th, key, *rest, y, t_obs)
+        out, _, w = with_dmeasure(X, th, key, *rest, y, t_obs)
         return jnp.sum(out * c) + jnp.sum(jnp.where(jnp.isfinite(w), w, 0.0))
 
     def separate(X, th):
         out, t_end = rp(X, th, key, *rest)
         cov = None if cute.covars_extended is None else cute.covars_extended[t_end]
-        w = rp.dmeasure(y, out, th, cov, t_obs, should_trans)
+        w = dmeasure(y, out, th, cov, t_obs, should_trans)
         return jnp.sum(out * c) + jnp.sum(jnp.where(jnp.isfinite(w), w, 0.0))
 
     for a, b in zip(

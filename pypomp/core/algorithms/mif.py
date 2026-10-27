@@ -305,24 +305,21 @@ def _perfilter_scan_body(
     should_resample = jnp.max(norm_weights_updated) - jnp.min(
         norm_weights_updated
     ) > jnp.log(context.thresh)
-    # The kernel resamples as it loads, so it only needs the ancestors.
-    resampled = (particlesP_Jx, perturbed_thetas)
+    resample_args = (should_resample, carry.counts, norm_weights_updated, key_resample)
+    resample_fn = getattr(context.per.rprocess_interp, "resample", None)
     if step is not None:
-        resampled = jnp.arange(context.J, dtype=jnp.int32)
-    counts_resampled, norm_weights_resampled, resampled = _resample_where(
-        should_resample,
-        carry.counts,
-        norm_weights_updated,
-        key_resample,
-        resampled,
-        getattr(context.per.rprocess_interp, "resample", None),
-    )
-    if step is not None:
-        anc, spare = resampled, (carry.particlesF, carry.thetas)
+        # The kernel resamples as it loads, so it only needs the ancestors.
+        counts_resampled, norm_weights_resampled, anc = _resample_where(
+            *resample_args, jnp.arange(context.J, dtype=jnp.int32), resample_fn
+        )
+        spare = (carry.particlesF, carry.thetas)
         particlesF_resampled, thetas_resampled = particlesP_Jx, perturbed_thetas
     else:
-        anc, spare = carry.anc, carry.spare
+        counts_resampled, norm_weights_resampled, resampled = _resample_where(
+            *resample_args, (particlesP_Jx, perturbed_thetas), resample_fn
+        )
         particlesF_resampled, thetas_resampled = resampled
+        anc, spare = carry.anc, carry.spare
 
     # 8. Update the ancestry (used for PIF, i.e., Panel.mif with block=False).
     if context.return_ancestry:

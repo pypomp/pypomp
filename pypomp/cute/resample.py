@@ -214,7 +214,10 @@ def _kernel(NW: cute.Tensor, U: cute.Tensor, IDX: cute.Tensor, J: cutlass.Int32)
 def _launch(stream, NW: cute.Tensor, U: cute.Tensor, IDX: cute.Tensor):
     B = cute.size(NW, mode=[0])
     J = cute.size(NW, mode=[1])
-    _kernel(NW, U, IDX, J).launch(grid=[B, 1, 1], block=[_T, 1, 1], stream=stream)
+    # Without cutlass, pyright sees _kernel as the undecorated function.
+    _kernel(NW, U, IDX, J).launch(  # pyright: ignore[reportAttributeAccessIssue]
+        grid=[B, 1, 1], block=[_T, 1, 1], stream=stream
+    )
 
 
 def _use_kernel(B: int, J: int) -> bool:
@@ -264,7 +267,7 @@ def _indices(nw: jax.Array, u: jax.Array) -> jax.Array:
 
 
 @_indices.defjvp
-def _indices_jvp(primals, tangents):
+def _indices_jvp(primals, tangents) -> tuple[jax.Array, Any]:
     out = _indices(*primals)
     return out, np.zeros(out.shape, jax.dtypes.float0)
 

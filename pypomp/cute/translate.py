@@ -1124,7 +1124,7 @@ def _eval_eqn(
             return _call_outlined(sub, ins, out_avals, ctx)
         return _interpret(sub, ins, ctx, keep_views=True)
     if name == "cond":
-        index, ops = ins[0], ins[1:]
+        index, ops = _materialize(ins[0], ctx), ins[1:]
         branches = eqn.params["branches"]
         idx = _obj(index).reshape(())[()] if np.ndim(index) == 0 else None
         if idx is None:
@@ -1551,7 +1551,8 @@ def _find_tables(
         name, p = eqn.primitive.name, eqn.params
         ins = [read(v) for v in eqn.invars]
         n_out = len(eqn.outvars)
-        known = all(x is not None for x in ins)
+        consts = [x for x in ins if x is not None]
+        known = len(consts) == len(ins)
         if name in ("dynamic_slice", "gather") and ins[0] is not None and not known:
             found.setdefault(_table_key(ins[0]), ins[0])
         if name in _CALLS:
@@ -1576,9 +1577,9 @@ def _find_tables(
             known
             and name not in ("empty", "empty2")
             and not any(_is_key(getattr(v.aval, "dtype", None)) for v in eqn.invars)
-            and not any(_is_key(v.aval.dtype) for v in eqn.outvars)
+            and not any(_is_key(getattr(v.aval, "dtype", None)) for v in eqn.outvars)
         ):
-            outs = _fold(eqn, ins)
+            outs = _fold(eqn, consts)
         else:
             outs = [None] * n_out
         env.update(zip(eqn.outvars, outs, strict=True))

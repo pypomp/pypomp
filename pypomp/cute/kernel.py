@@ -58,6 +58,9 @@ _BLOCK = 128
 _PROBE_J = 1031
 # _trace_step's output: step, transform, whether vectorized, and their VJPs.
 _Traced = tuple[ct.ClosedJaxpr, ct.ClosedJaxpr, bool, ct.ClosedJaxpr, ct.ClosedJaxpr]
+# The process kernel, the one with the fused density and iterated filtering's step;
+# the last two are None when the model's density doesn't translate.
+_Cores = tuple[Callable, Callable | None, Callable | None]
 
 
 class _Spec(NamedTuple):
@@ -795,7 +798,7 @@ def _make_rprocess_interp(
         TH = th.reshape(B * J if per_particle else B, nth)
         return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, 2 + nc)
 
-    def make_core(transform: bool, acc: tuple[int, ...]) -> Callable:
+    def make_core(transform: bool, acc: tuple[int, ...]) -> _Cores:
         # Shapes: Xp (..., J, ns); th (..., d), or (..., J, d) per particle;
         # sk (..., nstep, 2); tab (..., nstep, 2 + nc).
         @jax.custom_batching.custom_vmap
@@ -903,6 +906,7 @@ def _make_rprocess_interp(
             )
 
         def dmeas(out, th, obs):
+            assert dmeas_xla is not None
             cov = obs[ny + 1 :] if ncd else None
             return dmeas_xla(obs[:ny], out, th, cov, obs[ny], transform)
 
@@ -978,7 +982,7 @@ def _make_rprocess_interp(
 
         return diff_core, diff_dm, core_per
 
-    cores: dict[tuple[bool, tuple[int, ...]], tuple[Callable, ...]] = {}
+    cores: dict[tuple[bool, tuple[int, ...]], _Cores] = {}
 
     def kernel_inputs(
         keys: jax.Array,
@@ -988,7 +992,7 @@ def _make_rprocess_interp(
         t_idx: jax.Array,
         accumvars_: tuple[int, ...] | None,
         should_trans: bool,
-    ) -> tuple[tuple[Callable, ...], jax.Array, jax.Array]:
+    ) -> tuple[_Cores, jax.Array, jax.Array]:
         """Return the kernels for this call, the substep keys and the step table."""
         key = keys[0] if jnp.ndim(keys) != 0 else keys
         subkeys, ts, dts, covs = [], [], [], []

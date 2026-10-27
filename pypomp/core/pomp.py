@@ -462,13 +462,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             translated from its jaxpr, so it is used as written. The kernel also
             evaluates ``dmeas`` when that translates, and with it the parameter
             perturbation of iterated filtering; resampling runs in a separate
-            CuTe kernel. CuTe needs the
-            optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``),
-            a GPU and the same number of Euler steps in every observation interval;
-            without them, or if ``rproc`` uses an operation the translator does not
-            handle, pypomp warns and uses XLA. ``"auto"``, the default for a new
-            model, uses CuTe when all of that holds and there is more than one
-            Euler step per observation, and XLA otherwise, without a warning.
+            CuTe kernel. CuTe needs the optional ``nvidia-cutlass-dsl`` package
+            (``pip install pypomp[cute]``), a GPU and the same number of Euler
+            steps in every observation interval; without them, or if ``rproc``
+            uses an operation the translator does not handle, pypomp warns and
+            uses XLA. ``"auto"``, the default for a new model, uses CuTe when all
+            of that holds and XLA otherwise, without a warning.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws. ``"threefry"``, the default,
             draws JAX's threefry numbers, so for a given key the kernel's results
@@ -482,8 +481,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         check : bool, optional
             Whether to check the CuTe kernels numerically before using them. The
             check runs the first observation interval on the kernel and on XLA at
-            ``self.theta`` with the same random numbers, keeps XLA if they differ,
-            and adds several seconds to the first :meth:`to_struct`. With
+            ``self.theta`` with the same random numbers and keeps XLA if they
+            differ, or differentiates through XLA if only their gradients do. It
+            adds several seconds to the first :meth:`to_struct`. With
             ``check=False``, the kernels are used without it, and ``self.theta``
             need not be set. Operations the translator can't run, and coupling
             between particles found in a ``@vectorized`` rproc's jaxpr, still keep

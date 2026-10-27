@@ -6,9 +6,10 @@ the same random numbers. The coupling probe
 perturbs one particle of a ``@vectorized`` rproc and requires the others to stay
 bit-identical on XLA: the kernel runs every particle on its own, so any coupling
 would be dropped. The comparisons then require the kernel to match XLA with one
-parameter vector on the natural scale (as in filtering), with per-particle
-parameters on the estimation scale (as in iterated filtering), and in the
-gradients of the latter, which run the parameter transform's and the step's VJPs.
+parameter vector on the natural scale (as in filtering) and with per-particle
+parameters on the estimation scale (as in iterated filtering). The gradients of the
+latter, which run the parameter transform's and the step's VJPs, are checked
+separately, since a kernel whose gradients differ can still run undifferentiated.
 A kernel that also evaluates the measurement density must match XLA's density at
 the states it ends the interval in.
 """
@@ -37,6 +38,11 @@ _MEDIAN_RTOL = 1e-4
 # Gradients sum more rounding, so are compared more loosely.
 _GRAD_PARTICLE_RTOL = 1e-2
 _GRAD_MEDIAN_RTOL = 1e-3
+# A gradient that cancels large terms in float32 is mostly rounding, which XLA and
+# the kernel round differently. Its size is measured as XLA's own change at inputs
+# nudged by _NUDGE, and differences up to _NOISE_FACTOR times it are allowed.
+_NUDGE = 1e-6
+_NOISE_FACTOR = 4.0
 
 
 class _Interval(NamedTuple):
@@ -142,26 +148,39 @@ def _check(
     why = states(a, _forward(iv, cute_pf, iv.th, False)(iv.X0), "")
     if why is not None:
         return why
-    per = " with per-particle parameters on the estimation scale"
-    why = states(
+    return states(
         _forward(iv, rp.mechanics_per_interp, iv.th_per, True)(iv.X0),
         _forward(iv, cute_per, iv.th_per, True)(iv.X0),
-        per,
+        " with per-particle parameters on the estimation scale",
     )
-    if why is not None:
-        return why
-    ga, gb = _grads(iv, rp.mechanics_per_interp), _grads(iv, cute_per)
+
+
+def _check_grads(model: Pomp, cute_per: Callable, rng: str) -> str | None:
+    """Return why the CuTe rproc's gradients, with per-particle parameters on the
+    estimation scale, can't be used for `model`, or None if they can."""
+    iv = _interval(model, rng)
+    xla = model.rproc.mechanics_per_interp
+    ga, gb = _grads(iv, xla), _grads(iv, cute_per)
     mag = np.where(np.isfinite(ga), np.abs(ga), 0.0)
-    d = _different(
-        ga,
-        gb,
-        np.abs(ga) + 1e-3 * mag.max(axis=0) + 1e-12,
-        _GRAD_PARTICLE_RTOL,
-        _GRAD_MEDIAN_RTOL,
-    )
+    scale = np.abs(ga) + 1e-3 * mag.max(axis=0) + 1e-12
+
+    def different(noise: np.ndarray | float) -> float | None:
+        s = scale + _NOISE_FACTOR * noise / _GRAD_PARTICLE_RTOL
+        return _different(ga, gb, s, _GRAD_PARTICLE_RTOL, _GRAD_MEDIAN_RTOL)
+
+    d = different(0.0)
+    if d is not None:
+        # Only models that fail pay for measuring XLA's rounding.
+        nudged = iv._replace(
+            X0=iv.X0 * (1 + _NUDGE), th_per=iv.th_per + _NUDGE * jnp.abs(iv.th_per)
+        )
+        change = np.abs(_grads(nudged, xla) - ga)
+        noise = np.nanquantile(change, 1 - _MAX_DIFFERENT, axis=0)
+        d = different(np.where(np.isfinite(noise), noise, 0.0))
     if d is not None:
         return (
-            f"{d:.0%} of particles' gradients differ from XLA on a test interval{per}"
+            f"{d:.0%} of particles' gradients differ from XLA on a test interval with "
+            "per-particle parameters on the estimation scale"
         )
     return None
 

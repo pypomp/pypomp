@@ -1,14 +1,15 @@
 """The checks and fallbacks around the CuTe backend that run on XLA, so need no GPU."""
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
 import pypomp as pp
 import pypomp.cute
 import pypomp.functional as F
-from pypomp.cute import KernelRProc
-from pypomp.cute.verify import _check
+from pypomp.cute import KernelRProc, _with_xla_grads
+from pypomp.cute.verify import _check, _check_grads, _forward, _grads, _interval
 
 from .test_cute_backend import particle_mean, sde_model, vectorized_rproc
 
@@ -52,7 +53,66 @@ def test_check_rejects_gradients_that_differ_from_xla():
         out, t_idx = per(X_, *args)
         return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
 
-    assert "gradients differ" in (_check(model, pf, off, False, "threefry") or "")
+    assert _check(model, pf, off, False, "threefry") is None
+    assert "gradients differ" in (_check_grads(model, off, "threefry") or "")
+
+
+def test_check_grads_accepts_xlas_own_gradients():
+    model = sde_model()
+    assert _check_grads(model, model.rproc.mechanics_per_interp, "threefry") is None
+
+
+def with_wrong_grads(f):
+    """Return `f`, shifted by 1 undifferentiated and with a wrong derivative."""
+
+    def g(X_, *args):
+        out, *rest = f(X_, *args)
+        return out + 1.0 + 0.5 * (X_ - jax.lax.stop_gradient(X_)), *rest
+
+    return g
+
+
+def test_xla_grads_keep_the_kernel_undifferentiated():
+    model = sde_model()
+    per = model.rproc.mechanics_per_interp
+    kr = _with_xla_grads(KernelRProc(with_wrong_grads(per), per))
+    iv = _interval(model, "threefry")
+    np.testing.assert_allclose(
+        _forward(iv, kr, iv.th_per, True)(iv.X0),
+        _forward(iv, per, iv.th_per, True)(iv.X0) + 1.0,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(_grads(iv, kr), _grads(iv, per), rtol=1e-5)
+
+
+def test_xla_grads_cover_the_fused_density():
+    model = sde_model()
+    assert model.dmeas is not None
+    per, dmeas = model.rproc.mechanics_per_interp, model.dmeas.mechanics_per
+
+    def fused(X_, theta_, keys, cov, *rest):
+        out, t_end = per(X_, theta_, keys, cov, *rest[:6])
+        trans, y, t_obs = rest[5:]
+        c = None if cov is None else cov[t_end]
+        return out, t_end, dmeas(y, out, theta_, c, t_obs, trans)
+
+    kr = _with_xla_grads(
+        KernelRProc(per, per, with_dmeasure=with_wrong_grads(fused), dmeasure=dmeas)
+    )
+    assert kr.with_dmeasure is not None
+    iv = _interval(model, "threefry")
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
+    t_obs = jnp.float32(model.ys.index[0])
+
+    def loss(f):
+        def run(X, th):
+            out, _, w = f(X, th, *iv.rest, True, y, t_obs)
+            return jnp.sum(out) + jnp.sum(w)
+
+        return jax.jit(jax.grad(run, (0, 1)))(iv.X0, iv.th_per)
+
+    for a, b in zip(loss(kr.with_dmeasure), loss(fused), strict=True):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-5)
 
 
 def test_coupling_probe():

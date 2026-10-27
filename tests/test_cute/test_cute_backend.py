@@ -471,7 +471,7 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
     def ran(*args):
         raise AssertionError("the check ran")
 
-    for name in ("_check", "_check_dmeas", "_check_perturb_step"):
+    for name in ("_check", "_check_grads", "_check_dmeas", "_check_perturb_step"):
         monkeypatch.setattr(verify, name, ran)
     model = sde_model()
     model.theta = None
@@ -480,6 +480,33 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
         warnings.simplefilter("error")
         s = model.to_struct()
     assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.rproc_per, KernelRProc)
+
+
+def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
+    import pypomp.cute.verify as verify
+    from pypomp.cute.verify import _grads, _interval
+
+    monkeypatch.setattr(verify, "_check_grads", lambda *args: "50% differ")
+    model = sde_model()
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="differentiating through XLA"):
+        s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc)
+    iv = _interval(model, "threefry")
+    np.testing.assert_allclose(
+        _grads(iv, s.rproc_per), _grads(iv, model.rproc.mechanics_per_interp), rtol=1e-5
+    )
+
+
+def test_gradients_that_cancel_to_rounding_pass_the_check():
+    from pypomp.models import spx
+
+    model = spx()  # mu's gradient through S cancels to float32 rounding
+    model.set_backend("cute")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = model.to_struct()
     assert isinstance(s.rproc_per, KernelRProc)
 
 
@@ -532,14 +559,13 @@ def test_float64_particles_run_on_xla():
         jax.config.update("jax_enable_x64", False)
 
 
-def test_auto_uses_cute_only_with_several_steps_per_observation():
-    model = sde_model()
-    assert model.to_struct().rproc_pf is not model.rproc.mechanics_pf_interp
+def test_auto_uses_cute_with_one_step_per_observation():
     one_step = pp.models.lg(T=10)
+    assert one_step.rproc.nstep == 1
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = one_step.to_struct()
-    assert s.rproc_pf is one_step.rproc.mechanics_pf_interp
+    assert isinstance(s.rproc_pf, KernelRProc)
 
 
 def test_builds_without_a_cpu_backend(monkeypatch):

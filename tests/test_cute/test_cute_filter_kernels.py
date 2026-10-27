@@ -49,6 +49,15 @@ def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
     assert (got != ref).mean() < 1e-3
 
 
+def test_few_filters_of_many_particles_resample_on_xla():
+    resample = sde_model().to_struct(rproc_backend="cute").rproc_pf.resample
+    R, J = 2, 20011
+    W = log_weights(jax.random.key(3), R, J)
+    K = jax.random.split(jax.random.key(4), R)
+    got = jax.jit(jax.vmap(resample))(W, K)
+    np.testing.assert_array_equal(got, jax.jit(jax.vmap(_resample))(W, K))
+
+
 def unfused(struct):
     """`struct` with its density wrapped, so the kernel can't evaluate it."""
     dm_pf, dm_per = struct.dmeas_pf, struct.dmeas_per

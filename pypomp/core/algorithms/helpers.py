@@ -38,11 +38,15 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
         array-like: An array containing the resampled indices from the
             systematic resampling given the input normalized weights.
     """
+    return _systematic_indices(norm_weights, jax.random.uniform(key=subkey))
+
+
+def _systematic_indices(norm_weights: jax.Array, u: jax.Array) -> jax.Array:
+    """Return :func:`_resample`'s indices for the uniform draw `u`."""
     J = norm_weights.shape[-1]
     w = jnp.exp(norm_weights)
     live = w > 0
     csum = jax.lax.cummax(jnp.where(live, jnp.cumsum(w), -jnp.inf))
-    u = jax.random.uniform(key=subkey)
     n = jnp.clip(jnp.ceil(csum * (J / csum[-1]) - u), 0, J).astype(jnp.int32)
     last_live = J - 1 - jnp.argmax(live[::-1])
     # Only the last particle of each run of equal n is marked, so valid

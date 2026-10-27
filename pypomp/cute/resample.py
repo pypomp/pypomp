@@ -34,6 +34,8 @@ _NW = _T // 32
 # The binary search over a tile needs its size to be a power of two.
 _LOG_TV = (_T * _V).bit_length() - 1
 assert 1 << _LOG_TV == _T * _V
+# At or below this many particles per filter the kernel is faster at any batch size.
+_KERNEL_MAX_J = 10_000
 
 _Scalar = Any
 
@@ -215,9 +217,25 @@ def _launch(stream, NW: cute.Tensor, U: cute.Tensor, IDX: cute.Tensor):
     _kernel(NW, U, IDX, J).launch(grid=[B, 1, 1], block=[_T, 1, 1], stream=stream)
 
 
+def _use_kernel(B: int, J: int) -> bool:
+    """Return whether the kernel beats XLA at resampling B filters of J particles.
+
+    A block takes time proportional to J to resample its filter, while XLA spreads
+    every pass over all B * J particles. With J above about 10,000 and fewer
+    filters than half the GPU's SMs, XLA finishes first.
+    """
+    sms = getattr(jax.devices()[0], "core_count", 0) or 0
+    return J <= _KERNEL_MAX_J or 2 * B >= sms
+
+
 def _core_impl(nw: jax.Array, u: jax.Array) -> jax.Array:
     lead, J = nw.shape[:-1], nw.shape[-1]
     B = math.prod(lead)
+    if not _use_kernel(B, J):
+        from ..core.algorithms.helpers import _systematic_indices
+
+        idx = jax.vmap(_systematic_indices)(nw.reshape(B, J), u.reshape(B))
+        return idx.reshape(lead + (J,))
     idx = cutlass_call(
         _launch,
         output_shape_dtype=jax.ShapeDtypeStruct((B, J), jnp.int32),

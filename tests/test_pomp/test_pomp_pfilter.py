@@ -53,6 +53,34 @@ def test_reps_batch_size_matches_parallel(simple):
         assert jnp.allclose(LG.results_history[-1].logLiks.values, parallel, rtol=1e-5)
 
 
+def test_all_replicates_at_once_match_one_at_a_time(simple):
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    th = jnp.concatenate([th, th * 1.1])
+    keys = jax.random.split(key, 6).reshape(2, 3)
+    one, flat = (
+        F.pfilter(struct, th, J, keys, CLL=True, filter_mean=True, reps_batch_size=b)
+        for b in (1, 3)
+    )
+    for k in one:
+        assert flat[k].shape == one[k].shape
+        assert jnp.allclose(flat[k], one[k], rtol=1e-5)
+
+
+def test_gpu_path_runs_replicates_in_one_batch(simple, monkeypatch):
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    keys = jax.random.split(key, 3)[None]
+    one = F.pfilter(struct, th, J, keys, reps_batch_size=1)["logLik"]
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    eager = F.pfilter(struct, th, J, keys)["logLik"]
+    traced = jax.jit(lambda t: F.pfilter(struct, t, J, keys)["logLik"])(th)
+    assert jnp.allclose(eager, one, rtol=1e-5)
+    assert jnp.allclose(traced, one, rtol=1e-5)
+
+
 def test_reps_batch_for_memory_budget():
     from pypomp.functional.pfilter import _reps_batch_for
 

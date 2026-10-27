@@ -70,7 +70,7 @@ def ndtri(p: jax.Array) -> jax.Array:
 
     On a float32 scalar (or one-element array) this is a ``lax.cond`` over the
     pieces of JAX's approximation, which computes only the piece `p` falls in: the
-    CuTe rproc backend traces one particle at a time and turns it into a branch.
+    CuTe backend traces one particle at a time and turns it into a branch.
     """
     if jnp.size(p) != 1 or jnp.result_type(p) != jnp.float32:
         return jsp_special.ndtri(p)

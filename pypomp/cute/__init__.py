@@ -1,8 +1,9 @@
-"""CuTe backend for the process model on NVIDIA GPUs.
+"""CuTe backend for filtering on NVIDIA GPUs.
 
-``Pomp.set_rproc_backend`` chooses it. The model's ``rproc`` is translated from its
+``Pomp.set_backend`` chooses it. The model's ``rproc`` is translated from its
 jaxpr into a CUDA kernel that runs every Euler step of an observation interval, one
-particle per thread. The kernel is written with CuTe DSL, the Python interface to
+particle per thread, and evaluates ``dmeas`` too when that translates. The kernels
+are written with CuTe DSL, the Python interface to
 NVIDIA CUTLASS's CuTe library, which needs the optional ``nvidia-cutlass-dsl``
 package (``pip install pypomp[cute]``).
 """
@@ -114,16 +115,16 @@ def _build(
 
     ok, why = available()
     if not ok:
-        return skip(f"CuTe rproc backend unavailable: {why}.")
+        return skip(f"CuTe backend unavailable: {why}.")
     if model.rproc.nstep is None:
         return skip(
-            "CuTe rproc backend needs the same number of Euler steps in every "
+            "CuTe backend needs the same number of Euler steps in every "
             "observation interval (nstep, or a dt that divides the intervals evenly)."
         )
     if quiet and int(model.rproc.nstep) == 1:
         return None
     if check and model._theta is None:
-        return skip("CuTe rproc backend needs model.theta to check the kernel.")
+        return skip("CuTe backend needs model.theta to check the kernel.")
     import jax
 
     if rng == "threefry":
@@ -131,13 +132,13 @@ def _build(
 
         if not _is_threefry(jax.random.key(0)):
             return skip(
-                "CuTe rproc backend with rng='threefry' needs JAX's default PRNG "
+                "CuTe backend with rng='threefry' needs JAX's default PRNG "
                 "implementation to be threefry2x32, with jax_threefry_partitionable "
                 "on; rng='philox' takes any keys of two 32-bit words."
             )
     elif jax.random.key_data(jax.random.key(0)).shape != (2,):
         return skip(
-            "CuTe rproc backend needs a default PRNG implementation whose keys are "
+            "CuTe backend needs a default PRNG implementation whose keys are "
             "two 32-bit words, such as threefry."
         )
     try:

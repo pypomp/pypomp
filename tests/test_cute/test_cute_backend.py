@@ -1,4 +1,4 @@
-"""The CuTe rproc backend. Needs nvidia-cutlass-dsl and a GPU; skipped otherwise."""
+"""The CuTe backend. Needs nvidia-cutlass-dsl and a GPU; skipped otherwise."""
 
 import os
 import stat
@@ -150,8 +150,8 @@ def he10_model():
 
 def xla_and_cute(model, rng="threefry"):
     cm = deepcopy(model)
-    cm.set_rproc_backend("cute", rng=rng)
-    return model.to_struct(rproc_backend="xla"), cm.to_struct()
+    cm.set_backend("cute", rng=rng)
+    return model.to_struct(backend="xla"), cm.to_struct()
 
 
 def rng_key(seed, rng="threefry"):
@@ -330,14 +330,14 @@ def table_panel():
 @pytest.mark.parametrize("rng", ["threefry", "philox"])
 def test_panel_runs_its_first_units_kernel_for_every_unit(rng):
     panel, names, th = table_panel()
-    panel.set_rproc_backend("cute", rng)
+    panel.set_backend("cute", rng)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         cute = panel.to_struct()
     assert isinstance(cute.rproc_pf, KernelRProc)
     assert isinstance(cute.rproc_per, KernelRProc)
     assert all(u._theta is None for u in panel.unit_objects.values())
-    xla = panel.to_struct(rproc_backend="xla")
+    xla = panel.to_struct(backend="xla")
     assert xla.rproc_pf is panel.unit_objects["u1"].rproc.mechanics_pf_interp
 
     # Each unit's covariate picks its own rows of the tables.
@@ -379,9 +379,9 @@ def test_panel_runs_its_first_units_kernel_for_every_unit(rng):
 
 def test_mif_and_train_on_cute():
     model = sde_model()
-    model.set_rproc_backend("xla")
+    model.set_backend("xla")
     cm = deepcopy(model)
-    cm.set_rproc_backend("cute")
+    cm.set_backend("cute")
     rw = pp.RWSigma(
         sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
         init_names=[],
@@ -405,9 +405,9 @@ def test_mif_and_train_on_cute():
 def test_dpop_train_on_cute():
     model = sde_model(dpop_rproc, statenames=("x", "_logw"))
     assert model.rproc.accumvars == (1,)  # _logw is zeroed at each observation
-    model.set_rproc_backend("xla")
+    model.set_backend("xla")
     cm = deepcopy(model)
-    cm.set_rproc_backend("cute")
+    cm.set_backend("cute")
     eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
     key = rng_key(2)
     opt = pp.Adam(scale=True)
@@ -459,7 +459,7 @@ def uses_J(X_, theta_, key, covars, t, dt):
 )
 def test_rprocs_the_kernel_cannot_run_exactly_stay_on_xla(rproc):
     model = sde_model(rproc)
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     with pytest.warns(UserWarning, match="Using XLA"):
         s = model.to_struct()
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
@@ -475,7 +475,7 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
         monkeypatch.setattr(verify, name, ran)
     model = sde_model()
     model.theta = None
-    model.set_rproc_backend("cute", check=False)
+    model.set_backend("cute", check=False)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = model.to_struct()
@@ -485,7 +485,7 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
 
 def test_newton_training_uses_xla():
     model = sde_model()
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     eta = pp.LearningRate({p: 0.05 for p in model.canonical_param_names})
     with pytest.warns(UserWarning, match="Hessians"):
         model.train(J=64, M=1, eta=eta, optimizer=pp.Newton(), key=jax.random.key(0))
@@ -505,7 +505,7 @@ def test_keys_of_another_generator_run_on_xla_with_threefry():
 
 def test_rbg_keys_run_on_xla():
     model = sde_model()
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     model.pfilter(J=100, key=jax.random.key(0, impl="rbg"))
     assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
 

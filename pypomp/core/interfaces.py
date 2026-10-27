@@ -45,9 +45,9 @@ class PompInterface(Protocol):
     results_history: ResultsHistory
     fresh_key: jax.Array | None
     metadata: ModelMetadata
-    _rproc_backend: str
-    _rproc_rng: str
-    _rproc_check: bool
+    _backend: str
+    _backend_rng: str
+    _backend_check: bool
 
     @property
     def theta(self) -> PompParameters: ...
@@ -71,7 +71,7 @@ class PompInterface(Protocol):
     ) -> tuple[jax.Array, jax.Array]: ...
 
     def to_struct(
-        self, rproc_backend: str | None = None, rng: str | None = None
+        self, backend: str | None = None, rng: str | None = None
     ) -> PompStruct: ...
 
     @overload

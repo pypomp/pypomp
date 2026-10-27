@@ -38,7 +38,7 @@ class PanelPompInterface(Protocol):
 
     def get_unit_names(self) -> list[str]: ...
     def to_struct(
-        self, rproc_backend: str | None = None, rng: str | None = None
+        self, backend: str | None = None, rng: str | None = None
     ) -> PanelPompStruct: ...
 
     @overload

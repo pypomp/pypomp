@@ -97,12 +97,12 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         return list(self.unit_objects.keys())
 
-    def set_rproc_backend(
+    def set_backend(
         self, backend: str, rng: str = "threefry", check: bool = True
     ) -> None:
-        """Choose how the process model runs in filtering and estimation.
+        """Choose how filtering and estimation run.
 
-        Sets the backend of every unit; see :meth:`pypomp.Pomp.set_rproc_backend`.
+        Sets the backend of every unit; see :meth:`pypomp.Pomp.set_backend`.
         The panel runs the first unit's process model for all units, so with CuTe
         one kernel advances every unit's particles, and it is checked against XLA
         on the first unit at the first parameter set.
@@ -110,7 +110,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         Parameters
         ----------
         backend : {"auto", "cute", "xla"}
-            The process model backend.
+            The backend.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws.
         check : bool, optional
@@ -122,10 +122,10 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             If `backend` or `rng` is not one of its options.
         """
         for unit in self.unit_objects.values():
-            unit.set_rproc_backend(backend, rng, check)
+            unit.set_backend(backend, rng, check)
 
     def to_struct(
-        self, rproc_backend: str | None = None, rng: str | None = None
+        self, backend: str | None = None, rng: str | None = None
     ) -> PanelPompStruct:
         """Export static data and compiled simulators into a JAX PyTree.
 
@@ -134,9 +134,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
         Parameters
         ----------
-        rproc_backend : {"auto", "cute", "xla"} or None, optional
-            Process model backend for this struct (see :meth:`set_rproc_backend`).
-            Defaults to None, which uses the first unit's backend.
+        backend : {"auto", "cute", "xla"} or None, optional
+            Backend for this struct (see :meth:`set_backend`). Defaults to None,
+            which uses the first unit's backend.
         rng : {"threefry", "philox"} or None, optional
             The CuTe kernel's random numbers. Defaults to None, which uses the
             first unit's.
@@ -149,7 +149,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
         unit_names = self.get_unit_names()
         rep_unit = self.unit_objects[unit_names[0]]
-        rproc_pf, rproc_per = self._rproc_fns(rproc_backend, rng)
+        rproc_pf, rproc_per = self._rproc_fns(backend, rng)
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
@@ -191,9 +191,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         )
 
     def _rproc_fns(
-        self, rproc_backend: str | None, rng: str | None
+        self, backend: str | None, rng: str | None
     ) -> tuple[Callable, Callable]:
-        """Return the first unit's (rproc_pf, rproc_per) for `rproc_backend`
+        """Return the first unit's (rproc_pf, rproc_per) for `backend`
         and `rng`.
 
         Units of a panel hold no parameters, so the first unit gets the panel's
@@ -202,10 +202,10 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         name = self.get_unit_names()[0]
         unit = self.unit_objects[name]
         if unit._theta is not None:
-            return unit._rproc_fns(rproc_backend, rng)
+            return unit._rproc_fns(backend, rng)
         unit._theta = PompParameters(self.get_unit_parameters(name)[0])
         try:
-            return unit._rproc_fns(rproc_backend, rng)
+            return unit._rproc_fns(backend, rng)
         finally:
             unit._theta = None
 

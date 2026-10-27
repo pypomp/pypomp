@@ -32,13 +32,13 @@ from .parameters import PompParameters
 from .results import ResultsHistory
 
 
-def _check_rproc_backend(backend: str) -> None:
+def _check_backend(backend: str) -> None:
     """Raise ValueError unless `backend` is a process model backend."""
     if backend not in ("auto", "cute", "xla"):
         raise ValueError(f"backend must be 'auto', 'cute' or 'xla', got {backend!r}")
 
 
-def _check_rproc_rng(rng: str) -> None:
+def _check_rng(rng: str) -> None:
     """Raise ValueError unless `rng` is a CuTe kernel generator."""
     if rng not in ("threefry", "philox"):
         raise ValueError(f"rng must be 'threefry' or 'philox', got {rng!r}")
@@ -281,9 +281,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.t0 = float(t0)
         self.results_history = ResultsHistory()
         self.fresh_key = None
-        self._rproc_backend = "auto"
-        self._rproc_rng = "threefry"
-        self._rproc_check = True
+        self._backend = "auto"
+        self._backend_rng = "threefry"
+        self._backend_check = True
         self.metadata = ModelMetadata()
 
         if covars is not None:
@@ -448,18 +448,21 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def set_rproc_backend(
+    def set_backend(
         self, backend: str, rng: str = "threefry", check: bool = True
     ) -> None:
-        """Choose how the process model runs in filtering and estimation.
+        """Choose how filtering and estimation run.
 
         Parameters
         ----------
         backend : {"auto", "cute", "xla"}
-            ``"xla"`` compiles ``rproc`` with XLA. ``"cute"`` runs every Euler step
+            ``"xla"`` compiles everything with XLA. ``"cute"`` runs every Euler step
             of an observation interval in one CUDA kernel on an NVIDIA GPU, one
             particle per thread, for all filters of a call at once. ``rproc`` is
-            translated from its jaxpr, so it is used as written. CuTe needs the
+            translated from its jaxpr, so it is used as written. The kernel also
+            evaluates ``dmeas`` when that translates, and with it the parameter
+            perturbation of iterated filtering; resampling runs in a separate
+            CuTe kernel. CuTe needs the
             optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``),
             a GPU and the same number of Euler steps in every observation interval;
             without them, or if ``rproc`` uses an operation the translator does not
@@ -502,14 +505,14 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         Gradients for :meth:`train` go through a second generated kernel; optimizers
         that need Hessians, and float64 particles, use XLA.
         """
-        _check_rproc_backend(backend)
-        _check_rproc_rng(rng)
-        self._rproc_backend = backend
-        self._rproc_rng = rng
-        self._rproc_check = bool(check)
+        _check_backend(backend)
+        _check_rng(rng)
+        self._backend = backend
+        self._backend_rng = rng
+        self._backend_check = bool(check)
 
     def to_struct(
-        self, rproc_backend: str | None = None, rng: str | None = None
+        self, backend: str | None = None, rng: str | None = None
     ) -> PompStruct:
         """Export the model to a lightweight JAX-compatible struct.
 
@@ -519,11 +522,11 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         Parameters
         ----------
-        rproc_backend : {"auto", "cute", "xla"} or None, optional
-            Process model backend for this struct (see :meth:`set_rproc_backend`).
-            Defaults to None, which uses the model's backend.
+        backend : {"auto", "cute", "xla"} or None, optional
+            Backend for this struct (see :meth:`set_backend`). Defaults to None,
+            which uses the model's backend.
         rng : {"threefry", "philox"} or None, optional
-            The CuTe kernel's random numbers (see :meth:`set_rproc_backend`).
+            The CuTe kernel's random numbers (see :meth:`set_backend`).
             Defaults to None, which uses the model's.
 
         Returns
@@ -559,23 +562,23 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
         )
-        rproc_pf, rproc_per = self._rproc_fns(rproc_backend, rng)
+        rproc_pf, rproc_per = self._rproc_fns(backend, rng)
         return struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
 
     def _rproc_fns(
-        self, rproc_backend: str | None = None, rng: str | None = None
+        self, backend: str | None = None, rng: str | None = None
     ) -> tuple[Callable, Callable]:
-        """Return the process model's (rproc_pf, rproc_per) for `rproc_backend`
+        """Return the process model's (rproc_pf, rproc_per) for `backend`
         and `rng`.
 
         The CuTe kernels are checked against XLA at ``self.theta`` unless the
-        model's check is off; see :meth:`set_rproc_backend`.
+        model's check is off; see :meth:`set_backend`.
         """
-        backend = self._rproc_backend if rproc_backend is None else rproc_backend
-        rng = self._rproc_rng if rng is None else rng
-        check = self._rproc_check
-        _check_rproc_backend(backend)
-        _check_rproc_rng(rng)
+        backend = self._backend if backend is None else backend
+        rng = self._backend_rng if rng is None else rng
+        check = self._backend_check
+        _check_backend(backend)
+        _check_rng(rng)
         if backend != "xla":
             # Built once per backend, generator and check: new functions would make
             # every call recompile.
@@ -806,9 +809,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         """
         # Restore basic attributes
         self.__dict__.update(state)
-        self.__dict__.setdefault("_rproc_backend", "auto")
-        self.__dict__.setdefault("_rproc_rng", "threefry")
-        self.__dict__.setdefault("_rproc_check", True)
+        self.__dict__.setdefault("_backend", "auto")
+        self.__dict__.setdefault("_backend_rng", "threefry")
+        self.__dict__.setdefault("_backend_check", True)
         if "par_trans" in state and "_par_trans" not in state:
             self._par_trans = state["par_trans"]
 

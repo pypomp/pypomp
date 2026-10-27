@@ -603,8 +603,8 @@ class PompEstimationMixin(Base):
         # The CuTe kernel's derivative has no derivative of its own, so an optimizer
         # that needs Hessians runs on XLA.
         backend = None
-        if optimizer.uses_hessian and self._rproc_backend != "xla":
-            if self._rproc_backend == "cute":
+        if optimizer.uses_hessian and self._backend != "xla":
+            if self._backend == "cute":
                 warnings.warn(
                     f"{type(optimizer).__name__} needs Hessians, which the CuTe "
                     "backend doesn't provide. Using XLA.",
@@ -616,7 +616,7 @@ class PompEstimationMixin(Base):
             _train,
             {1: 0, 5: 0},
             [0, 0],
-            self.to_struct(rproc_backend=backend),
+            self.to_struct(backend=backend),
             theta_array,
             J,
             M,

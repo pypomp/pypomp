@@ -31,7 +31,7 @@ def log_weights(key, R, J):
 
 @pytest.mark.parametrize("J", [1, 7, 256, 5003])
 def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
-    rp = sde_model().to_struct(rproc_backend="cute").rproc_pf
+    rp = sde_model().to_struct(backend="cute").rproc_pf
     assert isinstance(rp, KernelRProc) and rp.resample is not None
     resample = rp.resample
     R = 64
@@ -51,7 +51,7 @@ def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
 
 
 def test_few_filters_of_many_particles_resample_on_xla():
-    rp = sde_model().to_struct(rproc_backend="cute").rproc_pf
+    rp = sde_model().to_struct(backend="cute").rproc_pf
     assert isinstance(rp, KernelRProc) and rp.resample is not None
     resample = rp.resample
     R, J = 2, 20011
@@ -199,7 +199,7 @@ def test_resample_kernel_leaves_float64_on_xla():
 
 def test_deepcopy_keeps_the_filter_kernels():
     model = sde_model()
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     s = deepcopy(model).to_struct()
     assert isinstance(s.rproc_pf, KernelRProc)
     assert s.rproc_pf.resample is not None

@@ -5,7 +5,7 @@ output words together. Here each call supplies four words, so a draw of n values
 costs about n / 4 calls. For a draw of shape (..., L), element (l, m), with l
 indexing the flattened leading axes, is word l % 4 of the call with counter
 (l // 4) * L + m. When the last axis indexes particles, each particle's draws come
-from its own calls, which is what the CuTe rproc backend needs to generate them
+from its own calls, which is what the CuTe backend needs to generate them
 inside one GPU thread. On the XLA path, keys made with :data:`PHILOX` give the same
 random numbers as the CuTe kernel:
 

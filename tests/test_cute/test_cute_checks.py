@@ -84,7 +84,7 @@ def test_backend_is_chosen_again_once_theta_is_set(monkeypatch):
 def test_rng_must_be_threefry_or_philox():
     model = sde_model()
     with pytest.raises(ValueError, match="rng"):
-        model.set_rproc_backend("cute", rng="rbg")
+        model.set_backend("cute", rng="rbg")
     with pytest.raises(ValueError, match="rng"):
         model.to_struct(rng="philox4x32")
 
@@ -95,11 +95,11 @@ def test_built_kernels_are_kept_per_generator(monkeypatch):
         pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(rng)
     )
     model = sde_model()
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     model.to_struct()
     model.to_struct(rng="philox")
     model.to_struct()
-    model.set_rproc_backend("cute", rng="philox")
+    model.set_backend("cute", rng="philox")
     model.to_struct()
     assert calls == ["threefry", "philox"]
 
@@ -112,12 +112,12 @@ def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
     model = sde_model()
     theta = model.theta
     model.theta = None
-    model.set_rproc_backend("cute", check=False)
+    model.set_backend("cute", check=False)
     model.to_struct()
     model.to_struct()
     assert calls == [False]
     model.theta = theta
-    model.set_rproc_backend("cute")
+    model.set_backend("cute")
     model.to_struct()
     assert calls == [False, True]
 
@@ -141,7 +141,7 @@ def test_translated_threefry_is_jaxs():
 
 def test_hessian_optimizers_train_on_the_xla_rproc():
     model = sde_model()
-    s = model.to_struct(rproc_backend="xla")
+    s = model.to_struct(backend="xla")
 
     def kernel(*args):
         raise AssertionError("Hessians can't go through the kernel")

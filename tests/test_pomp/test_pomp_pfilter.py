@@ -200,7 +200,7 @@ def test_thresh_is_a_weight_ratio(simple):
     assert logliks[1e6] != logliks[0.0]
 
 
-def test_default_rproc_backend_falls_back_quietly(simple):
+def test_default_backend_falls_back_quietly(simple):
     import warnings
 
     from pypomp.cute import available
@@ -214,7 +214,7 @@ def test_default_rproc_backend_falls_back_quietly(simple):
     assert s.rproc_pf is LG.rproc.mechanics_pf_interp
 
 
-def test_par_trans_change_drops_built_rproc_backends(simple):
+def test_par_trans_change_drops_built_backends(simple):
     LG, key, J = simple
     LG.to_struct()
     assert "_cute_fns" in LG.__dict__

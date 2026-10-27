@@ -568,6 +568,16 @@ def test_auto_uses_cute_with_one_step_per_observation():
     assert isinstance(s.rproc_pf, KernelRProc)
 
 
+def test_gpus_older_than_ampere_are_unavailable(monkeypatch):
+    class Volta:
+        platform = "gpu"
+        compute_capability = "7.0"
+
+    monkeypatch.setattr(jax, "devices", lambda backend=None: [Volta()])
+    ok, why = available()
+    assert not ok and "7.0" in why
+
+
 def test_builds_without_a_cpu_backend(monkeypatch):
     devices = jax.devices
 

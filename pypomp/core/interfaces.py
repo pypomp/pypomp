@@ -47,6 +47,7 @@ class PompInterface(Protocol):
     metadata: ModelMetadata
     _rproc_backend: str
     _rproc_rng: str
+    _rproc_check: bool
 
     @property
     def theta(self) -> PompParameters: ...

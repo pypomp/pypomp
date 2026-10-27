@@ -97,14 +97,15 @@ def available() -> tuple[bool, str]:
 
 
 def _build(
-    model: Pomp, quiet: bool, rng: str
+    model: Pomp, quiet: bool, rng: str, check: bool = True
 ) -> tuple[KernelRProc, KernelRProc] | None:
     """Return CuTe replacements for (rproc_pf, rproc_per), drawing with `rng`
     ("threefry" or "philox"), or None to keep XLA.
 
     Warns before returning None unless `quiet`. The "auto" backend is quiet and also
     keeps XLA for a model with one Euler step per observation. A kernel that doesn't
-    match XLA, or fails to build, is a translator bug, so that always warns.
+    match XLA, or fails to build, is a translator bug, so that always warns. Without
+    `check`, the kernels are not run against XLA before they are returned.
     """
 
     def skip(msg: str, always: bool = False) -> None:
@@ -121,7 +122,7 @@ def _build(
         )
     if quiet and int(model.rproc.nstep) == 1:
         return None
-    if model._theta is None:
+    if check and model._theta is None:
         return skip("CuTe rproc backend needs model.theta to check the kernel.")
     import jax
 
@@ -140,7 +141,7 @@ def _build(
             "two 32-bit words, such as threefry."
         )
     try:
-        return _build_kernels(model, rng)
+        return _build_kernels(model, rng, check)
     except _Skip as e:
         return skip(e.msg, e.always)
     except Exception as e:  # noqa: BLE001
@@ -157,8 +158,14 @@ class _Skip(Exception):
         self.msg, self.always = msg, always
 
 
-def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
-    """Translate, build and check the kernels, as :func:`_build` describes."""
+def _build_kernels(
+    model: Pomp, rng: str, check: bool = True
+) -> tuple[KernelRProc, KernelRProc]:
+    """Translate, build and check the kernels, as :func:`_build` describes.
+
+    Operations the kernel can't run, and particle coupling visible in the jaxprs,
+    are rejected even without `check`.
+    """
     from . import kernel
     from .translate import _untranslatable
     from .verify import _check, _check_dmeas, _check_perturb_step
@@ -176,11 +183,11 @@ def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
         )
     pf = kernel._make_rprocess_interp(model, traced, False, rng, None)
     per = kernel._make_rprocess_interp(model, traced, True, rng, None)
-    why = _check(model, pf, per, vec, rng)
+    why = _check(model, pf, per, vec, rng) if check else None
     if why is not None:
         raise _Skip(f"CuTe rproc check failed: {why}.", always="differ" in why)
-    # The density joins the kernel only if it translates and matches XLA; otherwise
-    # it stays a separate XLA computation.
+    # The density joins the kernel only if it translates and, when checked, matches
+    # XLA; otherwise it stays a separate XLA computation.
     try:
         dm_j = kernel._trace_dmeas(model)
     except Exception:  # noqa: BLE001
@@ -189,6 +196,8 @@ def _build_kernels(model: Pomp, rng: str) -> tuple[KernelRProc, KernelRProc]:
         return pf, per
     pf_dm = kernel._make_rprocess_interp(model, traced, False, rng, dm_j)
     per_dm = kernel._make_rprocess_interp(model, traced, True, rng, dm_j)
+    if not check:
+        return pf_dm, per_dm
     try:
         why = _check_dmeas(model, pf_dm, per_dm, rng)
     except Exception as e:  # noqa: BLE001

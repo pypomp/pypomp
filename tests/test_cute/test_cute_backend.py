@@ -465,6 +465,24 @@ def test_rprocs_the_kernel_cannot_run_exactly_stay_on_xla(rproc):
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
 
 
+def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
+    import pypomp.cute.verify as verify
+
+    def ran(*args):
+        raise AssertionError("the check ran")
+
+    for name in ("_check", "_check_dmeas", "_check_perturb_step"):
+        monkeypatch.setattr(verify, name, ran)
+    model = sde_model()
+    model.theta = None
+    model.set_rproc_backend("cute", check=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.rproc_per, KernelRProc)
+
+
 def test_newton_training_uses_xla():
     model = sde_model()
     model.set_rproc_backend("cute")

@@ -67,7 +67,7 @@ def test_coupling_probe():
 def test_backend_is_chosen_again_once_theta_is_set(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng: calls.append(1)
+        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(1)
     )
     model = sde_model()
     theta = model.theta
@@ -92,7 +92,7 @@ def test_rng_must_be_threefry_or_philox():
 def test_built_kernels_are_kept_per_generator(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng: calls.append(rng)
+        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(rng)
     )
     model = sde_model()
     model.set_rproc_backend("cute")
@@ -102,6 +102,24 @@ def test_built_kernels_are_kept_per_generator(monkeypatch):
     model.set_rproc_backend("cute", rng="philox")
     model.to_struct()
     assert calls == ["threefry", "philox"]
+
+
+def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(check)
+    )
+    model = sde_model()
+    theta = model.theta
+    model.theta = None
+    model.set_rproc_backend("cute", check=False)
+    model.to_struct()
+    model.to_struct()
+    assert calls == [False]
+    model.theta = theta
+    model.set_rproc_backend("cute")
+    model.to_struct()
+    assert calls == [False, True]
 
 
 def test_translated_threefry_is_jaxs():

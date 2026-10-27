@@ -97,7 +97,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         return list(self.unit_objects.keys())
 
-    def set_rproc_backend(self, backend: str, rng: str = "threefry") -> None:
+    def set_rproc_backend(
+        self, backend: str, rng: str = "threefry", check: bool = True
+    ) -> None:
         """Choose how the process model runs in filtering and estimation.
 
         Sets the backend of every unit; see :meth:`pypomp.Pomp.set_rproc_backend`.
@@ -111,6 +113,8 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             The process model backend.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws.
+        check : bool, optional
+            Whether to check the CuTe kernels against XLA before using them.
 
         Raises
         ------
@@ -118,7 +122,7 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             If `backend` or `rng` is not one of its options.
         """
         for unit in self.unit_objects.values():
-            unit.set_rproc_backend(backend, rng)
+            unit.set_rproc_backend(backend, rng, check)
 
     def to_struct(
         self, rproc_backend: str | None = None, rng: str | None = None

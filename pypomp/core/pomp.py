@@ -283,6 +283,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key = None
         self._rproc_backend = "auto"
         self._rproc_rng = "threefry"
+        self._rproc_check = True
         self.metadata = ModelMetadata()
 
         if covars is not None:
@@ -447,7 +448,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.fresh_key, new_key = jax.random.split(old_key)
         return new_key, old_key
 
-    def set_rproc_backend(self, backend: str, rng: str = "threefry") -> None:
+    def set_rproc_backend(
+        self, backend: str, rng: str = "threefry", check: bool = True
+    ) -> None:
         """Choose how the process model runs in filtering and estimation.
 
         Parameters
@@ -473,6 +476,16 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             costs fewer instructions per random number (about 20% less kernel time
             for the UK measles model), but for a given key its results differ from
             XLA's. Ignored by ``"xla"``, and so by ``"auto"`` when it picks XLA.
+        check : bool, optional
+            Whether to check the CuTe kernels numerically before using them. The
+            check runs the first observation interval on the kernel and on XLA at
+            ``self.theta`` with the same random numbers, keeps XLA if they differ,
+            and adds several seconds to the first :meth:`to_struct`. With
+            ``check=False``, the kernels are used without it, and ``self.theta``
+            need not be set. Operations the translator can't run, and coupling
+            between particles found in a ``@vectorized`` rproc's jaxpr, still keep
+            XLA, but a kernel that differs from XLA in another way goes unnoticed.
+            Defaults to True.
 
         Returns
         -------
@@ -493,6 +506,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         _check_rproc_rng(rng)
         self._rproc_backend = backend
         self._rproc_rng = rng
+        self._rproc_check = bool(check)
 
     def to_struct(
         self, rproc_backend: str | None = None, rng: str | None = None
@@ -554,25 +568,26 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         """Return the process model's (rproc_pf, rproc_per) for `rproc_backend`
         and `rng`.
 
-        The CuTe kernels are checked against XLA at ``self.theta``; see
-        :meth:`set_rproc_backend`.
+        The CuTe kernels are checked against XLA at ``self.theta`` unless the
+        model's check is off; see :meth:`set_rproc_backend`.
         """
         backend = self._rproc_backend if rproc_backend is None else rproc_backend
         rng = self._rproc_rng if rng is None else rng
+        check = self._rproc_check
         _check_rproc_backend(backend)
         _check_rproc_rng(rng)
         if backend != "xla":
-            # Built once per backend and generator: new functions would make every
-            # call recompile.
+            # Built once per backend, generator and check: new functions would make
+            # every call recompile.
             built = self.__dict__.setdefault("_cute_fns", {})
-            fns = built.get((backend, rng))
-            if (backend, rng) not in built:
+            fns = built.get((backend, rng, check))
+            if (backend, rng, check) not in built:
                 from pypomp.cute import _build
 
-                fns = _build(self, backend == "auto", rng)
+                fns = _build(self, backend == "auto", rng, check)
                 # Without theta the kernel can't be checked, so decide again later.
-                if self._theta is not None:
-                    built[backend, rng] = fns
+                if self._theta is not None or not check:
+                    built[backend, rng, check] = fns
             if fns is not None:
                 return fns
         return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
@@ -793,6 +808,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.__dict__.update(state)
         self.__dict__.setdefault("_rproc_backend", "auto")
         self.__dict__.setdefault("_rproc_rng", "threefry")
+        self.__dict__.setdefault("_rproc_check", True)
         if "par_trans" in state and "_par_trans" not in state:
             self._par_trans = state["par_trans"]
 

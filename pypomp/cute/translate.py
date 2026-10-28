@@ -748,11 +748,47 @@ def _view_reshape(v: _View, shape: tuple[int, ...]) -> _View | None:
     return _View(v.base, tuple(shape), strides, v.dtype)
 
 
+# Most candidates a runtime index may pick among in registers, per element read.
+_MAX_PICK = 64
+
+
+def _pick(
+    x: np.ndarray, pos: list[_Scalar], ranges: list[tuple[Any, Any]], dtype: Any
+) -> _Scalar:
+    """Return ``x[pos]`` for object array `x`, where ``pos[d]`` may be a runtime
+    index known to lie in ``ranges[d]``, by a tree of selects over the candidates."""
+    d = next((d for d, p in enumerate(pos) if _is_dsl(p)), None)
+    if d is None:
+        return x[tuple(int(p) for p in pos)]
+
+    def tree(lo: int, hi: int) -> _Scalar:
+        if lo == hi:
+            return _pick(x, [*pos[:d], lo, *pos[d + 1 :]], ranges, dtype)
+        mid = (lo + hi + 1) // 2
+        lt = pos[d] < cutlass.Int32(mid)
+        return _select(lt, tree(lo, mid - 1), tree(mid, hi), dtype)
+
+    return tree(*ranges[d])
+
+
+def _pick_count(eqn: Any, runtime: list[bool]) -> int:
+    """Return how many candidates each element of dynamic_slice or gather `eqn`
+    selects among when its operand is in registers; ``runtime[d]`` says whether
+    dynamic_slice's start index d is a runtime value."""
+    shape, sizes = _shape(eqn.invars[0]), eqn.params["slice_sizes"]
+    if eqn.primitive.name == "gather":
+        dims = eqn.params["dimension_numbers"].start_index_map
+    else:
+        dims = [d for d, r in enumerate(runtime) if r]
+    return math.prod(shape[d] - sizes[d] + 1 for d in dims)
+
+
 def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     """Return XLA's gather of operand `x` at start indices `idx`.
 
-    `x` is a view, a constant table or an object array; a runtime start index
-    needs one of the first two, whose elements are then loaded.
+    `x` is a view, a constant table or an object array. At a runtime start index,
+    a view's or table's elements are loaded from the table buffer, and an object
+    array's are selected among in registers.
     """
     p = eqn.params
     dn = p["dimension_numbers"]
@@ -765,9 +801,10 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     ndim = len(sizes)
     offset_src = [d for d in range(ndim) if d not in collapsed]
     runtime = any(_is_dsl(e) for e in idx.flat)
-    if runtime and not isinstance(x, _View):
-        if isinstance(x, np.ndarray) and x.dtype == object and not _all_const([x]):
-            raise NotImplementedError("gather from runtime values at a runtime index")
+    in_regs = runtime and not isinstance(x, _View) and not _all_const([x])
+    if in_regs and _pick_count(eqn, []) > _MAX_PICK:
+        raise NotImplementedError("gather of many runtime values at a runtime index")
+    if runtime and not in_regs and not isinstance(x, _View):
         x = _table_view(x, dtype, ctx)
     # Out-of-bounds starts are clamped, except that "fill" mode returns its fill
     # value for the whole slice.
@@ -778,6 +815,7 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     for o in np.ndindex(*shape) if shape else [()]:
         b = tuple(o[d] for d in batch_dims)
         pos: list[_Scalar] = [0] * ndim
+        ranges: list[tuple[Any, Any]] = [(0, 0)] * ndim
         inside: list[_Scalar] = []
         for k, d in enumerate(dn.start_index_map):
             s, hi = idx[b + (k,)], x.shape[d] - sizes[d]
@@ -788,11 +826,14 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
                     if _is_dsl(si)
                     else 0 <= si <= hi
                 )
-            pos[d] = _clamp(s, hi)
+            pos[d], ranges[d] = _clamp(s, hi), (0, hi)
         for od, d in zip(offset_dims, offset_src, strict=True):
             pos[d] = pos[d] + o[od]
+            ranges[d] = (ranges[d][0] + o[od], ranges[d][1] + o[od])
         if isinstance(x, _View):
             val = _load(ctx, _offset(x, tuple(pos)), x.dtype)
+        elif in_regs:
+            val = _pick(_obj(x), pos, ranges, dtype)
         else:
             val = _obj(x)[tuple(int(q) for q in pos)]
         for ok in inside:
@@ -979,14 +1020,29 @@ def _eval_eqn(
     if name == "dynamic_slice":
         starts = ins[1:]
         sizes = eqn.params["slice_sizes"]
+        if (
+            not isinstance(ins[0], _View)
+            and not _all_const(starts)
+            and not _all_const([ins[0]])
+        ):
+            # Runtime values at a runtime start: select among them in registers.
+            if _pick_count(eqn, [not _all_const([s]) for s in starts]) > _MAX_PICK:
+                raise NotImplementedError(
+                    "dynamic_slice of many runtime values at a runtime index"
+                )
+            x = _obj(ins[0])
+            hi = [n - k for n, k in zip(x.shape, sizes, strict=True)]
+            st = [_clamp(s, h) for s, h in zip(starts, hi, strict=True)]
+            out = np.empty(sizes, dtype=object)
+            for o in np.ndindex(*sizes) if sizes else [()]:
+                pos = [s + i for s, i in zip(st, o, strict=True)]
+                ranges = [(i, h + i) for h, i in zip(hi, o, strict=True)]
+                out[o] = _pick(x, pos, ranges, in_dt[0])
+            return [out]
         if isinstance(ins[0], _View) or not _all_const(starts):
-            # A runtime start needs the operand in memory: a table, or part of one.
+            # A runtime start of a constant operand reads it from the table buffer.
             x = ins[0]
             if not isinstance(x, _View):
-                if not _all_const([x]):
-                    raise NotImplementedError(
-                        "dynamic_slice of runtime values at a runtime index"
-                    )
                 x = _table_view(x, in_dt[0], ctx)
             st = [
                 _clamp(s, n - k) for s, n, k in zip(starts, x.shape, sizes, strict=True)
@@ -1621,8 +1677,13 @@ def _runtime(jaxpr: Any, marks: list[Any], bad: set[str]) -> list[Any]:
             if dt is not None and not _is_key(dt) and np.dtype(dt) not in _DSL:
                 bad.add(f"{np.dtype(dt)} values")
         if (
-            name in ("dynamic_slice", "gather") and any(ins[1:]) and ins[0] is True
-        ) or (name == "dynamic_update_slice" and any(ins[2:])):
+            name in ("dynamic_slice", "gather")
+            and any(ins[1:])
+            and ins[0] is True
+            and _pick_count(eqn, reg(ins[1:])) > _MAX_PICK
+        ):
+            bad.add(f"{name} of many runtime values at a runtime index")
+        if name == "dynamic_update_slice" and any(ins[2:]):
             bad.add(f"{name} of runtime values at a runtime index")
         if name == "gather" and p["dimension_numbers"].operand_batching_dims:
             bad.add("gather with batching dimensions")

@@ -89,19 +89,32 @@ def table_rproc(X_, theta_, key, covars, t, dt):
     return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
 
 
+def picks_rproc(X_, theta_, key, covars, t, dt):
+    # Runtime values read at runtime indices, some out of range: a negative index
+    # wraps, then dynamic_slice clamps and "fill" mode fills.
+    z = X_["x"]
+    w = jnp.stack([z, theta_["r"] * z, -z, z * z])
+    i = jnp.floor((z + 2.0) * 3.0).astype(jnp.int32) - 2
+    rows = jax.lax.dynamic_slice(w.reshape(2, 2), (i % 3 - 1, 0), (1, 2))
+    edge = w.at[i].get(mode="fill", fill_value=0.5)
+    nudge = 0.1 * w[i] + 0.05 * rows.sum() + 0.1 * edge
+    return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
+
+
 def dpop_rproc(X_, theta_, key, covars, t, dt):
     out = sde_rproc(X_, theta_, key, covars, t, dt)
     # Any function of theta shows whether _logw is reset at each observation.
     return {"x": out["x"], "_logw": X_["_logw"] + theta_["r"] * out["x"] * dt}
 
 
-def sde_model(rproc=sde_rproc, statenames=("x",), covars=None):
+def sde_dmeas(Y_, X_, theta_, covars, t):
+    return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], theta_["tau"])
+
+
+def sde_model(rproc=sde_rproc, statenames=("x",), covars=None, dmeas=sde_dmeas):
     def rinit(theta_, key, covars, t0):
         x0 = theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)
         return {"x": x0, **{n: 0.0 for n in statenames[1:]}}
-
-    def dmeas(Y_, X_, theta_, covars, t):
-        return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], theta_["tau"])
 
     T = 40
     ys = pd.DataFrame(
@@ -192,8 +205,9 @@ def interval(model, struct, J, R, i_obs=3):
         lambda: sde_model(vectorized_rproc),
         lambda: sde_model(int_ops_rproc),
         table_model,
+        lambda: sde_model(picks_rproc),
     ],
-    ids=["sde", "he10", "reshape", "vectorized", "int_ops", "tables"],
+    ids=["sde", "he10", "reshape", "vectorized", "int_ops", "tables", "picks"],
 )
 @pytest.mark.parametrize("rng", ["threefry", "philox"])
 def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
@@ -424,10 +438,10 @@ def sorts(X_, theta_, key, covars, t, dt):
     return {"x": z + jnp.sort(jnp.stack([z, -z]))[0] * dt}
 
 
-def runtime_index(X_, theta_, key, covars, t, dt):
+def runtime_index_of_many(X_, theta_, key, covars, t, dt):
     z = X_["x"]
-    i = jnp.asarray(t > 1.0, jnp.int32)
-    return {"x": z + jax.lax.dynamic_index_in_dim(jnp.stack([z, -z]), i, 0, False) * dt}
+    i = jnp.asarray(t, jnp.int32)
+    return {"x": z + (z * jnp.arange(100.0))[i] * dt}
 
 
 def rounds(X_, theta_, key, covars, t, dt):
@@ -454,7 +468,7 @@ def uses_J(X_, theta_, key, covars, t, dt):
 
 @pytest.mark.parametrize(
     "rproc",
-    [sorts, runtime_index, rounds, particle_mean, particles_first, uses_J],
+    [sorts, runtime_index_of_many, rounds, particle_mean, particles_first, uses_J],
     ids=lambda f: f.__name__,
 )
 def test_rprocs_the_kernel_cannot_run_exactly_stay_on_xla(rproc):

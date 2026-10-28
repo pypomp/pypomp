@@ -7,7 +7,7 @@ import pytest
 import pypomp as pp
 import pypomp.cute
 
-from .test_cute_backend import normal_dmeas, sde_model, uneven_model
+from .test_cute_backend import sde_dmeas, sde_model, uneven_model
 
 
 @pytest.fixture(autouse=True)
@@ -21,9 +21,10 @@ def sorts(X_, theta_, key, covars, t, dt):
 
 
 def dmeas_at_runtime_index(Y_, X_, theta_, covars, t):
-    v = jnp.stack([X_["x"], 2 * X_["x"]])
-    i = jnp.asarray(X_["x"] > 0, jnp.int32)
-    return normal_dmeas(Y_, {"x": v[i]}, theta_, covars, t)
+    # Too many runtime values to select among in registers.
+    v = X_["x"] * jnp.arange(100.0)
+    i = jnp.clip(jnp.round(10 * X_["x"]).astype(jnp.int32), 0, 99)
+    return sde_dmeas(Y_, {"x": v[i]}, theta_, covars, t)
 
 
 @pp.vectorized

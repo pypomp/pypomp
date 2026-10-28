@@ -313,8 +313,13 @@ def _runtime(
             if dt is not None and not _is_key(dt) and np.dtype(dt) not in _DTYPES:
                 _note(bad, f"{np.dtype(dt)} values", src)
         if (
-            name in ("dynamic_slice", "gather") and any(ins[1:]) and ins[0] is True
-        ) or (name == "dynamic_update_slice" and any(ins[2:])):
+            name in ("dynamic_slice", "gather")
+            and any(ins[1:])
+            and ins[0] is True
+            and _pick_count(eqn, reg(ins[1:])) > _MAX_PICK
+        ):
+            _note(bad, f"{name} of many runtime values at a runtime index", src)
+        if name == "dynamic_update_slice" and any(ins[2:]):
             _note(bad, f"{name} of runtime values at a runtime index", src)
         if name == "gather" and p["dimension_numbers"].operand_batching_dims:
             _note(bad, "gather with batching dimensions", src)
@@ -353,6 +358,22 @@ def _runtime(
             outs = [any(ins)] * len(eqn.outvars)
         env.update(zip(eqn.outvars, outs, strict=True))
     return [rt(v) for v in jaxpr.outvars]
+
+
+# Most candidates a runtime index may pick among in registers, per element read.
+_MAX_PICK = 64
+
+
+def _pick_count(eqn: Any, runtime: list[bool]) -> int:
+    """Return how many candidates each element of dynamic_slice or gather `eqn`
+    selects among when its operand is in registers; ``runtime[d]`` says whether
+    dynamic_slice's start index d is a runtime value."""
+    shape, sizes = _shape(eqn.invars[0]), eqn.params["slice_sizes"]
+    if eqn.primitive.name == "gather":
+        dims = eqn.params["dimension_numbers"].start_index_map
+    else:
+        dims = [d for d, r in enumerate(runtime) if r]
+    return math.prod(shape[d] - sizes[d] + 1 for d in dims)
 
 
 def _keeps_view(eqn: Any) -> bool:

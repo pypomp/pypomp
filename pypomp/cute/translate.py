@@ -13,6 +13,9 @@ data read at the current week, can't be registers. :func:`_runtime_tables` finds
 them, the kernel takes them in one buffer, and a runtime-indexed slice of one is a
 :class:`_View` whose elements are loaded where they are used.
 
+:func:`_hoist` splits off the part of a jaxpr that depends only on inputs every
+particle of a filter shares, for XLA to compute once per filter.
+
 Random numbers follow ``ctx.rng``. With "threefry" they are JAX's (partitionable)
 threefry: element f of a flattened draw is the XOR of the two Threefry2x32-20 words
 for counter (0, f), and split and fold_in keys are both words. With "philox" they
@@ -49,10 +52,12 @@ from cutlass._mlir.dialects import llvm as _llvm  # pyright: ignore[reportMissin
 
 from .analysis import (
     _CALLS,
+    _MAX_PICK,
     _DTYPES,
     _ELEMENTWISE,
     _IDENTITY,
     _is_key,
+    _pick_count,
     _shape,
     _sub_jaxpr,
 )
@@ -640,11 +645,31 @@ def _view_reshape(v: _View, shape: tuple[int, ...]) -> _View | None:
     return _View(v.base, tuple(shape), strides, v.dtype)
 
 
+def _pick(
+    x: np.ndarray, pos: list[_Scalar], ranges: list[tuple[Any, Any]], dtype: Any
+) -> _Scalar:
+    """Return ``x[pos]`` for object array `x`, where ``pos[d]`` may be a runtime
+    index known to lie in ``ranges[d]``, by a tree of selects over the candidates."""
+    d = next((d for d, p in enumerate(pos) if _is_dsl(p)), None)
+    if d is None:
+        return x[tuple(int(p) for p in pos)]
+
+    def tree(lo: int, hi: int) -> _Scalar:
+        if lo == hi:
+            return _pick(x, [*pos[:d], lo, *pos[d + 1 :]], ranges, dtype)
+        mid = (lo + hi + 1) // 2
+        lt = pos[d] < cutlass.Int32(mid)
+        return _select(lt, tree(lo, mid - 1), tree(mid, hi), dtype)
+
+    return tree(*ranges[d])
+
+
 def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     """Return XLA's gather of operand `x` at start indices `idx`.
 
-    `x` is a view, a constant table or an object array; a runtime start index
-    needs one of the first two, whose elements are then loaded.
+    `x` is a view, a constant table or an object array. At a runtime start index,
+    a view's or table's elements are loaded from the table buffer, and an object
+    array's are selected among in registers.
     """
     p = eqn.params
     dn = p["dimension_numbers"]
@@ -657,9 +682,10 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     ndim = len(sizes)
     offset_src = [d for d in range(ndim) if d not in collapsed]
     runtime = any(_is_dsl(e) for e in idx.flat)
-    if runtime and not isinstance(x, _View):
-        if isinstance(x, np.ndarray) and x.dtype == object and not _all_const([x]):
-            raise NotImplementedError("gather from runtime values at a runtime index")
+    in_regs = runtime and not isinstance(x, _View) and not _all_const([x])
+    if in_regs and _pick_count(eqn, []) > _MAX_PICK:
+        raise NotImplementedError("gather of many runtime values at a runtime index")
+    if runtime and not in_regs and not isinstance(x, _View):
         x = _table_view(x, dtype, ctx)
     # Out-of-bounds starts are clamped, except that "fill" mode returns its fill
     # value for the whole slice.
@@ -670,6 +696,7 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
     for o in np.ndindex(*shape) if shape else [()]:
         b = tuple(o[d] for d in batch_dims)
         pos: list[_Scalar] = [0] * ndim
+        ranges: list[tuple[Any, Any]] = [(0, 0)] * ndim
         inside: list[_Scalar] = []
         for k, d in enumerate(dn.start_index_map):
             s, hi = idx[b + (k,)], x.shape[d] - sizes[d]
@@ -680,11 +707,14 @@ def _gather(eqn: Any, x: Any, dtype: Any, idx: Any, ctx: _Ctx) -> np.ndarray:
                     if _is_dsl(si)
                     else 0 <= si <= hi
                 )
-            pos[d] = _clamp(s, hi)
+            pos[d], ranges[d] = _clamp(s, hi), (0, hi)
         for od, d in zip(offset_dims, offset_src, strict=True):
             pos[d] = pos[d] + o[od]
+            ranges[d] = (ranges[d][0] + o[od], ranges[d][1] + o[od])
         if isinstance(x, _View):
             val = _load(ctx, _offset(x, tuple(pos)), x.dtype)
+        elif in_regs:
+            val = _pick(_obj(x), pos, ranges, dtype)
         else:
             val = _obj(x)[tuple(int(q) for q in pos)]
         for ok in inside:
@@ -866,14 +896,29 @@ def _eval_eqn(
     if name == "dynamic_slice":
         starts = ins[1:]
         sizes = eqn.params["slice_sizes"]
+        if (
+            not isinstance(ins[0], _View)
+            and not _all_const(starts)
+            and not _all_const([ins[0]])
+        ):
+            # Runtime values at a runtime start: select among them in registers.
+            if _pick_count(eqn, [not _all_const([s]) for s in starts]) > _MAX_PICK:
+                raise NotImplementedError(
+                    "dynamic_slice of many runtime values at a runtime index"
+                )
+            x = _obj(ins[0])
+            hi = [n - k for n, k in zip(x.shape, sizes, strict=True)]
+            st = [_clamp(s, h) for s, h in zip(starts, hi, strict=True)]
+            out = np.empty(sizes, dtype=object)
+            for o in np.ndindex(*sizes) if sizes else [()]:
+                pos = [s + i for s, i in zip(st, o, strict=True)]
+                ranges = [(i, h + i) for h, i in zip(hi, o, strict=True)]
+                out[o] = _pick(x, pos, ranges, in_dt[0])
+            return [out]
         if isinstance(ins[0], _View) or not _all_const(starts):
-            # A runtime start needs the operand in memory: a table, or part of one.
+            # A runtime start of a constant operand reads it from the table buffer.
             x = ins[0]
             if not isinstance(x, _View):
-                if not _all_const([x]):
-                    raise NotImplementedError(
-                        "dynamic_slice of runtime values at a runtime index"
-                    )
                 x = _table_view(x, in_dt[0], ctx)
             st = [
                 _clamp(s, n - k) for s, n, k in zip(starts, x.shape, sizes, strict=True)
@@ -1437,3 +1482,175 @@ def _find_tables(
             outs = [None] * n_out
         env.update(zip(eqn.outvars, outs, strict=True))
     return [read(v) for v in jaxpr.outvars]
+
+
+# Most elements one hoisted value may have, and all of a step's together. A larger
+# value, such as a table's row that a particle indexes, is computed in the kernel
+# instead, from smaller hoisted inputs.
+_MAX_HOISTED = 32
+_MAX_HOISTED_TOTAL = 256
+_HOISTABLE = {
+    np.dtype("float32"),
+    np.dtype("int32"),
+    np.dtype("uint32"),
+    np.dtype("bool"),
+}
+
+
+@dataclass(frozen=True)
+class _Hoisted:
+    """A jaxpr split into what every particle of a filter shares and the rest.
+
+    ``shared`` maps the inputs marked shared to the hoisted values, which XLA
+    evaluates once per filter (and step); ``rest`` maps all the original inputs,
+    then the hoisted values, to the original outputs."""
+
+    shared: ClosedJaxpr
+    rest: ClosedJaxpr
+    avals: tuple[tuple[tuple[int, ...], np.dtype], ...]
+    """The hoisted values' shapes and dtypes."""
+
+
+def _struct(v: Any) -> jax.ShapeDtypeStruct:
+    """Return the shape and dtype of jaxpr variable `v`."""
+    return jax.ShapeDtypeStruct(v.aval.shape, v.aval.dtype)
+
+
+def _eval_jaxpr(
+    jaxpr: Any,
+    consts: list[Any],
+    args: list[Any],
+    eqns: list[Any],
+    known: dict[Any, Any] | None = None,
+) -> dict:
+    """Return the values of `jaxpr`'s variables after binding `eqns`, some of its
+    equations, given values `known` of some variables; `args` may hold None for
+    inputs that none of `eqns` reads."""
+    env: dict[Any, Any] = dict(zip(jaxpr.constvars, consts, strict=True))
+    env.update(zip(jaxpr.invars, args, strict=True))
+    env.update(known or {})
+    for eqn in eqns:
+        ins = [v.val if isinstance(v, Literal) else env[v] for v in eqn.invars]
+        out = eqn.primitive.bind(*ins, **eqn.primitive.get_bind_params(eqn.params))
+        outs = out if eqn.primitive.multiple_results else [out]
+        env.update(zip(eqn.outvars, outs, strict=True))
+    return env
+
+
+def _inline_mixed(cj: ClosedJaxpr, shared: list[bool]) -> ClosedJaxpr:
+    """Return `cj` with each call that takes both shared and per-particle values
+    inlined, so its shared part can be hoisted, unless it is large enough that the
+    translator would outline it."""
+
+    def run(jaxpr: Any, consts: list[Any], args: list[Any], marks: list[int]):
+        env = dict(zip(jaxpr.constvars, consts, strict=True))
+        env.update(zip(jaxpr.invars, args, strict=True))
+        mk = {v: 0 for v in jaxpr.constvars}
+        mk.update(zip(jaxpr.invars, marks, strict=True))
+        for eqn in jaxpr.eqns:
+            ins = [v.val if isinstance(v, Literal) else env[v] for v in eqn.invars]
+            ms = [0 if isinstance(v, Literal) else mk[v] for v in eqn.invars]
+            if (
+                eqn.primitive.name in _CALLS
+                and {1, 2} <= set(ms)
+                and _size(_sub_jaxpr(eqn)) < _OUTLINE_MIN_EQNS
+            ):
+                sub = _sub_jaxpr(eqn)
+                outs, oms = run(sub.jaxpr, list(sub.consts), ins, ms)
+            else:
+                p = eqn.primitive.get_bind_params(eqn.params)
+                out = eqn.primitive.bind(*ins, **p)
+                outs = out if eqn.primitive.multiple_results else [out]
+                oms = [max(ms, default=0)] * len(outs)
+            env.update(zip(eqn.outvars, outs, strict=True))
+            mk.update(zip(eqn.outvars, oms, strict=True))
+        read = lambda v: v.val if isinstance(v, Literal) else env[v]  # noqa: E731
+        mread = lambda v: 0 if isinstance(v, Literal) else mk[v]  # noqa: E731
+        return [read(v) for v in jaxpr.outvars], [mread(v) for v in jaxpr.outvars]
+
+    marks = [1 if s else 2 for s in shared]
+    avals = [_struct(v) for v in cj.jaxpr.invars]
+    return jax.make_jaxpr(lambda *a: run(cj.jaxpr, list(cj.consts), list(a), marks)[0])(
+        *avals
+    )
+
+
+def _hoist(cj: ClosedJaxpr, shared: list[bool]) -> _Hoisted | None:
+    """Split `cj` so that what depends only on the inputs marked `shared` (and on
+    constants) runs once per filter, or return None if nothing is worth hoisting.
+
+    XLA's vmap over particles computes such values once; a kernel thread per
+    particle would otherwise compute them, table reads included, in every thread.
+    """
+    flat = _inline_mixed(cj, shared)
+    jaxpr, eqns = flat.jaxpr, flat.jaxpr.eqns
+    # 0: a constant, 1: shared by the filter's particles, 2: per particle.
+    mark: dict[Any, int] = {v: 0 for v in jaxpr.constvars}
+    mark.update({v: 1 if s else 2 for v, s in zip(jaxpr.invars, shared, strict=True)})
+    eq_mark: list[int] = []
+    defined: dict[Any, int] = {}
+    for i, eqn in enumerate(eqns):
+        vs = [v for v in eqn.invars if not isinstance(v, Literal)]
+        eq_mark.append(max((mark[v] for v in vs), default=0))
+        for v in eqn.outvars:
+            mark[v], defined[v] = eq_mark[i], i
+    shared_vars = lambda vs: [  # noqa: E731
+        v
+        for v in vs
+        if not isinstance(v, Literal) and mark[v] == 1 and v not in jaxpr.invars
+    ]
+    # The kernel's equations: per-particle ones, constants, which the translator
+    # folds, and shared ones whose output is too large to hoist.
+    in_kernel = {i for i, m in enumerate(eq_mark) if m != 1}
+    while True:
+        res = {
+            v: None
+            for i in sorted(in_kernel)
+            for v in shared_vars(eqns[i].invars)
+            if defined[v] not in in_kernel
+        } | dict.fromkeys(shared_vars(jaxpr.outvars))
+        big = [
+            defined[v]
+            for v in res
+            if math.prod(v.aval.shape) > _MAX_HOISTED
+            or np.dtype(v.aval.dtype) not in _HOISTABLE
+        ]
+        if not big:
+            break
+        in_kernel.update(big)
+    res = list(res)
+    if (
+        not res
+        or len(in_kernel) == len(eqns)
+        or sum(math.prod(v.aval.shape) for v in res) > _MAX_HOISTED_TOTAL
+    ):
+        return None
+    consts = list(flat.consts)
+
+    def shared_fn(*a):
+        it = iter(a)
+        args = [next(it) if s else None for s in shared]
+        env = _eval_jaxpr(
+            jaxpr,
+            consts,
+            args,
+            [e for e, m in zip(eqns, eq_mark, strict=True) if m <= 1],
+        )
+        return [env[v] for v in res]
+
+    def rest_fn(*a):
+        n = len(jaxpr.invars)
+        kernel_eqns = [eqns[i] for i in sorted(in_kernel)]
+        env = _eval_jaxpr(
+            jaxpr, consts, list(a[:n]), kernel_eqns, dict(zip(res, a[n:], strict=True))
+        )
+        return [v.val if isinstance(v, Literal) else env[v] for v in jaxpr.outvars]
+
+    in_avals = [_struct(v) for v in jaxpr.invars]
+    return _Hoisted(
+        shared=jax.make_jaxpr(shared_fn)(
+            *[a for a, s in zip(in_avals, shared, strict=True) if s]
+        ),
+        rest=jax.make_jaxpr(rest_fn)(*in_avals, *[_struct(v) for v in res]),
+        avals=tuple((tuple(v.aval.shape), np.dtype(v.aval.dtype)) for v in res),
+    )

@@ -69,14 +69,31 @@ def unfused(struct):
     )
 
 
+# Each observation's scale is one of three functions of theta, picked by a table read
+# at the observation's index.
+_CODES = np.arange(41, dtype=np.int32) % 3
+
+
+def picks_dmeas(Y_, X_, theta_, covars, t):
+    tau = theta_["tau"]
+    f = jnp.stack([0.5 * tau, tau, 2.0 * tau])
+    k = jnp.clip(jnp.round(t), 0, 40).astype(jnp.int32)
+    return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], f[jnp.asarray(_CODES)[k]])
+
+
 # A density evaluated in the kernel rounds differently from XLA's, which moves the
 # odd systematic resampling index, so whole filters agree only in distribution.
 
 
 @pytest.mark.parametrize(
     ("make", "rng"),
-    [(sde_model, "threefry"), (he10_model, "threefry"), (sde_model, "philox")],
-    ids=["sde", "he10", "sde-philox"],
+    [
+        (sde_model, "threefry"),
+        (he10_model, "threefry"),
+        (sde_model, "philox"),
+        (lambda: sde_model(dmeas=picks_dmeas), "threefry"),
+    ],
+    ids=["sde", "he10", "sde-philox", "picks"],
 )
 def test_fused_density_matches_the_separate_one(make, rng):
     model = make()

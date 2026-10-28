@@ -11,7 +11,10 @@ The rest of the particle filter is pypomp's own. The substep keys are split as
 ``rng`` names: JAX's threefry, so its random numbers are XLA's, or pypomp's
 Philox4x32-10 (:mod:`pypomp.random.philox`), which costs fewer instructions.
 Constant tables that the step reads at runtime indices reach every kernel in one
-buffer argument (see ``translate.py``).
+buffer argument (see ``translate.py``). What every particle of a filter shares, the
+part of the step and density that depends only on the time, covariates, observation
+and, unless each particle has its own, the parameters, runs once per filter on XLA,
+and the kernel reads the results from each step's row of the step table.
 
 Gradients go through ``jax.custom_vjp``. When JAX differentiates through an interval,
 the forward kernel also stores each Euler step's input state (nstep x ns floats per
@@ -40,10 +43,11 @@ import numpy as np
 
 import cutlass  # pyright: ignore[reportMissingImports]
 from cutlass.jax import cutlass_call  # pyright: ignore[reportMissingImports]
+from jax.extend.core import jaxpr_as_fun
 
 from . import KernelRProc
 from . import translate as ct
-from .analysis import _Traced
+from .analysis import _Traced, _untranslatable
 from .resample import resample as _resample_kernel
 
 if TYPE_CHECKING:
@@ -81,6 +85,11 @@ class _Spec(NamedTuple):
     offsets: dict[tuple, int]
     """Where each table the step reads at runtime indices starts in the kernels'
     table buffer (see :func:`translate._runtime_tables`)."""
+    res: tuple[tuple[tuple[int, ...], np.dtype], ...]
+    """Shapes and dtypes of the values hoisted out of the step (see
+    :func:`translate._hoist`), which follow the covariates in each step's row."""
+    dm_res: tuple[tuple[tuple[int, ...], np.dtype], ...]
+    """The same for the density, whose values end each observation's row."""
     fixed: bool
     """Whether every interval has `nstep` Euler steps; otherwise `nstep` is the
     most any has, and each launch reads its intervals' counts."""
@@ -163,8 +172,10 @@ def _step_once(
     b: _Scalar,
     j: _Scalar,
     k: _Scalar,
+    res: tuple = (),
 ) -> tuple[_Scalar, ...]:
-    """Return the state after Euler step k; k may be a runtime loop index."""
+    """Return the state after Euler step k; k may be a runtime loop index. The
+    values `res` describes, hoisted out of the step, follow the covariates."""
     ctx = ct._Ctx(vectorized_J=J if vec else None, particle=j, rng=rng, tables=tb)
     k0, k1 = _step_keys(vec, rng, KEYS, b, j, k)
     cov = np.empty(nc, dtype=object)
@@ -179,6 +190,7 @@ def _step_once(
             cov,
             ct._obj(TAB[b, k, 0]),
             ct._obj(TAB[b, k, 1]),
+            *_read_hoisted(lambda c: TAB[b, k, 2 + nc + c], res),
         ],
         ctx,
     )
@@ -195,9 +207,11 @@ def _dmeas_once(
     OBS: _Tensor,
     tb: ct._Tables,
     b: _Scalar,
+    res: tuple = (),
 ) -> _Scalar:
     """Return the measurement log-density of state `xs`; OBS[b] holds filter b's
-    observation, then the observation time and its covariates."""
+    observation, then the observation time, its covariates and the values `res`
+    describes, hoisted out of the density."""
     y = np.empty(ny, dtype=object)
     for i in range(ny):
         y[i] = OBS[b, i]
@@ -205,10 +219,43 @@ def _dmeas_once(
     for c in range(ncd):
         cov[c] = OBS[b, ny + 1 + c]
     ctx = ct._Ctx(vectorized_J=None, particle=None, rng=rng, tables=tb)
+    hoisted = _read_hoisted(lambda c: OBS[b, ny + 1 + ncd + c], res)
     (out,) = ct._interpret(
-        dm_j, [y, ct._obj(list(xs)), th, cov, ct._obj(OBS[b, ny])], ctx
+        dm_j, [y, ct._obj(list(xs)), th, cov, ct._obj(OBS[b, ny]), *hoisted], ctx
     )
     return ct._as_dsl(np.asarray(out, dtype=object).reshape(-1)[0], np.float32)
+
+
+def _read_hoisted(col: Callable[[int], _Scalar], res: tuple) -> list[np.ndarray]:
+    """Return the hoisted values `res` describes, from consecutive float32 columns
+    ``col(0), col(1), ...`` that hold their bits (see :func:`_as_columns`)."""
+    out, c = [], 0
+    for shape, dtype in res:
+        a = np.empty(shape, dtype=object)
+        for idx in np.ndindex(*shape) if shape else [()]:
+            v = col(c)
+            if dtype == np.bool_:
+                v = v != cutlass.Float32(0.0)
+            elif dtype != np.float32:
+                v = v.bitcast(ct._DSL[dtype])
+            a[idx] = v
+            c += 1
+        out.append(a)
+    return out
+
+
+def _as_columns(vals: list[jax.Array], lead: int) -> jax.Array:
+    """Return hoisted values, each with `lead` leading axes, as float32 columns
+    holding their bits, or booleans as 0 and 1."""
+    cols = []
+    for v in vals:
+        v = v.reshape(v.shape[:lead] + (-1,))
+        if v.dtype == jnp.bool_:
+            v = v.astype(jnp.float32)
+        elif v.dtype != jnp.float32:
+            v = jax.lax.bitcast_convert_type(v, jnp.float32)
+        cols.append(v)
+    return jnp.concatenate(cols, axis=-1)
 
 
 def _perturb(
@@ -357,7 +404,19 @@ from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _table
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, fixed = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
+    fixed = spec.fixed
+    res = spec.res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OUT: cute.Tensor, N: cutlass.Int32):
@@ -373,7 +432,7 @@ def make(spec, J, transform, block):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(_nsteps(NS, b, NSTEP, fixed)):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
 
     @cute.jit
@@ -394,7 +453,19 @@ from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _save,
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, fixed = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
+    fixed = spec.fixed
+    res = spec.res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OUT: cute.Tensor, H: cute.Tensor, N: cutlass.Int32):
@@ -411,7 +482,7 @@ def make(spec, J, transform, block):
             {xs} = xs0
             for k in range(_nsteps(NS, b, NSTEP, fixed)):
                 _save(H, g, k, ({xs}))
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
 
     @cute.jit
@@ -432,7 +503,23 @@ from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _dmeas
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, fixed = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    dm_j = spec.dm_j
+    ny = spec.ny
+    ncd = spec.ncd
+    offsets = spec.offsets
+    fixed = spec.fixed
+    res = spec.res
+    dm_res = spec.dm_res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
@@ -448,9 +535,9 @@ def make(spec, J, transform, block):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(_nsteps(NS, b, NSTEP, fixed)):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
-            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b)
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b, dm_res)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
@@ -470,7 +557,24 @@ from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _dmeas
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, fixed = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    dm_j = spec.dm_j
+    ny = spec.ny
+    ncd = spec.ncd
+    noise_j = spec.noise_j
+    offsets = spec.offsets
+    fixed = spec.fixed
+    res = spec.res
+    dm_res = spec.dm_res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor, SIG: cute.Tensor,
                KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor,
@@ -488,9 +592,9 @@ def make(spec, J, transform, block):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
             for k in range(_nsteps(NS, b, NSTEP, fixed)):
-                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k)
+                {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
-            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b)
+            W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b, dm_res)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor,
@@ -512,7 +616,19 @@ from pypomp.cute.kernel import _nsteps, _load_th, _prep, _hist, _load_g, _zeros,
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, fixed = spec
+    prep_j = spec.prep_j
+    step_vjp_j = spec.step_vjp_j
+    prep_vjp_j = spec.prep_vjp_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
+    fixed = spec.fixed
     @cute.kernel
     def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
@@ -631,6 +747,13 @@ def _perturbation(
     )
 
 
+def _hoist(cj: ct.ClosedJaxpr, shared: list[bool]) -> ct._Hoisted | None:
+    """Return `cj` split by :func:`translate._hoist`, if the kernel's part
+    translates, else None."""
+    h = ct._hoist(cj, shared)
+    return None if h is None or _untranslatable(h.rest) else h
+
+
 def _make_rprocess_interp(
     model: Pomp,
     traced: _Traced,
@@ -653,12 +776,20 @@ def _make_rprocess_interp(
     if dm is not None:
         dmeas_xla = dm.mechanics_per if per_particle else dm.mechanics_pf
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
+    # What a filter's particles share runs once per filter and step on XLA: the
+    # covariates, times and observation, and the parameters unless every particle
+    # has its own.
+    hs = _hoist(step_j, [False, not per_particle, False, True, True, True])
+    hd = None
+    if dm_j is not None:
+        hd = _hoist(dm_j, [True, False, not per_particle, True, True])
     jaxprs = [step_j, prep_j, step_vjp_j, prep_vjp_j]
+    jaxprs += [h.rest for h in (hs, hd) if h is not None]
     if dm_j is not None:
         jaxprs.append(dm_j)
     data, offsets = ct._pack_tables(ct._runtime_tables(jaxprs))
     spec = _Spec(
-        step_j=step_j,
+        step_j=step_j if hs is None else hs.rest,
         prep_j=prep_j,
         step_vjp_j=step_vjp_j,
         prep_vjp_j=prep_vjp_j,
@@ -670,11 +801,13 @@ def _make_rprocess_interp(
         acc=(),
         per_particle=per_particle,
         rng=rng,
-        dm_j=dm_j,
+        dm_j=dm_j if hd is None else hd.rest,
         ny=0 if dm is None else len(dm.y_names),
         ncd=0 if dm is None else len(dm.covar_names),
         noise_j=_trace_noise(len(rp.param_names)),
         offsets=offsets,
+        res=() if hs is None else hs.avals,
+        dm_res=() if hd is None else hd.avals,
         fixed=rp.nstep is not None,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
@@ -689,7 +822,7 @@ def _make_rprocess_interp(
 
     def flatten(th: jax.Array, sk: jax.Array, tab: jax.Array, B: int, J: int):
         TH = th.reshape(B * J if per_particle else B, nth)
-        return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, 2 + nc)
+        return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, tab.shape[-1])
 
     def steps(n: jax.Array, lead: tuple[int, ...]) -> jax.Array:
         """Return the kernel's per-filter step counts from `n`, of shape `lead` or
@@ -698,7 +831,8 @@ def _make_rprocess_interp(
 
     def make_core(transform: bool, acc: tuple[int, ...]) -> _Cores:
         # Shapes: Xp (..., J, ns); th (..., d), or (..., J, d) per particle;
-        # sk (..., nstep, 2); tab (..., nstep, 2 + nc); n (...,), the step counts.
+        # sk (..., nstep, 2); tab (..., nstep, 2 + nc + hoisted); n (...,), the step
+        # counts.
         @jax.custom_batching.custom_vmap
         def core(Xp, th, sk, tab, n):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
@@ -784,7 +918,8 @@ def _make_rprocess_interp(
         if dm_j is None or dmeas_xla is None:
             return diff_core, None, None
 
-        # obs (..., ny + 1 + ncd): the observation, its time and its covariates.
+        # obs (..., ny + 1 + ncd + hoisted): the observation, its time, its
+        # covariates and the values hoisted out of the density.
         @jax.custom_batching.custom_vmap
         def core_dm(Xp, th, sk, tab, n, obs):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
@@ -801,7 +936,7 @@ def _make_rprocess_interp(
                 *flatten(th, sk, tab, B, J),
                 jnp.asarray(data),
                 steps(n, lead),
-                obs.reshape(B, ny + 1 + ncd),
+                obs.reshape(B, obs.shape[-1]),
             )
             return out.reshape(lead + (J, ns)), w.reshape(lead + (J,))
 
@@ -868,10 +1003,10 @@ def _make_rprocess_interp(
                 pk.reshape(B, 2),
                 sig.reshape(B, nth),
                 sk.reshape(B, nstep, 2),
-                tab.reshape(B, nstep, 2 + nc),
+                tab.reshape(B, nstep, tab.shape[-1]),
                 jnp.asarray(data),
                 steps(n, lead),
-                obs.reshape(B, ny + 1 + ncd),
+                obs.reshape(B, obs.shape[-1]),
                 Xs.reshape(B * J, ns),
                 ths.reshape(B * J, nth),
             )
@@ -893,8 +1028,19 @@ def _make_rprocess_interp(
 
     cores: dict[tuple[bool, tuple[int, ...]], _Cores] = {}
 
+    def natural(theta_: jax.Array, should_trans: bool) -> jax.Array:
+        """Return a filter's parameters on the natural scale."""
+        th = jnp.asarray(theta_, jnp.float32)
+        return jaxpr_as_fun(prep_j)(th)[0] if should_trans else th
+
+    def shared_theta(theta_: jax.Array, should_trans: bool) -> list[jax.Array]:
+        """Return the parameters as the hoisted parts take them: none if every
+        particle has its own."""
+        return [] if per_particle else [natural(theta_, should_trans)]
+
     def kernel_inputs(
         keys: jax.Array,
+        theta_: jax.Array,
         covars_extended: jax.Array | None,
         dt_array_extended: jax.Array,
         t: jax.Array,
@@ -902,7 +1048,8 @@ def _make_rprocess_interp(
         accumvars_: tuple[int, ...] | None,
         should_trans: bool,
     ) -> tuple[_Cores, jax.Array, jax.Array]:
-        """Return the kernels for this call, the substep keys and the step table."""
+        """Return the kernels for this call, the substep keys and the step table:
+        each step's time, step size, covariates and the values hoisted out of it."""
         key = keys[0] if jnp.ndim(keys) != 0 else keys
         subkeys, ts, dts, covs = [], [], [], []
         tk = t
@@ -921,6 +1068,14 @@ def _make_rprocess_interp(
         ]
         if nc:
             cols.append(jnp.stack(covs).astype(jnp.float32))
+        if hs is not None:
+            f32 = jnp.float32
+            cov = cols[1] if nc else jnp.zeros((nstep, 0), f32)
+            th, step_shared = shared_theta(theta_, should_trans), hs.shared
+            res = jax.vmap(lambda c, t, dt: jaxpr_as_fun(step_shared)(*th, c, t, dt))(
+                cov, cols[0][:, 0], cols[0][:, 1]
+            )
+            cols.append(_as_columns(res, 1))
         tab = jnp.concatenate(cols, axis=1)
         acc = tuple(sorted({int(a) for a in (accumvars_ or ())}))
         if (bool(should_trans), acc) not in cores:
@@ -971,7 +1126,14 @@ def _make_rprocess_interp(
                 should_trans,
             )
         (core, *_), sk, tab = kernel_inputs(
-            keys, covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans
+            keys,
+            theta_,
+            covars_extended,
+            dt_array_extended,
+            t,
+            t_idx,
+            accumvars_,
+            should_trans,
         )
         n = steps_of(nstep_dynamic)
         out = core(
@@ -1003,28 +1165,34 @@ def _make_rprocess_interp(
             )
             cov = None if covars_extended is None else covars_extended[t_end]
             return X, t_end, dmeas_xla(y, X, theta_, cov, t_obs, should_trans)
-        (_, core_dm, _), sk, tab = kernel_inputs(keys, *args)
+        (_, core_dm, _), sk, tab = kernel_inputs(keys, theta_, *args)
         assert core_dm is not None
         n = steps_of(nstep_dynamic)
-        obs = obs_row(y, t_obs, covars_extended, t_idx + n)
-        out, w = core_dm(
-            X_,
-            jnp.asarray(theta_, jnp.float32),
-            sk,
-            tab,
-            jnp.asarray(n, jnp.int32),
-            obs,
-        )
+        obs = obs_row(y, t_obs, covars_extended, t_idx + n, theta_, should_trans)
+        th = jnp.asarray(theta_, jnp.float32)
+        out, w = core_dm(X_, th, sk, tab, jnp.asarray(n, jnp.int32), obs)
         return out, t_idx + n, w
 
     def obs_row(
-        y: jax.Array, t_obs: jax.Array, covars_extended: jax.Array | None, t_end: Any
+        y: jax.Array,
+        t_obs: jax.Array,
+        covars_extended: jax.Array | None,
+        t_end: Any,
+        theta_: jax.Array,
+        should_trans: bool,
     ) -> jax.Array:
-        """Return the kernel's row for an observation: y, its time, its covariates."""
-        cols = [jnp.asarray(y, jnp.float32), jnp.asarray(t_obs, jnp.float32)[None]]
+        """Return the kernel's row for an observation: y, its time, its covariates
+        and the values hoisted out of the density."""
+        f32 = jnp.float32
+        cols = [jnp.asarray(y, f32), jnp.asarray(t_obs, f32)[None]]
         if ncd:
             assert covars_extended is not None
-            cols.append(covars_extended[t_end].astype(jnp.float32))
+            cols.append(covars_extended[t_end].astype(f32))
+        if hd is not None:
+            cov = cols[2] if ncd else jnp.zeros(0, f32)
+            th = shared_theta(theta_, should_trans)
+            res = jaxpr_as_fun(hd.shared)(cols[0], *th, cov, cols[1][0])
+            cols.append(_as_columns(res, 0))
         return jnp.concatenate(cols)
 
     def perturb_step(
@@ -1080,7 +1248,7 @@ def _make_rprocess_interp(
             cov = None if covars_extended is None else covars_extended[t_end]
             return X, th, t_end, dmeas_xla(y, X, th, cov, t_obs, should_trans)
         args = (covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans)
-        (_, _, core_per), sk, tab = kernel_inputs(keys, *args)
+        (_, _, core_per), sk, tab = kernel_inputs(keys, theta_, *args)
         assert core_per is not None
         n = steps_of(nstep_dynamic)
         if scratch is None:
@@ -1097,7 +1265,7 @@ def _make_rprocess_interp(
             sk,
             tab,
             jnp.asarray(n, jnp.int32),
-            obs_row(y, t_obs, covars_extended, t_idx + n),
+            obs_row(y, t_obs, covars_extended, t_idx + n, theta_, should_trans),
             *scratch,
         )
         return out, tho, t_idx + n, w

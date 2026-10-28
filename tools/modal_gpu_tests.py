@@ -20,16 +20,19 @@ import modal
 ROOT = Path(__file__).resolve().parent.parent
 REMOTE = "/root/pypomp"
 
-with open(ROOT / "pyproject.toml", "rb") as f:
-    _project = tomllib.load(f)["project"]
 # Dependencies get their own layer, so it is rebuilt only when pyproject.toml
-# changes rather than on every commit.
-DEPS = [
-    *_project["dependencies"],
-    *_project["optional-dependencies"]["tests"],
-    *_project["optional-dependencies"]["cute"],
-    "jax[cuda12]",
-]
+# changes rather than on every commit. Containers re-import this file from
+# /root, away from the repository, and only need the already-built image.
+DEPS: list[str] = []
+if modal.is_local():
+    with open(ROOT / "pyproject.toml", "rb") as f:
+        _project = tomllib.load(f)["project"]
+    DEPS = [
+        *_project["dependencies"],
+        *_project["optional-dependencies"]["tests"],
+        *_project["optional-dependencies"]["cute"],
+        "jax[cuda12]",
+    ]
 
 image = (
     modal.Image.debian_slim(python_version="3.14")

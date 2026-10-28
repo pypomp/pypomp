@@ -5,5 +5,9 @@ import importlib.util
 collect_ignore = (
     []
     if importlib.util.find_spec("cutlass")
-    else ["pypomp/cute/kernel.py", "pypomp/cute/translate.py"]
+    else [
+        "pypomp/cute/kernel.py",
+        "pypomp/cute/resample.py",
+        "pypomp/cute/translate.py",
+    ]
 )

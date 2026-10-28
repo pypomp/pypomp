@@ -11,7 +11,13 @@ import pypomp.functional as F
 from pypomp.cute import KernelRProc, _with_xla_grads
 from pypomp.cute.verify import _check, _check_grads, _forward, _grads, _interval
 
-from .test_cute_backend import particle_mean, sde_model, vectorized_rproc
+from .test_cute_backend import (
+    he10_model,
+    particle_mean,
+    sde_model,
+    table_model,
+    vectorized_rproc,
+)
 
 
 def xla_fns(model):
@@ -197,6 +203,42 @@ def test_translated_threefry_is_jaxs():
         assert derived == list(np.asarray(jax.random.key_data(split)))
         folded = jax.random.fold_in(key, i)
         assert derived == list(np.asarray(jax.random.key_data(folded)))
+
+
+@pytest.mark.parametrize("make", [table_model, he10_model], ids=["tables", "he10"])
+@pytest.mark.parametrize("per_particle", [False, True], ids=["pf", "per"])
+def test_hoisted_step_computes_what_the_step_does(make, per_particle):
+    pytest.importorskip("cutlass")
+    from jax.extend.core import jaxpr_as_fun
+
+    from pypomp.cute import kernel
+    from pypomp.cute import translate as ct
+
+    model = make()
+    step_j = kernel._trace_step(model)[0]
+    shared = [False, not per_particle, False, True, True, True]
+    h = ct._hoist(step_j, shared)
+    assert h is not None
+    ns, d = len(model.rproc.statenames), len(model.rproc.param_names)
+    th = model.theta.to_jax_array(model.canonical_param_names)[0]
+    cov = jnp.asarray(model._covars_extended)[7]
+    args = [
+        jnp.linspace(-1.0, 1.0, ns, dtype=jnp.float32) + 3.0,
+        jnp.asarray(th, jnp.float32).reshape(d),
+        jnp.array([5, 6], jnp.uint32),
+        jnp.asarray(cov, jnp.float32),
+        jnp.float32(7.3),
+        jnp.float32(0.01),
+    ]
+    res = jaxpr_as_fun(h.shared)(*[a for a, s in zip(args, shared, strict=True) if s])
+    want = jaxpr_as_fun(step_j)(*args)
+    got = jaxpr_as_fun(h.rest)(*args, *res)
+    for a, b in zip(want, got, strict=True):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+    if make is table_model:
+        # The weekly table's reads depend only on the covariate and the time; the
+        # grid's, at the state, stay in the kernel.
+        assert len(ct._runtime_tables([h.rest])) < len(ct._runtime_tables([step_j]))
 
 
 def test_hessian_optimizers_train_on_the_xla_rproc():

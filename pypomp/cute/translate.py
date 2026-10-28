@@ -13,6 +13,9 @@ data read at the current week, can't be registers. :func:`_runtime_tables` finds
 them, the kernel takes them in one buffer, and a runtime-indexed slice of one is a
 :class:`_View` whose elements are loaded where they are used.
 
+:func:`_hoist` splits off the part of a jaxpr that depends only on inputs every
+particle of a filter shares, for XLA to compute once per filter.
+
 Random numbers follow ``ctx.rng``. With "threefry" they are JAX's (partitionable)
 threefry: element f of a flattened draw is the XOR of the two Threefry2x32-20 words
 for counter (0, f), and split and fold_in keys are both words. With "philox" they
@@ -1861,3 +1864,175 @@ def _keeps_particles(eqn: Any, ax: list[int | None], J: int) -> bool:
             _shape(eqn.outvars[0])[:out]
         )
     return False
+
+
+# Most elements one hoisted value may have, and all of a step's together. A larger
+# value, such as a table's row that a particle indexes, is computed in the kernel
+# instead, from smaller hoisted inputs.
+_MAX_HOISTED = 32
+_MAX_HOISTED_TOTAL = 256
+_HOISTABLE = {
+    np.dtype("float32"),
+    np.dtype("int32"),
+    np.dtype("uint32"),
+    np.dtype("bool"),
+}
+
+
+@dataclass(frozen=True)
+class _Hoisted:
+    """A jaxpr split into what every particle of a filter shares and the rest.
+
+    ``shared`` maps the inputs marked shared to the hoisted values, which XLA
+    evaluates once per filter (and step); ``rest`` maps all the original inputs,
+    then the hoisted values, to the original outputs."""
+
+    shared: ClosedJaxpr
+    rest: ClosedJaxpr
+    avals: tuple[tuple[tuple[int, ...], np.dtype], ...]
+    """The hoisted values' shapes and dtypes."""
+
+
+def _struct(v: Any) -> jax.ShapeDtypeStruct:
+    """Return the shape and dtype of jaxpr variable `v`."""
+    return jax.ShapeDtypeStruct(v.aval.shape, v.aval.dtype)
+
+
+def _eval_jaxpr(
+    jaxpr: Any,
+    consts: list[Any],
+    args: list[Any],
+    eqns: list[Any],
+    known: dict[Any, Any] | None = None,
+) -> dict:
+    """Return the values of `jaxpr`'s variables after binding `eqns`, some of its
+    equations, given values `known` of some variables; `args` may hold None for
+    inputs that none of `eqns` reads."""
+    env: dict[Any, Any] = dict(zip(jaxpr.constvars, consts, strict=True))
+    env.update(zip(jaxpr.invars, args, strict=True))
+    env.update(known or {})
+    for eqn in eqns:
+        ins = [v.val if isinstance(v, Literal) else env[v] for v in eqn.invars]
+        out = eqn.primitive.bind(*ins, **eqn.primitive.get_bind_params(eqn.params))
+        outs = out if eqn.primitive.multiple_results else [out]
+        env.update(zip(eqn.outvars, outs, strict=True))
+    return env
+
+
+def _inline_mixed(cj: ClosedJaxpr, shared: list[bool]) -> ClosedJaxpr:
+    """Return `cj` with each call that takes both shared and per-particle values
+    inlined, so its shared part can be hoisted, unless it is large enough that the
+    translator would outline it."""
+
+    def run(jaxpr: Any, consts: list[Any], args: list[Any], marks: list[int]):
+        env = dict(zip(jaxpr.constvars, consts, strict=True))
+        env.update(zip(jaxpr.invars, args, strict=True))
+        mk = {v: 0 for v in jaxpr.constvars}
+        mk.update(zip(jaxpr.invars, marks, strict=True))
+        for eqn in jaxpr.eqns:
+            ins = [v.val if isinstance(v, Literal) else env[v] for v in eqn.invars]
+            ms = [0 if isinstance(v, Literal) else mk[v] for v in eqn.invars]
+            if (
+                eqn.primitive.name in _CALLS
+                and {1, 2} <= set(ms)
+                and _size(_sub_jaxpr(eqn)) < _OUTLINE_MIN_EQNS
+            ):
+                sub = _sub_jaxpr(eqn)
+                outs, oms = run(sub.jaxpr, list(sub.consts), ins, ms)
+            else:
+                p = eqn.primitive.get_bind_params(eqn.params)
+                out = eqn.primitive.bind(*ins, **p)
+                outs = out if eqn.primitive.multiple_results else [out]
+                oms = [max(ms, default=0)] * len(outs)
+            env.update(zip(eqn.outvars, outs, strict=True))
+            mk.update(zip(eqn.outvars, oms, strict=True))
+        read = lambda v: v.val if isinstance(v, Literal) else env[v]  # noqa: E731
+        mread = lambda v: 0 if isinstance(v, Literal) else mk[v]  # noqa: E731
+        return [read(v) for v in jaxpr.outvars], [mread(v) for v in jaxpr.outvars]
+
+    marks = [1 if s else 2 for s in shared]
+    avals = [_struct(v) for v in cj.jaxpr.invars]
+    return jax.make_jaxpr(lambda *a: run(cj.jaxpr, list(cj.consts), list(a), marks)[0])(
+        *avals
+    )
+
+
+def _hoist(cj: ClosedJaxpr, shared: list[bool]) -> _Hoisted | None:
+    """Split `cj` so that what depends only on the inputs marked `shared` (and on
+    constants) runs once per filter, or return None if nothing is worth hoisting.
+
+    XLA's vmap over particles computes such values once; a kernel thread per
+    particle would otherwise compute them, table reads included, in every thread.
+    """
+    flat = _inline_mixed(cj, shared)
+    jaxpr, eqns = flat.jaxpr, flat.jaxpr.eqns
+    # 0: a constant, 1: shared by the filter's particles, 2: per particle.
+    mark: dict[Any, int] = {v: 0 for v in jaxpr.constvars}
+    mark.update({v: 1 if s else 2 for v, s in zip(jaxpr.invars, shared, strict=True)})
+    eq_mark: list[int] = []
+    defined: dict[Any, int] = {}
+    for i, eqn in enumerate(eqns):
+        vs = [v for v in eqn.invars if not isinstance(v, Literal)]
+        eq_mark.append(max((mark[v] for v in vs), default=0))
+        for v in eqn.outvars:
+            mark[v], defined[v] = eq_mark[i], i
+    shared_vars = lambda vs: [  # noqa: E731
+        v
+        for v in vs
+        if not isinstance(v, Literal) and mark[v] == 1 and v not in jaxpr.invars
+    ]
+    # The kernel's equations: per-particle ones, constants, which the translator
+    # folds, and shared ones whose output is too large to hoist.
+    in_kernel = {i for i, m in enumerate(eq_mark) if m != 1}
+    while True:
+        res = {
+            v: None
+            for i in sorted(in_kernel)
+            for v in shared_vars(eqns[i].invars)
+            if defined[v] not in in_kernel
+        } | dict.fromkeys(shared_vars(jaxpr.outvars))
+        big = [
+            defined[v]
+            for v in res
+            if math.prod(v.aval.shape) > _MAX_HOISTED
+            or np.dtype(v.aval.dtype) not in _HOISTABLE
+        ]
+        if not big:
+            break
+        in_kernel.update(big)
+    res = list(res)
+    if (
+        not res
+        or len(in_kernel) == len(eqns)
+        or sum(math.prod(v.aval.shape) for v in res) > _MAX_HOISTED_TOTAL
+    ):
+        return None
+    consts = list(flat.consts)
+
+    def shared_fn(*a):
+        it = iter(a)
+        args = [next(it) if s else None for s in shared]
+        env = _eval_jaxpr(
+            jaxpr,
+            consts,
+            args,
+            [e for e, m in zip(eqns, eq_mark, strict=True) if m <= 1],
+        )
+        return [env[v] for v in res]
+
+    def rest_fn(*a):
+        n = len(jaxpr.invars)
+        kernel_eqns = [eqns[i] for i in sorted(in_kernel)]
+        env = _eval_jaxpr(
+            jaxpr, consts, list(a[:n]), kernel_eqns, dict(zip(res, a[n:], strict=True))
+        )
+        return [v.val if isinstance(v, Literal) else env[v] for v in jaxpr.outvars]
+
+    in_avals = [_struct(v) for v in jaxpr.invars]
+    return _Hoisted(
+        shared=jax.make_jaxpr(shared_fn)(
+            *[a for a, s in zip(in_avals, shared, strict=True) if s]
+        ),
+        rest=jax.make_jaxpr(rest_fn)(*in_avals, *[_struct(v) for v in res]),
+        avals=tuple((tuple(v.aval.shape), np.dtype(v.aval.dtype)) for v in res),
+    )

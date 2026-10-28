@@ -4,6 +4,7 @@ This module implements the OOP structure for PanelPOMP models.
 
 from collections.abc import Callable
 from copy import deepcopy
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +13,7 @@ from pypomp.core.metadata import ModelMetadata
 from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.core.results import ResultsHistory
+from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PanelPompStruct
 
 from .analysis_mixin import PanelAnalysisMixin
@@ -199,13 +201,42 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         Units of a panel hold no parameters, so the first unit gets the panel's
         first parameter set while a CuTe kernel is checked against XLA.
         """
+        return self._on_first_unit(lambda unit: unit._rproc_fns(backend, rng))
+
+    def backend_report(
+        self, backend: str | None = None, rng: str | None = None
+    ) -> BackendReport:
+        """Say what runs on the CuTe backend, and why the rest stays on XLA.
+
+        The panel runs its first unit's model for every unit, so this is that
+        unit's report; see :meth:`pypomp.Pomp.backend_report`.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"} or None, optional
+            The backend to report on. Defaults to None, which uses the first
+            unit's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers. Defaults to None, which uses the
+            first unit's.
+
+        Returns
+        -------
+        pypomp.cute.BackendReport
+            What runs where.
+        """
+        return self._on_first_unit(lambda unit: unit.backend_report(backend, rng))
+
+    def _on_first_unit(self, f: Callable[[Pomp], Any]) -> Any:
+        """Return `f` of the first unit, which gets the panel's first parameter
+        set if it has none."""
         name = self.get_unit_names()[0]
         unit = self.unit_objects[name]
         if unit._theta is not None:
-            return unit._rproc_fns(backend, rng)
+            return f(unit)
         unit._theta = PompParameters(self.get_unit_parameters(name)[0])
         try:
-            return unit._rproc_fns(backend, rng)
+            return f(unit)
         finally:
             unit._theta = None
 

@@ -517,7 +517,18 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, res, dm_res = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
+    res = spec.res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
                OUT: cute.Tensor, N: cutlass.Int32):
@@ -554,7 +565,18 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save, _tables
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, res, dm_res = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
+    res = spec.res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
                OUT: cute.Tensor, H: cute.Tensor, N: cutlass.Int32):
@@ -592,7 +614,22 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _t
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, res, dm_res = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    dm_j = spec.dm_j
+    ny = spec.ny
+    ncd = spec.ncd
+    offsets = spec.offsets
+    res = spec.res
+    dm_res = spec.dm_res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
                OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
@@ -630,7 +667,23 @@ from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _p
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, res, dm_res = spec
+    step_j = spec.step_j
+    prep_j = spec.prep_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    dm_j = spec.dm_j
+    ny = spec.ny
+    ncd = spec.ncd
+    noise_j = spec.noise_j
+    offsets = spec.offsets
+    res = spec.res
+    dm_res = spec.dm_res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor, SIG: cute.Tensor,
                KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor,
@@ -672,7 +725,18 @@ from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_onc
 
 
 def make(spec, J, transform, block):
-    step_j, prep_j, step_vjp_j, prep_vjp_j, vec, ns, nth, nc, NSTEP, acc, per_particle, rng, dm_j, ny, ncd, noise_j, offsets, res, dm_res = spec
+    prep_j = spec.prep_j
+    step_vjp_j = spec.step_vjp_j
+    prep_vjp_j = spec.prep_vjp_j
+    vec = spec.vec
+    ns = spec.ns
+    nth = spec.nth
+    nc = spec.nc
+    NSTEP = spec.nstep
+    acc = spec.acc
+    per_particle = spec.per_particle
+    rng = spec.rng
+    offsets = spec.offsets
     @cute.kernel
     def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
                G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):

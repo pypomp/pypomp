@@ -25,6 +25,11 @@ import cutlass  # pyright: ignore[reportMissingImports]
 import cutlass.cute as cute  # pyright: ignore[reportMissingImports]
 from cutlass.jax import cutlass_call  # pyright: ignore[reportMissingImports]
 
+try:  # cutlass.utils.SmemAllocator warns that it is deprecated from CuTe DSL 4.8 on.
+    from cutlass.memory import SmemAllocator  # pyright: ignore[reportMissingImports]
+except ImportError:
+    SmemAllocator = cutlass.utils.SmemAllocator
+
 from .translate import _select
 
 # Threads per block, particles per thread in a tile, and warps per block.
@@ -93,7 +98,7 @@ def _kernel(NW: cute.Tensor, U: cute.Tensor, IDX: cute.Tensor, J: cutlass.Int32)
     b, _, _ = cute.arch.block_idx()
     lane = cute.arch.lane_idx()
     warp = cute.arch.warp_idx()
-    smem = cutlass.utils.SmemAllocator()
+    smem = SmemAllocator()
     buf = smem.allocate_tensor(cutlass.Float32, cute.make_layout(_T * _V), 16)
     w_f = smem.allocate_tensor(cutlass.Float32, cute.make_layout(_NW), 16)
     w_i = smem.allocate_tensor(cutlass.Int32, cute.make_layout(_NW), 16)

@@ -206,7 +206,9 @@ Modal account, so it runs only on releases, when `run-gpu` is ticked (e.g. on a 
 branch), and on pushes to `main` that change what the GPU tests depend on (`pypomp/`,
 `tests/test_cute/`, test and build config, or the job itself). The job fails rather than skipping if
 the backend is unavailable on the rented GPU, and uploads coverage under the Codecov flag `gpu`,
-which `codecov.yml` carries forward to commits the job skipped. It needs the repository secrets `MODAL_TOKEN_ID` and
+which `codecov.yml` carries forward to commits the job skipped. JAX's compilation cache persists
+between runs on the Modal Volume `pypomp-jax-cache`; deleting it makes the next run compile
+everything again, which takes about twice as long. It needs the repository secrets `MODAL_TOKEN_ID` and
 `MODAL_TOKEN_SECRET` (created at modal.com/settings/tokens). To run it from your own
 machine instead, `pip install modal`, `modal token new`, then
 `modal run tools/modal_gpu_tests.py --pytest-args "tests/test_cute -x"`.

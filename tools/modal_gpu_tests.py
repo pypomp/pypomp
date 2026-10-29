@@ -58,12 +58,21 @@ image = (
 
 app = modal.App("pypomp-gpu-tests", image=image)
 
+# JAX's compilation cache outlives the container here, since compiling is over
+# half of a run with an empty cache. tests/conftest.py caps it at 5 GiB.
+cache = modal.Volume.from_name("pypomp-jax-cache", create_if_missing=True)
+CACHE = "/jax-cache"
+
 
 # L4 (Ada) is the cheapest GPU Modal offers that CuTe supports; A10 (Ampere) is
 # the fallback when L4s are scarce.
-@app.function(gpu=["L4", "A10"], cpu=4, memory=32768, timeout=90 * 60)
+@app.function(
+    gpu=["L4", "A10"], cpu=4, memory=8192, timeout=90 * 60, volumes={CACHE: cache}
+)
 def run_pytest(args: list[str]) -> tuple[int, bytes]:
     subprocess.run(["nvidia-smi", "-L"], check=False)
+    Path(".pytest_cache").mkdir(exist_ok=True)
+    Path(".pytest_cache/jax_cache").symlink_to(CACHE)
     # The CuTe tests skip themselves when the backend is unavailable, which
     # would pass the job without testing anything. Checked in a subprocess so
     # this process doesn't hold JAX's preallocated GPU memory during the tests.
@@ -74,6 +83,7 @@ def run_pytest(args: list[str]) -> tuple[int, bytes]:
     code = subprocess.run(
         [sys.executable, "-m", "pytest", "-n", "0", "--cov", "--cov-report=xml", *args]
     ).returncode
+    cache.commit()
     cov = Path("coverage.xml")
     return code, cov.read_bytes() if cov.exists() else b""
 

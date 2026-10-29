@@ -720,5 +720,11 @@ def run_jax_batch_sharded(
             sharding_spec = jax.sharding.NamedSharding(mesh, spec)
             sharded_args[arg_idx] = jax.device_put(arr, sharding_spec)
 
-        outputs = func(*sharded_args, **kwargs)
+        if len(shard_devices) > 1:
+            # Under the mesh, CuTe kernels launch on each device for its own
+            # parameter sets (pypomp.cute.sharding); XLA can't split them itself.
+            with jax.set_mesh(mesh):
+                outputs = func(*sharded_args, **kwargs)
+        else:
+            outputs = func(*sharded_args, **kwargs)
         return merge_outputs(outputs, shard_output_axes, size, 1, padded_size)

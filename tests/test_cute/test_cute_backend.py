@@ -289,6 +289,34 @@ def test_cute_gradients_match_xla(make, should_trans):
         assert (rel > 1e-2).mean() < 0.01
 
 
+@pytest.mark.skipif(len(jax.devices()) < 2, reason="needs two devices")
+def test_each_device_launches_the_kernel_for_its_own_filters(monkeypatch):
+    from pypomp.cute import kernel
+
+    rows = []
+    call = kernel.cutlass_call
+
+    def spy(*a, **k):
+        f = call(*a, **k)
+        return lambda *args: rows.append(args[0].shape[0]) or f(*args)
+
+    monkeypatch.setattr(kernel, "cutlass_call", spy)
+    model = sde_model()
+    theta = pp.PompParameters([model.theta[0]] * 4)
+    J = 256
+    lls = {}
+    for backend in ("xla", "cute"):
+        m = deepcopy(model)
+        m.set_backend(backend, check=False)
+        m.pfilter(J=J, theta=theta, key=jax.random.key(0))
+        lls[backend] = m.results()["logLik"].to_numpy(dtype=float)
+    # Two of the four parameter sets per device, rather than all four on each.
+    assert rows and set(rows) == {2 * J}
+    # Float rounding can flip a resampling decision, which moves the log-likelihood
+    # by about its Monte Carlo error.
+    np.testing.assert_allclose(lls["cute"], lls["xla"], atol=1.0)
+
+
 def test_filters_with_different_times_share_a_launch():
     model = he10_model()
     xla, cute = xla_and_cute(model)

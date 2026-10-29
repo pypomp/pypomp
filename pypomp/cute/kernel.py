@@ -49,6 +49,7 @@ from . import KernelRProc
 from . import translate as ct
 from .analysis import _Traced, _untranslatable
 from .resample import resample as _resample_kernel
+from .sharding import by_filter
 
 if TYPE_CHECKING:
     from ..core.pomp import Pomp
@@ -834,6 +835,7 @@ def _make_rprocess_interp(
         # sk (..., nstep, 2); tab (..., nstep, 2 + nc + hoisted); n (...,), the step
         # counts.
         @jax.custom_batching.custom_vmap
+        @by_filter(2)
         def core(Xp, th, sk, tab, n):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
@@ -849,6 +851,7 @@ def _make_rprocess_interp(
             return core(*_broadcast_unbatched(axis_size, in_batched, args)), True
 
         @jax.custom_batching.custom_vmap
+        @by_filter(2)
         def core_save(Xp, th, sk, tab, n):
             # As core, plus each step's input state: H (..., J, nstep * ns).
             lead, J = Xp.shape[:-2], Xp.shape[-2]
@@ -871,6 +874,7 @@ def _make_rprocess_interp(
             )
 
         @jax.custom_batching.custom_vmap
+        @by_filter(2)
         def core_bwd(H, th, sk, tab, n, gout):
             lead, J = gout.shape[:-2], gout.shape[-2]
             B = math.prod(lead)
@@ -921,6 +925,7 @@ def _make_rprocess_interp(
         # obs (..., ny + 1 + ncd + hoisted): the observation, its time, its
         # covariates and the values hoisted out of the density.
         @jax.custom_batching.custom_vmap
+        @by_filter(2)
         def core_dm(Xp, th, sk, tab, n, obs):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
@@ -985,6 +990,7 @@ def _make_rprocess_interp(
         # sig (..., d) the random walk's standard deviations, and Xs and ths spent
         # buffers shaped as Xp and th that the new states and parameters overwrite.
         @jax.custom_batching.custom_vmap
+        @by_filter(2)
         def core_per(Xp, th, anc, pk, sig, sk, tab, n, obs, Xs, ths):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)

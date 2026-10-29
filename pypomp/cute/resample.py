@@ -30,6 +30,7 @@ try:  # cutlass.utils.SmemAllocator warns that it is deprecated from CuTe DSL 4.
 except ImportError:
     SmemAllocator = cutlass.utils.SmemAllocator
 
+from .sharding import by_filter
 from .translate import _select
 
 # Threads per block, particles per thread in a tile, and warps per block.
@@ -252,6 +253,7 @@ def _core_impl(nw: jax.Array, u: jax.Array) -> jax.Array:
 
 
 @jax.custom_batching.custom_vmap
+@by_filter(1)
 def _core(nw: jax.Array, u: jax.Array) -> jax.Array:
     return _core_impl(nw, u)
 

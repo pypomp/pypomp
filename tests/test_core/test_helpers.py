@@ -216,6 +216,10 @@ def test_sharding_computes_no_more_replicates_than_it_was_given():
             "the surplus is padding that is calculated and then discarded"
         )
         assert entry["out"] == [2.0 * i for i in range(size)]
+        assert entry["per_device"] == [1], (
+            f"{size} replicate(s) on 4 devices gave a kernel call "
+            f"{entry['per_device']} of them on one device"
+        )
 
 
 def test_interp_covars_linear_and_constant():

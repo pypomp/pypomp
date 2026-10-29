@@ -32,17 +32,29 @@ def _probe(size: int) -> dict[str, Any]:
     import jax.numpy as jnp
 
     from pypomp.core.algorithms.helpers import run_jax_batch_sharded
+    from pypomp.cute.sharding import by_filter
 
     computed: list[int] = []
+    per_device: list[int] = []
+
+    @by_filter(1)
+    def kernel(x):
+        # A CuTe kernel's call sees only the parameter sets of its own device.
+        per_device.append(x.shape[0])
+        return x * 2.0
 
     def double(x):
         # len(x) is what actually gets computed: `size` plus any padding.
         computed.append(x.shape[0])
-        return x * 2.0
+        return kernel(x)
 
     x = jnp.arange(size, dtype=float).reshape(size, 1)
     out = run_jax_batch_sharded(double, {0: 0}, 0, x)
-    return {"computed": computed, "out": out.ravel().tolist()}
+    return {
+        "computed": computed,
+        "per_device": per_device,
+        "out": out.ravel().tolist(),
+    }
 
 
 def main(argv: list[str]) -> int:

@@ -216,6 +216,7 @@ def test_default_backend_falls_back_quietly(simple):
 
 def test_par_trans_change_drops_built_backends(simple):
     LG, key, J = simple
+    LG.set_backend("auto")
     LG.to_struct()
     assert "_cute_fns" in LG.__dict__
     LG.par_trans = LG.par_trans

@@ -541,8 +541,14 @@ def _fold_device() -> Any:
 
 def _fold(eqn: Any, vals: list[np.ndarray]) -> list[np.ndarray]:
     """Evaluate equation `eqn` on constant inputs, eagerly on the CPU if JAX has one."""
-    # This runs while JAX traces the CuTe call, so evaluation must be forced eager.
-    with jax.ensure_compile_time_eval(), jax.default_device(_fold_device()):
+    # This runs while JAX traces the CuTe call, so evaluation must be forced eager,
+    # and outside the mesh of a kernel split over devices (cute/sharding.py), whose
+    # manual axes eager computations can't run under.
+    with (
+        jax.ensure_compile_time_eval(),
+        jax.default_device(_fold_device()),
+        jax.sharding.use_abstract_mesh(jax.sharding.AbstractMesh((), ())),
+    ):
         out = eqn.primitive.bind(*[jnp.asarray(v) for v in vals], **eqn.params)
     outs = out if eqn.primitive.multiple_results else [out]
     return [np.asarray(o) for o in outs]

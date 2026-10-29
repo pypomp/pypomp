@@ -202,9 +202,11 @@ with nothing wrong in the code. Releases do not run them.
 The GPU tests (`tests/test_cute`) need an NVIDIA GPU of compute capability 8.0 or newer, which
 GitHub's hosted runners lack, so the `gpu` job rents one from [Modal](https://modal.com) (an L4,
 or an A10 when L4s are scarce) through `tools/modal_gpu_tests.py`. Each run is billed to the
-Modal account, so the job is opt-in: tick `run-gpu`, or cut a release, which always runs it. The
-job fails rather than skipping if the backend is unavailable on the rented GPU, and uploads
-coverage under the Codecov flag `gpu`. It needs the repository secrets `MODAL_TOKEN_ID` and
+Modal account, so it runs only on releases, when `run-gpu` is ticked (e.g. on a pull request's
+branch), and on pushes to `main` that change what the GPU tests depend on (`pypomp/`,
+`tests/test_cute/`, test and build config, or the job itself). The job fails rather than skipping if
+the backend is unavailable on the rented GPU, and uploads coverage under the Codecov flag `gpu`,
+which `codecov.yml` carries forward to commits the job skipped. It needs the repository secrets `MODAL_TOKEN_ID` and
 `MODAL_TOKEN_SECRET` (created at modal.com/settings/tokens). To run it from your own
 machine instead, `pip install modal`, `modal token new`, then
 `modal run tools/modal_gpu_tests.py --pytest-args "tests/test_cute -x"`.

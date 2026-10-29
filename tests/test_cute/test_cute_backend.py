@@ -310,8 +310,9 @@ def test_each_device_launches_the_kernel_for_its_own_filters(monkeypatch):
         m.set_backend(backend, check=False)
         m.pfilter(J=J, theta=theta, key=jax.random.key(0))
         lls[backend] = m.results()["logLik"].to_numpy(dtype=float)
-    # Two of the four parameter sets per device, rather than all four on each.
-    assert rows and set(rows) == {2 * J}
+    # Two of the four parameter sets per device, rather than all four on each. (The
+    # calls of J rows trace one filter, for custom_vmap's output types.)
+    assert 2 * J in rows and max(rows) == 2 * J
     # Float rounding can flip a resampling decision, which moves the log-likelihood
     # by about its Monte Carlo error.
     np.testing.assert_allclose(lls["cute"], lls["xla"], atol=1.0)

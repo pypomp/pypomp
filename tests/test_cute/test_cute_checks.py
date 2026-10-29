@@ -211,11 +211,11 @@ def test_hoisted_step_computes_what_the_step_does(make, per_particle):
     pytest.importorskip("cutlass")
     from jax.extend.core import jaxpr_as_fun
 
-    from pypomp.cute import kernel
     from pypomp.cute import translate as ct
+    from pypomp.cute.analysis import _trace_step
 
     model = make()
-    step_j = kernel._trace_step(model)[0]
+    step_j = _trace_step(model)[0]
     shared = [False, not per_particle, False, True, True, True]
     h = ct._hoist(step_j, shared)
     assert h is not None

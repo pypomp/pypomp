@@ -47,6 +47,7 @@ from jax.extend.core import jaxpr_as_fun
 
 from . import KernelRProc
 from . import translate as ct
+from .analysis import _Traced, _untranslatable
 from .resample import resample as _resample_kernel
 
 if TYPE_CHECKING:
@@ -57,11 +58,6 @@ _Tensor = Any
 _Scalar = ct._Scalar
 # CUDA threads per block.
 _BLOCK = 128
-# Particles in the trace that finds a @vectorized rproc's particle axis: a prime that
-# no other axis length is likely to equal.
-_PROBE_J = 1031
-# _trace_step's output: step, transform, whether vectorized, and their VJPs.
-_Traced = tuple[ct.ClosedJaxpr, ct.ClosedJaxpr, bool, ct.ClosedJaxpr, ct.ClosedJaxpr]
 # The process kernel, the one with the fused density and iterated filtering's step;
 # the last two are None when the model's density doesn't translate.
 _Cores = tuple[Callable, Callable | None, Callable | None]
@@ -94,62 +90,9 @@ class _Spec(NamedTuple):
     :func:`translate._hoist`), which follow the covariates in each step's row."""
     dm_res: tuple[tuple[tuple[int, ...], np.dtype], ...]
     """The same for the density, whose values end each observation's row."""
-
-
-def _trace_step(model: Pomp) -> _Traced:
-    """Return per-particle jaxprs of the Euler step, the parameter transform and VJPs.
-
-    The step maps (x, theta, key data, covariates, t, dt) to the next x, with theta on
-    the natural scale; the transform maps theta from the estimation scale to the
-    natural scale. The third output is whether the rproc is ``@vectorized``.
-    """
-    rp = model.rproc
-    snames = list(rp.statenames)
-    pnames = list(rp.param_names)
-    vec = bool(rp._is_vectorized)
-    ns, d, nc = len(snames), len(pnames), len(rp.covar_names)
-
-    def step(x, th, kd, cov, t, dt):
-        X = {n: (x[i][None] if vec else x[i]) for i, n in enumerate(snames)}
-        theta = rp._prepare_theta(th, False)
-        covd = rp._unpack_covars(cov) if nc else {}
-        res = rp._call_original(
-            X_=X,
-            theta_=theta,
-            key=jax.random.wrap_key_data(kd),
-            covars=covd,
-            t=t,
-            dt=dt,
-        )
-        return jnp.stack([jnp.asarray(res[n], jnp.float32).reshape(()) for n in snames])
-
-    def prep(th):
-        theta = rp._prepare_theta(th, True)
-        return jnp.stack(
-            [jnp.asarray(theta[n], jnp.float32).reshape(()) for n in pnames]
-        )
-
-    def step_vjp(x, th, kd, cov, t, dt, gx):
-        _, pull = jax.vjp(lambda x, th: step(x, th, kd, cov, t, dt), x, th)
-        return pull(gx)
-
-    def prep_vjp(th, gth):
-        return jax.vjp(prep, th)[1](gth)[0]
-
-    f32 = jnp.float32
-    args = (
-        jnp.zeros(ns, f32),
-        jnp.ones(d, f32),
-        jnp.zeros(2, jnp.uint32),
-        jnp.ones(max(nc, 1), f32)[:nc],
-        f32(0.0),
-        f32(0.01),
-    )
-    step_j = jax.make_jaxpr(step)(*args)
-    prep_j = jax.make_jaxpr(prep)(jnp.zeros(d, f32))
-    step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
-    prep_vjp_j = jax.make_jaxpr(prep_vjp)(jnp.zeros(d, f32), jnp.zeros(d, f32))
-    return step_j, prep_j, vec, step_vjp_j, prep_vjp_j
+    fixed: bool
+    """Whether every interval has `nstep` Euler steps; otherwise `nstep` is the
+    most any has, and each launch reads its intervals' counts."""
 
 
 def _trace_noise(d: int) -> ct.ClosedJaxpr:
@@ -157,68 +100,6 @@ def _trace_noise(d: int) -> ct.ClosedJaxpr:
     return jax.make_jaxpr(
         lambda kd: jax.random.normal(jax.random.wrap_key_data(kd), (d,), jnp.float32)
     )(jnp.zeros(2, jnp.uint32))
-
-
-def _trace_dmeas(model: Pomp) -> ct.ClosedJaxpr | None:
-    """Return the per-particle jaxpr of the measurement density, or None without one.
-
-    It maps (y, x, theta, covariates, t) to the log-density, with theta on the natural
-    scale.
-    """
-    dm = model.dmeas
-    if dm is None:
-        return None
-    ny, ns = len(dm.y_names), len(dm.statenames)
-    d, nc = len(dm.param_names), len(dm.covar_names)
-
-    def dmeas(y, x, th, cov, t):
-        out = dm.mechanics(y, x, th, cov if nc else None, t, False)
-        return jnp.asarray(out, jnp.float32).reshape(())
-
-    f32 = jnp.float32
-    return jax.make_jaxpr(dmeas)(
-        jnp.zeros(ny, f32),
-        jnp.zeros(ns, f32),
-        jnp.ones(d, f32),
-        jnp.ones(max(nc, 1), f32)[:nc],
-        f32(0.0),
-    )
-
-
-def _vectorized_jaxpr(model: Pomp, J: int) -> ct.ClosedJaxpr:
-    """Return the jaxpr of a ``@vectorized`` rproc's Euler step on J particles."""
-    rp = model.rproc
-    snames = list(rp.statenames)
-    ns, d, nc = len(snames), len(rp.param_names), len(rp.covar_names)
-
-    def step(x, th, kd, cov, t, dt):
-        res = rp._call_original(
-            X_={n: x[i] for i, n in enumerate(snames)},
-            theta_=rp._prepare_theta(th, False),
-            key=jax.random.wrap_key_data(kd),
-            covars=rp._unpack_covars(cov) if nc else {},
-            t=t,
-            dt=dt,
-        )
-        return jnp.stack([jnp.broadcast_to(res[n], (J,)) for n in snames])
-
-    f32 = jnp.float32
-    return jax.make_jaxpr(step)(
-        jnp.zeros((ns, J), f32),
-        jnp.ones(d, f32),
-        jnp.zeros(2, jnp.uint32),
-        jnp.ones(max(nc, 1), f32)[:nc],
-        f32(0.0),
-        f32(0.01),
-    )
-
-
-def _particle_mixing(model: Pomp) -> set[str]:
-    """Return what in a ``@vectorized`` rproc couples particles, which the kernel
-    can't run with one particle per thread."""
-    two = _vectorized_jaxpr(model, 2).jaxpr
-    probe = _vectorized_jaxpr(model, _PROBE_J).jaxpr
-    return ct._particle_mixing(two, probe, _PROBE_J)
 
 
 # The functions below run at trace time inside a kernel, for one thread's particle.
@@ -411,6 +292,12 @@ def _perturb(
     return out
 
 
+def _nsteps(NS: _Tensor, b: _Scalar, nstep: int, fixed: bool) -> _Scalar:
+    """Return the number of Euler steps in filter b's interval: `nstep` if every
+    interval has that many, so the loop's trip count is known at compile time."""
+    return nstep if fixed else NS[b]
+
+
 def _store(OUT: _Tensor, g: _Scalar, xs: tuple[_Scalar, ...]) -> None:
     """Write particle g's state."""
     for s, x in enumerate(xs):
@@ -513,7 +400,7 @@ def _store_bwd(
 _SRC = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _tables
+from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _tables
 
 
 def make(spec, J, transform, block):
@@ -528,9 +415,10 @@ def make(spec, J, transform, block):
     per_particle = spec.per_particle
     rng = spec.rng
     offsets = spec.offsets
+    fixed = spec.fixed
     res = spec.res
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OUT: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -543,15 +431,15 @@ def make(spec, J, transform, block):
             if cutlass.const_expr(transform):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
-            for k in range(NSTEP):
+            for k in range(_nsteps(NS, b, NSTEP, fixed)):
                 {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               TB: cute.Tensor, OUT: cute.Tensor):
+               TB: cute.Tensor, NS: cute.Tensor, OUT: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, TB, OUT, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, NS, OUT, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                 block=[block, 1, 1], stream=stream)
 
     return launch
@@ -561,7 +449,7 @@ def make(spec, J, transform, block):
 _SRC_SAVE = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _save, _tables
+from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _save, _tables
 
 
 def make(spec, J, transform, block):
@@ -576,9 +464,10 @@ def make(spec, J, transform, block):
     per_particle = spec.per_particle
     rng = spec.rng
     offsets = spec.offsets
+    fixed = spec.fixed
     res = spec.res
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OUT: cute.Tensor, H: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -591,16 +480,16 @@ def make(spec, J, transform, block):
             if cutlass.const_expr(transform):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
-            for k in range(NSTEP):
+            for k in range(_nsteps(NS, b, NSTEP, fixed)):
                 _save(H, g, k, ({xs}))
                 {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               TB: cute.Tensor, OUT: cute.Tensor, H: cute.Tensor):
+               TB: cute.Tensor, NS: cute.Tensor, OUT: cute.Tensor, H: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, TB, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, NS, OUT, H, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                    block=[block, 1, 1], stream=stream)
 
     return launch
@@ -610,7 +499,7 @@ def make(spec, J, transform, block):
 _SRC_DM = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _tables
+from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _dmeas_once, _tables
 
 
 def make(spec, J, transform, block):
@@ -628,10 +517,11 @@ def make(spec, J, transform, block):
     ny = spec.ny
     ncd = spec.ncd
     offsets = spec.offsets
+    fixed = spec.fixed
     res = spec.res
     dm_res = spec.dm_res
     @cute.kernel
-    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+    def kernel(X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -644,16 +534,16 @@ def make(spec, J, transform, block):
             if cutlass.const_expr(transform):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
-            for k in range(NSTEP):
+            for k in range(_nsteps(NS, b, NSTEP, fixed)):
                 {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
             W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b, dm_res)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               TB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor):
+               TB: cute.Tensor, NS: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor, W: cute.Tensor):
         N = cute.size(X, mode=[0])
-        kernel(X, TH, KEYS, TAB, TB, OBS, OUT, W, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(X, TH, KEYS, TAB, TB, NS, OBS, OUT, W, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                         block=[block, 1, 1], stream=stream)
 
     return launch
@@ -663,7 +553,7 @@ def make(spec, J, transform, block):
 _SRC_PER = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load, _prep, _step_once, _store, _dmeas_once, _perturb, _tables
+from pypomp.cute.kernel import _nsteps, _load, _prep, _step_once, _store, _dmeas_once, _perturb, _tables
 
 
 def make(spec, J, transform, block):
@@ -682,11 +572,12 @@ def make(spec, J, transform, block):
     ncd = spec.ncd
     noise_j = spec.noise_j
     offsets = spec.offsets
+    fixed = spec.fixed
     res = spec.res
     dm_res = spec.dm_res
     @cute.kernel
     def kernel(X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor, SIG: cute.Tensor,
-               KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor,
+               KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor, OBS: cute.Tensor, OUT: cute.Tensor,
                THO: cute.Tensor, W: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -700,18 +591,18 @@ def make(spec, J, transform, block):
             if cutlass.const_expr(transform):
                 th = _prep(prep_j, th, rng, tb)
             {xs} = xs0
-            for k in range(NSTEP):
+            for k in range(_nsteps(NS, b, NSTEP, fixed)):
                 {xs} = _step_once(step_j, vec, rng, J, ns, nc, ({xs}), th, KEYS, TAB, tb, b, j, k, res)
             _store(OUT, g, ({xs}))
             W[g] = _dmeas_once(dm_j, rng, ny, ncd, ({xs}), th, OBS, tb, b, dm_res)
 
     @cute.jit
     def launch(stream, X: cute.Tensor, TH: cute.Tensor, ANC: cute.Tensor, PK: cute.Tensor,
-               SIG: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+               SIG: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                OBS: cute.Tensor, OUT: cute.Tensor, THO: cute.Tensor, W: cute.Tensor):
         # OUT and THO are inputs aliased to outputs, so cutlass_call passes them once.
         N = cute.size(X, mode=[0])
-        kernel(X, TH, ANC, PK, SIG, KEYS, TAB, TB, OBS, OUT, THO, W, N).launch(
+        kernel(X, TH, ANC, PK, SIG, KEYS, TAB, TB, NS, OBS, OUT, THO, W, N).launch(
             grid=[(N + block - 1) // block, 1, 1], block=[block, 1, 1], stream=stream)
 
     return launch
@@ -721,7 +612,7 @@ def make(spec, J, transform, block):
 _SRC_BWD = """
 import cutlass
 import cutlass.cute as cute
-from pypomp.cute.kernel import _load_th, _prep, _hist, _load_g, _zeros, _vjp_once, _store_bwd, _tables
+from pypomp.cute.kernel import _nsteps, _load_th, _prep, _hist, _load_g, _zeros, _vjp_once, _store_bwd, _tables
 
 
 def make(spec, J, transform, block):
@@ -737,8 +628,9 @@ def make(spec, J, transform, block):
     per_particle = spec.per_particle
     rng = spec.rng
     offsets = spec.offsets
+    fixed = spec.fixed
     @cute.kernel
-    def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor,
+    def kernel(H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor, TB: cute.Tensor, NS: cute.Tensor,
                G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor, N: cutlass.Int32):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -753,17 +645,18 @@ def make(spec, J, transform, block):
                 th = _prep(prep_j, th_raw, rng, tb)
             {gs} = _load_g(G, g, ns)
             {ths} = _zeros(nth)
-            for kk in range(NSTEP):
-                k = NSTEP - 1 - kk
+            n = _nsteps(NS, b, NSTEP, fixed)
+            for kk in range(n):
+                k = n - 1 - kk
                 {gs} {ths} = _vjp_once(step_vjp_j, vec, rng, J, ns, nth, nc, _hist(H, g, k, ns), th, KEYS, TAB,
                                        tb, b, j, k, ({gs}), ({ths}))
             _store_bwd(DX, DTH, g, ({gs}), ({ths}), acc, prep_vjp_j, th_raw, transform, rng, tb)
 
     @cute.jit
     def launch(stream, H: cute.Tensor, TH: cute.Tensor, KEYS: cute.Tensor, TAB: cute.Tensor,
-               TB: cute.Tensor, G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor):
+               TB: cute.Tensor, NS: cute.Tensor, G: cute.Tensor, DX: cute.Tensor, DTH: cute.Tensor):
         N = cute.size(G, mode=[0])
-        kernel(H, TH, KEYS, TAB, TB, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
+        kernel(H, TH, KEYS, TAB, TB, NS, G, DX, DTH, N).launch(grid=[(N + block - 1) // block, 1, 1],
                                                        block=[block, 1, 1], stream=stream)
 
     return launch
@@ -818,6 +711,11 @@ def _build_launcher(kind: str, spec: _Spec, J: int, transform: bool) -> Any:
     return _import_generated(src).make(spec, J, transform, _BLOCK)
 
 
+def _float0(x: jax.Array) -> np.ndarray:
+    """Return the zero cotangent of integer array `x`."""
+    return np.zeros(jnp.shape(x), jax.dtypes.float0)
+
+
 def _broadcast_unbatched(
     axis_size: int, in_batched: Sequence[bool], args: Sequence[jax.Array]
 ) -> list[jax.Array]:
@@ -853,7 +751,7 @@ def _hoist(cj: ct.ClosedJaxpr, shared: list[bool]) -> ct._Hoisted | None:
     """Return `cj` split by :func:`translate._hoist`, if the kernel's part
     translates, else None."""
     h = ct._hoist(cj, shared)
-    return None if h is None or ct._untranslatable(h.rest) else h
+    return None if h is None or _untranslatable(h.rest) else h
 
 
 def _make_rprocess_interp(
@@ -873,7 +771,6 @@ def _make_rprocess_interp(
     the same kernel, while each particle's state is still in registers.
     """
     rp, dm = model.rproc, model.dmeas
-    assert rp.nstep is not None
     xla = rp.mechanics_per_interp if per_particle else rp.mechanics_pf_interp
     dmeas_xla = None
     if dm is not None:
@@ -900,7 +797,7 @@ def _make_rprocess_interp(
         ns=len(rp.statenames),
         nth=len(rp.param_names),
         nc=len(rp.covar_names),
-        nstep=int(rp.nstep),
+        nstep=int(rp.nstep or model._max_steps_per_interval),
         acc=(),
         per_particle=per_particle,
         rng=rng,
@@ -911,6 +808,7 @@ def _make_rprocess_interp(
         offsets=offsets,
         res=() if hs is None else hs.avals,
         dm_res=() if hd is None else hd.avals,
+        fixed=rp.nstep is not None,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
     ny, ncd = spec.ny, spec.ncd
@@ -926,18 +824,24 @@ def _make_rprocess_interp(
         TH = th.reshape(B * J if per_particle else B, nth)
         return TH, sk.reshape(B, nstep, 2), tab.reshape(B, nstep, tab.shape[-1])
 
+    def steps(n: jax.Array, lead: tuple[int, ...]) -> jax.Array:
+        """Return the kernel's per-filter step counts from `n`, of shape `lead` or
+        one count for all."""
+        return jnp.broadcast_to(n, lead).reshape(-1).astype(jnp.int32)
+
     def make_core(transform: bool, acc: tuple[int, ...]) -> _Cores:
         # Shapes: Xp (..., J, ns); th (..., d), or (..., J, d) per particle;
-        # sk (..., nstep, 2); tab (..., nstep, 2 + nc + hoisted).
+        # sk (..., nstep, 2); tab (..., nstep, 2 + nc + hoisted); n (...,), the step
+        # counts.
         @jax.custom_batching.custom_vmap
-        def core(Xp, th, sk, tab):
+        def core(Xp, th, sk, tab, n):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
             X = Xp.reshape(B * J, ns)
             out = cutlass_call(
                 launcher("fwd", J, transform, acc),
                 output_shape_dtype=jax.ShapeDtypeStruct(X.shape, jnp.float32),
-            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data))
+            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data), steps(n, lead))
             return out.reshape(lead + (J, ns))
 
         @core.def_vmap
@@ -945,7 +849,7 @@ def _make_rprocess_interp(
             return core(*_broadcast_unbatched(axis_size, in_batched, args)), True
 
         @jax.custom_batching.custom_vmap
-        def core_save(Xp, th, sk, tab):
+        def core_save(Xp, th, sk, tab, n):
             # As core, plus each step's input state: H (..., J, nstep * ns).
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
@@ -956,7 +860,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct(X.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nstep * ns), jnp.float32),
                 ),
-            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data))
+            )(X, *flatten(th, sk, tab, B, J), jnp.asarray(data), steps(n, lead))
             return out.reshape(lead + (J, ns)), H.reshape(lead + (J, nstep * ns))
 
         @core_save.def_vmap
@@ -967,7 +871,7 @@ def _make_rprocess_interp(
             )
 
         @jax.custom_batching.custom_vmap
-        def core_bwd(H, th, sk, tab, gout):
+        def core_bwd(H, th, sk, tab, n, gout):
             lead, J = gout.shape[:-2], gout.shape[-2]
             B = math.prod(lead)
             G = gout.reshape(B * J, ns)
@@ -978,7 +882,15 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct(G.shape, jnp.float32),
                     jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
                 ),
-            )(H.reshape(B * J, nstep * ns), TH, SK, TAB, jnp.asarray(data), G)
+            )(
+                H.reshape(B * J, nstep * ns),
+                TH,
+                SK,
+                TAB,
+                jnp.asarray(data),
+                steps(n, lead),
+                G,
+            )
             dTH = dTH.reshape(lead + (J, nth))
             return dX.reshape(lead + (J, ns)), (dTH if per_particle else dTH.sum(-2))
 
@@ -990,17 +902,17 @@ def _make_rprocess_interp(
             )
 
         @jax.custom_vjp
-        def diff_core(Xp, th, sk, tab):
-            return core(Xp, th, sk, tab)
+        def diff_core(Xp, th, sk, tab, n):
+            return core(Xp, th, sk, tab, n)
 
-        def diff_fwd(Xp, th, sk, tab):
-            out, H = core_save(Xp, th, sk, tab)
-            return out, (H, th, sk, tab)
+        def diff_fwd(Xp, th, sk, tab, n):
+            out, H = core_save(Xp, th, sk, tab, n)
+            return out, (H, th, sk, tab, n)
 
         def diff_bwd(res, gout):
-            H, th, sk, tab = res
-            dX, dth = core_bwd(H, th, sk, tab, gout)
-            return dX, dth, np.zeros(sk.shape, jax.dtypes.float0), jnp.zeros_like(tab)
+            H, th, sk, tab, n = res
+            dX, dth = core_bwd(H, th, sk, tab, n, gout)
+            return dX, dth, _float0(sk), jnp.zeros_like(tab), _float0(n)
 
         diff_core.defvjp(diff_fwd, diff_bwd)
         if dm_j is None or dmeas_xla is None:
@@ -1009,7 +921,7 @@ def _make_rprocess_interp(
         # obs (..., ny + 1 + ncd + hoisted): the observation, its time, its
         # covariates and the values hoisted out of the density.
         @jax.custom_batching.custom_vmap
-        def core_dm(Xp, th, sk, tab, obs):
+        def core_dm(Xp, th, sk, tab, n, obs):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
             X = Xp.reshape(B * J, ns)
@@ -1023,6 +935,7 @@ def _make_rprocess_interp(
                 X,
                 *flatten(th, sk, tab, B, J),
                 jnp.asarray(data),
+                steps(n, lead),
                 obs.reshape(B, obs.shape[-1]),
             )
             return out.reshape(lead + (J, ns)), w.reshape(lead + (J,))
@@ -1041,24 +954,25 @@ def _make_rprocess_interp(
 
         # Derivatives go through the unfused kernels and XLA's density.
         @jax.custom_vjp
-        def diff_dm(Xp, th, sk, tab, obs):
-            return core_dm(Xp, th, sk, tab, obs)
+        def diff_dm(Xp, th, sk, tab, n, obs):
+            return core_dm(Xp, th, sk, tab, n, obs)
 
-        def dm_fwd(Xp, th, sk, tab, obs):
-            out, H = core_save(Xp, th, sk, tab)
+        def dm_fwd(Xp, th, sk, tab, n, obs):
+            out, H = core_save(Xp, th, sk, tab, n)
             w, pull = jax.vjp(lambda o, t: dmeas(o, t, obs), out, th)
-            return (out, w), (H, th, sk, tab, obs, pull)
+            return (out, w), (H, th, sk, tab, n, obs, pull)
 
         def dm_bwd(res, g):
-            H, th, sk, tab, obs, pull = res
+            H, th, sk, tab, n, obs, pull = res
             gout, gw = g
             gx_dm, gth_dm = pull(gw)
-            dX, dth = core_bwd(H, th, sk, tab, gout + gx_dm)
+            dX, dth = core_bwd(H, th, sk, tab, n, gout + gx_dm)
             return (
                 dX,
                 dth + gth_dm,
-                np.zeros(sk.shape, jax.dtypes.float0),
+                _float0(sk),
                 jnp.zeros_like(tab),
+                _float0(n),
                 jnp.zeros_like(obs),
             )
 
@@ -1071,7 +985,7 @@ def _make_rprocess_interp(
         # sig (..., d) the random walk's standard deviations, and Xs and ths spent
         # buffers shaped as Xp and th that the new states and parameters overwrite.
         @jax.custom_batching.custom_vmap
-        def core_per(Xp, th, anc, pk, sig, sk, tab, obs, Xs, ths):
+        def core_per(Xp, th, anc, pk, sig, sk, tab, n, obs, Xs, ths):
             lead, J = Xp.shape[:-2], Xp.shape[-2]
             B = math.prod(lead)
             out, tho, w = cutlass_call(
@@ -1081,7 +995,7 @@ def _make_rprocess_interp(
                     jax.ShapeDtypeStruct((B * J, nth), jnp.float32),
                     jax.ShapeDtypeStruct((B * J,), jnp.float32),
                 ),
-                input_output_aliases={9: 0, 10: 1},
+                input_output_aliases={10: 0, 11: 1},
             )(
                 Xp.reshape(B * J, ns),
                 th.reshape(B * J, nth),
@@ -1091,6 +1005,7 @@ def _make_rprocess_interp(
                 sk.reshape(B, nstep, 2),
                 tab.reshape(B, nstep, tab.shape[-1]),
                 jnp.asarray(data),
+                steps(n, lead),
                 obs.reshape(B, obs.shape[-1]),
                 Xs.reshape(B * J, ns),
                 ths.reshape(B * J, nth),
@@ -1167,6 +1082,11 @@ def _make_rprocess_interp(
             cores[bool(should_trans), acc] = make_core(bool(should_trans), acc)
         return cores[bool(should_trans), acc], jnp.stack(subkeys), tab
 
+    def steps_of(nstep_dynamic: Any) -> Any:
+        """Return this interval's number of Euler steps: `nstep` if fixed, so the
+        time index stays static where XLA's would."""
+        return nstep if spec.fixed else jnp.asarray(nstep_dynamic, jnp.int32)
+
     def on_kernel(X_: jax.Array, keys: jax.Array) -> bool:
         """Return whether the kernel can run these inputs."""
         key = keys[0] if jnp.ndim(keys) != 0 else keys
@@ -1215,8 +1135,11 @@ def _make_rprocess_interp(
             accumvars_,
             should_trans,
         )
-        out = core(X_, jnp.asarray(theta_, jnp.float32), sk, tab)
-        return out, t_idx + nstep
+        n = steps_of(nstep_dynamic)
+        out = core(
+            X_, jnp.asarray(theta_, jnp.float32), sk, tab, jnp.asarray(n, jnp.int32)
+        )
+        return out, t_idx + n
 
     def with_dmeasure(
         X_: jax.Array,
@@ -1244,9 +1167,11 @@ def _make_rprocess_interp(
             return X, t_end, dmeas_xla(y, X, theta_, cov, t_obs, should_trans)
         (_, core_dm, _), sk, tab = kernel_inputs(keys, theta_, *args)
         assert core_dm is not None
-        obs = obs_row(y, t_obs, covars_extended, t_idx + nstep, theta_, should_trans)
-        out, w = core_dm(X_, jnp.asarray(theta_, jnp.float32), sk, tab, obs)
-        return out, t_idx + nstep, w
+        n = steps_of(nstep_dynamic)
+        obs = obs_row(y, t_obs, covars_extended, t_idx + n, theta_, should_trans)
+        th = jnp.asarray(theta_, jnp.float32)
+        out, w = core_dm(X_, th, sk, tab, jnp.asarray(n, jnp.int32), obs)
+        return out, t_idx + n, w
 
     def obs_row(
         y: jax.Array,
@@ -1325,6 +1250,7 @@ def _make_rprocess_interp(
         args = (covars_extended, dt_array_extended, t, t_idx, accumvars_, should_trans)
         (_, _, core_per), sk, tab = kernel_inputs(keys, theta_, *args)
         assert core_per is not None
+        n = steps_of(nstep_dynamic)
         if scratch is None:
             scratch = (
                 jnp.zeros(X_.shape, jnp.float32),
@@ -1338,10 +1264,11 @@ def _make_rprocess_interp(
             jnp.asarray(sigmas, jnp.float32),
             sk,
             tab,
-            obs_row(y, t_obs, covars_extended, t_idx + nstep, theta_, should_trans),
+            jnp.asarray(n, jnp.int32),
+            obs_row(y, t_obs, covars_extended, t_idx + n, theta_, should_trans),
             *scratch,
         )
-        return out, tho, t_idx + nstep, w
+        return out, tho, t_idx + n, w
 
     return KernelRProc(
         kernel=rprocess_interp,

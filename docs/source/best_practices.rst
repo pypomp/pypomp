@@ -77,6 +77,20 @@ Key patterns to avoid:
 - Intermediate state arrays like ``pts = jnp.stack([R1, R2, R3])`` that are updated or reduced across.
 
 
+Checking a Model for the CuTe Backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+On an NVIDIA GPU, the CuTe backend (:meth:`~pypomp.core.pomp.Pomp.set_backend`) translates ``rproc``, and ``dmeas`` where it can, into one CUDA kernel per observation interval.
+Operations the translator doesn't handle keep their part of the model on XLA.
+:meth:`~pypomp.core.pomp.Pomp.backend_report` says which parts run on the kernel, and names each operation that keeps a part off it with the line of the model's code that uses it:
+
+.. code-block:: python
+
+    print(model.backend_report())
+
+It runs on any machine, including one without a GPU or ``nvidia-cutlass-dsl``, where it says which parts the translator would accept.
+
+
 Optimizing CPU Performance
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -111,15 +111,24 @@ def sde_dmeas(Y_, X_, theta_, covars, t):
     return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], theta_["tau"])
 
 
-def sde_model(rproc=sde_rproc, statenames=("x",), covars=None, dmeas=sde_dmeas):
+def sde_model(
+    rproc=sde_rproc,
+    statenames=("x",),
+    covars=None,
+    dmeas=sde_dmeas,
+    times=None,
+    dt=None,
+):
     def rinit(theta_, key, covars, t0):
         x0 = theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)
         return {"x": x0, **{n: 0.0 for n in statenames[1:]}}
 
-    T = 40
+    if times is None:
+        times = np.arange(1, 41, dtype=float)
+    T = len(times)
     ys = pd.DataFrame(
         {"y": np.log(0.5) + 0.3 * np.random.default_rng(1).standard_normal(T)},
-        index=np.arange(1, T + 1, dtype=float),
+        index=np.asarray(times, dtype=float),
     )
     theta = {"r": 1.0, "sig": 0.3, "tau": 0.2, "z0m": float(np.log(0.2)), "z0s": 0.2}
     return pp.Pomp(
@@ -130,9 +139,16 @@ def sde_model(rproc=sde_rproc, statenames=("x",), covars=None, dmeas=sde_dmeas):
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,
-        nstep=10,
+        nstep=None if dt else 10,
+        dt=dt,
         covars=covars,
     )
+
+
+def uneven_model(rproc=sde_rproc):
+    """sde_model observed at uneven times, so its intervals take 4, 2, 8 and 3
+    Euler steps in turn."""
+    return sde_model(rproc, times=np.cumsum(np.resize([1, 0.5, 2, 0.75], 40)), dt=0.25)
 
 
 def table_model(u=2):
@@ -206,14 +222,24 @@ def interval(model, struct, J, R, i_obs=3):
         lambda: sde_model(int_ops_rproc),
         table_model,
         lambda: sde_model(picks_rproc),
+        uneven_model,
     ],
-    ids=["sde", "he10", "reshape", "vectorized", "int_ops", "tables", "picks"],
+    ids=[
+        "sde",
+        "he10",
+        "reshape",
+        "vectorized",
+        "int_ops",
+        "tables",
+        "picks",
+        "uneven",
+    ],
 )
 @pytest.mark.parametrize("rng", ["threefry", "philox"])
 def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
     model = make()
     xla, cute = xla_and_cute(model, rng)
-    assert cute.rproc_pf is not xla.rproc_pf
+    assert isinstance(cute.rproc_pf, KernelRProc)
     keys = jax.random.split(rng_key(5, rng), 2)
     X0, th, adv_xla = interval(model, xla, 1024, 2)
     _, _, adv_cute = interval(model, cute, 1024, 2)
@@ -233,7 +259,9 @@ def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
 
 @pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation"])
 @pytest.mark.parametrize(
-    "make", [sde_model, he10_model, table_model], ids=["sde", "he10", "tables"]
+    "make",
+    [sde_model, he10_model, table_model, uneven_model],
+    ids=["sde", "he10", "tables", "uneven"],
 )
 def test_cute_gradients_match_xla(make, should_trans):
     model = make()
@@ -290,6 +318,43 @@ def test_filters_with_different_times_share_a_launch():
     assert np.median(rel) < 1e-6
 
 
+def test_intervals_of_different_lengths_share_a_launch():
+    model = uneven_model()
+    assert model.rproc.nstep is None
+    xla, cute = xla_and_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, _ = interval(model, xla, 512, 3)
+    keys = jax.random.split(rng_key(5), 3)
+    nsteps = np.asarray(xla.nstep_array)
+    i_obs = np.array([1, 2, 3])  # 2, 8 and 3 Euler steps
+    ts = jnp.asarray(np.asarray(xla.times)[i_obs - 1])
+    t_idx = jnp.asarray(np.cumsum(nsteps)[i_obs - 1])
+    n = jnp.asarray(nsteps[i_obs])
+
+    def run(s):
+        def f(X, k, t, t_i, n):
+            return s.rproc_pf(
+                X,
+                th,
+                k,
+                s.covars_extended,
+                s.dt_array_extended,
+                t,
+                t_i,
+                n,
+                s.accumvars,
+                False,
+            )
+
+        return jax.jit(jax.vmap(f))(X0, keys, ts, t_idx, n)
+
+    (a, ta), (b, tb) = run(xla), run(cute)
+    np.testing.assert_array_equal(np.asarray(tb), np.asarray(ta))
+    rel = np.asarray(jnp.abs(a - b) / (jnp.abs(a) + 1.0))
+    assert (rel.max(-1) > 1e-4).mean() < 0.005
+    assert np.median(rel) < 1e-6
+
+
 def test_repeated_calls_share_a_device_function(monkeypatch):
     from pypomp.cute import translate
 
@@ -315,8 +380,9 @@ def test_repeated_calls_share_a_device_function(monkeypatch):
     assert any(called.count(j) == 2 * defined.count(j) for j in set(defined))
 
 
-def test_cute_loglik_agrees_with_xla():
-    model = sde_model()
+@pytest.mark.parametrize("make", [sde_model, uneven_model], ids=["sde", "uneven"])
+def test_cute_loglik_agrees_with_xla(make):
+    model = make()
     xla, cute = xla_and_cute(model)
     th = jnp.tile(model.theta.to_jax_array(model.canonical_param_names), (200, 1))
     keys = jax.random.split(jax.random.key(0), 200)[:, None]
@@ -414,6 +480,20 @@ def test_mif_and_train_on_cute():
     # Float rounding can flip a resampling decision, which moves the log-likelihood
     # (column 0) by about its Monte Carlo error.
     np.testing.assert_allclose(b[:, 0], a[:, 0], atol=1.0)
+
+
+def test_mif_with_intervals_of_different_lengths():
+    model = uneven_model()
+    model.set_backend("cute")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert isinstance(model.to_struct().rproc_per, KernelRProc)
+    rw = pp.RWSigma(
+        sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
+        init_names=[],
+    ).geometric_cooling(0.5)
+    model.mif(J=256, M=3, rw_sd=rw, key=jax.random.key(0))
+    assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
 
 
 def test_dpop_train_on_cute():
@@ -619,3 +699,65 @@ def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     with pytest.warns(UserWarning, match="differ"):
         s = model.to_struct()
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
+
+
+def test_report_says_every_part_runs_on_cute():
+    model = sde_model()
+    model.set_backend("cute")
+    report = model.backend_report()
+    assert report.available and not report.reason
+    assert all(p.cute for p in report.parts), str(report)
+
+
+def dmeas_at_runtime_index(Y_, X_, theta_, covars, t):
+    # Too many runtime values to select among in registers.
+    v = X_["x"] * jnp.arange(100.0)
+    i = jnp.clip(jnp.round(10 * X_["x"]).astype(jnp.int32), 0, 99)
+    return jax.scipy.stats.norm.logpdf(Y_["y"], v[i], theta_["tau"])
+
+
+def test_report_points_at_what_keeps_dmeasure_on_xla():
+    model = sde_model(dmeas=dmeas_at_runtime_index)
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="dmeas"):
+        s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc) and s.rproc_pf.with_dmeasure is None
+    report = model.backend_report()
+    assert report["rproc"].cute and report["gradients"].cute
+    assert not report["dmeasure"].cute and not report["perturbation"].cute
+    (problem,) = report["dmeasure"].problems
+    assert "runtime index" in problem.what
+    assert any("dmeas_at_runtime_index" in w for w in problem.where), problem
+
+
+@jax.custom_jvp
+def cumsum_tangent(x):
+    return x
+
+
+@cumsum_tangent.defjvp
+def _cumsum_tangent_jvp(primals, tangents):
+    # The kernel can't run cumsum, which only the derivative uses.
+    return primals[0], jnp.cumsum(jnp.stack([tangents[0], 0 * tangents[0]]))[-1]
+
+
+def cumsum_grad_rproc(X_, theta_, key, covars, t, dt):
+    out = sde_rproc(X_, theta_, key, covars, t, dt)
+    return {"x": cumsum_tangent(out["x"])}
+
+
+def test_gradients_that_dont_translate_go_through_xla():
+    from pypomp.cute.verify import _grads, _interval
+
+    model = sde_model(cumsum_grad_rproc)
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="differentiating through XLA"):
+        s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc)
+    report = model.backend_report()
+    assert report["rproc"].cute and not report["gradients"].cute
+    assert [p.what for p in report["gradients"].problems] == ["cumsum"]
+    iv = _interval(model, "threefry")
+    np.testing.assert_allclose(
+        _grads(iv, s.rproc_per), _grads(iv, model.rproc.mechanics_per_interp), rtol=1e-5
+    )

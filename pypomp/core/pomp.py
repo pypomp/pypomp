@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PompStruct
 
 from .algorithms.contexts import DPOP_STATE
@@ -463,11 +464,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             evaluates ``dmeas`` when that translates, and with it the parameter
             perturbation of iterated filtering; resampling runs in a separate
             CuTe kernel. CuTe needs the optional ``nvidia-cutlass-dsl`` package
-            (``pip install pypomp[cute]``), a GPU and the same number of Euler
-            steps in every observation interval; without them, or if ``rproc``
-            uses an operation the translator does not handle, pypomp warns and
-            uses XLA. ``"auto"``, the default for a new model, uses CuTe when all
-            of that holds and XLA otherwise, without a warning.
+            (``pip install pypomp[cute]``) and an NVIDIA GPU from Ampere on;
+            without them, or if ``rproc`` uses an operation the translator does
+            not handle, pypomp warns and uses XLA. ``"auto"``, the default for a
+            new model, uses CuTe when all of that holds and XLA otherwise, without
+            a warning. :meth:`backend_report` says which parts run on CuTe and
+            what in the model's code keeps the rest on XLA.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws. ``"threefry"``, the default,
             draws JAX's threefry numbers, so for a given key the kernel's results
@@ -574,26 +576,68 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         The CuTe kernels are checked against XLA at ``self.theta`` unless the
         model's check is off; see :meth:`set_backend`.
         """
+        built = self._cute_built(backend, rng)
+        if built is not None and built.fns is not None:
+            return built.fns
+        return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
+
+    def _cute_built(self, backend: str | None, rng: str | None) -> Any:
+        """Return what :func:`pypomp.cute._build` made of the model for `backend`
+        and `rng`, or None for XLA."""
         backend = self._backend if backend is None else backend
         rng = self._backend_rng if rng is None else rng
         check = self._backend_check
         _check_backend(backend)
         _check_rng(rng)
-        if backend != "xla":
-            # Built once per backend, generator and check: new functions would make
-            # every call recompile.
-            built = self.__dict__.setdefault("_cute_fns", {})
-            fns = built.get((backend, rng, check))
-            if (backend, rng, check) not in built:
-                from pypomp.cute import _build
+        if backend == "xla":
+            return None
+        # Built once per backend, generator and check: new functions would make
+        # every call recompile.
+        built = self.__dict__.setdefault("_cute_fns", {})
+        if (backend, rng, check) in built:
+            return built[backend, rng, check]
+        from pypomp.cute import _build
 
-                fns = _build(self, backend == "auto", rng, check)
-                # Without theta the kernel can't be checked, so decide again later.
-                if self._theta is not None or not check:
-                    built[backend, rng, check] = fns
-            if fns is not None:
-                return fns
-        return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
+        out = _build(self, backend == "auto", rng, check)
+        # Without theta the kernel can't be checked, so decide again later.
+        if self._theta is not None or not check:
+            built[backend, rng, check] = out
+        return out
+
+    def backend_report(
+        self, backend: str | None = None, rng: str | None = None
+    ) -> BackendReport:
+        """Say what runs on the CuTe backend, and why the rest stays on XLA.
+
+        Covers the process model, its gradients, the measurement density, iterated
+        filtering's parameter perturbation and resampling. For each part the
+        translator rejects, it lists the operations that keep it off the kernel
+        and the lines of the model's code that use them. On a machine where CuTe
+        can't run, such as one without a GPU or ``nvidia-cutlass-dsl``, it still
+        says which parts the translator accepts, so a model can be checked before
+        it reaches a GPU.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"} or None, optional
+            The backend to report on (see :meth:`set_backend`). Defaults to None,
+            which uses the model's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers. Defaults to None, which uses the
+            model's.
+
+        Returns
+        -------
+        pypomp.cute.BackendReport
+            ``print`` it for a summary, or index it by part, e.g.
+            ``report["dmeasure"].cute``.
+        """
+        from pypomp.cute import _report
+
+        built = self._cute_built(backend, rng)
+        backend = self._backend if backend is None else backend
+        rng = self._backend_rng if rng is None else rng
+        return _report(self, backend, rng, self._backend_check, built)
 
     def print_metadata(self) -> None:
         """Display environment and version metadata for this model instance.

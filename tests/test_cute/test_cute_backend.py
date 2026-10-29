@@ -239,7 +239,7 @@ def interval(model, struct, J, R, i_obs=3):
 def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
     model = make()
     xla, cute = xla_and_cute(model, rng)
-    assert cute.rproc_pf is not xla.rproc_pf
+    assert isinstance(cute.rproc_pf, KernelRProc)
     keys = jax.random.split(rng_key(5, rng), 2)
     X0, th, adv_xla = interval(model, xla, 1024, 2)
     _, _, adv_cute = interval(model, cute, 1024, 2)

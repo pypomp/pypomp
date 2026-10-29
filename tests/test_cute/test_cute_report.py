@@ -7,7 +7,7 @@ import pytest
 import pypomp as pp
 import pypomp.cute
 
-from .test_cute_backend import sde_dmeas, sde_model, uneven_model
+from .test_cute_backend import scan_rproc, sde_dmeas, sde_model, uneven_model
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +47,12 @@ def test_intervals_of_different_lengths_translate():
     model = uneven_model()
     assert model.rproc.nstep is None
     assert model.backend_report().translates
+
+
+def test_a_scan_translates():
+    report = sde_model(scan_rproc).backend_report()
+    assert report.translates, str(report)
+    assert report["gradients"].translates, str(report)
 
 
 def test_rproc_problems_point_at_the_model_line():

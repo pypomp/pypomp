@@ -28,6 +28,16 @@ def sde_rproc(X_, theta_, key, covars, t, dt):
     return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
 
 
+def scan_rproc(X_, theta_, key, covars, t, dt):
+    # jnp.polyval is a lax.scan with a constant, a carry and stacked inputs, as in
+    # JAX's ndtri before JAX 0.12.
+    z = X_["x"]
+    eps = jax.random.normal(key)
+    expm1 = jnp.polyval(jnp.array([1 / 24, 1 / 6, 1 / 2, 1.0, 0.0]), z)
+    drift = -theta_["r"] * expm1 - theta_["sig"] ** 2 / 2
+    return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
+
+
 def reshape_rproc(X_, theta_, key, covars, t, dt):
     z = X_["x"]
     m = jnp.stack([z, 2 * z, 3 * z, 4 * z]).reshape(2, 2)
@@ -227,6 +237,7 @@ def interval(model, struct, J, R, i_obs=3):
         table_model,
         lambda: sde_model(picks_rproc),
         uneven_model,
+        lambda: sde_model(scan_rproc),
     ],
     ids=[
         "sde",
@@ -237,6 +248,7 @@ def interval(model, struct, J, R, i_obs=3):
         "tables",
         "picks",
         "uneven",
+        "scan",
     ],
 )
 @pytest.mark.parametrize("rng", ["threefry", "philox"])

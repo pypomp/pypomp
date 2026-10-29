@@ -282,7 +282,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self.t0 = float(t0)
         self.results_history = ResultsHistory()
         self.fresh_key = None
-        self._backend = "auto"
+        self._backend = "xla"
         self._backend_rng = "threefry"
         self._backend_check = True
         self.metadata = ModelMetadata()
@@ -457,19 +457,20 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         Parameters
         ----------
         backend : {"auto", "cute", "xla"}
-            ``"xla"`` compiles everything with XLA. ``"cute"`` runs every Euler step
-            of an observation interval in one CUDA kernel on an NVIDIA GPU, one
-            particle per thread, for all filters of a call at once. ``rproc`` is
-            translated from its jaxpr, so it is used as written. The kernel also
-            evaluates ``dmeas`` when that translates, and with it the parameter
-            perturbation of iterated filtering; resampling runs in a separate
-            CuTe kernel. CuTe needs the optional ``nvidia-cutlass-dsl`` package
-            (``pip install pypomp[cute]``) and an NVIDIA GPU from Ampere on;
-            without them, or if ``rproc`` uses an operation the translator does
-            not handle, pypomp warns and uses XLA. ``"auto"``, the default for a
-            new model, uses CuTe when all of that holds and XLA otherwise, without
-            a warning. :meth:`backend_report` says which parts run on CuTe and
-            what in the model's code keeps the rest on XLA.
+            ``"xla"``, the default for a new model, compiles everything with XLA.
+            ``"cute"`` runs every Euler step of an observation interval in one CUDA
+            kernel on an NVIDIA GPU, one particle per thread, for all filters of a
+            call at once. ``rproc`` is translated from its jaxpr, so it is used as
+            written. The kernel also evaluates ``dmeas`` when that translates, and
+            with it the parameter perturbation of iterated filtering; resampling
+            runs in a separate CuTe kernel. CuTe needs the optional
+            ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``) and an
+            NVIDIA GPU from Ampere on; without them, or if ``rproc`` uses an
+            operation the translator does not handle, pypomp warns and uses XLA. ``"auto"`` uses CuTe when all of
+            that holds and XLA otherwise, without a warning. :meth:`backend_report`
+            says which parts run on CuTe and what in the model's code keeps the rest
+            on XLA. See :ref:`cute-backend` for when CuTe is faster and how its
+            results differ from XLA's.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws. ``"threefry"``, the default,
             draws JAX's threefry numbers, so for a given key the kernel's results
@@ -853,7 +854,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         """
         # Restore basic attributes
         self.__dict__.update(state)
-        self.__dict__.setdefault("_backend", "auto")
+        self.__dict__.setdefault("_backend", "xla")
         self.__dict__.setdefault("_backend_rng", "threefry")
         self.__dict__.setdefault("_backend_check", True)
         if "par_trans" in state and "_par_trans" not in state:

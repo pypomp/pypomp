@@ -131,7 +131,7 @@ def sde_model(
         index=np.asarray(times, dtype=float),
     )
     theta = {"r": 1.0, "sig": 0.3, "tau": 0.2, "z0m": float(np.log(0.2)), "z0s": 0.2}
-    return pp.Pomp(
+    model = pp.Pomp(
         ys=ys,
         theta=pp.PompParameters(theta),
         statenames=list(statenames),
@@ -143,6 +143,8 @@ def sde_model(
         dt=dt,
         covars=covars,
     )
+    model.set_backend("auto")
+    return model
 
 
 def uneven_model(rproc=sde_rproc):
@@ -172,9 +174,11 @@ def he10_model():
         "I_0": 5.14e-05,
         "R_0": 9.70e-01,
     }
-    return pp.models.UKMeasles.pomp(
+    model = pp.models.UKMeasles.pomp(
         unit="London", theta=pp.PompParameters(theta), clean=True, model="001b"
     )
+    model.set_backend("auto")
+    return model
 
 
 def xla_and_cute(model, rng="threefry"):
@@ -655,6 +659,7 @@ def test_float64_particles_run_on_xla():
 
 def test_auto_uses_cute_with_one_step_per_observation():
     one_step = pp.models.lg(T=10)
+    one_step.set_backend("auto")
     assert one_step.rproc.nstep == 1
     with warnings.catch_warnings():
         warnings.simplefilter("error")

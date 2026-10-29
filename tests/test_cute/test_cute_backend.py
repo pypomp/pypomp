@@ -529,6 +529,79 @@ def test_mif_with_intervals_of_different_lengths():
     assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
 
 
+SDE_RW = pp.RWSigma(
+    sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
+    init_names=[],
+).geometric_cooling(0.5)
+
+
+def test_mif_on_cute_agrees_with_xla_in_distribution():
+    # With the same key, a resampling decision that rounding flips sends the two
+    # backends' searches their own ways, so they are compared over replicates.
+    R = 32
+    out = {}
+    for backend, seed in (("xla", 11), ("cute", 12)):
+        model = sde_model()
+        model.set_backend(backend)
+        model.theta = pp.PompParameters([model.theta[0]] * R)
+        if backend == "cute":
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                per = model.to_struct().rproc_per
+            assert isinstance(per, KernelRProc) and per.perturb_step is not None
+        model.mif(J=256, M=2, rw_sd=SDE_RW, key=jax.random.key(seed))
+        out[backend] = model.results()
+    for col in ("logLik", "r", "sig", "tau"):
+        a, b = (out[k][col].to_numpy(dtype=float) for k in ("xla", "cute"))
+        se = np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / R)
+        assert abs(b.mean() - a.mean()) < 4 * se, col
+
+
+@pytest.mark.parametrize("block", [True, False], ids=["mpif", "pif"])
+def test_panel_mif_on_cute(block):
+    panel, names, th = table_panel()
+    panel.set_backend("cute")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        per = panel.to_struct().rproc_per
+        assert isinstance(per, KernelRProc) and per.perturb_step is not None
+        panel.mif(J=256, M=2, rw_sd=SDE_RW, key=jax.random.key(0), block=block)
+    res = panel.results()
+    assert np.isfinite(res["shared logLik"].to_numpy(dtype=float)).all()
+    assert np.isfinite(res["unit logLik"].to_numpy(dtype=float)).all()
+
+
+def test_simulate_on_cute_matches_xla():
+    # The model accumulates case counts, which the kernel needs as static indices.
+    model = he10_model()
+    assert model.rproc.accumvars
+    out = {}
+    for backend in ("xla", "cute"):
+        m = deepcopy(model)
+        m.set_backend(backend)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            X, _ = m.simulate(nsim=20, key=jax.random.key(7))
+        out[backend] = X.drop(columns=["theta_idx", "sim", "time"]).to_numpy(float)
+        if backend == "cute":
+            assert isinstance(m.to_struct().rproc_pf, KernelRProc)
+    rel = np.abs(out["xla"] - out["cute"]) / (np.abs(out["xla"]) + 1.0)
+    # A binomial draw that rounding flips sends that simulation its own way.
+    assert (rel.max(-1) > 1e-3).mean() < 0.1
+    assert np.median(rel) < 1e-5
+
+
+def test_estimation_checks_the_kernel_at_the_parameters_it_is_given():
+    model = sde_model()
+    model.set_backend("cute")
+    theta = model.theta
+    model.theta = None  # as for a Pomp that a PanelPomp has taken as a unit
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model.pfilter(J=100, theta=theta, key=jax.random.key(0))
+    assert model.backend_report()["rproc"].cute
+
+
 def test_dpop_train_on_cute():
     model = sde_model(dpop_rproc, statenames=("x", "_logw"))
     assert model.rproc.accumvars == (1,)  # _logw is zeroed at each observation
@@ -682,6 +755,7 @@ def test_float64_particles_run_on_xla():
         model = sde_model()
         model.pfilter(J=100, key=jax.random.key(0))
         assert np.isfinite(model.results()["logLik"].to_numpy(dtype=float)).all()
+        assert "jax_enable_x64" in model.backend_report()["rproc"].note
     finally:
         jax.config.update("jax_enable_x64", False)
 

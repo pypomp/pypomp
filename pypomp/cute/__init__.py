@@ -204,7 +204,9 @@ def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
     if not ok:
         return skip(f"unavailable: {why}")
     if check and model._theta is None:
-        return skip("needs model.theta to check the kernel")
+        return skip(
+            "needs model.theta to check the kernel, or set_backend(..., check=False)"
+        )
     import jax
 
     if rng == "threefry":
@@ -254,8 +256,17 @@ def _build_kernels(
 
     rp = parts["rproc"]
     if not rp.translates:
-        say(f"CuTe rproc doesn't translate: {_listed(rp.problems)}. Using XLA.")
-        keep("rproc", "doesn't translate")
+        import jax
+
+        # Under x64 the model's draws and arithmetic default to 64 bits, which the
+        # problems then list op by op; name the cause.
+        x64 = (
+            " jax_enable_x64 is on, and the kernel runs in float32."
+            if jax.config.jax_enable_x64
+            else ""
+        )
+        say(f"CuTe rproc doesn't translate: {_listed(rp.problems)}.{x64} Using XLA.")
+        keep("rproc", "doesn't translate" + (" (jax_enable_x64 is on)" if x64 else ""))
         return _Built(None, "", _without_rproc(parts))
     make = kernel._make_rprocess_interp
     pf = make(model, an.traced, False, rng, None)

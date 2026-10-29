@@ -108,11 +108,13 @@ For a short exploratory run, XLA can finish first; CuTe is for long runs such as
 **How results differ from XLA's.**
 With ``rng="threefry"``, the default, the kernel draws the same random numbers as XLA for the same key, so the two backends agree up to float rounding.
 Rounding can still flip a resampling decision now and then, which moves a log-likelihood by about its Monte Carlo error, so results are not identical across backends.
+After such a flip the two runs go their own ways, so iterated filtering, which resamples parameters along with particles, usually parts from XLA within its first iteration: with the same key, its estimates and log-likelihoods differ between backends by about their Monte Carlo error.
+They agree in distribution, so compare backends over replicates, not run by run.
 ``rng="philox"`` draws pypomp's own Philox stream instead, which takes about 20% less kernel time for the UK measles model but gives different numbers from XLA's for the same key.
 
 **What can go wrong.**
 
-- The check runs the first observation interval on the kernel and on XLA at ``model.theta``, once, and keeps XLA (with a warning) if they differ. A kernel that differs from XLA only at other parameters goes unnoticed. ``set_backend(..., check=False)`` skips the check.
+- The check runs the first observation interval on the kernel and on XLA at ``model.theta`` (or, for a model without it, at the parameters of the first call), once, and keeps XLA (with a warning) if they differ. A kernel that differs from XLA only at other parameters goes unnoticed. ``set_backend(..., check=False)`` skips the check.
 - The translator handles most of what an ``rproc`` written for one particle uses, but not everything: while loops with a runtime trip count, dynamic updates at a runtime index and float64, among others, keep the model on XLA. A ``@vectorized`` ``rproc`` that couples particles, for example through a mean over them, stays on XLA too.
 - :meth:`~pypomp.core.pomp.Pomp.train` differentiates through a second generated kernel. Optimizers that need Hessians (:class:`~pypomp.Newton`, :class:`~pypomp.WeightedNewton`) run on XLA.
 - A :class:`~pypomp.panel.panel.PanelPomp` runs its first unit's kernel for every unit, checked on the first unit.

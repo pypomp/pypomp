@@ -200,7 +200,7 @@ def test_thresh_is_a_weight_ratio(simple):
     assert logliks[1e6] != logliks[0.0]
 
 
-def test_default_backend_falls_back_quietly(simple):
+def test_auto_backend_falls_back_quietly(simple):
     import warnings
 
     from pypomp.cute import available
@@ -208,6 +208,7 @@ def test_default_backend_falls_back_quietly(simple):
     LG, key, J = simple
     if available()[0]:
         pytest.skip("CuTe is available here; covered by tests/test_cute")
+    LG.set_backend("auto")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = LG.to_struct()

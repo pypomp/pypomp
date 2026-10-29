@@ -74,6 +74,10 @@ class PompInterface(Protocol):
         self, backend: str | None = None, rng: str | None = None
     ) -> PompStruct: ...
 
+    def _to_struct_at(
+        self, theta: PompParameters, backend: str | None = None
+    ) -> PompStruct: ...
+
     @overload
     def simulate(
         self,

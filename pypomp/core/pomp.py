@@ -466,11 +466,11 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             runs in a separate CuTe kernel. CuTe needs the optional
             ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``) and an
             NVIDIA GPU from Ampere on; without them, or if ``rproc`` uses an
-            operation the translator does not handle, pypomp warns and uses XLA. ``"auto"`` uses CuTe when all of
-            that holds and XLA otherwise, without a warning. :meth:`backend_report`
-            says which parts run on CuTe and what in the model's code keeps the rest
-            on XLA. See :ref:`cute-backend` for when CuTe is faster and how its
-            results differ from XLA's.
+            operation the translator does not handle, pypomp warns and uses XLA.
+            ``"auto"`` uses CuTe when all of that holds and XLA otherwise, without
+            a warning. :meth:`backend_report` says which parts run on CuTe and
+            what in the model's code keeps the rest on XLA. See :ref:`cute-backend`
+            for when CuTe is faster and how its results differ from XLA's.
         rng : {"threefry", "philox"}, optional
             The random numbers the CuTe kernel draws. ``"threefry"``, the default,
             draws JAX's threefry numbers, so for a given key the kernel's results
@@ -484,14 +484,15 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         check : bool, optional
             Whether to check the CuTe kernels numerically before using them. The
             check runs the first observation interval on the kernel and on XLA at
-            ``self.theta`` with the same random numbers and keeps XLA if they
-            differ, or differentiates through XLA if only their gradients do. It
-            adds several seconds to the first :meth:`to_struct`. With
-            ``check=False``, the kernels are used without it, and ``self.theta``
-            need not be set. Operations the translator can't run, and coupling
-            between particles found in a ``@vectorized`` rproc's jaxpr, still keep
-            XLA, but a kernel that differs from XLA in another way goes unnoticed.
-            Defaults to True.
+            ``self.theta`` (or, for a model without it, at the parameters the
+            first filtering, estimation or simulation call is given) with the same
+            random numbers and keeps XLA if they differ, or differentiates through
+            XLA if only their gradients do. It adds several seconds to the first
+            call. With ``check=False``, the kernels are used without it, and
+            :meth:`to_struct` doesn't need ``self.theta``. Operations the
+            translator can't run, and coupling between particles found in a
+            ``@vectorized`` rproc's jaxpr, still keep XLA, but a kernel that differs
+            from XLA in another way goes unnoticed. Defaults to True.
 
         Returns
         -------
@@ -567,6 +568,24 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         )
         rproc_pf, rproc_per = self._rproc_fns(backend, rng)
         return struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
+
+    def _to_struct_at(
+        self, theta: PompParameters, backend: str | None = None
+    ) -> PompStruct:
+        """Return :meth:`to_struct`, checking any CuTe kernel at `theta` if the
+        model has no parameters of its own.
+
+        The estimation methods take their parameters as an argument and then set
+        ``self.theta``, so otherwise a model built without them would run its first
+        call on XLA and the next on CuTe.
+        """
+        if self._theta is not None:
+            return self.to_struct(backend=backend)
+        self._theta = theta
+        try:
+            return self.to_struct(backend=backend)
+        finally:
+            self._theta = None
 
     def _rproc_fns(
         self, backend: str | None = None, rng: str | None = None

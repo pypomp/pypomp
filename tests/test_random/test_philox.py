@@ -8,7 +8,10 @@ from pypomp.random.philox import PHILOX
 
 
 def test_rounds_match_jax_philox4x32():
-    from jax._src.random import philox4x32 as jp
+    try:
+        from jax._src.random import philox4x32 as jp
+    except ImportError:
+        pytest.skip("this JAX has no Philox implementation")
 
     rng = np.random.default_rng(0)
     k = rng.integers(0, 2**32, size=(2,), dtype=np.uint32)
@@ -19,6 +22,15 @@ def test_rounds_match_jax_philox4x32():
     )
     for a, b in zip(ours, theirs, strict=True):
         np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_mulhi_from_16_bit_halves():
+    rng = np.random.default_rng(1)
+    a = rng.integers(0, 2**32, size=4096, dtype=np.uint64)
+    b = rng.integers(0, 2**32, size=4096, dtype=np.uint64)
+    a[:4], b[:4] = [0, 2**32 - 1, 2**32 - 1, 1], [0, 2**32 - 1, 1, 2**32 - 1]
+    hi = philox._mulhi16(jnp.asarray(a, jnp.uint32), jnp.asarray(b, jnp.uint32))
+    np.testing.assert_array_equal(np.asarray(hi), ((a * b) >> 32).astype(np.uint32))
 
 
 def test_four_words_per_call_layout():

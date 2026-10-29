@@ -40,10 +40,24 @@ def _philox4x32(
     for r in range(10):
         if r:
             k0, k1 = k0 + _W0, k1 + _W1
-        lo0, hi0 = lax.mul(_M0, x0), lax.mulhi(_M0, x0)
-        lo1, hi1 = lax.mul(_M1, x2), lax.mulhi(_M1, x2)
+        lo0, hi0 = lax.mul(_M0, x0), _mulhi(_M0, x0)
+        lo1, hi1 = lax.mul(_M1, x2), _mulhi(_M1, x2)
         x0, x1, x2, x3 = hi1 ^ x1 ^ k0, lo1, hi0 ^ x3 ^ k1, lo0
     return x0, x1, x2, x3
+
+
+def _mulhi16(a: jax.Array, b: jax.Array) -> jax.Array:
+    """Return the high 32 bits of the product of 32-bit unsigned `a` and `b`, from
+    products of their 16-bit halves, for JAX before 0.11, which lacks lax.mulhi."""
+    a, b = jnp.asarray(a, jnp.uint32), jnp.asarray(b, jnp.uint32)
+    m = jnp.uint32(0xFFFF)
+    a_lo, a_hi, b_lo, b_hi = a & m, a >> 16, b & m, b >> 16
+    lh, hl = a_lo * b_hi, a_hi * b_lo
+    mid = ((a_lo * b_lo) >> 16) + (lh & m) + (hl & m)
+    return a_hi * b_hi + (lh >> 16) + (hl >> 16) + (mid >> 16)
+
+
+_mulhi = getattr(lax, "mulhi", _mulhi16)
 
 
 def _seed(seed: jax.Array) -> jax.Array:

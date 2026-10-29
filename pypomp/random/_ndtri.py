@@ -72,7 +72,13 @@ def ndtri(p: jax.Array) -> jax.Array:
     pieces of JAX's approximation, which computes only the piece `p` falls in: the
     CuTe backend traces one particle at a time and turns it into a branch.
     """
-    if jnp.size(p) != 1 or jnp.result_type(p) != jnp.float32:
+    # Before JAX 0.12, which added lax.polynomial, JAX's approximation isn't the one
+    # restated here, so its own is used.
+    if (
+        jnp.size(p) != 1
+        or jnp.result_type(p) != jnp.float32
+        or not hasattr(lax, "polynomial")
+    ):
         return jsp_special.ndtri(p)
     return _ndtri_scalar(jnp.reshape(p, ())).reshape(jnp.shape(p))
 

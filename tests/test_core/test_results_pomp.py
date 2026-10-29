@@ -4,7 +4,6 @@ from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
-import pandas as pd
 import pytest
 import xarray as xr
 
@@ -126,7 +125,7 @@ def test_pomp_pfilter_result():
     df = res.to_dataframe()
     assert len(df) == 1
     assert {"logLik", "se", "param1"} <= set(df.columns)
-    assert not pd.isna(df.loc[0, "se"])  # reps > 1
+    assert df["se"].notna().all()  # reps > 1
 
     assert len(res.CLL(average=False)) == 4  # 1 * 2 rep * 2 time
     assert len(res.CLL(average=True)) == 2
@@ -158,7 +157,7 @@ def test_pomp_pfilter_single_parameter_set_1d():
     df = res.to_dataframe()
     assert len(df) == 1
     assert df.loc[0, "logLik"] == 1.5
-    assert pd.isna(df.loc[0, "se"])
+    assert df["se"].isna().all()
     assert df.loc[0, "param1"] == 1.0
     assert res.traces().loc[0, "logLik"] == 1.5
 
@@ -172,7 +171,7 @@ def test_pomp_mif_result():
     assert len(df) == 1
     assert df.loc[0, "logLik"] == 2.5
     assert df.loc[0, "param1"] == 1.1
-    assert pd.isna(df.loc[0, "se"])
+    assert df["se"].isna().all()
 
     assert res.traces()["se"].isna().all()
 

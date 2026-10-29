@@ -117,7 +117,7 @@ def test_panel_mif_result():
     assert len(df) == 1
     assert df.loc[0, "shared logLik"] == 1.0
     assert df.loc[0, "unit logLik"] == 2.0
-    assert pd.isna(df.loc[0, "shared logLik se"])
+    assert df["shared logLik se"].isna().all()
 
     assert res.traces()["se"].isna().all()
 

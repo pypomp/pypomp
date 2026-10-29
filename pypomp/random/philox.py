@@ -21,6 +21,7 @@ import jax.extend.random as jxr
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+from jax.typing import ArrayLike
 
 # Multipliers and key increments from Salmon et al. (2011), "Parallel random
 # numbers: as easy as 1, 2, 3".
@@ -46,7 +47,7 @@ def _philox4x32(
     return x0, x1, x2, x3
 
 
-def _mulhi16(a: jax.Array, b: jax.Array) -> jax.Array:
+def _mulhi16(a: ArrayLike, b: ArrayLike) -> jax.Array:
     """Return the high 32 bits of the product of 32-bit unsigned `a` and `b`, from
     products of their 16-bit halves, for JAX before 0.11, which lacks lax.mulhi."""
     a, b = jnp.asarray(a, jnp.uint32), jnp.asarray(b, jnp.uint32)

@@ -1,0 +1,6 @@
+# Commits without a GPU test upload (see the `gpu` job in .github/workflows/ci.yml)
+# reuse the last one, so code only GPU tests reach doesn't count as uncovered.
+flag_management:
+  individual_flags:
+    - name: gpu
+      carryforward: true

@@ -317,6 +317,43 @@ def test_num_euler_steps_non_positive_interval_returns_zero():
     assert ifunc._num_euler_steps(2.0, 1.0, 0.1, None) == (0, 0.0)
 
 
+def test_calc_steps_every_interval_starts_from_the_requested_dt():
+    times0 = np.array([0.0, 0.7, 1.7, 2.7])
+    nstep_array, dt_array = ifunc._calc_steps(times0, dt=0.25, nstep=None)
+    assert nstep_array.tolist() == [3, 4, 4]
+    assert np.allclose(dt_array, [0.7 / 3, 0.25, 0.25])
+
+
+def test_calc_steps_short_interval_leaves_later_intervals_alone():
+    times0 = np.array([0.0, 0.01, 1.01, 2.01])
+    nstep_array, dt_array = ifunc._calc_steps(times0, dt=0.25, nstep=None)
+    assert nstep_array.tolist() == [1, 4, 4]
+    assert np.allclose(dt_array, [0.01, 0.25, 0.25])
+
+
+@pytest.mark.parametrize(
+    "dt, nstep, expected",
+    [(0.25, None, [0, 4, 0, 4]), (None, 3, [0, 3, 0, 3])],
+    ids=["dt", "nstep"],
+)
+def test_calc_steps_empty_intervals_have_no_steps(dt, nstep, expected):
+    times0 = np.array([0.0, 0.0, 1.0, 1.0, 2.0])
+    nstep_array, dt_array = ifunc._calc_steps(times0, dt=dt, nstep=nstep)
+    assert nstep_array.tolist() == expected
+    assert dt_array[0] == dt_array[2] == 0.0
+
+
+@pytest.mark.parametrize(
+    "t0, times",
+    [(1.5, [1.0, 2.0]), (0.0, [1.0, 3.0, 2.0])],
+    ids=["t0-after-first-observation", "decreasing-times"],
+)
+@pytest.mark.parametrize("grid", [{"dt": 0.1, "nstep": None}, {"dt": None, "nstep": 2}])
+def test_calc_ys_covars_rejects_time_running_backwards(t0, times, grid):
+    with pytest.raises(ValueError, match="t0 must be no later"):
+        ifunc._calc_ys_covars(t0, np.array(times), None, None, **grid)
+
+
 def test_calc_steps_argument_validation():
     times0 = np.array([0.0, 1.0, 2.0])
 

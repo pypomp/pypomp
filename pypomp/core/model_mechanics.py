@@ -568,6 +568,7 @@ class _RProc(_ModelComponent):
     nstep: int | None
     dt: float | None
     accumvars: tuple[int, ...] | None
+    skip_empty: bool = False
     mechanics_pf_interp: Callable
     mechanics_per_interp: Callable
 
@@ -606,11 +607,12 @@ class _RProc(_ModelComponent):
         # number of steps. This is necessary for train to work.
         if nstep_array is not None:
             nstep_arr = np.asarray(nstep_array)
-            all_nstep_same = np.min(nstep_arr) == np.max(nstep_arr)
-            # If nstep is the same for all intervals (which can happen even if derived
-            # from dt), use it for the interpolated functions.
-            if all_nstep_same:
-                self.nstep = int(np.min(nstep_arr))
+            counts = np.unique(nstep_arr[nstep_arr > 0])
+            # If nstep is the same for all intervals that have steps (which can happen
+            # even if derived from dt), use it for the interpolated functions.
+            if counts.size <= 1:
+                self.nstep = int(counts[0]) if counts.size else 0
+                self.skip_empty = counts.size == 1 and bool(np.any(nstep_arr == 0))
 
         super().__init__(
             mechanics,
@@ -688,12 +690,14 @@ class _RProc(_ModelComponent):
             nstep_fixed=self.nstep,
             statenames=self.statenames,
             prepare_theta=prepare_pf,
+            skip_empty=self.skip_empty,
         )
         self.mechanics_per_interp = _time_interp(
             step_per,
             nstep_fixed=self.nstep,
             statenames=self.statenames,
             prepare_theta=prepare_per,
+            skip_empty=self.skip_empty,
         )
 
     def __eq__(self, other: object) -> bool:
@@ -703,6 +707,7 @@ class _RProc(_ModelComponent):
             and self.nstep == other.nstep
             and self.dt == other.dt
             and self.accumvars == other.accumvars
+            and self.skip_empty == other.skip_empty
             and self._is_vectorized == other._is_vectorized
         )
 
@@ -958,6 +963,7 @@ def _time_interp(
     nstep_fixed: int | None,
     statenames: list[str],
     prepare_theta: Callable | None = None,
+    skip_empty: bool = False,
 ) -> Callable:
     """Constructs an interpolated version of rproc.
 
@@ -968,6 +974,8 @@ def _time_interp(
         statenames (list[str]): List of state variable names.
         prepare_theta (Callable | None): Optional callable to transform or prepare
             parameters once per observation interval. Defaults to None.
+        skip_empty (bool): Whether intervals with no steps leave the state alone
+            under `nstep_fixed`. Defaults to False.
 
     Returns:
         Callable: Interpolated version of rproc.
@@ -1001,10 +1009,12 @@ def _time_interp(
         nstep_dynamic: int,
         accumvars: tuple[int, ...] | None,
         should_trans: bool,
-    ) -> tuple[jax.Array, int]:
+    ) -> tuple[jax.Array, jax.Array | int]:
         """Interpolated version of rproc."""
         if accumvars is not None and len(accumvars) > 0:
             X_ = X_.at[:, accumvars].set(0)
+        if nstep_fixed == 0:  # Every interval is empty, and so is dt_array_extended.
+            return X_, t_idx
         if jnp.ndim(keys) != 0:
             # Callers may hand over one key per particle; extract a single scalar seed key.
             keys = keys[0]
@@ -1029,6 +1039,12 @@ def _time_interp(
         )
         X_dict_out = final[0]
         X_out = jnp.stack([X_dict_out[n] for n in snames], axis=-1)
+        if skip_empty:
+            # The step count has to stay static for reverse-mode gradients, so an
+            # empty interval runs its steps on the next interval's dt, which keeps
+            # dt-scaled terms finite, and discards them.
+            empty = jnp.equal(nstep_dynamic, 0)
+            return jnp.where(empty, X_, X_out), jnp.where(empty, t_idx, final[3])
         return X_out, final[3]  # Return state and new t_idx
 
     return _rproc_interp

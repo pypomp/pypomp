@@ -879,6 +879,18 @@ def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
 
 
+def test_fixed_step_kernel_leaves_intervals_of_no_length_to_xla():
+    model = sde_model()
+    model._nstep_array = np.array([0, *model._nstep_array[1:]])
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="no length"):
+        s = model.to_struct()
+    assert s.rproc_pf is model.rproc.mechanics_pf_interp
+    report = model.backend_report()
+    assert not report["rproc"].cute
+    assert "no length" in report["rproc"].note
+
+
 def test_report_says_every_part_runs_on_cute():
     model = sde_model()
     model.set_backend("cute")

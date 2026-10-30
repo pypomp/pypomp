@@ -15,6 +15,7 @@ from .test_cute_backend import (
     he10_model,
     particle_mean,
     sde_model,
+    sde_rproc,
     table_model,
     table_panel,
     vectorized_rproc,
@@ -39,6 +40,19 @@ def test_check_rejects_a_kernel_that_differs_from_xla():
         return out * 1.01 + 0.1, t_idx
 
     assert "differ" in (_check(model, off, per, False, "threefry") or "")
+
+
+def test_check_sees_the_steps_when_the_first_interval_has_no_length():
+    def drifting(X_, theta_, key, covars, t, dt):
+        out = sde_rproc(X_, theta_, key, covars, t, dt)
+        return {"x": out["x"] + 5.0 * dt}
+
+    times = np.arange(0.0, 20.0)
+    model = sde_model(times=times)
+    assert _interval(model, "threefry").obs == 1
+    assert _check(model, *xla_fns(model), False, "threefry") is None
+    wrong = xla_fns(sde_model(drifting, times=times))
+    assert "differ" in (_check(model, *wrong, False, "threefry") or "")
 
 
 def test_check_rejects_a_per_particle_kernel_that_differs_from_xla():

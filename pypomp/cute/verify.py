@@ -1,8 +1,9 @@
 """Numerical checks run once before the CuTe backend is chosen for a model.
 
-All run the model's first observation interval on ``_CHECK_J`` particles with a key
-of the kernel's generator (threefry, or pypomp's Philox), so XLA and the kernel draw
-the same random numbers. The coupling probe
+All run the model's first observation interval with steps of nonzero length, since
+nothing can differ over the others, on ``_CHECK_J`` particles with a key of the
+kernel's generator (threefry, or pypomp's Philox), so XLA and the kernel draw the
+same random numbers. The coupling probe
 perturbs one particle of a ``@vectorized`` rproc and requires the others to stay
 bit-identical on XLA: the kernel runs every particle on its own, so any coupling
 would be dropped. The comparisons then require the kernel to match XLA with one
@@ -58,6 +59,20 @@ class _Interval(NamedTuple):
     rest: tuple
     """The remaining ``rprocess_interp`` arguments after X and theta, up to
     ``should_trans``."""
+    obs: int
+    """The observation that ends the interval."""
+
+
+def _first_steps(model: Pomp) -> tuple[int, int]:
+    """Return the first observation interval with steps of nonzero length, and the
+    index of its first step."""
+    steps = np.asarray(model._nstep_array)
+    dts = np.asarray(model._dt_array_extended)
+    starts = np.cumsum(steps) - steps
+    for i, (n, start) in enumerate(zip(steps, starts, strict=True)):
+        if n > 0 and dts[start] > 0:
+            return i, int(start)
+    return 0, 0
 
 
 def _interval(model: Pomp, rng: str) -> _Interval:
@@ -77,14 +92,17 @@ def _interval(model: Pomp, rng: str) -> _Interval:
     )
     key = jax.random.key(1, impl="threefry2x32" if rng == "threefry" else PHILOX)
     dts = jnp.asarray(model._dt_array_extended)
-    nstep, acc = int(model._nstep_array[0]), model.rproc.accumvars
+    obs, t_idx = _first_steps(model)
+    t = model.t0 if obs == 0 else float(model.ys.index[obs - 1])
+    nstep, acc = int(model._nstep_array[obs]), model.rproc.accumvars
 
     def run(
         rproc: Callable, X: jax.Array, theta: jax.Array, should_trans: bool
     ) -> jax.Array:
-        return rproc(X, theta, key, cov, dts, model.t0, 0, nstep, acc, should_trans)[0]
+        return rproc(X, theta, key, cov, dts, t, t_idx, nstep, acc, should_trans)[0]
 
-    return _Interval(X0, th, th_per, run, (key, cov, dts, model.t0, 0, nstep, acc))
+    rest = (key, cov, dts, t, t_idx, nstep, acc)
+    return _Interval(X0, th, th_per, run, rest, obs)
 
 
 def _forward(iv: _Interval, rproc: Callable, theta: jax.Array, trans: bool) -> Callable:
@@ -192,8 +210,8 @@ def _check_dmeas(model: Pomp, cute_pf: Any, cute_per: Any, rng: str) -> str | No
     kernel ends the test interval in.
     """
     iv = _interval(model, rng)
-    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
-    t_obs = jnp.float32(model.ys.index[0])
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[iv.obs])
+    t_obs = jnp.float32(model.ys.index[iv.obs])
     cov = iv.rest[1]
     cases = (
         (cute_pf, iv.th, False, ""),
@@ -224,8 +242,8 @@ def _check_perturb_step(model: Pomp, cute_per: Any, rng: str) -> str | None:
 
     iv = _interval(model, rng)
     J, d = iv.th_per.shape
-    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
-    t_obs = jnp.float32(model.ys.index[0])
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[iv.obs])
+    t_obs = jnp.float32(model.ys.index[iv.obs])
     cov = iv.rest[1]
     anc = jax.random.randint(jax.random.key(4), (J,), 0, J, jnp.int32)
     key_perturb = jax.random.key(

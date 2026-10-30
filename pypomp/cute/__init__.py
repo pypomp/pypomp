@@ -268,6 +268,12 @@ def _build_kernels(
         say(f"CuTe rproc doesn't translate: {_listed(rp.problems)}.{x64} Using XLA.")
         keep("rproc", "doesn't translate" + (" (jax_enable_x64 is on)" if x64 else ""))
         return _Built(None, "", _without_rproc(parts))
+    nstep = model.rproc.nstep
+    if nstep is not None and any(n != nstep for n in model._nstep_array.tolist()):
+        # A fixed-step kernel has no way to leave an empty interval's particles alone.
+        say("CuTe rproc can't skip intervals of no length. Using XLA.")
+        keep("rproc", "can't skip intervals of no length")
+        return _Built(None, "", _without_rproc(parts))
     make = kernel._make_rprocess_interp
     pf = make(model, an.traced, False, rng, None)
     per = make(model, an.traced, True, rng, None)

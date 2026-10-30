@@ -81,6 +81,25 @@ def test_train_ignores_later_unit_param_order(panel):
     )
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda names: [*names, "extra"],
+        lambda names: names[:-1],
+        lambda names: [*names[:-1], "other"],
+    ],
+    ids=["extra", "fewer", "renamed"],
+)
+@pytest.mark.parametrize("unit", ["unit1", "unit2"])
+def test_to_struct_rejects_unit_with_other_params(panel, unit, edit):
+    """Validation at construction can't see a unit changed afterwards."""
+    pomp = panel.unit_objects[unit]
+    pomp.canonical_param_names = edit(pomp.canonical_param_names)
+
+    with pytest.raises(ValueError, match=f"Unit '{unit}'.*differ in"):
+        panel.to_struct()
+
+
 def test_panel_pfilter_reads_struct_param_names_order(panel):
     """The functional filter takes ``struct.param_names`` order, as the method does."""
     key = jax.random.key(3)

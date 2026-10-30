@@ -409,7 +409,7 @@ def test_get_param_permutation_missing_param(lg_panel_setup_some_shared):
     panel.unit_objects["unit1"].canonical_param_names = panel.unit_objects[
         "unit1"
     ].canonical_param_names + ["nonexistent"]
-    with pytest.raises(ValueError, match="not in the panel's parameter list"):
+    with pytest.raises(ValueError, match="parameter list differ in"):
         panel._get_param_permutation()
 
 

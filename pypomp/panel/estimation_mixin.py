@@ -104,8 +104,14 @@ class PanelEstimationMixin(Base):
             raise TypeError("theta must be a PanelParameters instance or None")
         return theta
 
-    def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
-        unit_canonical = self.unit_objects[unit_name].canonical_param_names
+    def _get_param_permutation(self) -> jax.Array:
+        """Indices that take theta from panel order to the first unit's order.
+
+        Every unit runs on the first unit's functions, which read theta by
+        position, so the first unit's order applies to all units.
+        """
+        first_unit = self.get_unit_names()[0]
+        unit_canonical = self.unit_objects[first_unit].canonical_param_names
         panel_canonical = self.canonical_param_names
 
         try:
@@ -113,7 +119,7 @@ class PanelEstimationMixin(Base):
         except ValueError as e:
             missing = set(unit_canonical) - set(panel_canonical)
             raise ValueError(
-                f"Unit '{unit_name}' has parameters {missing} that are not in the panel's parameter list. "
+                f"Unit '{first_unit}' has parameters {missing} that are not in the panel's parameter list. "
                 f"Panel parameters: {panel_canonical}, Unit parameters: {unit_canonical}"
             ) from e
         return jnp.array(permutation, dtype=jnp.int32)
@@ -479,7 +485,7 @@ class PanelEstimationMixin(Base):
             [
                 jnp.array(
                     [
-                        [t[name] for name in self.unit_objects[u].canonical_param_names]
+                        [t[name] for name in self.canonical_param_names]
                         for t in self.get_unit_parameters(u, theta=theta_obj_in)
                     ]
                 )

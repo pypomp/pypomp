@@ -11,7 +11,6 @@ from Section 2 of the paper.
 from __future__ import annotations
 
 from collections.abc import Callable
-from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -19,7 +18,7 @@ import numpy as np
 from jax import lax
 from jax._src import dtypes
 
-from ._branch import where_lazy
+from ._branch import branching, jit, where_lazy
 from ._ndtri import ndtri
 from ._dtype_helpers import (
     _get_available_dtype,
@@ -27,7 +26,7 @@ from ._dtype_helpers import (
 )
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def fast_multinomial(
     key: jax.Array,
     n: jax.Array,
@@ -130,7 +129,7 @@ def fast_multinomial(
     return jnp.stack(out, axis=-1).astype(dtype)
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def fast_binomial(
     key: jax.Array,
     n: jax.Array,
@@ -237,7 +236,7 @@ def fast_binomial(
     return x.astype(dtype)
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def binominv(
     u: jax.Array,
     n: jax.Array,
@@ -298,7 +297,7 @@ def binominv(
        https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     u, n, p = jnp.broadcast_arrays(u, n, p)
-    if u.ndim and u.size == 1:
+    if branching() and u.ndim and u.size == 1:
         # One element runs unbatched, so each method is computed only if needed.
         x = binominv(
             u.reshape(()),
@@ -468,7 +467,7 @@ def _binom_bottom_up(
         result = jnp.where(is_new_discovery, jnp.full_like(result, i), result)
         return pmf, cdf, result, jnp.logical_or(found, found_now)
 
-    if jnp.ndim(u) == 0:
+    if branching() and jnp.ndim(u) == 0:
         # Unbatched, stop at the quantile: later terms can't change it, and the
         # CuTe kernel turns each cond into a branch. A check costs a branch, so it
         # comes before every other term from the third, by when most small-mean

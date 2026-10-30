@@ -18,6 +18,7 @@ import numpy as np
 from jax.extend.core import ClosedJaxpr  # pyright: ignore[reportPrivateImportUsage]
 from jax.extend.core import Literal
 
+from ..random._branch import branching_traces
 from .report import Problem
 
 if TYPE_CHECKING:
@@ -576,10 +577,12 @@ def _trace_step(model: Pomp) -> _Traced:
         f32(0.0),
         f32(0.01),
     )
-    step_j = jax.make_jaxpr(step)(*args)
-    prep_j = jax.make_jaxpr(prep)(jnp.zeros(d, f32))
-    step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
-    prep_vjp_j = jax.make_jaxpr(prep_vjp)(jnp.zeros(d, f32), jnp.zeros(d, f32))
+    # One thread runs each particle, so the samplers' one-element branches pay.
+    with branching_traces():
+        step_j = jax.make_jaxpr(step)(*args)
+        prep_j = jax.make_jaxpr(prep)(jnp.zeros(d, f32))
+        step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
+        prep_vjp_j = jax.make_jaxpr(prep_vjp)(jnp.zeros(d, f32), jnp.zeros(d, f32))
     return step_j, prep_j, vec, step_vjp_j, prep_vjp_j
 
 
@@ -600,13 +603,14 @@ def _trace_dmeas(model: Pomp) -> ClosedJaxpr | None:
         return jnp.asarray(out, jnp.float32).reshape(())
 
     f32 = jnp.float32
-    return jax.make_jaxpr(dmeas)(
-        jnp.zeros(ny, f32),
-        jnp.zeros(ns, f32),
-        jnp.ones(d, f32),
-        jnp.ones(max(nc, 1), f32)[:nc],
-        f32(0.0),
-    )
+    with branching_traces():
+        return jax.make_jaxpr(dmeas)(
+            jnp.zeros(ny, f32),
+            jnp.zeros(ns, f32),
+            jnp.ones(d, f32),
+            jnp.ones(max(nc, 1), f32)[:nc],
+            f32(0.0),
+        )
 
 
 def _vectorized_jaxpr(model: Pomp, J: int) -> ClosedJaxpr:

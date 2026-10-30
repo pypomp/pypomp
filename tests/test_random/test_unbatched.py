@@ -1,5 +1,5 @@
-"""The samplers' one-element paths, which branch instead of selecting, match their
-batched paths bit for bit."""
+"""The samplers' one-element paths, which branch instead of selecting inside
+branching_traces, match their batched paths bit for bit, and appear nowhere else."""
 
 import jax
 import jax.numpy as jnp
@@ -8,6 +8,7 @@ import pytest
 from jax.scipy.special import ndtri as jax_ndtri
 
 from pypomp.random import binominv, gammainv, poissoninv
+from pypomp.random._branch import branching_traces
 from pypomp.random._ndtri import ndtri
 
 F32 = np.float32
@@ -19,10 +20,31 @@ def _same(a, b) -> bool:
 
 
 def _one_at_a_time(f, *args):
-    g = jax.jit(f)
-    return np.array(
-        [np.asarray(g(*(a[i : i + 1] for a in args)))[0] for i in range(len(args[0]))]
-    )
+    # A function of its own, so this jit shares no trace with jits outside it.
+    with branching_traces():
+        g = jax.jit(lambda *a: f(*a))
+        return np.array(
+            [
+                np.asarray(g(*(a[i : i + 1] for a in args)))[0]
+                for i in range(len(args[0]))
+            ]
+        )
+
+
+def _conds(jaxpr) -> int:
+    """Count the cond equations in `jaxpr` and in every jaxpr it calls."""
+    n = 0
+    for eqn in jaxpr.eqns:
+        n += eqn.primitive.name == "cond"
+        for v in eqn.params.values():
+            for sub in v if isinstance(v, (list, tuple)) else [v]:
+                inner = getattr(sub, "jaxpr", sub)
+                if hasattr(inner, "eqns"):
+                    n += _conds(inner)
+    return n
+
+
+_SCALARS = (F32(0.3), F32(20.0), F32(0.1))
 
 
 def _uniforms(rng, n):
@@ -93,3 +115,37 @@ def test_gammainv_one_at_a_time():
     alpha = np.exp(rng.uniform(np.log(1e-2), np.log(1e3), size=n_pts)).astype(F32)
     batched = gammainv(jnp.asarray(u), jnp.asarray(alpha))
     assert _same(_one_at_a_time(gammainv, u, alpha), batched)
+
+
+def test_shortcuts_only_while_branching():
+    with branching_traces():
+        assert _conds(jax.make_jaxpr(lambda p: ndtri(p))(F32(0.3)).jaxpr) > 0
+        jaxpr = jax.make_jaxpr(lambda *a: binominv(*a))(*_SCALARS).jaxpr
+        assert _conds(jaxpr) > 0
+        # A jit call, which the CuTe translator emits once as a device function.
+        assert [e.primitive.name for e in jaxpr.eqns] in (["jit"], ["pjit"])
+    assert _conds(jax.make_jaxpr(lambda p: ndtri(p))(F32(0.3)).jaxpr) == 0
+    assert _conds(jax.make_jaxpr(lambda *a: binominv(*a))(*_SCALARS).jaxpr) == 0
+    # XLA's filters vmap the per-particle rproc over particles.
+    arrays = [jnp.full(4, s) for s in _SCALARS]
+    assert _conds(jax.make_jaxpr(jax.vmap(binominv))(*arrays).jaxpr) == 0
+
+
+@pytest.mark.parametrize("branching_first", [True, False])
+def test_jit_cache_keeps_the_paths_apart(branching_first):
+    # An exact_max of its own, so no other test has traced these entries.
+    def trace():
+        return _conds(
+            jax.make_jaxpr(lambda *a: binominv(*a, exact_max=9 + branching_first))(
+                *_SCALARS
+            ).jaxpr
+        )
+
+    def branching_trace():
+        with branching_traces():
+            return trace()
+
+    if branching_first:
+        assert branching_trace() > 0 and trace() == 0
+    else:
+        assert trace() == 0 and branching_trace() > 0

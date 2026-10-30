@@ -15,7 +15,7 @@ import numpy as np
 from jax import lax
 from jax.scipy import special as jsp_special
 
-from ._branch import where_lazy
+from ._branch import branching, where_lazy
 
 # erf_inv_core's float32 ndtri constants: pieces split at w = 3.5 and 18.0625, the
 # central piece's polynomial in w - 1.75 and the tails' in sqrt(w) - shift, and
@@ -68,14 +68,17 @@ _NDTRI32_P = (
 def ndtri(p: jax.Array) -> jax.Array:
     """Return ``jax.scipy.special.ndtri(p)``, bit for bit.
 
-    On a float32 scalar (or one-element array) this is a ``lax.cond`` over the
-    pieces of JAX's approximation, which computes only the piece `p` falls in: the
-    CuTe backend traces one particle at a time and turns it into a branch.
+    On a float32 scalar (or one-element array) inside
+    :func:`~pypomp.random._branch.branching_traces`, this is a ``lax.cond`` over
+    the pieces of JAX's approximation, which computes only the piece `p` falls in:
+    the CuTe backend traces one particle at a time and turns it into a branch.
+    Elsewhere it is JAX's own, which costs less once vmapped.
     """
     # Before JAX 0.12, which added lax.polynomial, JAX's approximation isn't the one
     # restated here, so its own is used.
     if (
-        jnp.size(p) != 1
+        not branching()
+        or jnp.size(p) != 1
         or jnp.result_type(p) != jnp.float32
         or not hasattr(lax, "polynomial")
     ):

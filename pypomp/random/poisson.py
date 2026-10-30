@@ -10,7 +10,6 @@ small.
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 import jax
@@ -19,13 +18,12 @@ import numpy as np
 from jax import lax
 from jax._src import dtypes
 
+from ._branch import branching, jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 from ._ndtri import ndtri
 
 
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
-)
+@jit(static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"])
 def fast_poisson(
     key: jax.Array,
     lam: jax.Array,
@@ -133,9 +131,7 @@ def fast_poisson(
     return jnp.where(invalid, -1, x.astype(dtype))
 
 
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
-)
+@jit(static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"])
 def poissoninv(
     u: jax.Array,
     lam: jax.Array,
@@ -313,8 +309,8 @@ def _bottom_up(
             t_next = x_next * lami
             return x_next, t_next * s + one, t_next * delta
 
-        # Stop once s >= 0: the search never resumes, and unbatched each cond
-        # stays a branch (in the CuTe kernel too), so later steps are skipped.
+        # Stop once s >= 0: the search never resumes, and in a branching trace
+        # each cond stays a branch, so later steps are skipped.
         def search(i: int, x, s, delta):
             if i == max_inverse_cdf_loops:
                 return x, s, delta
@@ -324,7 +320,18 @@ def _bottom_up(
                 lambda: (x, s, delta),
             )
 
-        return search(0, x_init, s0, del0)
+        if branching():
+            return search(0, x_init, s0, del0)
+
+        # Vmapped, a cond is a select of both sides, so select each step instead.
+        x, s, delta = x_init, s0, del0
+        for _ in range(max_inverse_cdf_loops):
+            keep_going = s < zero
+            x_next, s_next, delta_next = step(x, s, delta)
+            x = lax.select(keep_going, x_next, x)
+            s = lax.select(keep_going, s_next, s)
+            delta = lax.select(keep_going, delta_next, delta)
+        return x, s, delta
 
     x_init = jnp.array(0.0, dtype=dtype)
     x, s, delta = _find_quantile(x_init, s0, del0, lami)

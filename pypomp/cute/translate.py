@@ -58,6 +58,7 @@ from .analysis import (
     _IDENTITY,
     _is_key,
     _pick_count,
+    _scan_counts,
     _shape,
     _sub_jaxpr,
 )
@@ -1088,7 +1089,7 @@ def _eval_eqn(
         raise NotImplementedError("while loop did not terminate during translation")
     if name == "scan":
         p = eqn.params
-        nc, ncarry, length = p["num_consts"], p["num_carry"], p["length"]
+        (nc, ncarry), length = _scan_counts(p), p["length"]
         consts, carry, xs = ins[:nc], ins[nc : nc + ncarry], ins[nc + ncarry :]
         ys = []
         order = range(length - 1, -1, -1) if p["reverse"] else range(length)
@@ -1474,7 +1475,7 @@ def _find_tables(
             _find_tables(p["body_jaxpr"], ins[cn : cn + bn] + carry, found)
             outs = [None] * n_out
         elif name == "scan":
-            nc = p["num_consts"]
+            nc, _ = _scan_counts(p)
             _find_tables(p["jaxpr"], ins[:nc] + [None] * (len(ins) - nc), found)
             outs = [None] * n_out
         elif (

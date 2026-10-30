@@ -156,6 +156,18 @@ def _sub_jaxpr(eqn: Any) -> ClosedJaxpr:
     raise NotImplementedError(f"{eqn.primitive.name}: no sub-jaxpr")
 
 
+def _scan_counts(params: dict[str, Any]) -> tuple[int, int]:
+    """Return how many of a scan's operands are constants and how many carry.
+
+    JAX keeps them in the ``ft_in`` tree of (consts, carry, xs); older versions
+    passed ``num_consts`` and ``num_carry`` instead.
+    """
+    if "num_consts" in params:
+        return params["num_consts"], params["num_carry"]
+    consts, carry, _ = params["ft_in"].unpack()
+    return len(consts), len(carry)
+
+
 def _is_key(dtype: Any) -> bool:
     """Return whether `dtype` is a JAX PRNG key dtype."""
     return dtype is not None and jnp.issubdtype(dtype, jax.dtypes.prng_key)
@@ -343,7 +355,7 @@ def _runtime(
             if any(_runtime(p["cond_jaxpr"].jaxpr, reg(ins[:cn]) + outs, bad, src)):
                 _note(bad, "while loop with a runtime trip count", src)
         elif name == "scan":
-            nc, ncarry = p["num_consts"], p["num_carry"]
+            nc, ncarry = _scan_counts(p)
             ins = reg(ins)
             consts, carry, xs = ins[:nc], ins[nc : nc + ncarry], ins[nc + ncarry :]
             outs = _loop(p["jaxpr"].jaxpr, consts, carry, xs, bad, src)
@@ -482,7 +494,7 @@ def _compare(
             if ax[0] in lc or ax[1] in rc:
                 _note(bad, "dot_general over particles", src)
         elif name == "scan":
-            if any(a == 0 for a in ax[p["num_consts"] + p["num_carry"] :]):
+            if any(a == 0 for a in ax[sum(_scan_counts(p)) :]):
                 _note(bad, "scan over particles", src)
         elif any(a is not None for a in ax) and name not in _PARTICLEWISE:
             if not _keeps_particles(e, ax, J):

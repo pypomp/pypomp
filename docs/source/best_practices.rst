@@ -77,6 +77,63 @@ Key patterns to avoid:
 - Intermediate state arrays like ``pts = jnp.stack([R1, R2, R3])`` that are updated or reduced across.
 
 
+.. _cute-backend:
+
+The CuTe Backend
+^^^^^^^^^^^^^^^^
+
+On an NVIDIA GPU, the CuTe backend translates ``rproc``, and ``dmeas`` where it can, into one CUDA kernel per observation interval.
+Each thread advances one particle through every Euler step of the interval, for all the filters of a call at once, so the particles' states stay in registers instead of passing through GPU memory at each step.
+It is opt-in: a new model uses XLA until you choose CuTe with :meth:`~pypomp.core.pomp.Pomp.set_backend`.
+
+.. code-block:: python
+
+    model.set_backend("cute")  # warns and uses XLA if CuTe can't run the model
+    model.set_backend("auto")  # CuTe where it can run, XLA otherwise, quietly
+
+CuTe needs the optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``), an NVIDIA GPU from Ampere on, float32 particles and JAX's default threefry keys.
+Where any of these is missing, the model runs on XLA.
+
+**When it is faster.**
+The kernel pays off most for models with many Euler steps per observation and with the branching samplers of ``pypomp.random`` (binomial, Poisson), whose branches the kernel takes per particle instead of computing every branch for every particle as XLA does.
+For the UK measles model (``pypomp.models.UKMeasles``, model ``001b``), advancing 1296 filters of 5000 particles over one observation interval takes about 11 ms on an A40 against 69 ms on XLA, and 3.6 ms on an RTX Pro 6000 against 10.5 ms.
+For a larger panel model on the RTX Pro 6000, :meth:`~pypomp.panel.panel.PanelPomp.pfilter` ran 4.7 times and :meth:`~pypomp.panel.panel.PanelPomp.mif` 2.7 times faster.
+The work between intervals, such as normalizing the weights and deciding whether to resample, gains less, so a whole filter speeds up less than its process model.
+
+**Startup cost.**
+The first call after :meth:`~pypomp.core.pomp.Pomp.set_backend` translates the model, compiles the kernels and checks them against XLA, which takes tens of seconds: for the UK measles model on an A40, the first filter or iterated filtering call took 30 to 50 s longer than on XLA.
+The kernels belong to the model object: copying it (``deepcopy``, pickling) builds them again, and nothing is cached between Python sessions.
+For a short exploratory run, XLA can finish first; CuTe is for long runs such as iterated filtering searches and many filter replicates.
+
+**How results differ from XLA's.**
+With ``rng="threefry"``, the default, the kernel draws the same random numbers as XLA for the same key, so the two backends agree up to float rounding.
+Rounding can still flip a resampling decision now and then, which moves a log-likelihood by about its Monte Carlo error, so results are not identical across backends.
+After such a flip the two runs go their own ways, so iterated filtering, which resamples parameters along with particles, usually parts from XLA within its first iteration: with the same key, its estimates and log-likelihoods differ between backends by about their Monte Carlo error.
+They agree in distribution, so compare backends over replicates, not run by run.
+``rng="philox"`` draws pypomp's own Philox stream instead, which takes about 20% less kernel time for the UK measles model but gives different numbers from XLA's for the same key.
+
+**What can go wrong.**
+
+- The check runs the first observation interval on the kernel and on XLA at ``model.theta`` (or, for a model without it, at the parameters of the first call), once, and keeps XLA (with a warning) if they differ. A kernel that differs from XLA only at other parameters goes unnoticed. ``set_backend(..., check=False)`` skips the check.
+- The translator handles most of what an ``rproc`` written for one particle uses, but not everything: while loops with a runtime trip count, dynamic updates at a runtime index and float64, among others, keep the model on XLA. A ``@vectorized`` ``rproc`` that couples particles, for example through a mean over them, stays on XLA too.
+- :meth:`~pypomp.core.pomp.Pomp.train` differentiates through a second generated kernel. Optimizers that need Hessians (:class:`~pypomp.Newton`, :class:`~pypomp.WeightedNewton`) run on XLA.
+- A :class:`~pypomp.panel.panel.PanelPomp` runs its first unit's kernel for every unit, checked on the first unit.
+- On several GPUs, :meth:`~pypomp.core.pomp.Pomp.pfilter`, :meth:`~pypomp.core.pomp.Pomp.mif` and :meth:`~pypomp.core.pomp.Pomp.train` spread the parameter sets over the GPUs, and each GPU launches the kernel for its own. With ``pypomp.functional``, run the call under ``jax.set_mesh(mesh)`` with the parameter sets sharded over the mesh for the same effect; otherwise every GPU runs every filter.
+
+**Checking a model.**
+:meth:`~pypomp.core.pomp.Pomp.backend_report` says which parts run on the kernel, and names each operation that keeps a part off it with the line of the model's code that uses it:
+
+.. code-block:: python
+
+    print(model.backend_report(backend="cute"))
+
+It runs on any machine, including one without a GPU or ``nvidia-cutlass-dsl``, where it says which parts the translator would accept.
+
+**Writing for the kernel.**
+The kernel runs ``rproc`` for one particle, so a ``lax.cond`` in it is a real branch that computes one side; ``jnp.where`` still computes both.
+The samplers in ``pypomp.random`` are written this way, which is one more reason to prefer them.
+
+
 Optimizing CPU Performance
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -22,6 +22,10 @@ on:
         description: "Test against the dependency floors declared in pyproject.toml"
         type: boolean
         default: false
+      run-gpu:
+        description: "Run the GPU tests on a rented Modal GPU (billed per run)"
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       full-matrix:
@@ -36,12 +40,19 @@ on:
       run-oldest-deps:
         type: boolean
         default: false
+      run-gpu:
+        type: boolean
+        default: false
       concurrency-key:
         # Set by a caller that must never be cancelled (see `concurrency` below).
         type: string
         default: ""
     secrets:
       CODECOV_TOKEN:
+        required: false
+      MODAL_TOKEN_ID:
+        required: false
+      MODAL_TOKEN_SECRET:
         required: false
 
 permissions:
@@ -310,6 +321,57 @@ jobs:
         run: |
           pytest tests/test_cpu_parallel -n 0 -s \
             --timeout=1200 --timeout-method=thread
+
+  gpu:
+    name: GPU tests
+    # Each run rents a Modal GPU, since GitHub's hosted runners have none that
+    # the CuTe backend supports (see tools/modal_gpu_tests.py). Runs when asked
+    # for and on pushes to main that change what the GPU tests depend on.
+    if: ${{ inputs.run-gpu || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check for changes the GPU tests depend on
+        id: changes
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        # Runs the tests whenever the previous commit can't be fetched.
+        run: |
+          if git fetch -q --depth=1 origin "$BEFORE" &&
+            git diff --quiet "$BEFORE" HEAD -- pypomp tests/test_cute \
+              tests/conftest.py pyproject.toml pytest.ini \
+              tools/modal_gpu_tests.py .github/workflows/ci.yml codecov.yml; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v6
+        if: steps.changes.outputs.run != 'false'
+        with:
+          python-version: "3.14"
+      - name: Install Modal client
+        if: steps.changes.outputs.run != 'false'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "modal>=1.6,<2"
+      - name: Run GPU tests on Modal
+        if: steps.changes.outputs.run != 'false'
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::Set the MODAL_TOKEN_ID and MODAL_TOKEN_SECRET repository secrets."
+            exit 1
+          fi
+          modal run tools/modal_gpu_tests.py
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && hashFiles('coverage-gpu.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-gpu.xml
+          flags: gpu
 
   build:
     name: Build distributions

@@ -294,6 +294,10 @@ class PanelEstimationMixin(Base):
         theta = self._prepare_theta_input(theta)
         active_key, _ = self._update_fresh_key(key)
 
+        # Units differ only in their data, so they share the first unit's kernel,
+        # whose build takes minutes, and its compiled functions.
+        struct = self._on_first_unit(lambda u: u.to_struct(), theta=theta)
+
         X_sims_list = []
         Y_sims_list = []
         new_unit_objects: dict[str, Pomp] = {}
@@ -303,12 +307,16 @@ class PanelEstimationMixin(Base):
 
             theta_obj = PompParameters(theta_list)
             active_key, subkey = jax.random.split(active_key)
-            result = obj.simulate(
-                key=subkey,
-                theta=theta_obj,
-                times=times,
-                nsim=nsim,
-                as_pomp=as_pomp,
+            covars = obj._covars_extended
+            result = obj._simulate(
+                nsim,
+                theta_obj,
+                times,
+                subkey,
+                as_pomp,
+                struct._replace(
+                    covars_extended=None if covars is None else jnp.array(covars)
+                ),
             )
             if as_pomp:
                 from ..core.pomp import Pomp

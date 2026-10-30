@@ -10,22 +10,23 @@ from Section 2 of the paper.
 
 from __future__ import annotations
 
-from functools import partial
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
 from jax._src import dtypes
-from jax.scipy.stats import norm
 
+from ._branch import branching, jit, where_lazy
+from ._ndtri import ndtri
 from ._dtype_helpers import (
     _get_available_dtype,
     check_and_canonicalize_user_dtype,
 )
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def fast_multinomial(
     key: jax.Array,
     n: jax.Array,
@@ -128,7 +129,7 @@ def fast_multinomial(
     return jnp.stack(out, axis=-1).astype(dtype)
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def fast_binomial(
     key: jax.Array,
     n: jax.Array,
@@ -235,7 +236,7 @@ def fast_binomial(
     return x.astype(dtype)
 
 
-@partial(jax.jit, static_argnames=["order", "exact_max", "dtype"])
+@jit(static_argnames=["order", "exact_max", "dtype"])
 def binominv(
     u: jax.Array,
     n: jax.Array,
@@ -296,6 +297,17 @@ def binominv(
        https://doi.org/10.1007/978-3-031-64529-7_22.
     """
     u, n, p = jnp.broadcast_arrays(u, n, p)
+    if branching() and u.ndim and u.size == 1:
+        # One element runs unbatched, so each method is computed only if needed.
+        x = binominv(
+            u.reshape(()),
+            n.reshape(()),
+            p.reshape(()),
+            order=order,
+            exact_max=exact_max,
+            dtype=dtype,
+        )
+        return x.reshape(u.shape)
     if dtype is None:
         dtype = jnp.result_type(u, n, p)
         if not dtypes.issubdtype(dtype, np.floating):
@@ -351,39 +363,44 @@ def binominv(
     u_safe = jnp.clip(u_flipped, u_clip_min, 1.0 - u_clip_min)
 
     q = 1.0 - p_safe
-    w = norm.ppf(u_safe)
-    w2 = w * w
     np_ = n_safe * p_safe
-    npq_ = np_ * q
-    sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(float_dtype).tiny))
-    pq = p_safe * q
-
-    args = (u_safe, n_safe, p_safe, q, w, w2, np_, sqrt_npq, pq)
-
     safe_order = max(0, min(2, int(order)))
-    order_idx = safe_order
-    branches = [
-        lambda x: _q_n0(*x),
-        lambda x: _q_n1(*x),
-        lambda x: _q_n2(*x),
-    ]
-    q_u = lax.switch(order_idx, branches, args)
-    k_approx = jnp.clip(jnp.floor(q_u), 0.0, n_safe)
-    # Cap to prevent wild tail divergence of asymptotic expansions when np is small
-    max_reasonable = np_ + 6.0 * sqrt_npq + 5.0
-    k_approx = jnp.floor(jnp.minimum(k_approx, max_reasonable))
+
+    def approx() -> jax.Array:
+        """The asymptotic expansion's quantile."""
+        w = jnp.asarray(ndtri(u_safe), float)  # as norm.ppf returns it
+        w2 = w * w
+        npq_ = np_ * q
+        sqrt_npq = jnp.sqrt(jnp.maximum(npq_, jnp.finfo(float_dtype).tiny))
+        pq = p_safe * q
+        args = (u_safe, n_safe, p_safe, q, w, w2, np_, sqrt_npq, pq)
+        q_u = (_q_n0, _q_n1, _q_n2)[safe_order](*args)
+        k = jnp.clip(jnp.floor(q_u), 0.0, n_safe)
+        # Cap to prevent wild tail divergence of asymptotic expansions when np is small
+        max_reasonable = np_ + 6.0 * sqrt_npq + 5.0
+        return jnp.floor(jnp.minimum(k, max_reasonable))
 
     u_exact = jnp.clip(u_flipped, 0.0, 1.0)
-    k_bottom_up = _binom_bottom_up(
-        u_exact, n_safe, p_safe, k_approx, float_dtype, max_k=exact_max
-    )
+
+    def exact(fallback: Callable[[], jax.Array]) -> jax.Array:
+        """The exact quantile, or `fallback` past the first exact_max values."""
+        k, found = _binom_bottom_up(u_exact, n_safe, p_safe, float_dtype, exact_max)
+        return jnp.clip(where_lazy(found, lambda: k, fallback), 0.0, n_safe)
 
     x_cutoff = 10
     np_cutoff = 4.0
-    k_small = k_approx < x_cutoff
-    np_small = np_ < np_cutoff
-    use_bottom_up = k_small | np_small
-    k_approx = jnp.where(use_bottom_up, k_bottom_up, k_approx)
+
+    # The exact sum serves small means, and large means whose asymptotic estimate
+    # is below x_cutoff. It appears once, so a backend that branches runs it once
+    # for both kinds of element. Each method is computed only where it is used
+    # (see where_lazy).
+    small = np_ < np_cutoff
+    k_large = where_lazy(small, lambda: jnp.zeros_like(np_), approx)
+    k_approx = where_lazy(
+        small | (k_large < x_cutoff),
+        lambda: exact(lambda: where_lazy(small, approx, lambda: k_large)),
+        lambda: k_large,
+    )
 
     k_flipped = jnp.where(flip, n_safe - k_approx, k_approx)
 
@@ -405,13 +422,15 @@ def _binom_bottom_up(
     u: jax.Array,
     n: jax.Array,
     p: jax.Array,
-    approx: jax.Array,
     dtype,
     max_k: int = 20,
-) -> jax.Array:
+) -> tuple[jax.Array, jax.Array]:
     """
     Compute the exact inverse CDF for small k by accumulating the binomial CDF.
     Includes protection against numerical stalling in the tail.
+
+    Returns the quantile and whether it is below `max_k`; where it is not, the
+    quantile is 0 and the caller supplies another.
     """
     tiny = jnp.finfo(dtype).tiny
     epsilon = jnp.finfo(dtype).eps
@@ -431,32 +450,45 @@ def _binom_bottom_up(
 
     found = cdf >= u
 
-    result = jnp.where(found, 0.0, approx)
+    result = jnp.zeros_like(u)
 
-    for i in range(1, max_k):
-        k_curr_val = i
-        k_curr = jnp.full_like(result, k_curr_val)
-        k_prev = i - 1
+    # Check for numerical stall:
+    # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further.
+    # We claim any remaining u values belong to this tail bucket.
+    stall_threshold = 1.0 - (epsilon * 10.0)
 
-        num = jnp.maximum(n - k_prev, 0.0)
-        den = k_curr_val
-
-        pmf = pmf * (num / den) * ratio_multiplier
+    def step(i: int, pmf, cdf, result, found):
+        num = jnp.maximum(n - (i - 1), 0.0)
+        pmf = pmf * (num / i) * ratio_multiplier
         cdf = cdf + pmf
-
-        # Check for numerical stall:
-        # If CDF is nearly 1.0 and PMF is negligible, the CDF won't increase further.
-        # We claim any remaining u values belong to this tail bucket.
-        stall_threshold = 1.0 - (epsilon * 10.0)
         is_stalled = (cdf > stall_threshold) & (pmf < epsilon)
         found_now = (cdf >= u) | is_stalled
-
         is_new_discovery = jnp.logical_and(~found, found_now)
-        result = jnp.where(is_new_discovery, k_curr, result)
+        result = jnp.where(is_new_discovery, jnp.full_like(result, i), result)
+        return pmf, cdf, result, jnp.logical_or(found, found_now)
 
-        found = jnp.logical_or(found, found_now)
+    if branching() and jnp.ndim(u) == 0:
+        # Unbatched, stop at the quantile: later terms can't change it, and the
+        # CuTe kernel turns each cond into a branch. A check costs a branch, so it
+        # comes before every other term from the third, by when most small-mean
+        # draws are found.
+        def from_(i: int, state):
+            if i == max_k:
+                return state[2], state[3]
+            if i < 3 or i % 2 == 0:
+                return from_(i + 1, step(i, *state))
+            return lax.cond(
+                state[3],
+                lambda: (state[2], state[3]),
+                lambda: from_(i + 1, step(i, *state)),
+            )
 
-    return jnp.clip(result, 0.0, n)
+        return from_(1, (pmf, cdf, result, found))
+
+    state = (pmf, cdf, result, found)
+    for i in range(1, max_k):
+        state = step(i, *state)
+    return state[2], state[3]
 
 
 def _q_n0(

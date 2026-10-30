@@ -12,6 +12,7 @@ from ..core.algorithms.train import (
 )
 from ..core.learning_rate import LearningRate
 from ..core.optimizer import Adam, Optimizer
+from ..cute import _with_xla_rproc
 from .mop import _warn_dpop_experimental
 from .structs import PanelPompStruct, PompStruct
 
@@ -234,6 +235,9 @@ def _train(
 ) -> tuple[jax.Array, jax.Array]:
     """Body of :func:`train`, without the DPOP warning, for the OOP layer."""
     optimizer = optimizer or Adam()
+    if optimizer.uses_hessian:
+        # Hessians need the derivative of the CuTe kernel's derivative, which it lacks.
+        struct = _with_xla_rproc(struct)
     eta_array = eta.to_array(struct.param_names, M)
 
     thetas_est = struct.par_trans._transform_array(

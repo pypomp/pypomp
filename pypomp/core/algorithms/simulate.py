@@ -23,7 +23,7 @@ def _simulate_internal(
     nstep_array: jax.Array,
     ydim: int,  # static
     covars_extended: jax.Array | None,
-    accumvars: tuple[int, ...] | None,
+    accumvars: tuple[int, ...] | None,  # static: a CuTe kernel needs it concrete
     nsim: int,  # static
     key: jax.Array,
     should_trans: bool = SHOULD_TRANS,  # argument allows abc, pmcmc to transform
@@ -78,6 +78,7 @@ _jit_simulate_internal = jit(
         "rprocess_interp",
         "rmeasure",
         "ydim",
+        "accumvars",
         "nsim",
         "should_trans",
     ),
@@ -90,6 +91,7 @@ _jv_simulate_internal = jit(
         "rprocess_interp",
         "rmeasure",
         "ydim",
+        "accumvars",
         "nsim",
         "should_trans",
     ),

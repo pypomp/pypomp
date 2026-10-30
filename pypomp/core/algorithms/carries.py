@@ -118,6 +118,13 @@ class PerfilterState:
     counts: jax.Array
     t_idx: int
     ancestry: jax.Array
+    anc: jax.Array
+    """With a kernel that resamples as it loads (``perturb_step``), the ancestors
+    of the last resampling: particlesF and thetas are then not yet resampled.
+    Otherwise empty."""
+    spare: tuple[jax.Array, jax.Array]
+    """With ``perturb_step``, spent buffers shaped as particlesF and thetas that the
+    kernel writes its outputs over. Otherwise empty."""
 
 
 @register_dataclass

@@ -6,18 +6,18 @@ The implementation uses the asymptotic inversion method described in Temme (1992
 
 from __future__ import annotations
 
-from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax._src import dtypes
-from jax.scipy.special import ndtri
 
+from ._branch import jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
+from ._ndtri import ndtri
 
 
-@partial(jax.jit, static_argnames=["adjustment_size", "dtype", "newton_steps"])
+@jit(static_argnames=["adjustment_size", "dtype", "newton_steps"])
 def fast_gamma(
     key: jax.Array,
     alpha: jax.Array,
@@ -115,7 +115,7 @@ def fast_gamma(
     return x.astype(dtype)
 
 
-@partial(jax.jit, static_argnames=["dtype", "newton_steps"])
+@jit(static_argnames=["dtype", "newton_steps"])
 def gammainv(
     u: jax.Array,
     alpha: jax.Array,

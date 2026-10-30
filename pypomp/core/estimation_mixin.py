@@ -41,6 +41,8 @@ from .results import (
 from .rw_sigma import RWSigma
 
 if TYPE_CHECKING:
+    from pypomp.functional.structs import PompStruct
+
     from .interfaces import PompInterface as Base
     from .pomp import Pomp
 else:
@@ -211,7 +213,7 @@ class PompEstimationMixin(Base):
             F.pfilter,
             {1: 0, 3: 0},
             {"logLik": 0, "CLL": 0, "ESS": 0, "filter_mean": 0, "prediction_mean": 0},
-            self.to_struct(),
+            self._to_struct_at(theta_obj_in),
             thetas_array,
             J,
             rep_keys,
@@ -395,7 +397,7 @@ class PompEstimationMixin(Base):
             F.mif,
             {1: 0, 5: 0},
             [0, 0, 0],
-            self.to_struct(),
+            self._to_struct_at(theta_obj_in),
             theta_array,
             J,
             M,
@@ -600,11 +602,23 @@ class PompEstimationMixin(Base):
 
         theta_array = theta_obj_in.to_jax_array(self.canonical_param_names)
 
+        # The CuTe kernel's derivative has no derivative of its own, so an optimizer
+        # that needs Hessians runs on XLA.
+        backend = None
+        if optimizer.uses_hessian and self._backend != "xla":
+            if self._backend == "cute":
+                warnings.warn(
+                    f"{type(optimizer).__name__} needs Hessians, which the CuTe "
+                    "backend doesn't provide. Using XLA.",
+                    stacklevel=2,
+                )
+            backend = "xla"
+
         nLLs_jax, theta_traces_jax = run_jax_batch_sharded(
             _train,
             {1: 0, 5: 0},
             [0, 0],
-            self.to_struct(),
+            self._to_struct_at(theta_obj_in, backend=backend),
             theta_array,
             J,
             M,
@@ -740,7 +754,7 @@ class PompEstimationMixin(Base):
         keys = jax.random.split(new_key, n_chains)
 
         ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
-            struct=self.to_struct(),
+            struct=self._to_struct_at(theta_obj_in),
             thetas_array=theta_array,
             proposal=proposal,
             J=J,
@@ -873,7 +887,7 @@ class PompEstimationMixin(Base):
         keys = jax.random.split(new_key, n_chains)
 
         dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
-            struct=self.to_struct(),
+            struct=self._to_struct_at(theta_obj_in),
             thetas_array=theta_array,
             proposal=proposal,
             probes=probes,
@@ -1016,7 +1030,19 @@ class PompEstimationMixin(Base):
                     stacklevel=2,
                 )
             nsim = 1
+        return self._simulate(nsim, theta, times, key, as_pomp)
 
+    def _simulate(
+        self,
+        nsim: int,
+        theta: PompParameters | None,
+        times: jax.Array | None,
+        key: jax.Array | None,
+        as_pomp: bool,
+        struct: PompStruct | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame] | Pomp:
+        """Do what :meth:`simulate` documents, through `struct` if given rather
+        than the model's own."""
         theta_obj_in = self._prepare_theta_input(theta)
 
         if self.rmeas is None:
@@ -1024,13 +1050,15 @@ class PompEstimationMixin(Base):
                 "self.rmeas cannot be None. Did you forget to supply it to the object or method?"
             )
 
-        thetas_array = theta_obj_in.to_jax_array(self.canonical_param_names)
+        if struct is None:
+            struct = self._to_struct_at(theta_obj_in)
+        thetas_array = theta_obj_in.to_jax_array(struct.param_names)
 
         new_key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(new_key, thetas_array.shape[0])
         times_array = jnp.array(self.ys.index) if times is None else times
         X_sims_jax, Y_sims_jax = F.simulate(
-            self.to_struct(),
+            struct,
             nsim,
             thetas_array,
             times=times_array,

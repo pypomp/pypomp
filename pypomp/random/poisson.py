@@ -10,7 +10,6 @@ small.
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 import jax
@@ -18,14 +17,13 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax
 from jax._src import dtypes
-from jax.scipy import special as jsp_special
 
+from ._branch import branching, jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
+from ._ndtri import ndtri
 
 
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
-)
+@jit(static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"])
 def fast_poisson(
     key: jax.Array,
     lam: jax.Array,
@@ -133,9 +131,7 @@ def fast_poisson(
     return jnp.where(invalid, -1, x.astype(dtype))
 
 
-@partial(
-    jax.jit, static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"]
-)
+@jit(static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"])
 def poissoninv(
     u: jax.Array,
     lam: jax.Array,
@@ -212,10 +208,17 @@ def poissoninv(
     float_dtype = _get_available_dtype(float_dtype)
     assert float_dtype is not None
 
-    if u_arr.ndim == 0:
+    if u_arr.size == 1:
+        # Unbatched, the lax.conds stay branches, so only the needed region is
+        # computed (as in the CuTe kernel, which traces one particle at a time);
+        # vmap would turn them into selects of every region.
         res = _poissoninv_scalar(
-            u_arr, lam_arr, float_dtype, max_newton_loops, max_inverse_cdf_loops
-        )
+            u_arr.reshape(()),
+            lam_arr.reshape(()),
+            float_dtype,
+            max_newton_loops,
+            max_inverse_cdf_loops,
+        ).reshape(u_arr.shape)
     else:
         flat_u = u_arr.reshape(-1)
         flat_lam = lam_arr.reshape(-1)
@@ -298,33 +301,36 @@ def _bottom_up(
         x_init: jax.Array, s0: jax.Array, del0: jax.Array, lami: jax.Array
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
 
-        x = x_init
-        s = s0
-        delta = del0
-        t = jnp.array(0.0, dtype=dtype)
         zero = jnp.array(0.0, dtype=dtype)
         one = jnp.array(1.0, dtype=dtype)
 
-        active = jnp.array(True)
-
-        # vanilla for loops are used because they are more efficient than jax.lax.fori_loop by a long shot in this case
-        for _ in range(max_inverse_cdf_loops):
-            current_cond = s < zero
-
-            keep_going = jnp.logical_and(active, current_cond)
-
+        def step(x, s, delta):
             x_next = x + one
             t_next = x_next * lami
-            delta_next = t_next * delta
-            s_next = t_next * s + one
+            return x_next, t_next * s + one, t_next * delta
 
-            x = jax.lax.select(keep_going, x_next, x)
-            s = jax.lax.select(keep_going, s_next, s)
-            delta = jax.lax.select(keep_going, delta_next, delta)
-            t = jax.lax.select(keep_going, t_next, t)
+        # Stop once s >= 0: the search never resumes, and in a branching trace
+        # each cond stays a branch, so later steps are skipped.
+        def search(i: int, x, s, delta):
+            if i == max_inverse_cdf_loops:
+                return x, s, delta
+            return lax.cond(
+                s < zero,
+                lambda: search(i + 1, *step(x, s, delta)),
+                lambda: (x, s, delta),
+            )
 
-            active = keep_going
+        if branching():
+            return search(0, x_init, s0, del0)
 
+        # Vmapped, a cond is a select of both sides, so select each step instead.
+        x, s, delta = x_init, s0, del0
+        for _ in range(max_inverse_cdf_loops):
+            keep_going = s < zero
+            x_next, s_next, delta_next = step(x, s, delta)
+            x = lax.select(keep_going, x_next, x)
+            s = lax.select(keep_going, s_next, s)
+            delta = lax.select(keep_going, delta_next, delta)
         return x, s, delta
 
     x_init = jnp.array(0.0, dtype=dtype)
@@ -389,7 +395,7 @@ def _poissoninv_scalar(
     lam_safe = jnp.where(lam_invalid, one, lam)
 
     def large_lambda_case(_: Any) -> jax.Array:
-        s = jsp_special.ndtri(u) * lax.rsqrt(lam_safe)
+        s = ndtri(u) * lax.rsqrt(lam_safe)
 
         def central(_: Any) -> jax.Array:
             return _central_region(s, lam_safe, dtype)

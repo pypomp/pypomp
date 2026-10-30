@@ -60,11 +60,14 @@ jobs:
       full-matrix: true
       run-heavy: true
       run-oldest-deps: true
+      run-gpu: true
       # Run-scoped, so this CI run shares a concurrency group with nothing and
       # cannot be cancelled by a push to main mid-release.
       concurrency-key: release-ci-${{ github.run_id }}
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 
   publish:
     name: Publish to PyPI

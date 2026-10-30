@@ -436,10 +436,14 @@ def _ew(
         return _ir("remsi" if signed else "remui", in_dtypes[0], *a)
     if name == "neg":
         return -x
-    if name == "max":
-        return m.max(x, a[1]) if f else _select(x > a[1], x, a[1], in_dtypes[0])
+    if name == "max":  # a NaN operand gives NaN, as in XLA
+        if f:
+            return m.max(x, a[1], propagate_nan=True)
+        return _select(x > a[1], x, a[1], in_dtypes[0])
     if name == "min":
-        return m.min(x, a[1]) if f else _select(x < a[1], x, a[1], in_dtypes[0])
+        if f:
+            return m.min(x, a[1], propagate_nan=True)
+        return _select(x < a[1], x, a[1], in_dtypes[0])
     if name == "abs":
         return (
             m.abs(x) if f else _select(x < _const(0, in_dtypes[0]), -x, x, in_dtypes[0])
@@ -515,7 +519,7 @@ def _ew(
     if name == "clamp":  # clamp(lo, x, hi)
         lo, v, hi = a
         return (
-            m.min(m.max(v, lo), hi)
+            m.min(m.max(v, lo, propagate_nan=True), hi, propagate_nan=True)
             if np.issubdtype(np.dtype(in_dtypes[1]), np.floating)
             else _select(v < lo, lo, _select(v > hi, hi, v, in_dtypes[1]), in_dtypes[1])
         )

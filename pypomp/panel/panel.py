@@ -201,7 +201,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         Units of a panel hold no parameters, so the first unit gets the panel's
         first parameter set while a CuTe kernel is checked against XLA.
         """
-        return self._on_first_unit(lambda unit: unit._rproc_fns(backend, rng))
+        return self._on_first_unit(
+            lambda unit: unit._rproc_fns(backend, rng), backend, rng
+        )
 
     def backend_report(
         self, backend: str | None = None, rng: str | None = None
@@ -225,16 +227,26 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         pypomp.cute.BackendReport
             What runs where.
         """
-        return self._on_first_unit(lambda unit: unit.backend_report(backend, rng))
+        return self._on_first_unit(
+            lambda unit: unit.backend_report(backend, rng), backend, rng
+        )
 
-    def _on_first_unit(self, f: Callable[[Pomp], Any]) -> Any:
-        """Return `f` of the first unit, which gets the panel's first parameter
-        set if it has none."""
+    def _on_first_unit(
+        self,
+        f: Callable[[Pomp], Any],
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PanelParameters | None = None,
+    ) -> Any:
+        """Return `f` of the first unit, which if `backend` and `rng` still need
+        a kernel checked gets the first parameter set of `theta`, by default the
+        panel's, unless it has its own."""
         name = self.get_unit_names()[0]
         unit = self.unit_objects[name]
-        if unit._theta is not None:
+        if unit._theta is not None or not unit._kernel_needs_theta(backend, rng):
             return f(unit)
-        unit._theta = PompParameters(self.get_unit_parameters(name)[0])
+        first = self._prepare_theta_input(theta).subset([0])
+        unit._theta = PompParameters(self.get_unit_parameters(name, theta=first)[0])
         try:
             return f(unit)
         finally:

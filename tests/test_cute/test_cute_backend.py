@@ -121,6 +121,10 @@ def sde_dmeas(Y_, X_, theta_, covars, t):
     return jax.scipy.stats.norm.logpdf(Y_["y"], X_["x"], theta_["tau"])
 
 
+def sde_rmeas(X_, theta_, key, covars, t):
+    return {"y": X_["x"] + theta_["tau"] * jax.random.normal(key)}
+
+
 def sde_model(
     rproc=sde_rproc,
     statenames=("x",),
@@ -128,6 +132,7 @@ def sde_model(
     dmeas=sde_dmeas,
     times=None,
     dt=None,
+    reverse_params=False,
 ):
     def rinit(theta_, key, covars, t0):
         x0 = theta_["z0m"] + theta_["z0s"] * jax.random.normal(key)
@@ -141,6 +146,8 @@ def sde_model(
         index=np.asarray(times, dtype=float),
     )
     theta = {"r": 1.0, "sig": 0.3, "tau": 0.2, "z0m": float(np.log(0.2)), "z0s": 0.2}
+    if reverse_params:
+        theta = dict(reversed(theta.items()))
     model = pp.Pomp(
         ys=ys,
         theta=pp.PompParameters(theta),
@@ -149,6 +156,7 @@ def sde_model(
         rinit=rinit,
         rproc=rproc,
         dmeas=dmeas,
+        rmeas=sde_rmeas,
         nstep=None if dt else 10,
         dt=dt,
         covars=covars,
@@ -163,9 +171,9 @@ def uneven_model(rproc=sde_rproc):
     return sde_model(rproc, times=np.cumsum(np.resize([1, 0.5, 2, 0.75], 40)), dt=0.25)
 
 
-def table_model(u=2):
+def table_model(u=2, reverse_params=False):
     covars = pd.DataFrame({"u": float(u)}, index=np.arange(0.0, 41.0))
-    return sde_model(table_rproc, covars=covars)
+    return sde_model(table_rproc, covars=covars, reverse_params=reverse_params)
 
 
 def he10_model():
@@ -437,8 +445,8 @@ def test_cute_loglik_agrees_with_xla(make):
     assert abs(a.mean() - b.mean()) < 4 * se
 
 
-def table_panel():
-    units = {f"u{u}": table_model(u) for u in (1, 3)}
+def table_panel(reverse_last=False):
+    units = {"u1": table_model(1), "u3": table_model(3, reverse_last)}
     names = units["u1"].canonical_param_names
     vals = units["u1"].theta.to_jax_array(names)[0]
     v = dict(zip(names, np.asarray(vals, float).tolist(), strict=True))
@@ -601,6 +609,56 @@ def test_simulate_on_cute_matches_xla():
     # A binomial draw that rounding flips sends that simulation its own way.
     assert (rel.max(-1) > 1e-3).mean() < 0.1
     assert np.median(rel) < 1e-5
+
+
+def test_panel_simulates_on_one_kernel_as_xla_does():
+    panel, _, _ = table_panel(reverse_last=True)
+    panel.set_backend("xla")
+    cp = deepcopy(panel)
+    cp.set_backend("cute")
+    key = jax.random.key(7)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        X_c, _ = cp.simulate(nsim=20, key=key)
+    assert isinstance(cp.to_struct().rproc_pf, KernelRProc)
+    assert "_cute_fns" not in cp.unit_objects["u3"].__dict__
+    X_x, _ = panel.simulate(nsim=20, key=key)
+    a, b = X_x["x"].to_numpy(), X_c["x"].to_numpy()
+    assert not np.allclose(a[X_x["unit"] == "u1"], a[X_x["unit"] == "u3"])
+    rel = np.abs(a - b) / (np.abs(a) + 1.0)
+    assert np.median(rel) < 1e-5
+    assert rel.max() < 1e-2
+
+
+def nan_ops_rproc(X_, theta_, key, covars, t, dt):
+    n = jnp.sqrt(jax.random.normal(key))  # NaN for about half of the particles
+    return {
+        "x": jnp.maximum(n, 0.5),
+        "a": jnp.minimum(0.5, n),
+        "b": jax.lax.clamp(0.2, n, 0.8),
+        "c": jnp.max(jnp.stack([0.5, n])),
+        "d": jnp.min(jnp.stack([n, 0.5])),
+    }
+
+
+def unchecked_cute(model):
+    """`model`'s CuTe struct, which keeps a kernel that differs from XLA."""
+    cm = deepcopy(model)
+    cm.set_backend("cute", check=False)
+    return cm.to_struct()
+
+
+def test_max_min_and_clamp_keep_nans_as_xla_does():
+    model = sde_model(nan_ops_rproc, statenames=tuple("xabcd"))
+    xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, adv_xla = interval(model, xla, 1024, 1)
+    _, _, adv_cute = interval(model, cute, 1024, 1)
+    key = rng_key(5)
+    a = np.asarray(jax.jit(lambda X: adv_xla(X, th, key))(X0[0]))
+    b = np.asarray(jax.jit(lambda X: adv_cute(X, th, key))(X0[0]))
+    assert 0.3 < np.isnan(a).mean(0).min() and np.isnan(a).mean(0).max() < 0.7
+    np.testing.assert_allclose(a, b, rtol=1e-5, equal_nan=True)
 
 
 def test_estimation_checks_the_kernel_at_the_parameters_it_is_given():

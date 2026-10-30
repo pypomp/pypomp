@@ -601,6 +601,15 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             return built.fns
         return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
 
+    def _kernel_needs_theta(self, backend: str | None, rng: str | None) -> bool:
+        """Say whether :meth:`_cute_built` would have to check a new kernel at
+        ``self.theta``."""
+        backend = self._backend if backend is None else backend
+        rng = self._backend_rng if rng is None else rng
+        check = self._backend_check
+        built = self.__dict__.get("_cute_fns", {})
+        return check and backend != "xla" and (backend, rng, check) not in built
+
     def _cute_built(self, backend: str | None, rng: str | None) -> Any:
         """Return what :func:`pypomp.cute._build` made of the model for `backend`
         and `rng`, or None for XLA."""

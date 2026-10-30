@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol, overload
 
 import jax
@@ -40,6 +41,13 @@ class PanelPompInterface(Protocol):
     def to_struct(
         self, backend: str | None = None, rng: str | None = None
     ) -> PanelPompStruct: ...
+    def _on_first_unit(
+        self,
+        f: Callable[[Pomp], Any],
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PanelParameters | None = None,
+    ) -> Any: ...
 
     @overload
     def simulate(

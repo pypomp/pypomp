@@ -12,7 +12,13 @@ import pypomp.functional as F
 from pypomp.core.algorithms.helpers import _resample
 from pypomp.cute import KernelRProc, available
 
-from .test_cute_backend import he10_model, sde_model, xla_and_cute
+from .test_cute_backend import (
+    he10_model,
+    sde_model,
+    sde_rproc,
+    unchecked_cute,
+    xla_and_cute,
+)
 
 ok, why = available()
 pytestmark = pytest.mark.skipif(not ok, reason=f"CuTe backend unavailable: {why}")
@@ -132,6 +138,30 @@ def test_filters_with_fused_density_agree_in_distribution():
     ).ravel()
     se = np.sqrt(a.var() / a.size + b.var() / b.size)
     assert abs(a.mean() - b.mean()) < 4 * se
+
+
+def rproc_with_nans(X_, theta_, key, covars, t, dt):
+    # sde_model's particles start near log(0.2), so a few fall below -2.
+    x = sde_rproc(X_, theta_, key, covars, t, dt)["x"]
+    return {"x": jnp.sqrt(x + 2.0) ** 2 - 2.0}
+
+
+def dmeas_with_floor(Y_, X_, theta_, covars, t):
+    mean = jnp.maximum(jnp.exp(X_["x"]) * theta_["r"], 1e-10)
+    return jax.scipy.stats.norm.logpdf(Y_["y"], mean, theta_["tau"])
+
+
+def test_nan_state_gives_the_fused_density_nan_as_on_xla():
+    model = sde_model(rproc_with_nans, dmeas=dmeas_with_floor)
+    xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
+    rp = cute.rproc_pf
+    assert isinstance(rp, KernelRProc) and rp.with_dmeasure is not None
+    th = jnp.tile(model.theta.to_jax_array(model.canonical_param_names), (4, 1))
+    keys = jax.random.split(jax.random.key(0), 4)[:, None]
+    a = np.asarray(F.pfilter(xla, th, 2000, keys, CLL=True)["CLL"])[..., 0]
+    b = np.asarray(F.pfilter(cute, th, 2000, keys, CLL=True)["CLL"])[..., 0]
+    assert np.isnan(a).all()
+    assert np.isnan(b).all()
 
 
 @pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation"])

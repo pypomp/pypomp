@@ -16,6 +16,7 @@ from .test_cute_backend import (
     particle_mean,
     sde_model,
     table_model,
+    table_panel,
     vectorized_rproc,
 )
 
@@ -186,6 +187,60 @@ def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
     model.set_backend("cute")
     model.to_struct()
     assert calls == [False, True]
+
+
+def test_panel_simulates_and_probes_with_the_first_units_kernel(monkeypatch):
+    built = []
+    monkeypatch.setattr(
+        pypomp.cute, "_build", lambda model, quiet, rng, check: built.append(model)
+    )
+    panel, _, _ = table_panel()
+    panel.set_backend("cute")
+    panel.simulate(nsim=2, key=jax.random.key(0))
+    panel.probe(
+        {"mean": lambda y: float(jnp.mean(y["y"]))}, nsim=2, key=jax.random.key(1)
+    )
+    assert len(built) == 1
+    assert built[0] is panel.unit_objects["u1"]
+
+
+def test_panel_simulation_keeps_each_units_data_and_parameters():
+    panel, _, _ = table_panel(reverse_last=True)
+    panel.set_backend("xla")
+    key = jax.random.key(3)
+    X, Y = panel.simulate(nsim=2, key=key)
+    active, _ = panel._update_fresh_key(key)
+    for unit, obj in panel.unit_objects.items():
+        active, subkey = jax.random.split(active)
+        theta = pp.PompParameters(panel.get_unit_parameters(unit))
+        X_u, Y_u = obj.simulate(nsim=2, theta=theta, key=subkey)
+        for got, want in ((X, X_u), (Y, Y_u)):
+            got = got[got["unit"] == unit].drop(columns="unit")
+            np.testing.assert_allclose(got.to_numpy(float), want.to_numpy(float))
+
+
+def test_panel_takes_parameters_only_to_check_a_new_kernel(monkeypatch):
+    monkeypatch.setattr(pypomp.cute, "_build", lambda model, quiet, rng, check: None)
+    panel, _, _ = table_panel()
+    panel.theta = pp.PanelParameters.merge(panel.theta, panel.theta)
+    replicates = []
+    get = pp.PanelPomp.get_unit_parameters
+
+    def spy(self, unit, theta=None):
+        replicates.append(self._prepare_theta_input(theta).num_replicates())
+        return get(self, unit, theta)
+
+    monkeypatch.setattr(pp.PanelPomp, "get_unit_parameters", spy)
+    panel.set_backend("xla")
+    panel.to_struct()
+    panel.set_backend("cute", check=False)
+    panel.to_struct()
+    assert replicates == []
+    panel.set_backend("cute")
+    panel.to_struct()
+    panel.to_struct()
+    assert replicates == [1]
+    assert all(u._theta is None for u in panel.unit_objects.values())
 
 
 def test_translated_threefry_is_jaxs():

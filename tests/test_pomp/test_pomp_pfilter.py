@@ -1,3 +1,4 @@
+import sys
 from copy import deepcopy
 
 import jax
@@ -6,6 +7,10 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from pypomp.core.algorithms.contexts import PfilterContext
+
+# pypomp.functional.pfilter is the function, which hides the module of that name.
+PFILTER_MODULE = sys.modules["pypomp.functional.pfilter"]
 
 
 @pytest.fixture(scope="module")
@@ -81,14 +86,84 @@ def test_gpu_path_runs_replicates_in_one_batch(simple, monkeypatch):
     assert jnp.allclose(traced, one, rtol=1e-5)
 
 
-def test_reps_batch_for_memory_budget():
-    from pypomp.functional.pfilter import _reps_batch_for
+def test_batch_for_memory_budget():
+    from pypomp.functional.pfilter import _batch_for
 
-    assert _reps_batch_for(100, 600, 1000, 10) is None
-    # Budget 800: 600 fixed leaves room for one replicate's 140 of workspace.
-    assert _reps_batch_for(600, 1400, 1000, 10) == 1
-    assert _reps_batch_for(0, 1000, 1000, 10) == 8
-    assert _reps_batch_for(10**12, 10**12, 1000, 10) == 1
+    assert _batch_for(100, 600, 1000, 10) is None
+    # Budget 800: 600 fixed leaves room for one filter's 140 of workspace.
+    assert _batch_for(600, 1400, 1000, 10) == 1
+    assert _batch_for(0, 1000, 1000, 10) == 8
+    assert _batch_for(10**12, 10**12, 1000, 10) == 1
+
+
+@pytest.mark.parametrize(
+    "n, reps, batch", [(2, 3, 2), (2, 3, 4), (5, 1, 2), (3, 2, 100)]
+)
+def test_gpu_path_batches_match_one_at_a_time(simple, monkeypatch, n, reps, batch):
+    """Batches cut across parameter sets and pad unevenly without changing results."""
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    th = jnp.concatenate([th * (1 + 0.1 * i) for i in range(n)])
+    keys = jax.random.split(key, n * reps).reshape(n, reps)
+    one = F.pfilter(struct, th, J, keys, CLL=True, reps_batch_size=1)
+
+    monkeypatch.setattr(PFILTER_MODULE, "_PARTICLES_PER_BATCH", batch * J)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    batched = F.pfilter(struct, th, J, keys, CLL=True)
+    for k in one:
+        assert batched[k].shape == one[k].shape
+        assert jnp.allclose(batched[k], one[k], rtol=1e-5)
+
+
+def test_gpu_path_splits_filters_across_devices(simple):
+    """The per-device batching keeps results when the filters span two devices."""
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = jnp.tile(LG.theta.to_jax_array(LG.canonical_param_names), (2, 1))
+    keys = jax.random.split(key, 6).reshape(2, 3)
+    one = F.pfilter(struct, th, J, keys, reps_batch_size=1)["logLik"]
+    out = PFILTER_MODULE._filter_batches(
+        th, keys, PfilterContext.from_struct(struct, J=J), batch=2, n_devices=2
+    )
+    assert jnp.allclose(-out["neg_loglik"], one, rtol=1e-5)
+
+
+def test_even_batch_avoids_padding():
+    even_batch = PFILTER_MODULE._even_batch
+    assert even_batch(16, 4) == 4
+    # 3 would pad 16 filters to 18, and 2 divides them evenly.
+    assert even_batch(16, 3) == 2
+    assert even_batch(64, 5) == 4
+    assert even_batch(7, 1) == 1
+    # 3 needs the same padding as 5, so the larger wins.
+    assert even_batch(14, 5) == 5
+    # Filters that no batch divides still pad as little as possible.
+    assert even_batch(13, 4) == 2
+
+
+def test_gpu_path_shrinks_batches_to_the_memory_budget(simple, monkeypatch):
+    LG, key, J = simple
+    struct = LG.to_struct()
+    th = LG.theta.to_jax_array(LG.canonical_param_names)
+    keys = jax.random.split(key, 4)[None]
+    one = F.pfilter(struct, th, J, keys, reps_batch_size=1)["logLik"]
+
+    batches = []
+    real = PFILTER_MODULE._filter_batches
+
+    def spy(*args, **kwargs):
+        batches.append(kwargs["batch"])
+        return real(*args, **kwargs)
+
+    spy.lower = real.lower  # type: ignore[attr-defined]
+    monkeypatch.setattr(PFILTER_MODULE, "_filter_batches", spy)
+    monkeypatch.setattr(PFILTER_MODULE, "_memory_bytes", lambda c: (0, 4 * 10**9))
+    monkeypatch.setattr(PFILTER_MODULE, "_free_device_bytes", lambda a: 10**9)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    out = F.pfilter(struct, th, J, keys)["logLik"]
+    assert batches == [1]
+    assert jnp.allclose(out, one, rtol=1e-5)
 
 
 def test_reps_batch_size_validation(simple):

@@ -162,10 +162,10 @@ class PompEstimationMixin(Base):
         reps_batch_size : int or None, optional
             How many of the ``reps`` filters per parameter set to run at once;
             smaller batches run one after another and use less memory.  ``None``
-            (default) chooses: on a GPU, all of them at once if XLA's memory
-            estimate for that fits in 80% of the free device memory, otherwise
-            the largest batch that fits; on CPU, one at a time, which is faster
-            there.
+            (default) chooses: on a GPU, each device runs batches of about 3
+            million particles across all parameter sets and replicates, fewer if
+            XLA's memory estimate exceeds 80% of the free device memory; on CPU,
+            one replicate at a time, which is faster there.
 
         Returns
         -------

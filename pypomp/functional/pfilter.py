@@ -1,4 +1,5 @@
 from dataclasses import replace
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -6,8 +7,10 @@ from jax.core import Tracer
 from jax.stages import Compiled
 
 from ..core.algorithms.contexts import PfilterContext
+from ..core.algorithms.helpers import pad_array
 from ..core.algorithms.pfilter import (
     _chunked_panel_pfilter_internal,
+    _pfilter_internal,
     _vmapped_pfilter_internal2,
 )
 from .structs import PanelPompStruct, PompStruct
@@ -63,11 +66,11 @@ def pfilter(
     reps_batch_size : int or None, optional
         How many replicate filters per parameter set to run at once; smaller
         batches run one after another and use less memory.  ``None`` (default)
-        chooses: on a GPU, all replicates at once if XLA's memory estimate for
-        that fits in 80% of the free device memory, otherwise the largest batch
-        that fits; on CPU, one at a time, which is faster there.  Inside a
-        caller's ``jax.jit`` the memory cannot be measured, so on a GPU all
-        replicates run at once.
+        chooses: on a GPU, each device runs batches of about 3 million particles
+        across all parameter sets and replicates, fewer if XLA's memory estimate
+        exceeds 80% of the free device memory; on CPU, one replicate at a time,
+        which is faster there.  Inside a caller's ``jax.jit``, a GPU runs every
+        filter at once.
 
     Returns
     -------
@@ -106,19 +109,23 @@ def pfilter(
     return results
 
 
-# Share of free device memory that the filters may use before replicates are batched.
+# Particles each device runs at once.  Far fewer and launching kernels dominates;
+# far more gains no speed, costs memory and slows some GPUs.
+_PARTICLES_PER_BATCH = 3 * 2**20
+
+# Share of free device memory that the filters may use.
 _MEMORY_HEADROOM = 0.8
 
 
-def _reps_batch_for(
-    fixed_bytes: int, temp_bytes: int, free_bytes: int, n_reps: int
+def _batch_for(
+    fixed_bytes: int, temp_bytes: int, free_bytes: int, batch: int
 ) -> int | None:
-    """Return the largest replicate batch that fits in memory, or None if all do."""
+    """Return the largest filter batch that fits in memory, or None if `batch` does."""
     budget = _MEMORY_HEADROOM * free_bytes
     if fixed_bytes + temp_bytes <= budget:
         return None
     # Inputs and outputs are full size at any batch size; the workspace scales.
-    return max(1, int((budget - fixed_bytes) // (temp_bytes / n_reps)))
+    return max(1, int((budget - fixed_bytes) // (temp_bytes / batch)))
 
 
 def _free_device_bytes(arrays: tuple[jax.Array, ...]) -> int | None:
@@ -157,35 +164,83 @@ def _flat_reps(
     return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[2:]), out)
 
 
+def _even_batch(size: int, batch: int) -> int:
+    """Return the batch of at most `batch`, and at least half of it, that needs the
+    least padding to cover `size` filters, preferring the larger of any ties."""
+    return min(range((batch + 1) // 2, batch + 1), key=lambda b: (-size % b, -b))
+
+
+@partial(jax.jit, static_argnames=("batch", "n_devices"))
+def _filter_batches(
+    thetas_array: jax.Array,
+    keys: jax.Array,
+    context: PfilterContext,
+    *,
+    batch: int,
+    n_devices: int,
+) -> dict[str, jax.Array]:
+    """Run all filters, `batch` at a time on each of `n_devices` devices."""
+    n, reps = keys.shape[:2]
+    per_device = n * reps // n_devices
+    if batch >= per_device:
+        return _flat_reps(thetas_array, keys, context)
+
+    # Pad to even batches: a remainder would compile a second copy of the filter.
+    batch = _even_batch(per_device, batch)
+    padded = -(-per_device // batch) * batch
+
+    def by_device(x: jax.Array) -> jax.Array:
+        x = x.reshape(n_devices, per_device, *x.shape[1:])
+        return pad_array(x, 1, padded, per_device)
+
+    def run_device(thetas: jax.Array, device_keys: jax.Array) -> dict[str, jax.Array]:
+        return jax.lax.map(
+            lambda args: _pfilter_internal(args[0], args[1], context),
+            (thetas, device_keys),
+            batch_size=batch,
+        )
+
+    out = jax.vmap(run_device)(
+        by_device(jnp.repeat(thetas_array, reps, axis=0)),
+        by_device(keys.reshape(n * reps, *keys.shape[2:])),
+    )
+    return jax.tree.map(lambda x: x[:, :per_device].reshape(n, reps, *x.shape[2:]), out)
+
+
 def _run_reps(
     thetas_array: jax.Array, keys: jax.Array, context: PfilterContext
 ) -> dict[str, jax.Array]:
-    """Run the filters, choosing the replicate batch size when it is not given."""
-    if keys.shape[1] == 1:
+    """Run the filters, choosing how to batch them when no batch size is given."""
+    on_cpu = jax.default_backend() == "cpu"
+    if keys.shape[1] == 1 and (context.reps_batch_size is not None or on_cpu):
         return _vmapped_pfilter_internal2(thetas_array, keys, context)
     if context.reps_batch_size is not None:
         if context.reps_batch_size >= keys.shape[1]:
             return _flat_reps(thetas_array, keys, context)
         return _vmapped_pfilter_internal2(thetas_array, keys, context)
-    if jax.default_backend() == "cpu":
+    if on_cpu:
         return _vmapped_pfilter_internal2(
             thetas_array, keys, replace(context, reps_batch_size=1)
         )
     leaves = jax.tree_util.tree_leaves((thetas_array, keys, context))
     if any(isinstance(x, Tracer) for x in leaves):
         return _flat_reps(thetas_array, keys, context)
-    # The all-at-once compile is needed anyway when it fits, so reuse it to measure memory.
-    compiled = jax.jit(_flat_reps).lower(thetas_array, keys, context).compile()
+
+    # Parameter sets may be split over devices; replicates never are.
+    shard_shape = thetas_array.sharding.shard_shape(thetas_array.shape)
+    n_devices = thetas_array.shape[0] // shard_shape[0]
+    per_device = keys.shape[0] * keys.shape[1] // n_devices
+    batch = min(per_device, -(-_PARTICLES_PER_BATCH // context.J))
+
+    compiled = _filter_batches.lower(
+        thetas_array, keys, context, batch=batch, n_devices=n_devices
+    ).compile()
     mem, free = _memory_bytes(compiled), _free_device_bytes((thetas_array, keys))
-    batch = (
-        None
-        if mem is None or free is None
-        else _reps_batch_for(*mem, free, keys.shape[1])
-    )
-    if batch is None:
+    smaller = None if mem is None or free is None else _batch_for(*mem, free, batch)
+    if smaller is None:
         return compiled(thetas_array, keys, context)
-    return _vmapped_pfilter_internal2(
-        thetas_array, keys, replace(context, reps_batch_size=batch)
+    return _filter_batches(
+        thetas_array, keys, context, batch=smaller, n_devices=n_devices
     )
 
 

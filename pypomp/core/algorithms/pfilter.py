@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 
@@ -7,7 +8,7 @@ from jax import jit
 
 from .carries import PfilterState
 from .contexts import PfilterContext, SeriesData
-from .helpers import _normalize_weights, _resample_where
+from .helpers import _normalize_weights, _resample_where, pad_array
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 
@@ -205,6 +206,38 @@ _vmapped_pfilter_internal2 = jax.vmap(
 )
 
 
+def _even_batch(size: int, batch: int) -> int:
+    """Return the batch of at most `batch`, and at least half of it, that needs the
+    least padding to cover `size` filters, preferring the larger of any ties."""
+    return min(range((batch + 1) // 2, batch + 1), key=lambda b: (-size % b, -b))
+
+
+def _map_batches(
+    fn: Callable[[jax.Array, jax.Array], dict[str, jax.Array]],
+    thetas: jax.Array,
+    keys: jax.Array,
+    batch: int,
+    n_devices: int,
+) -> dict[str, jax.Array]:
+    """Apply `fn` along axis 0, `batch` at a time on each of `n_devices` devices."""
+    size = thetas.shape[0]
+    per_device = size // n_devices
+
+    # Pad to even batches: a remainder would compile a second copy of the filter.
+    batch = _even_batch(per_device, batch)
+    padded = -(-per_device // batch) * batch
+
+    def by_device(x: jax.Array) -> jax.Array:
+        x = x.reshape(n_devices, per_device, *x.shape[1:])
+        return pad_array(x, 1, padded, per_device)
+
+    def run_device(thetas: jax.Array, keys: jax.Array) -> dict[str, jax.Array]:
+        return jax.lax.map(lambda args: fn(*args), (thetas, keys), batch_size=batch)
+
+    out = jax.vmap(run_device)(by_device(thetas), by_device(keys))
+    return jax.tree.map(lambda x: x[:, :per_device].reshape(size, *x.shape[2:]), out)
+
+
 def _panel_pfilter_vmap(
     thetas: jax.Array,
     keys: jax.Array,
@@ -243,14 +276,19 @@ def _pfilter_internal_mean(
     )
 
 
-@partial(jit, static_argnames=("chunk_size",))
+@partial(jit, static_argnames=("chunk_size", "batch", "n_devices"))
 def _chunked_panel_pfilter_internal(
     thetas: jax.Array,
     keys: jax.Array,
     context: PfilterContext,
     chunk_size: int,
+    batch: int | None = None,
+    n_devices: int = 1,
 ) -> dict[str, jax.Array]:
-    """Run pfilter in vmapped chunks over multiple panel units."""
+    """Run pfilter in vmapped chunks over multiple panel units.
+
+    With `batch`, each of `n_devices` devices runs that many replicates at a time.
+    """
     # 1. Reshape inputs for chunked processing.
     n_reps, U, n_params = thetas.shape
     n_chunks = U // chunk_size
@@ -299,4 +337,6 @@ def _chunked_panel_pfilter_internal(
 
         return jax.tree_util.tree_map(reshape_back, res_chunks)
 
-    return jax.vmap(process_rep)(thetas_c, keys_c)
+    if batch is None or batch >= n_reps // n_devices:
+        return jax.vmap(process_rep)(thetas_c, keys_c)
+    return _map_batches(process_rep, thetas_c, keys_c, batch, n_devices)

@@ -1,3 +1,5 @@
+import sys
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -6,6 +8,8 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
+from pypomp.core.algorithms.contexts import PfilterContext
+from pypomp.core.algorithms.pfilter import _chunked_panel_pfilter_internal
 from pypomp.functional import abc, pmcmc
 from tests.helpers.models import lg_panel, sir_panel
 from tests.helpers.params import uniform_rw_sd
@@ -616,6 +620,87 @@ def test_panel_pfilter_functional(panel_setup):
     assert "logLik" in results
     assert results["logLik"].shape == (n_reps, U)
     assert jnp.all(jnp.isfinite(results["logLik"]))
+
+
+@pytest.mark.parametrize(
+    "n_reps, chunk_size, batch",
+    [(5, 1, 2), (5, 2, 2), (3, 1, 100), (6, 1, 3)],
+)
+def test_panel_pfilter_gpu_path_batches_match_all_at_once(
+    panel_setup, monkeypatch, n_reps, chunk_size, batch
+):
+    """Replicate batches pad unevenly and count a chunk's units without changing
+    results."""
+    struct, shared_array, unit_array, key, J, _, U, _, _ = panel_setup
+    thetas = jnp.stack(
+        [
+            jnp.concatenate([shared_array[0], unit_array[0, u]], axis=-1)
+            for u in range(U)
+        ]
+    )
+    thetas = jnp.tile(thetas, (n_reps, 1, 1))
+    keys = jax.random.split(key, n_reps * U).reshape(n_reps, U, *key.shape)
+    kwargs = {"J": J, "keys": keys, "chunk_size": chunk_size, "CLL": True}
+    whole = F.panel_pfilter(struct, thetas, **kwargs)
+
+    fp = sys.modules["pypomp.functional.pfilter"]
+    monkeypatch.setattr(fp, "_PARTICLES_PER_BATCH", batch * J * chunk_size)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    batched = F.panel_pfilter(struct, thetas, **kwargs)
+    for k in whole:
+        assert batched[k].shape == whole[k].shape
+        assert jnp.allclose(batched[k], whole[k], rtol=1e-5)
+
+
+def test_panel_pfilter_gpu_path_shrinks_batches_to_the_memory_budget(
+    panel_setup, monkeypatch
+):
+    struct, shared_array, unit_array, key, J, n_reps, U, _, _ = panel_setup
+    thetas = jnp.stack(
+        [
+            jnp.concatenate([shared_array, unit_array[:, u, :]], axis=-1)
+            for u in range(U)
+        ],
+        axis=1,
+    )
+    keys = jax.random.split(key, n_reps * U).reshape(n_reps, U, *key.shape)
+    whole = F.panel_pfilter(struct, thetas, J=J, keys=keys)["logLik"]
+
+    fp = sys.modules["pypomp.functional.pfilter"]
+    batches = []
+    real = fp._chunked_panel_pfilter_internal
+
+    def spy(*args, **kwargs):
+        batches.append(kwargs["batch"])
+        return real(*args, **kwargs)
+
+    spy.lower = real.lower  # type: ignore[attr-defined]
+    monkeypatch.setattr(fp, "_chunked_panel_pfilter_internal", spy)
+    monkeypatch.setattr(fp, "_memory_bytes", lambda c: (0, 4 * 10**9))
+    monkeypatch.setattr(fp, "_free_device_bytes", lambda a: 10**9)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    out = F.panel_pfilter(struct, thetas, J=J, keys=keys)["logLik"]
+    assert batches == [1]
+    assert jnp.allclose(out, whole, rtol=1e-5)
+
+
+def test_panel_pfilter_splits_replicates_across_devices(panel_setup):
+    struct, shared_array, unit_array, key, J, _, U, _, _ = panel_setup
+    thetas = jnp.stack(
+        [
+            jnp.concatenate([shared_array[0], unit_array[0, u]], axis=-1)
+            for u in range(U)
+        ]
+    )
+    thetas = jnp.tile(thetas, (6, 1, 1))
+    keys = jax.random.split(key, 6 * U).reshape(6, U, *key.shape)
+    whole = F.panel_pfilter(struct, thetas, J=J, keys=keys)["logLik"]
+
+    context = PfilterContext.from_panel_struct(struct, J=J)
+    out = _chunked_panel_pfilter_internal(
+        thetas, keys, context, 1, batch=2, n_devices=2
+    )
+    assert jnp.allclose(-out["neg_loglik"], whole, rtol=1e-5)
 
 
 def test_pmcmc_functional(model_setup):

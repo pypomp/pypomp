@@ -1,5 +1,6 @@
 from dataclasses import replace
 from functools import partial
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -7,9 +8,9 @@ from jax.core import Tracer
 from jax.stages import Compiled
 
 from ..core.algorithms.contexts import PfilterContext
-from ..core.algorithms.helpers import pad_array
 from ..core.algorithms.pfilter import (
     _chunked_panel_pfilter_internal,
+    _map_batches,
     _pfilter_internal,
     _vmapped_pfilter_internal2,
 )
@@ -164,12 +165,6 @@ def _flat_reps(
     return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[2:]), out)
 
 
-def _even_batch(size: int, batch: int) -> int:
-    """Return the batch of at most `batch`, and at least half of it, that needs the
-    least padding to cover `size` filters, preferring the larger of any ties."""
-    return min(range((batch + 1) // 2, batch + 1), key=lambda b: (-size % b, -b))
-
-
 @partial(jax.jit, static_argnames=("batch", "n_devices"))
 def _filter_batches(
     thetas_array: jax.Array,
@@ -181,30 +176,42 @@ def _filter_batches(
 ) -> dict[str, jax.Array]:
     """Run all filters, `batch` at a time on each of `n_devices` devices."""
     n, reps = keys.shape[:2]
-    per_device = n * reps // n_devices
-    if batch >= per_device:
+    if batch >= n * reps // n_devices:
         return _flat_reps(thetas_array, keys, context)
-
-    # Pad to even batches: a remainder would compile a second copy of the filter.
-    batch = _even_batch(per_device, batch)
-    padded = -(-per_device // batch) * batch
-
-    def by_device(x: jax.Array) -> jax.Array:
-        x = x.reshape(n_devices, per_device, *x.shape[1:])
-        return pad_array(x, 1, padded, per_device)
-
-    def run_device(thetas: jax.Array, device_keys: jax.Array) -> dict[str, jax.Array]:
-        return jax.lax.map(
-            lambda args: _pfilter_internal(args[0], args[1], context),
-            (thetas, device_keys),
-            batch_size=batch,
-        )
-
-    out = jax.vmap(run_device)(
-        by_device(jnp.repeat(thetas_array, reps, axis=0)),
-        by_device(keys.reshape(n * reps, *keys.shape[2:])),
+    out = _map_batches(
+        lambda theta, key: _pfilter_internal(theta, key, context),
+        jnp.repeat(thetas_array, reps, axis=0),
+        keys.reshape(n * reps, *keys.shape[2:]),
+        batch,
+        n_devices,
     )
-    return jax.tree.map(lambda x: x[:, :per_device].reshape(n, reps, *x.shape[2:]), out)
+    return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[1:]), out)
+
+
+def _is_traced(*trees: Any) -> bool:
+    """Return whether any leaf of `trees` is being traced by a caller's transform."""
+    return any(isinstance(x, Tracer) for x in jax.tree_util.tree_leaves(trees))
+
+
+def _n_devices(thetas_array: jax.Array) -> int:
+    """Return how many devices split the first axis of `thetas_array`."""
+    shard_shape = thetas_array.sharding.shard_shape(thetas_array.shape)
+    return thetas_array.shape[0] // shard_shape[0]
+
+
+def _run_fitted(
+    fn: Any,
+    args: tuple[jax.Array, jax.Array, PfilterContext],
+    batch: int,
+    **static: Any,
+) -> dict[str, jax.Array]:
+    """Run jitted `fn` with `batch`, or a smaller batch if XLA's estimate needs one."""
+    compiled = fn.lower(*args, batch=batch, **static).compile()
+    mem, free = _memory_bytes(compiled), _free_device_bytes(args[:2])
+    smaller = None if mem is None or free is None else _batch_for(*mem, free, batch)
+    if smaller is None:
+        return compiled(*args)
+    return fn(*args, batch=smaller, **static)
 
 
 def _run_reps(
@@ -222,25 +229,37 @@ def _run_reps(
         return _vmapped_pfilter_internal2(
             thetas_array, keys, replace(context, reps_batch_size=1)
         )
-    leaves = jax.tree_util.tree_leaves((thetas_array, keys, context))
-    if any(isinstance(x, Tracer) for x in leaves):
+    if _is_traced(thetas_array, keys, context):
         return _flat_reps(thetas_array, keys, context)
 
-    # Parameter sets may be split over devices; replicates never are.
-    shard_shape = thetas_array.sharding.shard_shape(thetas_array.shape)
-    n_devices = thetas_array.shape[0] // shard_shape[0]
+    n_devices = _n_devices(thetas_array)
     per_device = keys.shape[0] * keys.shape[1] // n_devices
     batch = min(per_device, -(-_PARTICLES_PER_BATCH // context.J))
+    return _run_fitted(
+        _filter_batches, (thetas_array, keys, context), batch, n_devices=n_devices
+    )
 
-    compiled = _filter_batches.lower(
-        thetas_array, keys, context, batch=batch, n_devices=n_devices
-    ).compile()
-    mem, free = _memory_bytes(compiled), _free_device_bytes((thetas_array, keys))
-    smaller = None if mem is None or free is None else _batch_for(*mem, free, batch)
-    if smaller is None:
-        return compiled(thetas_array, keys, context)
-    return _filter_batches(
-        thetas_array, keys, context, batch=smaller, n_devices=n_devices
+
+def _run_panel(
+    thetas_array: jax.Array,
+    keys: jax.Array,
+    context: PfilterContext,
+    chunk_size: int,
+) -> dict[str, jax.Array]:
+    """Run the panel filters, batching replicates by particles on a GPU."""
+    if jax.default_backend() == "cpu" or _is_traced(thetas_array, keys, context):
+        return _chunked_panel_pfilter_internal(
+            thetas_array, keys, context, chunk_size=chunk_size
+        )
+    n_devices = _n_devices(thetas_array)
+    per_device = keys.shape[0] // n_devices
+    batch = min(per_device, -(-_PARTICLES_PER_BATCH // (context.J * chunk_size)))
+    return _run_fitted(
+        _chunked_panel_pfilter_internal,
+        (thetas_array, keys, context),
+        batch,
+        chunk_size=chunk_size,
+        n_devices=n_devices,
     )
 
 
@@ -302,6 +321,10 @@ def panel_pfilter(
     To align and stack input parameter arrays into the correct
     canonical ordering, use :func:`pypomp.functional.align_params`.
 
+    On a GPU, each device runs replicates in batches of about 3 million particles
+    per chunk of units, fewer if XLA's memory estimate exceeds 80% of the free
+    device memory.  Inside a caller's ``jax.jit``, every replicate runs at once.
+
     See Also
     --------
     pypomp.PanelPomp.pfilter : Object-oriented interface.
@@ -318,11 +341,6 @@ def panel_pfilter(
         prediction_mean=prediction_mean,
         should_trans=False,
     )
-    results = _chunked_panel_pfilter_internal(
-        thetas_array,
-        keys,
-        context,
-        chunk_size,
-    )
+    results = _run_panel(thetas_array, keys, context, chunk_size)
     results["logLik"] = -results.pop("neg_loglik")
     return results

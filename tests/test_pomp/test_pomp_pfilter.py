@@ -8,6 +8,7 @@ import pytest
 import pypomp as pp
 import pypomp.functional as F
 from pypomp.core.algorithms.contexts import PfilterContext
+from pypomp.core.algorithms.pfilter import _even_batch
 
 # pypomp.functional.pfilter is the function, which hides the module of that name.
 PFILTER_MODULE = sys.modules["pypomp.functional.pfilter"]
@@ -130,7 +131,7 @@ def test_gpu_path_splits_filters_across_devices(simple):
 
 
 def test_even_batch_avoids_padding():
-    even_batch = PFILTER_MODULE._even_batch
+    even_batch = _even_batch
     assert even_batch(16, 4) == 4
     # 3 would pad 16 filters to 18, and 2 divides them evenly.
     assert even_batch(16, 3) == 2

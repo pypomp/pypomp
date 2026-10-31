@@ -456,6 +456,12 @@ class PanelEstimationMixin(Base):
         None
             Updates the unit-specific log-likelihoods ``self.theta.logLik_unit``
             and appends a :class:`~pypomp.core.results.Result` to the history.
+
+        Notes
+        -----
+        On a GPU, each device runs replicates in batches of about 3 million
+        particles per chunk of units, fewer if XLA's memory estimate exceeds 80%
+        of the free device memory.
         """
         # 1. Setup keys and prepare parameters.
         start_time = time.time()

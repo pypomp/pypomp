@@ -341,6 +341,9 @@ def panel_pfilter(
         prediction_mean=prediction_mean,
         should_trans=False,
     )
+    # The first unit's functions read theta in its order. All rows are equal, so
+    # row 0 also covers any padding units in thetas_array.
+    thetas_array = thetas_array[..., struct.unit_param_permutations[0]]
     results = _run_panel(thetas_array, keys, context, chunk_size)
     results["logLik"] = -results.pop("neg_loglik")
     return results

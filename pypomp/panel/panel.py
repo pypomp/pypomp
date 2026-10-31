@@ -116,8 +116,8 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         )
         covars_per_unit = self._get_covars_per_unit(unit_names)
 
-        unit_param_permutations = jnp.stack(
-            [self._get_unit_param_permutation(u) for u in unit_names], axis=0
+        unit_param_permutations = jnp.tile(
+            self._get_param_permutation(), (len(unit_names), 1)
         )
 
         return PanelPompStruct(

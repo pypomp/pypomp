@@ -161,6 +161,8 @@ def _num_fixedstep_steps(
     """
     if nstep is None:
         raise ValueError("nstep must be provided")
+    if t1 >= t2:
+        return 0, 0.0
     return nstep, (t2 - t1) / nstep
 
 
@@ -207,9 +209,9 @@ def _calc_steps(
     nstep_array = np.zeros(nintervals, dtype=int)
     dt_array = np.zeros(nintervals, dtype=float)
     for i in range(nintervals):
-        nstep, dt = num_step_func(float(times0[i]), float(times0[i + 1]), dt, nstep)  # type: ignore
-        nstep_array[i] = nstep
-        dt_array[i] = dt
+        nstep_array[i], dt_array[i] = num_step_func(
+            float(times0[i]), float(times0[i + 1]), dt, nstep
+        )
     return nstep_array, dt_array
 
 
@@ -285,6 +287,11 @@ def _calc_ys_covars(
 ) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, int]:
     """Construct extended dt and covars arrays."""
     times0 = np.concatenate(([t0], times))
+    if np.any(np.diff(times0) < 0):
+        raise ValueError(
+            "t0 must be no later than the first observation time, and observation "
+            "times must not decrease."
+        )
     nstep_array, dt_array = _calc_steps(times0, dt, nstep)
 
     interp_covars = _calc_interp_covars(

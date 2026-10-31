@@ -69,8 +69,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
     statenames : list of str
         Names of all latent state variables in the process model.
     t0 : float
-        Initial time for the model, typically just before the first
-        observation.
+        Initial time for the model, no later than the first observation.  If
+        equal to it, the first observation measures the initial state, with no
+        process steps before it.
     rinit : callable
         Initial state simulator.  See :ref:`rinit-tutorial` for the required
         signature.

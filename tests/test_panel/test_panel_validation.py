@@ -404,13 +404,13 @@ def test_prepare_theta_input_invalid_type(lg_panel_setup_some_shared):
         panel._prepare_theta_input(theta="not a PanelParameters object")  # type: ignore
 
 
-def test_get_unit_param_permutation_missing_param(lg_panel_setup_some_shared):
+def test_get_param_permutation_missing_param(lg_panel_setup_some_shared):
     panel, _, _ = lg_panel_setup_some_shared
     panel.unit_objects["unit1"].canonical_param_names = panel.unit_objects[
         "unit1"
     ].canonical_param_names + ["nonexistent"]
-    with pytest.raises(ValueError, match="not in the panel's parameter list"):
-        panel._get_unit_param_permutation("unit1")
+    with pytest.raises(ValueError, match="parameter list differ in"):
+        panel._get_param_permutation()
 
 
 def test_pfilter_dmeas_none(lg_panel_setup_some_shared):

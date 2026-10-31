@@ -104,18 +104,30 @@ class PanelEstimationMixin(Base):
             raise TypeError("theta must be a PanelParameters instance or None")
         return theta
 
-    def _get_unit_param_permutation(self, unit_name: str) -> jax.Array:
-        unit_canonical = self.unit_objects[unit_name].canonical_param_names
+    def _get_param_permutation(self) -> jax.Array:
+        """Indices that take theta from panel order to the first unit's order.
+
+        Every unit runs on the first unit's functions, which read theta by
+        position, so the first unit's order applies to all units.
+        """
         panel_canonical = self.canonical_param_names
 
-        try:
-            permutation = [panel_canonical.index(name) for name in unit_canonical]
-        except ValueError as e:
-            missing = set(unit_canonical) - set(panel_canonical)
-            raise ValueError(
-                f"Unit '{unit_name}' has parameters {missing} that are not in the panel's parameter list. "
-                f"Panel parameters: {panel_canonical}, Unit parameters: {unit_canonical}"
-            ) from e
+        # Only the first unit's order is used, so check the others here or a
+        # mismatch in a later unit would be silently ignored.
+        for unit_name, unit in self.unit_objects.items():
+            unit_canonical = unit.canonical_param_names
+            differing = set(unit_canonical) ^ set(panel_canonical)
+            if differing:
+                raise ValueError(
+                    f"Unit '{unit_name}' and the panel's parameter list differ in {sorted(differing)}. "
+                    f"Panel parameters: {panel_canonical}, Unit parameters: {unit_canonical}"
+                )
+
+        first_unit = self.get_unit_names()[0]
+        permutation = [
+            panel_canonical.index(name)
+            for name in self.unit_objects[first_unit].canonical_param_names
+        ]
         return jnp.array(permutation, dtype=jnp.int32)
 
     def _dataframe_to_array_canonical(
@@ -485,7 +497,7 @@ class PanelEstimationMixin(Base):
             [
                 jnp.array(
                     [
-                        [t[name] for name in self.unit_objects[u].canonical_param_names]
+                        [t[name] for name in self.canonical_param_names]
                         for t in self.get_unit_parameters(u, theta=theta_obj_in)
                     ]
                 )

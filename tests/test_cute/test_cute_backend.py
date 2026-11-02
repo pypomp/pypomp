@@ -2,6 +2,7 @@
 
 import os
 import stat
+import sys
 import warnings
 from copy import deepcopy
 
@@ -336,6 +337,54 @@ def test_each_device_launches_the_kernel_for_its_own_filters(monkeypatch):
     # Float rounding can flip a resampling decision, which moves the log-likelihood
     # by about its Monte Carlo error.
     np.testing.assert_allclose(lls["cute"], lls["xla"], atol=1.0)
+
+
+def _spy_launch_rows(monkeypatch):
+    """Record the particle rows of every kernel launch."""
+    from pypomp.cute import kernel
+
+    rows = []
+    call = kernel.cutlass_call
+
+    def spy(*a, **k):
+        f = call(*a, **k)
+        return lambda *args: rows.append(args[0].shape[0]) or f(*args)
+
+    monkeypatch.setattr(kernel, "cutlass_call", spy)
+    return rows
+
+
+@pytest.mark.parametrize("panel", [False, True], ids=["pomp", "panel"])
+def test_particle_batches_run_the_kernel(monkeypatch, panel):
+    """Filters run a few at a time give what they give all at once."""
+    module = sys.modules["pypomp.functional.pfilter"]
+    J, reps = 256, 6
+    if panel:
+        model, _, _ = table_panel()
+        model.set_backend("cute", check=False)
+
+        def run(key):
+            model.pfilter(J=J, key=key, reps=reps)
+            return model.results()["shared logLik"].to_numpy(dtype=float)
+
+    else:
+        model = sde_model()
+        model.set_backend("cute", check=False)
+        theta = pp.PompParameters([model.theta[0]] * 3)
+
+        def run(key):
+            model.pfilter(J=J, theta=theta, key=key, reps=reps)
+            return model.results()["logLik"].to_numpy(dtype=float)
+
+    rows = _spy_launch_rows(monkeypatch)
+    flat = run(jax.random.key(0))
+    assert rows, "the kernel never ran"
+    rows.clear()
+    monkeypatch.setattr(module, "_PARTICLES_PER_BATCH", 2 * J)
+    batched = run(jax.random.key(0))
+    # At most two filters per launch on each device, rather than all of them.
+    assert rows and max(rows) <= 2 * J
+    np.testing.assert_allclose(batched, flat, rtol=1e-5)
 
 
 def test_filters_with_different_times_share_a_launch():

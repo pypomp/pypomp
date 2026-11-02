@@ -15,6 +15,7 @@ from jax._src import dtypes
 from ._branch import jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 from ._ndtri import ndtri
+from ._polyval import polyval
 
 
 @jit(static_argnames=["adjustment_size", "dtype", "newton_steps"])
@@ -255,7 +256,7 @@ def _solve_lambda_from_eta(eta: jax.Array, dtype, newton_steps: int = 3) -> jax.
 
     eta2 = eta**2
 
-    lam_guess = jnp.polyval(_LAM_GUESS_COEFFS_ARR.astype(dtype), eta)
+    lam_guess = polyval(_LAM_GUESS_COEFFS_ARR.astype(dtype), eta)
 
     z_guess = jnp.where(
         lam_guess <= jnp.array(0.01, dtype=dtype),
@@ -350,8 +351,8 @@ def _compute_epsilon(
     """
     Computes epsilon_1 through epsilon_4 using Horner's method.
     """
-    e1 = jnp.polyval(_E1_COEFFS_ARR.astype(dtype), eta)
-    e2 = jnp.polyval(_E2_COEFFS_ARR.astype(dtype), eta)
-    e3 = jnp.polyval(_E3_COEFFS_ARR.astype(dtype), eta)
-    e4 = jnp.polyval(_E4_COEFFS_ARR.astype(dtype), eta)
+    e1 = polyval(_E1_COEFFS_ARR.astype(dtype), eta)
+    e2 = polyval(_E2_COEFFS_ARR.astype(dtype), eta)
+    e3 = polyval(_E3_COEFFS_ARR.astype(dtype), eta)
+    e4 = polyval(_E4_COEFFS_ARR.astype(dtype), eta)
     return e1, e2, e3, e4

@@ -21,6 +21,7 @@ from jax._src import dtypes
 from ._branch import branching, jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 from ._ndtri import ndtri
+from ._polyval import polyval
 
 
 @jit(static_argnames=["dtype", "max_newton_loops", "max_inverse_cdf_loops"])
@@ -239,11 +240,11 @@ def _central_region(s: jax.Array, lam: jax.Array, dtype) -> jax.Array:
     t_coeffs = _T_COEFFS_ARR.astype(dtype)
     x_coeffs = _X_COEFFS_ARR.astype(dtype)
 
-    rm = jnp.polyval(rm_coeffs, s)
+    rm = polyval(rm_coeffs, s)
     rm = s + s * (rm * s)
 
-    t = jnp.polyval(t_coeffs, rm)
-    x = jnp.polyval(x_coeffs, rm) / lam
+    t = polyval(t_coeffs, rm)
+    x = polyval(x_coeffs, rm) / lam
 
     total = lam + (x + t) + lam * rm
     return jnp.floor(total)

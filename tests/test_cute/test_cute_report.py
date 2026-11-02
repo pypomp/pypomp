@@ -43,6 +43,16 @@ def test_a_model_that_translates():
     assert "no GPU here" in text and "doesn't translate" not in text
 
 
+def constant_nextafter(X_, theta_, key, covars, t, dt):
+    # An unsupported primitive of constants only, which the translator folds.
+    top = jnp.nextafter(jnp.float32(1.0), jnp.float32(0.0))
+    return {"x": jnp.minimum(X_["x"], top) + 0.1 * jax.random.normal(key) * dt}
+
+
+def test_unsupported_operations_of_constants_translate():
+    assert sde_model(constant_nextafter).backend_report()["rproc"].translates
+
+
 def test_intervals_of_different_lengths_translate():
     model = uneven_model()
     assert model.rproc.nstep is None

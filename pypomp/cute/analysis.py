@@ -319,7 +319,15 @@ def _runtime(
         name, p = eqn.primitive.name, eqn.params
         ins = [rt(v) for v in eqn.invars]
         src = (eqn.source_info, *outer)
-        if name not in _SUPPORTED:
+        # The translator evaluates an equation of constants itself, whatever it is.
+        folds = (
+            not any(ins)
+            and name not in _CALLS
+            and name not in ("cond", "while", "scan")
+            and not any(_is_key(getattr(v.aval, "dtype", None)) for v in eqn.invars)
+            and not any(_is_key(getattr(v.aval, "dtype", None)) for v in eqn.outvars)
+        )
+        if name not in _SUPPORTED and not folds:
             _note(bad, name, src)
         for v in eqn.outvars:
             dt = getattr(v.aval, "dtype", None)

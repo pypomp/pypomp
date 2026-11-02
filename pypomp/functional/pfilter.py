@@ -1,12 +1,17 @@
 from dataclasses import replace
+from functools import partial
+from typing import Any
 
 import jax
+import jax.numpy as jnp
 from jax.core import Tracer
 from jax.stages import Compiled
 
 from ..core.algorithms.contexts import PfilterContext
 from ..core.algorithms.pfilter import (
     _chunked_panel_pfilter_internal,
+    _map_batches,
+    _pfilter_internal,
     _vmapped_pfilter_internal2,
 )
 from .structs import PanelPompStruct, PompStruct
@@ -62,11 +67,11 @@ def pfilter(
     reps_batch_size : int or None, optional
         How many replicate filters per parameter set to run at once; smaller
         batches run one after another and use less memory.  ``None`` (default)
-        chooses: on a GPU, all replicates at once if XLA's memory estimate for
-        that fits in 80% of the free device memory, otherwise the largest batch
-        that fits; on CPU, one at a time, which is faster there.  Inside a
-        caller's ``jax.jit`` the memory cannot be measured, so on a GPU all
-        replicates run at once.
+        chooses: on a GPU, each device runs batches of about 3 million particles
+        across all parameter sets and replicates, fewer if XLA's memory estimate
+        exceeds 80% of the free device memory; on CPU, one replicate at a time,
+        which is faster there.  Inside a caller's ``jax.jit``, a GPU runs every
+        filter at once.
 
     Returns
     -------
@@ -105,19 +110,23 @@ def pfilter(
     return results
 
 
-# Share of free device memory that the filters may use before replicates are batched.
+# Particles each device runs at once.  Far fewer and launching kernels dominates;
+# far more gains no speed, costs memory and slows some GPUs.
+_PARTICLES_PER_BATCH = 3 * 2**20
+
+# Share of free device memory that the filters may use.
 _MEMORY_HEADROOM = 0.8
 
 
-def _reps_batch_for(
-    fixed_bytes: int, temp_bytes: int, free_bytes: int, n_reps: int
+def _batch_for(
+    fixed_bytes: int, temp_bytes: int, free_bytes: int, batch: int
 ) -> int | None:
-    """Return the largest replicate batch that fits in memory, or None if all do."""
+    """Return the largest filter batch that fits in memory, or None if `batch` does."""
     budget = _MEMORY_HEADROOM * free_bytes
     if fixed_bytes + temp_bytes <= budget:
         return None
     # Inputs and outputs are full size at any batch size; the workspace scales.
-    return max(1, int((budget - fixed_bytes) // (temp_bytes / n_reps)))
+    return max(1, int((budget - fixed_bytes) // (temp_bytes / batch)))
 
 
 def _free_device_bytes(arrays: tuple[jax.Array, ...]) -> int | None:
@@ -142,33 +151,115 @@ def _memory_bytes(compiled: Compiled) -> tuple[int, int] | None:
     return fixed, m.temp_size_in_bytes
 
 
+def _flat_reps(
+    thetas_array: jax.Array, keys: jax.Array, context: PfilterContext
+) -> dict[str, jax.Array]:
+    """Run every replicate at once, with parameter sets and replicates in one batch."""
+    # Nested inside the parameter sets' vmap, the replicates make XLA copy data on
+    # every Euler step.
+    n, reps = keys.shape[:2]
+    flat_keys = keys.reshape(n * reps, 1, *keys.shape[2:])
+    out = _vmapped_pfilter_internal2(
+        jnp.repeat(thetas_array, reps, axis=0), flat_keys, context
+    )
+    return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[2:]), out)
+
+
+@partial(jax.jit, static_argnames=("batch", "n_devices"))
+def _filter_batches(
+    thetas_array: jax.Array,
+    keys: jax.Array,
+    context: PfilterContext,
+    *,
+    batch: int,
+    n_devices: int,
+) -> dict[str, jax.Array]:
+    """Run all filters, `batch` at a time on each of `n_devices` devices."""
+    n, reps = keys.shape[:2]
+    if batch >= n * reps // n_devices:
+        return _flat_reps(thetas_array, keys, context)
+    out = _map_batches(
+        lambda theta, key: _pfilter_internal(theta, key, context),
+        jnp.repeat(thetas_array, reps, axis=0),
+        keys.reshape(n * reps, *keys.shape[2:]),
+        batch,
+        n_devices,
+    )
+    return jax.tree.map(lambda x: x.reshape(n, reps, *x.shape[1:]), out)
+
+
+def _is_traced(*trees: Any) -> bool:
+    """Return whether any leaf of `trees` is being traced by a caller's transform."""
+    return any(isinstance(x, Tracer) for x in jax.tree_util.tree_leaves(trees))
+
+
+def _n_devices(thetas_array: jax.Array) -> int:
+    """Return how many devices split the first axis of `thetas_array`."""
+    shard_shape = thetas_array.sharding.shard_shape(thetas_array.shape)
+    return thetas_array.shape[0] // shard_shape[0]
+
+
+def _run_fitted(
+    fn: Any,
+    args: tuple[jax.Array, jax.Array, PfilterContext],
+    batch: int,
+    **static: Any,
+) -> dict[str, jax.Array]:
+    """Run jitted `fn` with `batch`, or a smaller batch if XLA's estimate needs one."""
+    compiled = fn.lower(*args, batch=batch, **static).compile()
+    mem, free = _memory_bytes(compiled), _free_device_bytes(args[:2])
+    smaller = None if mem is None or free is None else _batch_for(*mem, free, batch)
+    if smaller is None:
+        return compiled(*args)
+    return fn(*args, batch=smaller, **static)
+
+
 def _run_reps(
     thetas_array: jax.Array, keys: jax.Array, context: PfilterContext
 ) -> dict[str, jax.Array]:
-    """Run the filters, choosing the replicate batch size when it is not given."""
-    if context.reps_batch_size is not None or keys.shape[1] == 1:
+    """Run the filters, choosing how to batch them when no batch size is given."""
+    on_cpu = jax.default_backend() == "cpu"
+    if keys.shape[1] == 1 and (context.reps_batch_size is not None or on_cpu):
         return _vmapped_pfilter_internal2(thetas_array, keys, context)
-    if jax.default_backend() == "cpu":
+    if context.reps_batch_size is not None:
+        if context.reps_batch_size >= keys.shape[1]:
+            return _flat_reps(thetas_array, keys, context)
+        return _vmapped_pfilter_internal2(thetas_array, keys, context)
+    if on_cpu:
         return _vmapped_pfilter_internal2(
             thetas_array, keys, replace(context, reps_batch_size=1)
         )
-    leaves = jax.tree_util.tree_leaves((thetas_array, keys, context))
-    if any(isinstance(x, Tracer) for x in leaves):
-        return _vmapped_pfilter_internal2(thetas_array, keys, context)
-    # The all-at-once compile is needed anyway when it fits, so reuse it to measure memory.
-    compiled = (
-        jax.jit(_vmapped_pfilter_internal2).lower(thetas_array, keys, context).compile()
+    if _is_traced(thetas_array, keys, context):
+        return _flat_reps(thetas_array, keys, context)
+
+    n_devices = _n_devices(thetas_array)
+    per_device = keys.shape[0] * keys.shape[1] // n_devices
+    batch = min(per_device, -(-_PARTICLES_PER_BATCH // context.J))
+    return _run_fitted(
+        _filter_batches, (thetas_array, keys, context), batch, n_devices=n_devices
     )
-    mem, free = _memory_bytes(compiled), _free_device_bytes((thetas_array, keys))
-    batch = (
-        None
-        if mem is None or free is None
-        else _reps_batch_for(*mem, free, keys.shape[1])
-    )
-    if batch is None:
-        return compiled(thetas_array, keys, context)
-    return _vmapped_pfilter_internal2(
-        thetas_array, keys, replace(context, reps_batch_size=batch)
+
+
+def _run_panel(
+    thetas_array: jax.Array,
+    keys: jax.Array,
+    context: PfilterContext,
+    chunk_size: int,
+) -> dict[str, jax.Array]:
+    """Run the panel filters, batching replicates by particles on a GPU."""
+    if jax.default_backend() == "cpu" or _is_traced(thetas_array, keys, context):
+        return _chunked_panel_pfilter_internal(
+            thetas_array, keys, context, chunk_size=chunk_size
+        )
+    n_devices = _n_devices(thetas_array)
+    per_device = keys.shape[0] // n_devices
+    batch = min(per_device, -(-_PARTICLES_PER_BATCH // (context.J * chunk_size)))
+    return _run_fitted(
+        _chunked_panel_pfilter_internal,
+        (thetas_array, keys, context),
+        batch,
+        chunk_size=chunk_size,
+        n_devices=n_devices,
     )
 
 
@@ -230,6 +321,10 @@ def panel_pfilter(
     To align and stack input parameter arrays into the correct
     canonical ordering, use :func:`pypomp.functional.align_params`.
 
+    On a GPU, each device runs replicates in batches of about 3 million particles
+    per chunk of units, fewer if XLA's memory estimate exceeds 80% of the free
+    device memory.  Inside a caller's ``jax.jit``, every replicate runs at once.
+
     See Also
     --------
     pypomp.PanelPomp.pfilter : Object-oriented interface.
@@ -246,11 +341,9 @@ def panel_pfilter(
         prediction_mean=prediction_mean,
         should_trans=False,
     )
-    results = _chunked_panel_pfilter_internal(
-        thetas_array,
-        keys,
-        context,
-        chunk_size,
-    )
+    # The first unit's functions read theta in its order. All rows are equal, so
+    # row 0 also covers any padding units in thetas_array.
+    thetas_array = thetas_array[..., struct.unit_param_permutations[0]]
+    results = _run_panel(thetas_array, keys, context, chunk_size)
     results["logLik"] = -results.pop("neg_loglik")
     return results

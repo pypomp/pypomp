@@ -710,6 +710,69 @@ def test_max_min_and_clamp_keep_nans_as_xla_does():
     np.testing.assert_allclose(a, b, rtol=1e-5, equal_nan=True)
 
 
+def erf_inv_rproc(X_, theta_, key, covars, t, dt):
+    # Every fourth particle at -1, 1 or just inside them, and the rest uniform.
+    u = jax.random.uniform(key, minval=-1.0, maxval=1.0)
+    k = jnp.floor(jax.random.uniform(key, minval=0.0, maxval=16.0))
+    edge = jnp.array([-1.0, 1.0, -0.99999994, 0.99999994])[jnp.int32(k) % 4]
+    return {"x": jax.scipy.special.erfinv(jnp.where(k < 4, edge, u))}
+
+
+def test_erf_inv_is_infinite_at_plus_and_minus_one_as_in_xla():
+    model = sde_model(erf_inv_rproc)
+    xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, adv_xla = interval(model, xla, 1024, 1)
+    _, _, adv_cute = interval(model, cute, 1024, 1)
+    key = rng_key(5)
+    a = np.asarray(jax.jit(lambda X: adv_xla(X, th, key))(X0[0]))
+    b = np.asarray(jax.jit(lambda X: adv_cute(X, th, key))(X0[0]))
+    assert np.isposinf(a).any() and np.isneginf(a).any()
+    np.testing.assert_allclose(a, b, rtol=1e-5)
+
+
+def finite_select_rproc(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    # logsumexp selects on isfinite of the maximum; so does the where below.
+    v = jnp.stack([z, 2 * z, jnp.log(z + 1.5)])  # NaN where z < -1.5
+    w = jnp.where(jnp.isfinite(v), v, -1.0)
+    return sde_rproc(
+        {"x": z + 0.01 * jax.nn.logsumexp(w) * dt}, theta_, key, covars, t, dt
+    )
+
+
+def test_selects_on_isfinite_match_xla():
+    model = sde_model(finite_select_rproc)
+    xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, adv_xla = interval(model, xla, 1024, 1)
+    _, _, adv_cute = interval(model, cute, 1024, 1)
+    key = rng_key(5)
+    a = np.asarray(jax.jit(lambda X: adv_xla(X, th, key))(X0[0]))
+    b = np.asarray(jax.jit(lambda X: adv_cute(X, th, key))(X0[0]))
+    np.testing.assert_allclose(a, b, rtol=1e-5)
+
+
+def int_clamp_rproc(X_, theta_, key, covars, t, dt):
+    n = jnp.round(10 * X_["x"]).astype(jnp.int32)
+    # Bounds that cross for some particles, where XLA returns the upper one.
+    lo = jnp.round(10 * jax.random.normal(key)).astype(jnp.int32)
+    c = jax.lax.clamp(lo, n, jnp.int32(-12))
+    return sde_rproc({"x": X_["x"] + 0.01 * c * dt}, theta_, key, covars, t, dt)
+
+
+def test_integer_clamp_with_crossed_bounds_matches_xla():
+    model = sde_model(int_clamp_rproc)
+    xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, adv_xla = interval(model, xla, 1024, 1)
+    _, _, adv_cute = interval(model, cute, 1024, 1)
+    key = rng_key(5)
+    a = np.asarray(jax.jit(lambda X: adv_xla(X, th, key))(X0[0]))
+    b = np.asarray(jax.jit(lambda X: adv_cute(X, th, key))(X0[0]))
+    np.testing.assert_allclose(a, b, rtol=1e-5)
+
+
 def test_estimation_checks_the_kernel_at_the_parameters_it_is_given():
     model = sde_model()
     model.set_backend("cute")

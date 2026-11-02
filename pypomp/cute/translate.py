@@ -359,7 +359,12 @@ def _erf_inv32(x: _Scalar) -> _Scalar:
     p = _select(lt, cutlass.Float32(c1[0]), cutlass.Float32(c2[0]), np.float32)
     for a, b in zip(c1[1:], c2[1:], strict=True):
         p = _select(lt, cutlass.Float32(a), cutlass.Float32(b), np.float32) + p * w
-    return p * x
+    # At |x| = 1 the polynomial overflows to -inf whatever the sign of x, while XLA
+    # returns x * inf.
+    inf = cutlass.Float32(np.inf)
+    one = cutlass.Float32(1.0)
+    p = _select(x == one, inf, _select(x == -one, -inf, p * x, np.float32), np.float32)
+    return p
 
 
 def _ir(op: str, dtype: Any, *xs: _Scalar) -> _Scalar:
@@ -405,6 +410,12 @@ def _ipow(x: _Scalar, n: int) -> _Scalar:
         if n:
             base = base * base
     return (cutlass.Float32(1.0) / acc) if neg else acc
+
+
+def _clamp_int(lo: _Scalar, v: _Scalar, hi: _Scalar, dtype: Any) -> _Scalar:
+    """Return min(max(v, lo), hi), as XLA clamps, so hi wins when lo > hi."""
+    at_least_lo = _select(v < lo, lo, v, dtype)
+    return _select(at_least_lo > hi, hi, at_least_lo, dtype)
 
 
 def _ew(
@@ -492,7 +503,9 @@ def _ew(
     if name == "erf_inv":
         return _erf_inv32(x)
     if name == "is_finite":
-        return m.isfinite(x)
+        # cute.math.isfinite gives a bare i1, which selects can't take.
+        r = m.isfinite(x)
+        return r if _is_dsl(r) else cutlass.Boolean(r)
     if name in ("eq", "ne", "lt", "le", "gt", "ge"):
         return {
             "eq": x == a[1],
@@ -521,7 +534,7 @@ def _ew(
         return (
             m.min(m.max(v, lo, propagate_nan=True), hi, propagate_nan=True)
             if np.issubdtype(np.dtype(in_dtypes[1]), np.floating)
-            else _select(v < lo, lo, _select(v > hi, hi, v, in_dtypes[1]), in_dtypes[1])
+            else _clamp_int(lo, v, hi, in_dtypes[1])
         )
     if name == "nextafter":
         raise NotImplementedError("nextafter")

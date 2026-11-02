@@ -809,7 +809,8 @@ def _make_rprocess_interp(
         offsets=offsets,
         res=() if hs is None else hs.avals,
         dm_res=() if hd is None else hd.avals,
-        fixed=rp.nstep is not None,
+        # A model with empty intervals reads each one's count, so they take none.
+        fixed=rp.nstep is not None and not rp.skip_empty,
     )
     ns, nth, nc, nstep = spec.ns, spec.nth, spec.nc, spec.nstep
     ny, ncd = spec.ny, spec.ncd

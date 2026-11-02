@@ -991,16 +991,34 @@ def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     assert s.rproc_pf is model.rproc.mechanics_pf_interp
 
 
-def test_fixed_step_kernel_leaves_intervals_of_no_length_to_xla():
-    model = sde_model()
-    model._nstep_array = np.array([0, *model._nstep_array[1:]])
-    model.set_backend("cute")
-    with pytest.warns(UserWarning, match="no length"):
-        s = model.to_struct()
-    assert s.rproc_pf is model.rproc.mechanics_pf_interp
-    report = model.backend_report()
-    assert not report["rproc"].cute
-    assert "no length" in report["rproc"].note
+@pytest.mark.parametrize("dt", [None, 0.1], ids=["nstep", "dt"])
+def test_kernel_leaves_intervals_of_no_length_alone(dt):
+    # Observed at t0, so the first interval is empty and the rest take 10 steps.
+    model = sde_model(times=np.arange(0.0, 40.0), dt=dt)
+    assert model.rproc.skip_empty
+    xla, cute = xla_and_cute(model)
+    assert isinstance(cute.rproc_pf, KernelRProc)
+    X0, th, adv_xla = interval(model, xla, 512, 2, i_obs=1)
+    _, _, adv_cute = interval(model, cute, 512, 2, i_obs=1)
+    keys = jax.random.split(rng_key(5), 2)
+    a = np.asarray(jax.jit(jax.vmap(lambda X, k: adv_xla(X, th, k)))(X0, keys))
+    b = np.asarray(jax.jit(jax.vmap(lambda X, k: adv_cute(X, th, k)))(X0, keys))
+    assert not np.allclose(a, X0)
+    rel = np.abs(a - b) / (np.abs(a) + 1.0)
+    assert (rel.max(-1) > 1e-4).mean() < 0.005
+
+    def empty(s):
+        def f(X, k):
+            args = (s.covars_extended, s.dt_array_extended, 0.0, 0, 0, s.accumvars)
+            return s.rproc_pf(X, th, k, *args, False)
+
+        return jax.jit(jax.vmap(f))(X0, keys)
+
+    for s in (xla, cute):
+        X, t_idx = empty(s)
+        np.testing.assert_array_equal(np.asarray(X), np.asarray(X0))
+        assert (np.asarray(t_idx) == 0).all()
+    assert model.backend_report(backend="cute")["rproc"].cute
 
 
 def test_report_says_every_part_runs_on_cute():

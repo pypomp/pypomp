@@ -5,6 +5,7 @@ import stat
 import sys
 import warnings
 from copy import deepcopy
+from dataclasses import replace
 
 import jax
 import jax.numpy as jnp
@@ -14,7 +15,8 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
-from pypomp.cute import KernelRProc, available
+from pypomp.core.algorithms.engine import Interval, engine_for
+from pypomp.cute import CuteBackend, Kernels, available
 from pypomp.random import binominv
 from pypomp.random.philox import PHILOX
 
@@ -215,6 +217,19 @@ def he10_model():
     return model
 
 
+def kernels(struct, per_particle=False) -> Kernels:
+    """Return `struct`'s CuTe kernels of one flavor, failing if it has none."""
+    assert isinstance(struct.backend, CuteBackend)
+    return struct.backend.per if per_particle else struct.backend.pf
+
+
+def propagate(struct):
+    """Return `struct`'s ``rproc_pf`` as ``pfilter`` runs it: on its kernel, if
+    it has one."""
+    engine = engine_for(struct, per_particle=False)
+    return lambda X, theta, *rest: engine.propagate(X, theta, Interval(*rest))
+
+
 def xla_and_cute(model, rng="threefry"):
     cm = deepcopy(model)
     cm.set_backend("cute", rng=rng)
@@ -243,7 +258,7 @@ def interval(model, struct, J, R, i_obs=3):
     )
 
     def advance(X, th, key, should_trans=False):
-        return struct.rproc_pf(
+        return propagate(struct)(
             X, th, key, *args, int(nsteps[i_obs]), struct.accumvars, should_trans
         )[0]
 
@@ -279,7 +294,7 @@ def interval(model, struct, J, R, i_obs=3):
 def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
     model = make()
     xla, cute = xla_and_cute(model, rng)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     keys = jax.random.split(rng_key(5, rng), 2)
     X0, th, adv_xla = interval(model, xla, 1024, 2)
     _, _, adv_cute = interval(model, cute, 1024, 2)
@@ -414,7 +429,7 @@ def test_filters_with_different_times_share_a_launch():
 
     def run(s):
         def f(X, k, t, t_i):
-            return s.rproc_pf(
+            return propagate(s)(
                 X,
                 th,
                 k,
@@ -439,7 +454,7 @@ def test_intervals_of_different_lengths_share_a_launch():
     model = uneven_model()
     assert model.rproc.nstep is None
     xla, cute = xla_and_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, _ = interval(model, xla, 512, 3)
     keys = jax.random.split(rng_key(5), 3)
     nsteps = np.asarray(xla.nstep_array)
@@ -450,7 +465,7 @@ def test_intervals_of_different_lengths_share_a_launch():
 
     def run(s):
         def f(X, k, t, t_i, n):
-            return s.rproc_pf(
+            return propagate(s)(
                 X,
                 th,
                 k,
@@ -503,14 +518,14 @@ def test_tables_passed_to_long_calls_are_read():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
 
 
 def test_grids_with_longer_intervals_than_the_kernel_are_rejected():
     model = uneven_model()
     model.set_backend("cute")
     s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
     nstep = np.asarray(s.nstep_array).copy()
     nstep[1] += 20
     longer = s._replace(nstep_array=jnp.asarray(nstep))
@@ -524,7 +539,7 @@ def test_a_grid_without_steps_stays_on_xla():
     model.set_backend("cute", check=False)
     with pytest.warns(UserWarning, match="no process steps"):
         s = model.to_struct()
-    assert not isinstance(s.rproc_pf, KernelRProc)
+    assert s.backend is None
     th = model.theta.to_jax_array(model.canonical_param_names)
     assert np.isfinite(
         F.pfilter(s, th, 100, jax.random.split(jax.random.key(0), 1)[:, None])["logLik"]
@@ -565,11 +580,10 @@ def test_panel_runs_its_first_units_kernel_for_every_unit(rng):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         cute = panel.to_struct()
-    assert isinstance(cute.rproc_pf, KernelRProc)
-    assert isinstance(cute.rproc_per, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     assert all(u._theta is None for u in panel.unit_objects.values())
     xla = panel.to_struct(backend="xla")
-    assert xla.rproc_pf is panel.unit_objects["u1"].rproc.mechanics_pf_interp
+    assert xla.backend is None
 
     # Each unit's covariate picks its own rows of the tables.
     J, i_obs = 1024, 3
@@ -583,7 +597,7 @@ def test_panel_runs_its_first_units_kernel_for_every_unit(rng):
 
     def advance(s):
         def f(X, k, c):
-            return s.rproc_pf(
+            return propagate(s)(
                 X,
                 th,
                 k,
@@ -638,7 +652,7 @@ def test_mif_with_intervals_of_different_lengths():
     model.set_backend("cute")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        assert isinstance(model.to_struct().rproc_per, KernelRProc)
+        assert isinstance(model.to_struct().backend, CuteBackend)
     rw = pp.RWSigma(
         sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
         init_names=[],
@@ -665,8 +679,8 @@ def test_mif_on_cute_agrees_with_xla_in_distribution():
         if backend == "cute":
             with warnings.catch_warnings():
                 warnings.simplefilter("error")
-                per = model.to_struct().rproc_per
-            assert isinstance(per, KernelRProc) and per.perturb_step is not None
+                per = kernels(model.to_struct(), per_particle=True)
+            assert per.perturb_step is not None
         model.mif(J=256, M=2, rw_sd=SDE_RW, key=jax.random.key(seed))
         out[backend] = model.results()
     for col in ("logLik", "r", "sig", "tau"):
@@ -681,8 +695,8 @@ def test_panel_mif_on_cute(block):
     panel.set_backend("cute")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        per = panel.to_struct().rproc_per
-        assert isinstance(per, KernelRProc) and per.perturb_step is not None
+        per = kernels(panel.to_struct(), per_particle=True)
+        assert per.perturb_step is not None
         panel.mif(J=256, M=2, rw_sd=SDE_RW, key=jax.random.key(0), block=block)
     res = panel.results()
     assert np.isfinite(res["shared logLik"].to_numpy(dtype=float)).all()
@@ -702,7 +716,7 @@ def test_simulate_on_cute_matches_xla():
             X, _ = m.simulate(nsim=20, key=jax.random.key(7))
         out[backend] = X.drop(columns=["theta_idx", "sim", "time"]).to_numpy(float)
         if backend == "cute":
-            assert isinstance(m.to_struct().rproc_pf, KernelRProc)
+            assert isinstance(m.to_struct().backend, CuteBackend)
     rel = np.abs(out["xla"] - out["cute"]) / (np.abs(out["xla"]) + 1.0)
     # A binomial draw that rounding flips sends that simulation its own way.
     assert (rel.max(-1) > 1e-3).mean() < 0.1
@@ -718,7 +732,7 @@ def test_panel_simulates_on_one_kernel_as_xla_does():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         X_c, _ = cp.simulate(nsim=20, key=key)
-    assert isinstance(cp.to_struct().rproc_pf, KernelRProc)
+    assert isinstance(cp.to_struct().backend, CuteBackend)
     assert "_cute_fns" not in cp.unit_objects["u3"].__dict__
     X_x, _ = panel.simulate(nsim=20, key=key)
     a, b = X_x["x"].to_numpy(), X_c["x"].to_numpy()
@@ -749,7 +763,7 @@ def unchecked_cute(model):
 def test_max_min_and_clamp_keep_nans_as_xla_does():
     model = sde_model(nan_ops_rproc, statenames=tuple("xabcd"))
     xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, adv_xla = interval(model, xla, 1024, 1)
     _, _, adv_cute = interval(model, cute, 1024, 1)
     key = rng_key(5)
@@ -770,7 +784,7 @@ def erf_inv_rproc(X_, theta_, key, covars, t, dt):
 def test_erf_inv_is_infinite_at_plus_and_minus_one_as_in_xla():
     model = sde_model(erf_inv_rproc)
     xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, adv_xla = interval(model, xla, 1024, 1)
     _, _, adv_cute = interval(model, cute, 1024, 1)
     key = rng_key(5)
@@ -793,7 +807,7 @@ def finite_select_rproc(X_, theta_, key, covars, t, dt):
 def test_selects_on_isfinite_match_xla():
     model = sde_model(finite_select_rproc)
     xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, adv_xla = interval(model, xla, 1024, 1)
     _, _, adv_cute = interval(model, cute, 1024, 1)
     key = rng_key(5)
@@ -813,7 +827,7 @@ def int_clamp_rproc(X_, theta_, key, covars, t, dt):
 def test_integer_clamp_with_crossed_bounds_matches_xla():
     model = sde_model(int_clamp_rproc)
     xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, adv_xla = interval(model, xla, 1024, 1)
     _, _, adv_cute = interval(model, cute, 1024, 1)
     key = rng_key(5)
@@ -893,7 +907,7 @@ def test_rprocs_the_kernel_cannot_run_exactly_stay_on_xla(rproc):
     model.set_backend("cute")
     with pytest.warns(UserWarning, match="Using XLA"):
         s = model.to_struct()
-    assert s.rproc_pf is model.rproc.mechanics_pf_interp
+    assert s.backend is None
 
 
 def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
@@ -910,8 +924,7 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
-    assert isinstance(s.rproc_per, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
 
 
 def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
@@ -923,10 +936,12 @@ def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
     model.set_backend("cute")
     with pytest.warns(UserWarning, match="differentiating through XLA"):
         s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
     iv = _interval(model, "threefry")
     np.testing.assert_allclose(
-        _grads(iv, s.rproc_per), _grads(iv, model.rproc.mechanics_per_interp), rtol=1e-5
+        _grads(iv, kernels(s, per_particle=True).rproc),
+        _grads(iv, model.rproc.mechanics_per_interp),
+        rtol=1e-5,
     )
 
 
@@ -938,7 +953,7 @@ def test_gradients_that_cancel_to_rounding_pass_the_check():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = model.to_struct()
-    assert isinstance(s.rproc_per, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
 
 
 def test_newton_training_uses_xla():
@@ -975,7 +990,7 @@ def test_rbg_default_keeps_xla_quietly():
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             s = model.to_struct()
-        assert s.rproc_pf is model.rproc.mechanics_pf_interp
+        assert s.backend is None
     finally:
         jax.config.update("jax_default_prng_impl", "threefry2x32")
 
@@ -998,7 +1013,7 @@ def test_auto_uses_cute_with_one_step_per_observation():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = one_step.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
 
 
 def test_gpus_older_than_ampere_are_unavailable(monkeypatch):
@@ -1039,23 +1054,26 @@ def test_builds_without_a_cpu_backend(monkeypatch):
 
     monkeypatch.setattr(jax, "devices", no_cpu)
     model = sde_model()
-    assert model.to_struct().rproc_pf is not model.rproc.mechanics_pf_interp
+    assert isinstance(model.to_struct().backend, CuteBackend)
 
 
 def test_kernel_that_differs_from_xla_is_not_used(monkeypatch):
     from pypomp.cute import kernel
 
     model = sde_model()
-    make = kernel._make_rprocess_interp
+    make = kernel._make_kernels
 
     def off(model, traced, per_particle, rng, dm_j):
-        pf = make(model, traced, per_particle, rng, dm_j)
-        return lambda X_, *args: (pf(X_, *args)[0] + 0.1, pf(X_, *args)[1])
+        k = make(model, traced, per_particle, rng, dm_j)
+        rproc = k.rproc
+        return replace(
+            k, rproc=lambda X_, *a: (rproc(X_, *a)[0] + 0.1, rproc(X_, *a)[1])
+        )
 
-    monkeypatch.setattr(kernel, "_make_rprocess_interp", off)
+    monkeypatch.setattr(kernel, "_make_kernels", off)
     with pytest.warns(UserWarning, match="differ"):
         s = model.to_struct()
-    assert s.rproc_pf is model.rproc.mechanics_pf_interp
+    assert s.backend is None
 
 
 @pytest.mark.parametrize("dt", [None, 0.1], ids=["nstep", "dt"])
@@ -1064,7 +1082,7 @@ def test_kernel_leaves_intervals_of_no_length_alone(dt):
     model = sde_model(times=np.arange(0.0, 40.0), dt=dt)
     assert model.rproc.skip_empty
     xla, cute = xla_and_cute(model)
-    assert isinstance(cute.rproc_pf, KernelRProc)
+    assert isinstance(cute.backend, CuteBackend)
     X0, th, adv_xla = interval(model, xla, 512, 2, i_obs=1)
     _, _, adv_cute = interval(model, cute, 512, 2, i_obs=1)
     keys = jax.random.split(rng_key(5), 2)
@@ -1077,7 +1095,7 @@ def test_kernel_leaves_intervals_of_no_length_alone(dt):
     def empty(s):
         def f(X, k):
             args = (s.covars_extended, s.dt_array_extended, 0.0, 0, 0, s.accumvars)
-            return s.rproc_pf(X, th, k, *args, False)
+            return propagate(s)(X, th, k, *args, False)
 
         return jax.jit(jax.vmap(f))(X0, keys)
 
@@ -1108,7 +1126,7 @@ def test_report_points_at_what_keeps_dmeasure_on_xla():
     model.set_backend("cute")
     with pytest.warns(UserWarning, match="dmeas"):
         s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc) and s.rproc_pf.with_dmeasure is None
+    assert kernels(s).with_dmeasure is None
     report = model.backend_report()
     assert report["rproc"].cute and report["gradients"].cute
     assert not report["dmeasure"].cute and not report["perturbation"].cute
@@ -1140,11 +1158,13 @@ def test_gradients_that_dont_translate_go_through_xla():
     model.set_backend("cute")
     with pytest.warns(UserWarning, match="differentiating through XLA"):
         s = model.to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
+    assert isinstance(s.backend, CuteBackend)
     report = model.backend_report()
     assert report["rproc"].cute and not report["gradients"].cute
     assert [p.what for p in report["gradients"].problems] == ["cumsum"]
     iv = _interval(model, "threefry")
     np.testing.assert_allclose(
-        _grads(iv, s.rproc_per), _grads(iv, model.rproc.mechanics_per_interp), rtol=1e-5
+        _grads(iv, kernels(s, per_particle=True).rproc),
+        _grads(iv, model.rproc.mechanics_per_interp),
+        rtol=1e-5,
     )

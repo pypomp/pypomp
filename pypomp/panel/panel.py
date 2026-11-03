@@ -13,6 +13,7 @@ from pypomp.core.metadata import ModelMetadata
 from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.core.results import ResultsHistory
+from pypomp.cute import CuteBackend
 from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PanelPompStruct
 
@@ -151,7 +152,6 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
 
         unit_names = self.get_unit_names()
         rep_unit = self.unit_objects[unit_names[0]]
-        rproc_pf, rproc_per = self._rproc_fns(backend, rng)
 
         ys_per_unit = jnp.stack(
             [jnp.array(self.unit_objects[u].ys) for u in unit_names], axis=0
@@ -171,12 +171,12 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             covars_per_unit=covars_per_unit,
             accumvars=rep_unit.rproc.accumvars,
             rinit_pf=rep_unit.rinit.mechanics_pf,
-            rproc_pf=rproc_pf,
+            rproc_pf=rep_unit.rproc.mechanics_pf_interp,
             dmeas_pf=rep_unit.dmeas.mechanics_pf
             if rep_unit.dmeas is not None
             else None,
             rinit_per=rep_unit.rinit.mechanics_per,
-            rproc_per=rproc_per,
+            rproc_per=rep_unit.rproc.mechanics_per_interp,
             dmeas_per=rep_unit.dmeas.mechanics_per
             if rep_unit.dmeas is not None
             else None,
@@ -190,19 +190,19 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit_param_permutations=unit_param_permutations,
             unit_names=unit_names,
             statenames=tuple(rep_unit.statenames),
+            backend=self._struct_backend(backend, rng),
         )
 
-    def _rproc_fns(
+    def _struct_backend(
         self, backend: str | None, rng: str | None
-    ) -> tuple[Callable, Callable]:
-        """Return the first unit's (rproc_pf, rproc_per) for `backend`
-        and `rng`.
+    ) -> CuteBackend | None:
+        """Return the first unit's struct ``backend`` for `backend` and `rng`.
 
         Units of a panel hold no parameters, so the first unit gets the panel's
         first parameter set while a CuTe kernel is checked against XLA.
         """
         return self._on_first_unit(
-            lambda unit: unit._rproc_fns(backend, rng), backend, rng
+            lambda unit: unit._struct_backend(backend, rng), backend, rng
         )
 
     def backend_report(

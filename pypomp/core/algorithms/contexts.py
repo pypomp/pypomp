@@ -18,7 +18,6 @@ from typing import Any, cast
 import jax
 from jax.tree_util import register_dataclass
 
-from ...cute import _check_grid
 from ...functional.structs import PanelPompStruct, PompStruct
 from ..rw_sigma import RWSigma
 from .engine import IntervalEngine, engine_for
@@ -49,14 +48,16 @@ class SimFns:
     """
 
     rinitializer: Callable
-    rprocess_interp: Callable
+    engine: IntervalEngine
+    """Propagates the particles (:meth:`IntervalEngine.propagate`), on the struct's
+    backend if it has one for these functions."""
     accumvars: tuple[int, ...] | None
 
     @classmethod
     def pf(cls, struct: PompStruct | PanelPompStruct) -> SimFns:
         return cls(
             rinitializer=struct.rinit_pf,
-            rprocess_interp=struct.rproc_pf,
+            engine=engine_for(struct, per_particle=False),
             accumvars=struct.accumvars,
         )
 
@@ -72,18 +73,13 @@ class ModelFns(SimFns):
 
     dmeasure: Callable
 
-    @property
-    def engine(self) -> IntervalEngine:
-        """The engine that advances the filters with these functions."""
-        return engine_for(self.rprocess_interp, self.dmeasure)
-
     @classmethod
     def pf(cls, struct: PompStruct | PanelPompStruct) -> ModelFns:
         if struct.dmeas_pf is None:
             raise ValueError("dmeasure (dmeas_pf) is required")
         return cls(
             rinitializer=struct.rinit_pf,
-            rprocess_interp=struct.rproc_pf,
+            engine=engine_for(struct, per_particle=False),
             accumvars=struct.accumvars,
             dmeasure=struct.dmeas_pf,
         )
@@ -94,7 +90,7 @@ class ModelFns(SimFns):
             raise ValueError("dmeasure (dmeas_per) is required")
         return cls(
             rinitializer=struct.rinit_per,
-            rprocess_interp=struct.rproc_per,
+            engine=engine_for(struct, per_particle=True),
             accumvars=struct.accumvars,
             dmeasure=struct.dmeas_per,
         )
@@ -114,7 +110,6 @@ class SeriesData:
 
     @classmethod
     def from_struct(cls, struct: PompStruct) -> SeriesData:
-        _check_grid(struct)
         return cls(
             ys=struct.ys,
             dt_array_extended=struct.dt_array_extended,
@@ -126,7 +121,6 @@ class SeriesData:
 
     @classmethod
     def from_panel_struct(cls, struct: PanelPompStruct) -> SeriesData:
-        _check_grid(struct)
         return cls(
             ys=struct.ys_per_unit,
             dt_array_extended=struct.dt_array_extended,

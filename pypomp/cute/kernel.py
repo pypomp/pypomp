@@ -45,7 +45,7 @@ import cutlass  # pyright: ignore[reportMissingImports]
 from cutlass.jax import cutlass_call  # pyright: ignore[reportMissingImports]
 from jax.extend.core import jaxpr_as_fun
 
-from . import KernelRProc
+from . import Kernels
 from . import translate as ct
 from .analysis import _Traced, _untranslatable
 from .resample import resample as _resample_kernel
@@ -760,14 +760,14 @@ def _hoist(cj: ct.ClosedJaxpr, shared: list[bool]) -> ct._Hoisted | None:
     return None if h is None or _untranslatable(h.rest) else h
 
 
-def _make_rprocess_interp(
+def _make_kernels(
     model: Pomp,
     traced: _Traced,
     per_particle: bool,
     rng: str,
     dm_j: ct.ClosedJaxpr | None,
-) -> KernelRProc:
-    """Return a CuTe replacement for the model's ``rprocess_interp``.
+) -> Kernels:
+    """Return the CuTe kernels that replace the model's ``rprocess_interp``.
 
     With `per_particle`, every particle has its own parameters, as in iterated
     filtering (``mechanics_per_interp``); otherwise every filter has one parameter
@@ -1282,8 +1282,8 @@ def _make_rprocess_interp(
         )
         return out, tho, t_idx + n, w
 
-    return KernelRProc(
-        kernel=rprocess_interp,
+    return Kernels(
+        rproc=rprocess_interp,
         xla=xla,
         resample=_resample_kernel,
         with_dmeasure=None if dm_j is None else with_dmeasure,

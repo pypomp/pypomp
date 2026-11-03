@@ -14,7 +14,7 @@ import importlib
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .report import PARTS, BackendReport, Part, Problem
 
@@ -23,24 +23,20 @@ if TYPE_CHECKING:
     from ..functional.structs import PanelPompStruct, PompStruct
     from .engine import CuteEngine
 
-    _S = TypeVar("_S", PompStruct, PanelPompStruct)
-
 
 @dataclass(frozen=True)
-class KernelRProc:
-    """An ``rprocess_interp`` run by the CuTe kernel, with the XLA one it replaces.
+class Kernels:
+    """The CuTe kernels for one flavor of a model's functions, those of ``pfilter``
+    or those of iterated filtering, with the XLA functions they replace."""
 
-    The kernel's derivative has no derivative of its own, so code that needs
-    forward-mode or second-order derivatives swaps `xla` back in (see
-    :func:`_with_xla_rproc`).
-    """
-
-    kernel: Callable
+    rproc: Callable
+    """Runs ``xla``, an ``rprocess_interp``, in a kernel."""
     xla: Callable
+    """The XLA ``rprocess_interp`` that ``rproc`` replaces."""
     resample: Callable | None = None
     """A replacement for ``_resample`` that runs on the same device, if any."""
     with_dmeasure: Callable | None = None
-    """``kernel`` that also returns each particle's measurement log-density, if the
+    """``rproc`` that also returns each particle's measurement log-density, if the
     model's ``dmeasure`` translates."""
     dmeasure: Callable | None = None
     """The XLA measurement density that ``with_dmeasure`` evaluates."""
@@ -50,30 +46,39 @@ class KernelRProc:
     density."""
     max_steps: int | None = None
     """The most steps an interval may have, if the number varies; the kernel was
-    built for the model's grid. See :func:`_check_grid`."""
+    built for the model's grid."""
 
-    def __call__(self, *args: Any) -> Any:
-        return self.kernel(*args)
 
-    def engine(self, dmeasure: Callable) -> CuteEngine:
-        """Return the filters' engine for these kernels with `dmeasure` (see
-        :func:`pypomp.core.algorithms.engine.engine_for`)."""
+@dataclass(frozen=True)
+class CuteBackend:
+    """A struct's ``backend`` (:class:`pypomp.core.algorithms.engine.Backend`) that
+    runs the filters on CuTe kernels.
+
+    The kernels run only the functions they were built from: a struct whose
+    ``rproc_pf`` or ``rproc_per`` was replaced runs that flavor on XLA, and one
+    whose density was replaced evaluates the new density on XLA.
+    """
+
+    pf: Kernels
+    per: Kernels
+
+    def engine(
+        self, struct: PompStruct | PanelPompStruct, per_particle: bool
+    ) -> CuteEngine | None:
         from .engine import CuteEngine
 
-        return CuteEngine(self, dmeasure)
+        if per_particle:
+            kernels, rproc, dmeasure = self.per, struct.rproc_per, struct.dmeas_per
+        else:
+            kernels, rproc, dmeasure = self.pf, struct.rproc_pf, struct.dmeas_pf
+        if kernels.xla is not rproc:
+            return None
+        _check_grid(kernels, struct.nstep_array)
+        return CuteEngine(rproc, dmeasure, kernels)
 
 
-def _with_xla_rproc(struct: _S) -> _S:
-    """Return `struct` with any CuTe process model replaced by its XLA original."""
-    pf, per = struct.rproc_pf, struct.rproc_per
-    return struct._replace(
-        rproc_pf=pf.xla if isinstance(pf, KernelRProc) else pf,
-        rproc_per=per.xla if isinstance(per, KernelRProc) else per,
-    )
-
-
-def _check_grid(struct: Any) -> None:
-    """Raise if `struct`'s grid has an interval with more steps than its kernels were
+def _check_grid(kernels: Kernels, nstep: Any) -> None:
+    """Raise if grid `nstep` has an interval with more steps than `kernels` were
     built for, as a struct whose grid was replaced after ``to_struct`` can.
 
     A traced grid can't be checked here, so the kernels also stop at that many.
@@ -81,22 +86,18 @@ def _check_grid(struct: Any) -> None:
     import numpy as np
     from jax.core import Tracer
 
-    nstep = struct.nstep_array
-    if isinstance(nstep, Tracer):
+    if kernels.max_steps is None or isinstance(nstep, Tracer):
         return
-    for kr in (struct.rproc_pf, struct.rproc_per):
-        if not isinstance(kr, KernelRProc) or kr.max_steps is None:
-            continue
-        n = int(np.max(np.asarray(nstep), initial=0))
-        if n > kr.max_steps:
-            raise ValueError(
-                f"An observation interval has {n} steps, but the struct's CuTe kernel "
-                f"was built for at most {kr.max_steps}. Build the struct from a model "
-                "with this grid, or use backend='xla'."
-            )
+    n = int(np.max(np.asarray(nstep), initial=0))
+    if n > kernels.max_steps:
+        raise ValueError(
+            f"An observation interval has {n} steps, but the struct's CuTe kernel "
+            f"was built for at most {kernels.max_steps}. Build the struct from a "
+            "model with this grid, or use backend='xla'."
+        )
 
 
-def _with_xla_grads(kr: KernelRProc) -> KernelRProc:
+def _with_xla_grads(kr: Kernels) -> Kernels:
     """Return `kr` with its derivatives taken through XLA instead of the kernel.
 
     Undifferentiated calls still run the kernel. Under reverse-mode differentiation
@@ -115,7 +116,7 @@ def _with_xla_grads(kr: KernelRProc) -> KernelRProc:
     dm = kr.with_dmeasure
     return replace(
         kr,
-        kernel=_differentiated_by(kr.kernel, xla),
+        rproc=_differentiated_by(kr.rproc, xla),
         with_dmeasure=None if dm is None else _differentiated_by(dm, xla_dm),
     )
 
@@ -202,8 +203,8 @@ def available() -> tuple[bool, str]:
 class _Built(NamedTuple):
     """What :func:`_build` made of a model."""
 
-    fns: tuple[KernelRProc, KernelRProc] | None
-    """CuTe replacements for (rproc_pf, rproc_per), or None to keep XLA."""
+    backend: CuteBackend | None
+    """The struct's backend, or None to keep XLA."""
     reason: str = ""
     """Why CuTe wasn't tried, or ``""`` if the kernels were translated."""
     parts: dict[str, Part] | None = None
@@ -211,7 +212,7 @@ class _Built(NamedTuple):
 
 
 def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
-    """Return CuTe replacements for (rproc_pf, rproc_per), drawing with `rng`
+    """Return the CuTe backend for `model`'s structs, drawing with `rng`
     ("threefry" or "philox"), with how each part of filtering runs.
 
     Warns of each part kept on XLA unless `quiet`, as the "auto" backend is. A kernel
@@ -300,10 +301,10 @@ def _build_kernels(
         say(f"CuTe rproc doesn't translate: {_listed(rp.problems)}.{x64} Using XLA.")
         keep("rproc", "doesn't translate" + (" (jax_enable_x64 is on)" if x64 else ""))
         return _Built(None, "", _without_rproc(parts))
-    make = kernel._make_rprocess_interp
+    make = kernel._make_kernels
     pf = make(model, an.traced, False, rng, None)
     per = make(model, an.traced, True, rng, None)
-    why = _check(model, pf, per, an.traced[2], rng) if check else None
+    why = _check(model, pf.rproc, per.rproc, an.traced[2], rng) if check else None
     if why is not None:
         say(f"CuTe rproc check failed: {why}. Using XLA.", always="differ" in why)
         keep("rproc", f"failed its check: {why}")
@@ -319,7 +320,7 @@ def _build_kernels(
         keep("gradients", "its VJP doesn't translate")
     elif check:
         try:
-            why = _check_grads(model, pf, per, rng)
+            why = _check_grads(model, pf.rproc, per.rproc, rng)
         except Exception as e:  # noqa: BLE001
             why = f"{type(e).__name__}: {e}"
         if why is not None:
@@ -346,13 +347,13 @@ def _build_kernels(
             )
             keep("dmeasure", "doesn't translate")
         keep("perturbation", "needs dmeasure in the kernel")
-        return _Built((pf, per), "", parts)
+        return _Built(CuteBackend(pf, per), "", parts)
     pf_dm = _finish(make(model, an.traced, False, rng, an.dm_j), grads)
     per_dm = _finish(make(model, an.traced, True, rng, an.dm_j), grads)
     if not check:
         parts["dmeasure"] = replace(dm, cute=True)
         parts["perturbation"] = replace(parts["perturbation"], cute=True)
-        return _Built((pf_dm, per_dm), "", parts)
+        return _Built(CuteBackend(pf_dm, per_dm), "", parts)
     try:
         why = _check_dmeas(model, pf_dm, per_dm, rng)
     except Exception as e:  # noqa: BLE001
@@ -365,7 +366,7 @@ def _build_kernels(
         )
         keep("dmeasure", f"failed its check: {why}")
         keep("perturbation", "needs dmeasure in the kernel")
-        return _Built((pf, per), "", parts)
+        return _Built(CuteBackend(pf, per), "", parts)
     parts["dmeasure"] = replace(dm, cute=True)
     try:
         why = _check_perturb_step(model, per_dm, rng)
@@ -381,10 +382,10 @@ def _build_kernels(
         per_dm = replace(per_dm, perturb_step=None)
     else:
         parts["perturbation"] = replace(parts["perturbation"], cute=True)
-    return _Built((pf_dm, per_dm), "", parts)
+    return _Built(CuteBackend(pf_dm, per_dm), "", parts)
 
 
-def _finish(kr: KernelRProc, grads: bool) -> KernelRProc:
+def _finish(kr: Kernels, grads: bool) -> Kernels:
     """Return `kr`, differentiated through XLA unless its `grads` passed."""
     return kr if grads else _with_xla_grads(kr)
 

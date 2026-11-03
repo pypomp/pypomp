@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from pypomp.cute import CuteBackend
 from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PompStruct
 
@@ -544,7 +545,7 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         pypomp.functional.pfilter : Functional particle filter.
         pypomp.functional.mif : Functional iterated filter.
         """
-        struct = PompStruct(
+        return PompStruct(
             ys=jnp.array(self.ys),
             dt_array_extended=jnp.array(self._dt_array_extended),
             nstep_array=jnp.array(self._nstep_array),
@@ -566,9 +567,8 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             param_names=self.canonical_param_names,
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
+            backend=self._struct_backend(backend, rng),
         )
-        rproc_pf, rproc_per = self._rproc_fns(backend, rng)
-        return struct._replace(rproc_pf=rproc_pf, rproc_per=rproc_per)
 
     def _to_struct_at(
         self, theta: PompParameters, backend: str | None = None
@@ -588,19 +588,17 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         finally:
             self._theta = None
 
-    def _rproc_fns(
+    def _struct_backend(
         self, backend: str | None = None, rng: str | None = None
-    ) -> tuple[Callable, Callable]:
-        """Return the process model's (rproc_pf, rproc_per) for `backend`
-        and `rng`.
+    ) -> CuteBackend | None:
+        """Return the ``backend`` field of a struct for `backend` and `rng`: the
+        CuTe kernels, or None for XLA.
 
         The CuTe kernels are checked against XLA at ``self.theta`` unless the
         model's check is off; see :meth:`set_backend`.
         """
         built = self._cute_built(backend, rng)
-        if built is not None and built.fns is not None:
-            return built.fns
-        return self.rproc.mechanics_pf_interp, self.rproc.mechanics_per_interp
+        return None if built is None else built.backend
 
     def _kernel_needs_theta(self, backend: str | None, rng: str | None) -> bool:
         """Say whether :meth:`_cute_built` would have to check a new kernel at

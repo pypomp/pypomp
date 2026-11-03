@@ -9,12 +9,14 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 
+from .engine import Interval, IntervalEngine
+
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
 
 
 def _simulate_internal(
     rinitializer: Callable,  # static
-    rprocess_interp: Callable,  # static
+    engine: IntervalEngine,  # static
     rmeasure: Callable,  # static
     theta: jax.Array,
     t0: float,
@@ -44,7 +46,7 @@ def _simulate_internal(
 
     _simulate_helper2 = partial(
         _simulate_helper,
-        rprocess_interp=rprocess_interp,
+        engine=engine,
         rmeasure=rmeasure,
         theta=theta,
         times0=times0,
@@ -75,7 +77,7 @@ _jit_simulate_internal = jit(
     _simulate_internal,
     static_argnames=(
         "rinitializer",
-        "rprocess_interp",
+        "engine",
         "rmeasure",
         "ydim",
         "accumvars",
@@ -88,7 +90,7 @@ _jv_simulate_internal = jit(
     _vmapped_simulate_internal,
     static_argnames=(
         "rinitializer",
-        "rprocess_interp",
+        "engine",
         "rmeasure",
         "ydim",
         "accumvars",
@@ -104,7 +106,7 @@ def _simulate_helper(
     times0: jax.Array,
     dt_array_extended: jax.Array,
     nstep_array: jax.Array,
-    rprocess_interp: Callable,
+    engine: IntervalEngine,
     rmeasure: Callable,
     theta: jax.Array,
     covars_extended: jax.Array | None,
@@ -118,17 +120,19 @@ def _simulate_helper(
 
     nstep = nstep_array[i].astype(int)
 
-    X_sims, t_idx = rprocess_interp(
+    X_sims, t_idx = engine.propagate(
         X_sims,
         theta,
-        subkey,
-        covars_extended,
-        dt_array_extended,
-        t,
-        t_idx,
-        nstep,
-        accumvars,
-        should_trans,
+        Interval(
+            subkey,
+            covars_extended,
+            dt_array_extended,
+            t,
+            t_idx,
+            nstep,
+            accumvars,
+            should_trans,
+        ),
     )
     t = times0[i + 1]
 

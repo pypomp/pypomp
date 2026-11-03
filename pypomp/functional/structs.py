@@ -1,9 +1,12 @@
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import jax
 
 from ..core.par_trans import ParTrans
+
+if TYPE_CHECKING:
+    from ..core.algorithms.engine import Backend
 
 
 class PompStruct(NamedTuple):
@@ -56,6 +59,11 @@ class PompStruct(NamedTuple):
         ``ys`` (i.e. ``ys[:, i]`` corresponds to ``y_names[i]``).
     statenames : tuple of str
         State variable names, in the order of the state array's columns.
+    backend : Backend or None
+        The filters' engines from another backend than XLA, such as the CuTe
+        kernels that :meth:`~pypomp.Pomp.to_struct` builds, or ``None`` to run
+        the functions above on XLA. A backend runs only the functions it was
+        built from, so replacing ``rproc_pf`` runs the new one on XLA.
 
     See Also
     --------
@@ -81,6 +89,7 @@ class PompStruct(NamedTuple):
     param_names: list[str]
     y_names: list[str]
     statenames: tuple[str, ...]
+    backend: "Backend | None" = None
 
 
 def pomp_struct_flatten(struct: PompStruct):
@@ -108,6 +117,7 @@ def pomp_struct_flatten(struct: PompStruct):
         struct.param_names,
         struct.y_names,
         struct.statenames,
+        struct.backend,
     )
     return children, aux_data
 
@@ -129,6 +139,7 @@ def pomp_struct_unflatten(aux_data, children):
         param_names,
         y_names,
         statenames,
+        backend,
     ) = aux_data
     return PompStruct(
         ys=ys,
@@ -150,6 +161,7 @@ def pomp_struct_unflatten(aux_data, children):
         param_names=param_names,
         y_names=y_names,
         statenames=statenames,
+        backend=backend,
     )
 
 
@@ -165,6 +177,7 @@ class PanelPompStruct(NamedTuple):
 
     This object contains all the plumbing necessary to evaluate the core
     JAX algorithms for panel models (like panel_mif, panel_train) purely functionally.
+    ``backend`` is as in :class:`PompStruct`.
     """
 
     ys_per_unit: jax.Array
@@ -188,6 +201,7 @@ class PanelPompStruct(NamedTuple):
     unit_param_permutations: jax.Array
     unit_names: list[str]
     statenames: tuple[str, ...]
+    backend: "Backend | None" = None
 
 
 def panel_pomp_struct_flatten(struct: PanelPompStruct):
@@ -217,6 +231,7 @@ def panel_pomp_struct_flatten(struct: PanelPompStruct):
         struct.unit_param_names,
         struct.unit_names,
         struct.statenames,
+        struct.backend,
     )
     return children, aux_data
 
@@ -246,6 +261,7 @@ def panel_pomp_struct_unflatten(aux_data, children):
         unit_param_names,
         unit_names,
         statenames,
+        backend,
     ) = aux_data
     return PanelPompStruct(
         ys_per_unit=ys_per_unit,
@@ -269,6 +285,7 @@ def panel_pomp_struct_unflatten(aux_data, children):
         unit_param_permutations=unit_param_permutations,
         unit_names=unit_names,
         statenames=statenames,
+        backend=backend,
     )
 
 

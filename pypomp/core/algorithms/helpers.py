@@ -110,8 +110,8 @@ def _resample_where(
         subkey: The random key for sampling.
         particles: Per-particle arrays to resample along their leading axis, e.g.
             the particles from a prediction procedure and their parameters.
-        resample_fn: Computes the indices in place of :func:`_resample`, e.g. a
-            kernel that ``rprocess_interp`` carries as its ``resample``.
+        resample_fn: Computes the indices in place of :func:`_resample`, e.g. an
+            engine's :meth:`~pypomp.core.algorithms.engine.IntervalEngine.resample`.
 
     Returns:
         tuple: The ancestor indices of the latest resampling, and the normalized

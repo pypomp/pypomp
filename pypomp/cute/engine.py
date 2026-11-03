@@ -1,11 +1,11 @@
-"""The filters' :class:`~pypomp.core.algorithms.engine.IntervalEngine` for a
-:class:`~pypomp.cute.KernelRProc`."""
+"""The filters' :class:`~pypomp.core.algorithms.engine.IntervalEngine` on the
+kernels of a :class:`~pypomp.cute.CuteBackend`."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -13,41 +13,44 @@ import jax.numpy as jnp
 from ..core.algorithms.carries import Swarm
 from ..core.algorithms.engine import Interval, XlaEngine
 from ..core.algorithms.helpers import _resample_where
-from . import KernelRProc
+from . import Kernels
 
 
 @dataclass(frozen=True)
 class CuteEngine(XlaEngine):
-    """Runs each step on the kernels of ``rprocess_interp``, a :class:`KernelRProc`,
-    that it has, and the rest as :class:`XlaEngine` does.
+    """Runs each step on the `kernels` built from ``rprocess_interp`` that it has,
+    and the rest as :class:`XlaEngine` does.
 
     The kernels that evaluate the measurement density, the fused one and that of
     iterated filtering, are used only if `dmeasure` is the density they evaluate,
     so a struct whose density was replaced gets the new one, on XLA.
     """
 
-    @property
-    def _kernels(self) -> KernelRProc:
-        return cast(KernelRProc, self.rprocess_interp)
+    kernels: Kernels
 
     @property
     def _fused(self) -> bool:
-        return self._kernels.dmeasure is self.dmeasure
+        return self.kernels.dmeasure is self.dmeasure
 
     @property
     def _perturb_step(self) -> Callable | None:
-        return self._kernels.perturb_step if self._fused else None
+        return self.kernels.perturb_step if self._fused else None
+
+    def propagate(
+        self, X: jax.Array, theta: jax.Array, iv: Interval
+    ) -> tuple[jax.Array, Any]:
+        return self.kernels.rproc(X, theta, *iv)
 
     def advance(
         self, X: jax.Array, theta: jax.Array, iv: Interval, y: jax.Array, t_obs: Any
     ) -> tuple[jax.Array, Any, jax.Array]:
-        fused = self._kernels.with_dmeasure
+        fused = self.kernels.with_dmeasure
         if self._fused and fused is not None:
             return fused(X, theta, *iv, y, t_obs)
         return super().advance(X, theta, iv, y, t_obs)
 
     def resample(self, norm_weights: jax.Array, key: jax.Array) -> jax.Array:
-        kernel = self._kernels.resample
+        kernel = self.kernels.resample
         if kernel is None:
             return super().resample(norm_weights, key)
         return kernel(norm_weights, key)

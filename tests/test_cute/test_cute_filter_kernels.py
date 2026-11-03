@@ -10,10 +10,11 @@ import pytest
 import pypomp as pp
 import pypomp.functional as F
 from pypomp.core.algorithms.helpers import _resample
-from pypomp.cute import KernelRProc, available
+from pypomp.cute import available
 
 from .test_cute_backend import (
     he10_model,
+    kernels,
     sde_model,
     sde_rproc,
     unchecked_cute,
@@ -37,9 +38,8 @@ def log_weights(key, R, J):
 
 @pytest.mark.parametrize("J", [1, 7, 256, 5003])
 def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
-    rp = sde_model().to_struct(backend="cute").rproc_pf
-    assert isinstance(rp, KernelRProc) and rp.resample is not None
-    resample = rp.resample
+    resample = kernels(sde_model().to_struct(backend="cute")).resample
+    assert resample is not None
     R = 64
     W = log_weights(jax.random.key(J), R, J)
     K = jax.random.split(jax.random.key(J + 1), R)
@@ -57,9 +57,8 @@ def test_resample_kernel_keeps_systematic_resampling_guarantees(J):
 
 
 def test_few_filters_of_many_particles_resample_on_xla():
-    rp = sde_model().to_struct(backend="cute").rproc_pf
-    assert isinstance(rp, KernelRProc) and rp.resample is not None
-    resample = rp.resample
+    resample = kernels(sde_model().to_struct(backend="cute")).resample
+    assert resample is not None
     R, J = 2, 20011
     W = log_weights(jax.random.key(3), R, J)
     K = jax.random.split(jax.random.key(4), R)
@@ -104,11 +103,11 @@ def picks_dmeas(Y_, X_, theta_, covars, t):
 def test_fused_density_matches_the_separate_one(make, rng):
     model = make()
     _, cute = xla_and_cute(model, rng)
-    for rp in (cute.rproc_pf, cute.rproc_per):
-        assert isinstance(rp, KernelRProc) and rp.with_dmeasure is not None
+    for per_particle in (False, True):
+        assert kernels(cute, per_particle).with_dmeasure is not None
     # Built only when its check against XLA passes.
-    assert cute.rproc_per.perturb_step is not None
-    assert cute.rproc_pf.perturb_step is None
+    assert kernels(cute, per_particle=True).perturb_step is not None
+    assert kernels(cute).perturb_step is None
     th = jnp.tile(model.theta.to_jax_array(model.canonical_param_names), (4, 1))
     keys = jax.random.split(jax.random.key(0), 4)[:, None]
     a = F.pfilter(cute, th, 300, keys, CLL=True)["CLL"]
@@ -154,8 +153,7 @@ def dmeas_with_floor(Y_, X_, theta_, covars, t):
 def test_nan_state_gives_the_fused_density_nan_as_on_xla():
     model = sde_model(rproc_with_nans, dmeas=dmeas_with_floor)
     xla, cute = model.to_struct(backend="xla"), unchecked_cute(model)
-    rp = cute.rproc_pf
-    assert isinstance(rp, KernelRProc) and rp.with_dmeasure is not None
+    assert kernels(cute).with_dmeasure is not None
     th = jnp.tile(model.theta.to_jax_array(model.canonical_param_names), (4, 1))
     keys = jax.random.split(jax.random.key(0), 4)[:, None]
     a = np.asarray(F.pfilter(xla, th, 2000, keys, CLL=True)["CLL"])[..., 0]
@@ -168,8 +166,7 @@ def test_nan_state_gives_the_fused_density_nan_as_on_xla():
 def test_fused_density_gradients_match_the_separate_one(should_trans):
     model = he10_model()
     _, cute = xla_and_cute(model)
-    rp = cute.rproc_per if should_trans else cute.rproc_pf
-    assert isinstance(rp, KernelRProc)
+    rp = kernels(cute, per_particle=should_trans)
     with_dmeasure, dmeasure = rp.with_dmeasure, rp.dmeasure
     assert with_dmeasure is not None and dmeasure is not None
     names = model.canonical_param_names
@@ -194,7 +191,7 @@ def test_fused_density_gradients_match_the_separate_one(should_trans):
         return jnp.sum(out * c) + jnp.sum(jnp.where(jnp.isfinite(w), w, 0.0))
 
     def separate(X, th):
-        out, t_end = rp(X, th, key, *rest)
+        out, t_end = rp.rproc(X, th, key, *rest)
         cov = None if cute.covars_extended is None else cute.covars_extended[t_end]
         w = dmeasure(y, out, th, cov, t_obs, should_trans)
         return jnp.sum(out * c) + jnp.sum(jnp.where(jnp.isfinite(w), w, 0.0))
@@ -248,6 +245,5 @@ def test_deepcopy_keeps_the_filter_kernels():
     model = sde_model()
     model.set_backend("cute")
     s = deepcopy(model).to_struct()
-    assert isinstance(s.rproc_pf, KernelRProc)
-    assert s.rproc_pf.resample is not None
-    assert s.rproc_pf.with_dmeasure is not None
+    assert kernels(s).resample is not None
+    assert kernels(s).with_dmeasure is not None

@@ -4,21 +4,25 @@ The particle filters (``pfilter``, and the perturbed filter of iterated filterin
 leave every step that depends on how the model runs to an :class:`IntervalEngine`:
 propagating the particles, evaluating the measurement density, perturbing the
 parameters and computing resampling indices. :class:`XlaEngine` does these with the
-model's own JAX functions; a backend such as CuTe supplies its own engine for its
-process model (see :func:`engine_for`), so the filters need not know which runs.
+model's own JAX functions. A struct whose ``backend`` holds a :class:`Backend`, such
+as CuTe's, gets that backend's engine instead (see :func:`engine_for`), so the
+filters need not know which runs.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import jax
 import jax.numpy as jnp
 
 from .carries import Swarm
 from .helpers import _resample, _resample_where
+
+if TYPE_CHECKING:
+    from ...functional.structs import PanelPompStruct, PompStruct
 
 
 class Interval(NamedTuple):
@@ -41,6 +45,13 @@ class IntervalEngine(Protocol):
     `X` holds one row of states per particle and `theta` the parameters, one set
     for all particles (``pfilter``) or one row per particle (iterated filtering).
     """
+
+    def propagate(
+        self, X: jax.Array, theta: jax.Array, iv: Interval
+    ) -> tuple[jax.Array, Any]:
+        """Propagate `X` over `iv` and return the states and the time index at the
+        end of the interval."""
+        ...
 
     def advance(
         self, X: jax.Array, theta: jax.Array, iv: Interval, y: jax.Array, t_obs: Any
@@ -99,17 +110,44 @@ class IntervalEngine(Protocol):
         ...
 
 
+class Backend(Protocol):
+    """What a struct's ``backend`` field holds: the filters' engines for a model,
+    built by another backend than XLA."""
+
+    def engine(
+        self, struct: PompStruct | PanelPompStruct, per_particle: bool
+    ) -> IntervalEngine | None:
+        """Return the engine for `struct`'s functions of one flavor, those of
+        iterated filtering if `per_particle` and of ``pfilter`` otherwise, or None
+        if the backend wasn't built for them, so they run on XLA.
+
+        Raises if the backend can't run `struct`'s time grid.
+        """
+        ...
+
+
 @dataclass(frozen=True)
 class XlaEngine:
-    """The :class:`IntervalEngine` of the model's own JAX functions."""
+    """The :class:`IntervalEngine` of the model's own JAX functions.
+
+    `dmeasure` may be None for algorithms that only simulate, which call only
+    :meth:`propagate`.
+    """
 
     rprocess_interp: Callable
-    dmeasure: Callable
+    dmeasure: Callable | None
+
+    def propagate(
+        self, X: jax.Array, theta: jax.Array, iv: Interval
+    ) -> tuple[jax.Array, Any]:
+        return self.rprocess_interp(X, theta, *iv)
 
     def advance(
         self, X: jax.Array, theta: jax.Array, iv: Interval, y: jax.Array, t_obs: Any
     ) -> tuple[jax.Array, Any, jax.Array]:
-        X, t_idx = self.rprocess_interp(X, theta, *iv)
+        if self.dmeasure is None:
+            raise ValueError("dmeasure is required")
+        X, t_idx = self.propagate(X, theta, iv)
         cov = None if iv.covars_extended is None else iv.covars_extended[t_idx]
         return X, t_idx, self.dmeasure(y, X, theta, cov, t_obs, iv.should_trans)
 
@@ -160,14 +198,20 @@ class XlaEngine:
         return swarm.thetas
 
 
-def engine_for(rprocess_interp: Callable, dmeasure: Callable) -> IntervalEngine:
-    """Return the engine that runs `rprocess_interp` with `dmeasure`.
+def engine_for(
+    struct: PompStruct | PanelPompStruct, per_particle: bool
+) -> IntervalEngine:
+    """Return the engine that runs `struct`'s functions of one flavor, those of
+    iterated filtering (``rproc_per``, ``dmeas_per``) if `per_particle` and of
+    ``pfilter`` otherwise.
 
-    A process model of another backend, such as
-    :class:`pypomp.cute.KernelRProc`, makes its own through its ``engine``
-    method; any other runs on :class:`XlaEngine`.
+    That is its backend's engine, if it has one for them (see :class:`Backend`),
+    and otherwise :class:`XlaEngine`.
     """
-    make = getattr(rprocess_interp, "engine", None)
-    if make is None:
-        return XlaEngine(rprocess_interp, dmeasure)
-    return make(dmeasure)
+    backend = struct.backend
+    engine = None if backend is None else backend.engine(struct, per_particle)
+    if engine is not None:
+        return engine
+    if per_particle:
+        return XlaEngine(struct.rproc_per, struct.dmeas_per)
+    return XlaEngine(struct.rproc_pf, struct.dmeas_pf)

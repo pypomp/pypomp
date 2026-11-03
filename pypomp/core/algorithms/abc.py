@@ -154,7 +154,7 @@ def _abc_sim_distance(
     # 1. Simulate a single synthetic dataset under theta.
     _, Y = _simulate_internal(
         context.fns.rinitializer,
-        context.fns.rprocess_interp,
+        context.fns.engine,
         context.rmeasure,
         theta,
         context.series.t0,

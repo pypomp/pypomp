@@ -8,7 +8,7 @@ import pytest
 import pypomp as pp
 import pypomp.cute
 import pypomp.functional as F
-from pypomp.cute import KernelRProc, _with_xla_grads
+from pypomp.cute import CuteBackend, Kernels, _with_xla_grads
 from pypomp.cute.verify import _check, _check_grads, _forward, _grads, _interval
 
 from .test_cute_backend import (
@@ -109,14 +109,14 @@ def with_wrong_grads(f):
 def test_xla_grads_keep_the_kernel_undifferentiated():
     model = sde_model()
     per = model.rproc.mechanics_per_interp
-    kr = _with_xla_grads(KernelRProc(with_wrong_grads(per), per))
+    kr = _with_xla_grads(Kernels(with_wrong_grads(per), per))
     iv = _interval(model, "threefry")
     np.testing.assert_allclose(
-        _forward(iv, kr, iv.th_per, True)(iv.X0),
+        _forward(iv, kr.rproc, iv.th_per, True)(iv.X0),
         _forward(iv, per, iv.th_per, True)(iv.X0) + 1.0,
         rtol=1e-6,
     )
-    np.testing.assert_allclose(_grads(iv, kr), _grads(iv, per), rtol=1e-5)
+    np.testing.assert_allclose(_grads(iv, kr.rproc), _grads(iv, per), rtol=1e-5)
 
 
 def test_xla_grads_cover_the_fused_density():
@@ -131,7 +131,7 @@ def test_xla_grads_cover_the_fused_density():
         return out, t_end, dmeas(y, out, theta_, c, t_obs, trans)
 
     kr = _with_xla_grads(
-        KernelRProc(per, per, with_dmeasure=with_wrong_grads(fused), dmeasure=dmeas)
+        Kernels(per, per, with_dmeasure=with_wrong_grads(fused), dmeasure=dmeas)
     )
     assert kr.with_dmeasure is not None
     iv = _interval(model, "threefry")
@@ -331,8 +331,7 @@ def test_hessian_optimizers_train_on_the_xla_rproc():
         raise AssertionError("Hessians can't go through the kernel")
 
     s = s._replace(
-        rproc_pf=KernelRProc(kernel, s.rproc_pf),
-        rproc_per=KernelRProc(kernel, s.rproc_per),
+        backend=CuteBackend(Kernels(kernel, s.rproc_pf), Kernels(kernel, s.rproc_per))
     )
     th = model.theta.to_jax_array(model.canonical_param_names)
     eta = pp.LearningRate({p: 0.01 for p in model.canonical_param_names})
@@ -341,9 +340,15 @@ def test_hessian_optimizers_train_on_the_xla_rproc():
     assert np.isfinite(np.asarray(traces)).all()
 
 
-def xla_iterated_filtering_kernels(s):
-    """A KernelRProc for `s.rproc_per` whose kernels are XLA code computing what
+def with_xla_kernels(s, max_steps=None):
+    """Return `s` with a CuTe backend whose kernels are XLA code computing what
     CuTe's compute, so iterated filtering takes the kernels' path on CPU."""
+    pf = Kernels(s.rproc_pf, s.rproc_pf, max_steps=max_steps)
+    return s._replace(backend=CuteBackend(pf, xla_iterated_filtering_kernels(s)))
+
+
+def xla_iterated_filtering_kernels(s):
+    """Kernels for `s.rproc_per` that are XLA code computing what CuTe's compute."""
     rproc, dmeas = s.rproc_per, s.dmeas_per
     assert dmeas is not None
 
@@ -376,7 +381,7 @@ def xla_iterated_filtering_kernels(s):
         X, t_end, w = with_dmeasure(X[anc], th, *iv, y, t_obs)
         return X, th, t_end, w
 
-    return KernelRProc(
+    return Kernels(
         rproc,
         rproc,
         with_dmeasure=with_dmeasure,
@@ -392,7 +397,7 @@ def test_engine_for_runs_kernels_only_on_their_own_density():
 
     s = sde_model().to_struct(backend="xla")
     assert type(ModelFns.per(s).engine) is XlaEngine
-    kernels = s._replace(rproc_per=xla_iterated_filtering_kernels(s))
+    kernels = with_xla_kernels(s)
     engine = ModelFns.per(kernels).engine
     assert isinstance(engine, CuteEngine) and engine._perturb_step is not None
     # A density the kernels don't evaluate runs separately, on XLA.
@@ -401,6 +406,21 @@ def test_engine_for_runs_kernels_only_on_their_own_density():
     other = kernels._replace(dmeas_per=lambda *a: dmeas(*a))
     engine = ModelFns.per(other).engine
     assert isinstance(engine, CuteEngine) and engine._perturb_step is None
+    # A process model the kernels weren't built from runs on XLA.
+    rproc = s.rproc_per
+    other = kernels._replace(rproc_per=lambda *a: rproc(*a))
+    assert type(ModelFns.per(other).engine) is XlaEngine
+    assert isinstance(ModelFns.pf(other).engine, CuteEngine)
+
+
+def test_kernels_reject_a_grid_with_more_steps_than_they_were_built_for():
+    from pypomp.core.algorithms.contexts import ModelFns
+
+    s = sde_model().to_struct(backend="xla")
+    n = int(np.max(np.asarray(s.nstep_array)))
+    ModelFns.pf(with_xla_kernels(s, max_steps=n))
+    with pytest.raises(ValueError, match="built for at most"):
+        ModelFns.pf(with_xla_kernels(s, max_steps=n - 1))
 
 
 @pytest.mark.parametrize("n_obs, thresh", [(40, 0.0), (41, 1e3)])
@@ -410,7 +430,7 @@ def test_iterated_filtering_on_kernels_that_resample_on_load_matches_xla(n_obs, 
     # give XLA's results for the same keys.
     model = sde_model(times=np.arange(1, n_obs + 1, dtype=float))
     s = model.to_struct(backend="xla")
-    kernels = s._replace(rproc_per=xla_iterated_filtering_kernels(s))
+    kernels = with_xla_kernels(s)
     th = model.theta.to_jax_array(model.canonical_param_names)
     keys = jax.random.split(jax.random.key(3), th.shape[0])
     rw = pp.RWSigma(

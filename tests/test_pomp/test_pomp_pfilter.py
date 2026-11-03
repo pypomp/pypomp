@@ -316,7 +316,7 @@ def test_auto_backend_falls_back_quietly(simple):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         s = LG.to_struct()
-    assert s.rproc_pf is LG.rproc.mechanics_pf_interp
+    assert s.backend is None
 
 
 def test_par_trans_change_drops_built_backends(simple):

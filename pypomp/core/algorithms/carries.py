@@ -109,22 +109,35 @@ class PfilterState:
 
 @register_dataclass
 @dataclass(frozen=True)
+class Swarm:
+    """The particles and parameters that iterated filtering carries from one
+    observation interval to the next, in the form its
+    :class:`~pypomp.core.algorithms.engine.IntervalEngine` keeps them.
+
+    Read them through the engine (``advance_perturbed``, ``parameters``): an engine
+    that resamples as it loads keeps them as they were before the last resampling.
+    """
+
+    particles: jax.Array
+    thetas: jax.Array
+    anc: jax.Array
+    """For an engine that resamples as it loads, the ancestors of the last
+    resampling, not yet applied to `particles` and `thetas`. Otherwise empty."""
+    spare: tuple[jax.Array, jax.Array]
+    """For such an engine, spent buffers shaped as `particles` and `thetas` that it
+    writes its outputs over. Otherwise empty."""
+
+
+@register_dataclass
+@dataclass(frozen=True)
 class PerfilterState:
     t: float | jax.Array
-    particlesF: jax.Array
-    thetas: jax.Array
+    swarm: Swarm
     loglik: jax.Array
     norm_weights: jax.Array
     counts: jax.Array
     t_idx: int
     ancestry: jax.Array
-    anc: jax.Array
-    """With a kernel that resamples as it loads (``perturb_step``), the ancestors
-    of the last resampling: particlesF and thetas are then not yet resampled.
-    Otherwise empty."""
-    spare: tuple[jax.Array, jax.Array]
-    """With ``perturb_step``, spent buffers shaped as particlesF and thetas that the
-    kernel writes its outputs over. Otherwise empty."""
 
 
 @register_dataclass

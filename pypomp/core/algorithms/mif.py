@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -9,8 +7,8 @@ from .carries import (
     PerfilterStepInputs,
 )
 from .contexts import MifContext, PfilterContext
-from ...cute import _perturb_step, _with_dmeasure
-from .helpers import _normalize_weights, _resample_where
+from .engine import Interval
+from .helpers import _normalize_weights
 from .pfilter import _vmapped_pfilter_internal
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
@@ -166,59 +164,25 @@ def _perfilter_internal(
         cooling_factor=cooling_factors,
         step_key=step_keys_raw,
     )
-    step = _perturb_step(context.per.rprocess_interp, context.per.dmeasure)
-    spare = (jnp.zeros((0,)), jnp.zeros((0,)))
-    if step is not None:
-        spare = (jnp.zeros_like(particlesF_Jx), jnp.zeros_like(thetas_Jd))
+    engine = context.per.engine
     init_state = PerfilterState(
         t=context.series.t0,
-        particlesF=particlesF_Jx,
-        thetas=thetas_Jd,
+        swarm=engine.swarm(particlesF_Jx, thetas_Jd),
         loglik=loglik,
         norm_weights=norm_weights,
         counts=counts,
         t_idx=0,
         ancestry=ancestry,
-        anc=jnp.arange(J if step is not None else 0, dtype=jnp.int32),
-        spare=spare,
     )
     scan_body_fn = jax.tree_util.Partial(_perfilter_scan_body, context)
 
     # 5. Run the perturbed particle filter over the time series.
-    if step is None:
-        final_state, _ = jax.lax.scan(scan_body_fn, init_state, perfilter_scan_xs)
-    else:
-        final_state = _scan_in_pairs(scan_body_fn, init_state, perfilter_scan_xs)
-
-    thetas = final_state.thetas
-    if step is not None:
-        thetas = thetas[final_state.anc]
-    return thetas, -final_state.loglik, final_state.ancestry
-
-
-def _scan_in_pairs(
-    body: Callable, init: PerfilterState, xs: PerfilterStepInputs
-) -> PerfilterState:
-    """Scan `body` over `xs` two steps per iteration.
-
-    ``perturb_step`` writes over the spare buffers and the body swaps them with the
-    carry, so after two steps every buffer is back in its slot and XLA need not copy
-    the kernel's outputs into the carry.
-    """
-    n = len(xs.y)
-    pairs = jax.tree.map(
-        lambda a: a[: n - n % 2].reshape((n // 2, 2) + a.shape[1:]), xs
+    final_state = engine.scan(scan_body_fn, init_state, perfilter_scan_xs)
+    return (
+        engine.parameters(final_state.swarm),
+        -final_state.loglik,
+        final_state.ancestry,
     )
-
-    def two(carry, xs2):
-        for k in range(2):
-            carry, _ = body(carry, jax.tree.map(lambda a, k=k: a[k], xs2))
-        return carry, None
-
-    carry, _ = jax.lax.scan(two, init, pairs)
-    if n % 2:
-        carry, _ = body(carry, jax.tree.map(lambda a: a[-1], xs))
-    return carry
 
 
 def _perfilter_scan_body(
@@ -232,68 +196,25 @@ def _perfilter_scan_body(
     nstep_int = jnp.asarray(xs.nstep).astype(int)
 
     sigmas_cooled = xs.cooling_factor * context.rw_sigma.sigmas_array
-    step = _perturb_step(context.per.rprocess_interp, context.per.dmeasure)
-    if step is not None:
-        # 2-5. One kernel resamples on load, perturbs the parameters, propagates the
-        # particles and evaluates the measurement density.
-        particlesP_Jx, perturbed_thetas, updated_t_idx, measurements = step(
-            carry.particlesF,
-            carry.thetas,
-            carry.anc,
-            key_perturb,
-            sigmas_cooled,
-            key_process,
-            context.series.covars_extended,
-            context.series.dt_array_extended,
-            carry.t,
-            carry.t_idx,
-            nstep_int,
-            context.per.accumvars,
-            SHOULD_TRANS,
-            xs.y,
-            xs.time,
-            carry.spare,
-        )
-    else:
-        # 2. Perturb the parameters.
-        perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
-            shape=carry.thetas.shape, key=key_perturb
-        )
-        # Draw the perturbations once: otherwise XLA may fuse the draws into each
-        # of their consumers (dmeasure, the resampling gather) and draw them twice.
-        perturbed_thetas = jax.lax.optimization_barrier(perturbed_thetas)
+    engine = context.per.engine
+    iv = Interval(
+        key_process,
+        context.series.covars_extended,
+        context.series.dt_array_extended,
+        carry.t,
+        carry.t_idx,
+        nstep_int,
+        context.per.accumvars,
+        SHOULD_TRANS,
+    )
 
-        # 3. Propagate the particles for one observation interval.
-        args = (
-            carry.particlesF,
-            perturbed_thetas,
-            key_process,
-            context.series.covars_extended,
-            context.series.dt_array_extended,
-            carry.t,
-            carry.t_idx,
-            nstep_int,
-            context.per.accumvars,
-            SHOULD_TRANS,
+    # 2-5. Perturb the parameters, propagate the particles for one observation
+    # interval and evaluate the density of the observation at its end.
+    particlesP_Jx, perturbed_thetas, updated_t_idx, measurements = (
+        engine.advance_perturbed(
+            carry.swarm, key_perturb, sigmas_cooled, iv, xs.y, xs.time
         )
-        fused = _with_dmeasure(context.per.rprocess_interp, context.per.dmeasure)
-        if fused is not None:
-            # 4-5. The kernel also evaluates the measurement density.
-            particlesP_Jx, updated_t_idx, measurements = fused(*args, xs.y, xs.time)
-        else:
-            particlesP_Jx, updated_t_idx = context.per.rprocess_interp(*args)
-
-            # 4. Update covars to current observation time.
-            covars_t = (
-                None
-                if context.series.covars_extended is None
-                else context.series.covars_extended[updated_t_idx]
-            )
-
-            # 5. Compute log-likelihood contribution of current observation.
-            measurements = context.per.dmeasure(
-                xs.y, particlesP_Jx, perturbed_thetas, covars_t, xs.time, SHOULD_TRANS
-            )
+    )
     measurements = jnp.nan_to_num(measurements.squeeze(), nan=jnp.log(1e-18))
 
     # 6. Update the running log-likelihood and normalize particle weights.
@@ -305,21 +226,15 @@ def _perfilter_scan_body(
     should_resample = jnp.max(norm_weights_updated) - jnp.min(
         norm_weights_updated
     ) > jnp.log(context.thresh)
-    resample_args = (should_resample, carry.counts, norm_weights_updated, key_resample)
-    resample_fn = getattr(context.per.rprocess_interp, "resample", None)
-    if step is not None:
-        # The kernel resamples as it loads, so it only needs the ancestors.
-        counts_resampled, norm_weights_resampled, anc = _resample_where(
-            *resample_args, jnp.arange(context.J, dtype=jnp.int32), resample_fn
-        )
-        spare = (carry.particlesF, carry.thetas)
-        particlesF_resampled, thetas_resampled = particlesP_Jx, perturbed_thetas
-    else:
-        counts_resampled, norm_weights_resampled, resampled = _resample_where(
-            *resample_args, (particlesP_Jx, perturbed_thetas), resample_fn
-        )
-        particlesF_resampled, thetas_resampled = resampled
-        anc, spare = carry.anc, carry.spare
+    counts_resampled, norm_weights_resampled, swarm = engine.resample_swarm(
+        carry.swarm,
+        particlesP_Jx,
+        perturbed_thetas,
+        should_resample,
+        carry.counts,
+        norm_weights_updated,
+        key_resample,
+    )
 
     # 8. Update the ancestry (used for PIF, i.e., Panel.mif with block=False).
     if context.return_ancestry:
@@ -333,15 +248,12 @@ def _perfilter_scan_body(
     # 9. Return the updated state
     new_state = PerfilterState(
         t=xs.time,
-        particlesF=particlesF_resampled,
-        thetas=thetas_resampled,
+        swarm=swarm,
         loglik=loglik_updated,
         norm_weights=norm_weights_resampled,
         counts=counts_resampled,
         t_idx=updated_t_idx,
         ancestry=ancestry_updated,
-        anc=anc,
-        spare=spare,
     )
     return new_state, None
 

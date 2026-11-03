@@ -339,3 +339,85 @@ def test_hessian_optimizers_train_on_the_xla_rproc():
     keys = jax.random.split(jax.random.key(0), 1)
     _, traces = F.train(s, th, 32, 1, eta, keys, optimizer=pp.Newton())
     assert np.isfinite(np.asarray(traces)).all()
+
+
+def xla_iterated_filtering_kernels(s):
+    """A KernelRProc for `s.rproc_per` whose kernels are XLA code computing what
+    CuTe's compute, so iterated filtering takes the kernels' path on CPU."""
+    rproc, dmeas = s.rproc_per, s.dmeas_per
+    assert dmeas is not None
+
+    def with_dmeasure(X, th, keys, cov, dt, t, t_idx, nstep, acc, trans, y, t_obs):
+        X, t_end = rproc(X, th, keys, cov, dt, t, t_idx, nstep, acc, trans)
+        c = None if cov is None else cov[t_end]
+        return X, t_end, dmeas(y, X, th, c, t_obs, trans)
+
+    def perturb_step(
+        X,
+        th,
+        anc,
+        key_perturb,
+        sigmas,
+        keys,
+        cov,
+        dt,
+        t,
+        t_idx,
+        nstep,
+        acc,
+        trans,
+        y,
+        t_obs,
+        scratch,
+    ):
+        assert scratch[0].shape == X.shape and scratch[1].shape == th.shape
+        th = th[anc] + sigmas * jax.random.normal(key_perturb, th.shape)
+        iv = (keys, cov, dt, t, t_idx, nstep, acc, trans)
+        X, t_end, w = with_dmeasure(X[anc], th, *iv, y, t_obs)
+        return X, th, t_end, w
+
+    return KernelRProc(
+        rproc,
+        rproc,
+        with_dmeasure=with_dmeasure,
+        dmeasure=dmeas,
+        perturb_step=perturb_step,
+    )
+
+
+def test_engine_for_runs_kernels_only_on_their_own_density():
+    from pypomp.core.algorithms.contexts import ModelFns
+    from pypomp.core.algorithms.engine import XlaEngine
+    from pypomp.cute.engine import CuteEngine
+
+    s = sde_model().to_struct(backend="xla")
+    assert type(ModelFns.per(s).engine) is XlaEngine
+    kernels = s._replace(rproc_per=xla_iterated_filtering_kernels(s))
+    engine = ModelFns.per(kernels).engine
+    assert isinstance(engine, CuteEngine) and engine._perturb_step is not None
+    # A density the kernels don't evaluate runs separately, on XLA.
+    dmeas = s.dmeas_per
+    assert dmeas is not None
+    other = kernels._replace(dmeas_per=lambda *a: dmeas(*a))
+    engine = ModelFns.per(other).engine
+    assert isinstance(engine, CuteEngine) and engine._perturb_step is None
+
+
+@pytest.mark.parametrize("n_obs, thresh", [(40, 0.0), (41, 1e3)])
+def test_iterated_filtering_on_kernels_that_resample_on_load_matches_xla(n_obs, thresh):
+    # The kernels' path defers each resampling to the next interval's load and
+    # scans two intervals at a time; with XLA standing in for the kernels, it must
+    # give XLA's results for the same keys.
+    model = sde_model(times=np.arange(1, n_obs + 1, dtype=float))
+    s = model.to_struct(backend="xla")
+    kernels = s._replace(rproc_per=xla_iterated_filtering_kernels(s))
+    th = model.theta.to_jax_array(model.canonical_param_names)
+    keys = jax.random.split(jax.random.key(3), th.shape[0])
+    rw = pp.RWSigma(
+        sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
+        init_names=[],
+    ).geometric_cooling(0.5)
+    want = F.mif(s, th, 64, 2, rw, keys, thresh=thresh)
+    got = F.mif(kernels, th, 64, 2, rw, keys, thresh=thresh)
+    for a, b in zip(want, got, strict=True):
+        np.testing.assert_allclose(np.asarray(b), np.asarray(a), rtol=1e-6)

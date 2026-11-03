@@ -21,6 +21,7 @@ from .report import PARTS, BackendReport, Part, Problem
 if TYPE_CHECKING:
     from ..core.pomp import Pomp
     from ..functional.structs import PanelPompStruct, PompStruct
+    from .engine import CuteEngine
 
     _S = TypeVar("_S", PompStruct, PanelPompStruct)
 
@@ -40,19 +41,26 @@ class KernelRProc:
     """A replacement for ``_resample`` that runs on the same device, if any."""
     with_dmeasure: Callable | None = None
     """``kernel`` that also returns each particle's measurement log-density, if the
-    model's ``dmeasure`` translates; see :func:`_with_dmeasure`."""
+    model's ``dmeasure`` translates."""
     dmeasure: Callable | None = None
     """The XLA measurement density that ``with_dmeasure`` evaluates."""
     perturb_step: Callable | None = None
     """For per-particle parameters with a fused density: an interval of iterated
-    filtering, from the ancestors through the parameter perturbation to the density;
-    see :func:`_perturb_step`."""
+    filtering, from the ancestors through the parameter perturbation to the
+    density."""
     max_steps: int | None = None
     """The most steps an interval may have, if the number varies; the kernel was
     built for the model's grid. See :func:`_check_grid`."""
 
     def __call__(self, *args: Any) -> Any:
         return self.kernel(*args)
+
+    def engine(self, dmeasure: Callable) -> CuteEngine:
+        """Return the filters' engine for these kernels with `dmeasure` (see
+        :func:`pypomp.core.algorithms.engine.engine_for`)."""
+        from .engine import CuteEngine
+
+        return CuteEngine(self, dmeasure)
 
 
 def _with_xla_rproc(struct: _S) -> _S:
@@ -153,22 +161,6 @@ def _differentiated_by(fast: Callable, slow: Callable) -> Callable:
         return f(X_, theta_, jax.random.key_data(keys) if typed else keys, dyn)
 
     return call
-
-
-def _with_dmeasure(rproc: Callable, dmeasure: Callable) -> Callable | None:
-    """Return `rproc`'s fused process-and-density kernel when it evaluates
-    `dmeasure`, otherwise None."""
-    if isinstance(rproc, KernelRProc) and rproc.dmeasure is dmeasure:
-        return rproc.with_dmeasure
-    return None
-
-
-def _perturb_step(rproc: Callable, dmeasure: Callable) -> Callable | None:
-    """Return `rproc`'s iterated filtering kernel when it evaluates `dmeasure`,
-    otherwise None."""
-    if isinstance(rproc, KernelRProc) and rproc.dmeasure is dmeasure:
-        return rproc.perturb_step
-    return None
 
 
 def available() -> tuple[bool, str]:

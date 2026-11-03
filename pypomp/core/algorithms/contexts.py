@@ -21,6 +21,7 @@ from jax.tree_util import register_dataclass
 from ...cute import _check_grid
 from ...functional.structs import PanelPompStruct, PompStruct
 from ..rw_sigma import RWSigma
+from .engine import IntervalEngine, engine_for
 
 
 def static(**kwargs: Any) -> Any:
@@ -70,6 +71,11 @@ class ModelFns(SimFns):
     """
 
     dmeasure: Callable
+
+    @property
+    def engine(self) -> IntervalEngine:
+        """The engine that advances the filters with these functions."""
+        return engine_for(self.rprocess_interp, self.dmeasure)
 
     @classmethod
     def pf(cls, struct: PompStruct | PanelPompStruct) -> ModelFns:

@@ -11,6 +11,7 @@ scratch/
 .claude
 .agents
 docs/source/api/generated/
+uv.lock
 
 #### the following is the default Python package gitignore from GitHub ####
 

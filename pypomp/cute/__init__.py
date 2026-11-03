@@ -10,6 +10,7 @@ package (``pip install pypomp[cute]``).
 
 from __future__ import annotations
 
+import importlib
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -46,6 +47,9 @@ class KernelRProc:
     """For per-particle parameters with a fused density: an interval of iterated
     filtering, from the ancestors through the parameter perturbation to the density;
     see :func:`_perturb_step`."""
+    max_steps: int | None = None
+    """The most steps an interval may have, if the number varies; the kernel was
+    built for the model's grid. See :func:`_check_grid`."""
 
     def __call__(self, *args: Any) -> Any:
         return self.kernel(*args)
@@ -58,6 +62,30 @@ def _with_xla_rproc(struct: _S) -> _S:
         rproc_pf=pf.xla if isinstance(pf, KernelRProc) else pf,
         rproc_per=per.xla if isinstance(per, KernelRProc) else per,
     )
+
+
+def _check_grid(struct: Any) -> None:
+    """Raise if `struct`'s grid has an interval with more steps than its kernels were
+    built for, as a struct whose grid was replaced after ``to_struct`` can.
+
+    A traced grid can't be checked here, so the kernels also stop at that many.
+    """
+    import numpy as np
+    from jax.core import Tracer
+
+    nstep = struct.nstep_array
+    if isinstance(nstep, Tracer):
+        return
+    for kr in (struct.rproc_pf, struct.rproc_per):
+        if not isinstance(kr, KernelRProc) or kr.max_steps is None:
+            continue
+        n = int(np.max(np.asarray(nstep), initial=0))
+        if n > kr.max_steps:
+            raise ValueError(
+                f"An observation interval has {n} steps, but the struct's CuTe kernel "
+                f"was built for at most {kr.max_steps}. Build the struct from a model "
+                "with this grid, or use backend='xla'."
+            )
 
 
 def _with_xla_grads(kr: KernelRProc) -> KernelRProc:
@@ -166,8 +194,16 @@ def available() -> tuple[bool, str]:
         return False, "no GPU device"
     # CuTe DSL compiles for NVIDIA GPUs from Ampere (compute capability 8.0) on.
     cc = getattr(gpus[0], "compute_capability", None)
-    if cc is None or int(str(cc).split(".")[0]) < 8:
+    try:
+        major = int(str(cc).split(".")[0])
+    except ValueError:
+        major = 0
+    if major < 8:
         return False, f"GPU compute capability {cc}, below CuTe DSL's 8.0"
+    try:
+        importlib.import_module(f"{__name__}.kernel")
+    except Exception as e:  # noqa: BLE001
+        return False, f"the kernels don't import with this nvidia-cutlass-dsl ({e})"
     return True, ""
 
 
@@ -200,9 +236,13 @@ def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
         say(f"CuTe backend {why}. Using XLA.")
         return _Built(None, f"CuTe backend {why}")
 
+    import numpy as np
+
     ok, why = available()
     if not ok:
         return skip(f"unavailable: {why}")
+    if not int(np.sum(model._nstep_array)):
+        return skip("has no process steps to run: every observation is at t0")
     if check and model._theta is None:
         return skip(
             "needs model.theta to check the kernel, or set_backend(..., check=False)"
@@ -286,7 +326,10 @@ def _build_kernels(
         )
         keep("gradients", "its VJP doesn't translate")
     elif check:
-        why = _check_grads(model, per, rng)
+        try:
+            why = _check_grads(model, pf, per, rng)
+        except Exception as e:  # noqa: BLE001
+            why = f"{type(e).__name__}: {e}"
         if why is not None:
             say(
                 f"CuTe rproc's gradients failed their check ({why}); "

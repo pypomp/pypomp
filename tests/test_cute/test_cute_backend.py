@@ -100,6 +100,21 @@ def table_rproc(X_, theta_, key, covars, t, dt):
     return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
 
 
+@jax.jit
+def _lookup(table, k, z):
+    v = table[k]  # long enough to be outlined
+    for _ in range(30):
+        v = jnp.sin(v) * 0.9 + 0.01 * z
+    return v
+
+
+def table_arg_rproc(X_, theta_, key, covars, t, dt):
+    k = jnp.clip(jnp.floor(t), 0, 59).astype(jnp.int32)
+    z = X_["x"]
+    v = _lookup(jnp.asarray(_WEEKLY[0]), k, z)
+    return sde_rproc({"x": z + 0.1 * v * dt}, theta_, key, covars, t, dt)
+
+
 def picks_rproc(X_, theta_, key, covars, t, dt):
     # Runtime values read at runtime indices, some out of range: a negative index
     # wraps, then dynamic_slice clamps and "fill" mode fills.
@@ -480,6 +495,40 @@ def test_repeated_calls_share_a_device_function(monkeypatch):
     assert np.median(rel) < 1e-6
     # Each kernel emits binominv once and calls it twice.
     assert any(called.count(j) == 2 * defined.count(j) for j in set(defined))
+
+
+def test_tables_passed_to_long_calls_are_read():
+    model = sde_model(table_arg_rproc)
+    model.set_backend("cute")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc)
+
+
+def test_grids_with_longer_intervals_than_the_kernel_are_rejected():
+    model = uneven_model()
+    model.set_backend("cute")
+    s = model.to_struct()
+    assert isinstance(s.rproc_pf, KernelRProc)
+    nstep = np.asarray(s.nstep_array).copy()
+    nstep[1] += 20
+    longer = s._replace(nstep_array=jnp.asarray(nstep))
+    th = model.theta.to_jax_array(model.canonical_param_names)
+    with pytest.raises(ValueError, match="built for at most 8"):
+        F.pfilter(longer, th, 100, jax.random.split(jax.random.key(0), 1)[:, None])
+
+
+def test_a_grid_without_steps_stays_on_xla():
+    model = sde_model(times=np.array([0.0]))
+    model.set_backend("cute", check=False)
+    with pytest.warns(UserWarning, match="no process steps"):
+        s = model.to_struct()
+    assert not isinstance(s.rproc_pf, KernelRProc)
+    th = model.theta.to_jax_array(model.canonical_param_names)
+    assert np.isfinite(
+        F.pfilter(s, th, 100, jax.random.split(jax.random.key(0), 1)[:, None])["logLik"]
+    ).all()
 
 
 @pytest.mark.parametrize("make", [sde_model, uneven_model], ids=["sde", "uneven"])
@@ -960,6 +1009,24 @@ def test_gpus_older_than_ampere_are_unavailable(monkeypatch):
     monkeypatch.setattr(jax, "devices", lambda backend=None: [Volta()])
     ok, why = available()
     assert not ok and "7.0" in why
+
+
+def test_gpus_of_unknown_compute_capability_are_unavailable(monkeypatch):
+    class Rocm:
+        platform = "gpu"
+        compute_capability = "gfx90a"
+
+    monkeypatch.setattr(jax, "devices", lambda backend=None: [Rocm()])
+    ok, why = available()
+    assert not ok and "gfx90a" in why
+
+
+def test_kernels_that_dont_import_are_unavailable(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "pypomp.cute.kernel", None)
+    ok, why = available()
+    assert not ok and "don't import" in why
 
 
 def test_builds_without_a_cpu_backend(monkeypatch):

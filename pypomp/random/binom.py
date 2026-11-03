@@ -473,7 +473,7 @@ def _binom_bottom_up(
         # comes before every other term from the third, by when most small-mean
         # draws are found.
         def from_(i: int, state):
-            if i == max_k:
+            if i >= max_k:
                 return state[2], state[3]
             if i < 3 or i % 2 == 0:
                 return from_(i + 1, step(i, *state))

@@ -295,8 +295,12 @@ def _perturb(
 
 def _nsteps(NS: _Tensor, b: _Scalar, nstep: int, fixed: bool) -> _Scalar:
     """Return the number of Euler steps in filter b's interval: `nstep` if every
-    interval has that many, so the loop's trip count is known at compile time."""
-    return nstep if fixed else NS[b]
+    interval has that many, so the loop's trip count is known at compile time.
+    Otherwise at most `nstep`, the steps the keys and table hold."""
+    if fixed:
+        return nstep
+    n = NS[b]
+    return ct._select(n < cutlass.Int32(nstep), n, cutlass.Int32(nstep), np.int32)
 
 
 def _store(OUT: _Tensor, g: _Scalar, xs: tuple[_Scalar, ...]) -> None:
@@ -675,7 +679,8 @@ def _generated_dir() -> str:
 def _import_generated(src: str) -> Any:
     """Import generated kernel source `src` as a module, cached by its hash."""
     path = os.path.join(
-        _generated_dir(), f"pypomp_cute_{hashlib.md5(src.encode()).hexdigest()[:12]}.py"
+        _generated_dir(),
+        f"pypomp_cute_{hashlib.blake2b(src.encode(), digest_size=6).hexdigest()}.py",
     )
     if not os.path.exists(path):
         with open(path, "w") as fh:
@@ -1284,4 +1289,5 @@ def _make_rprocess_interp(
         with_dmeasure=None if dm_j is None else with_dmeasure,
         dmeasure=dmeas_xla,
         perturb_step=perturb_step if per_particle and dm_j is not None else None,
+        max_steps=None if spec.fixed else nstep,
     )

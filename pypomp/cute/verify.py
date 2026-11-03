@@ -8,9 +8,11 @@ perturbs one particle of a ``@vectorized`` rproc and requires the others to stay
 bit-identical on XLA: the kernel runs every particle on its own, so any coupling
 would be dropped. The comparisons then require the kernel to match XLA with one
 parameter vector on the natural scale (as in filtering) and with per-particle
-parameters on the estimation scale (as in iterated filtering). The gradients of the
-latter, which run the parameter transform's and the step's VJPs, are checked
-separately, since a kernel whose gradients differ can still run undifferentiated.
+parameters on the estimation scale (as in iterated filtering). The gradients, which
+run the parameter transform's and the step's VJPs, are checked separately, since a
+kernel whose gradients differ can still run undifferentiated: per particle with
+per-particle parameters, and summed over the particles with one parameter vector,
+as MOP takes them.
 A kernel that also evaluates the measurement density must match XLA's density at
 the states it ends the interval in.
 """
@@ -44,6 +46,9 @@ _GRAD_MEDIAN_RTOL = 1e-3
 # nudged by _NUDGE, and differences up to _NOISE_FACTOR times it are allowed.
 _NUDGE = 1e-6
 _NOISE_FACTOR = 4.0
+# A parameter gradient summed over particles may differ by this fraction of the
+# summed sizes of the particles' terms, a little over the _MAX_DIFFERENT share.
+_SUM_RTOL = 0.05
 
 
 class _Interval(NamedTuple):
@@ -52,6 +57,8 @@ class _Interval(NamedTuple):
     X0: jax.Array
     th: jax.Array
     """One parameter vector on the natural scale."""
+    th_est: jax.Array
+    """``th`` on the estimation scale."""
     th_per: jax.Array
     """Per-particle parameters on the estimation scale, (J, d)."""
     run: Callable[[Callable, jax.Array, jax.Array, bool], jax.Array]
@@ -102,7 +109,7 @@ def _interval(model: Pomp, rng: str) -> _Interval:
         return rproc(X, theta, key, cov, dts, t, t_idx, nstep, acc, should_trans)[0]
 
     rest = (key, cov, dts, t, t_idx, nstep, acc)
-    return _Interval(X0, th, th_per, run, rest, obs)
+    return _Interval(X0, th, th_est, th_per, run, rest, obs)
 
 
 def _forward(iv: _Interval, rproc: Callable, theta: jax.Array, trans: bool) -> Callable:
@@ -114,13 +121,27 @@ def _forward(iv: _Interval, rproc: Callable, theta: jax.Array, trans: bool) -> C
 def _grads(iv: _Interval, rproc_per: Callable) -> np.ndarray:
     """Return each particle's state and parameter gradients, (J, ns + d), of a
     weighted sum of the end states, with per-particle estimation-scale parameters."""
+    gx, gth = _loss_grads(iv, rproc_per, iv.th_per)
+    return np.concatenate([gx, gth], axis=1)
+
+
+def _shared_grads(iv: _Interval, rproc_pf: Callable) -> tuple[np.ndarray, np.ndarray]:
+    """Return each particle's state gradients, (J, ns), and the parameter gradient,
+    (d,), of the same sum, with one parameter vector on the estimation scale, as
+    MOP differentiates it."""
+    return _loss_grads(iv, rproc_pf, iv.th_est)
+
+
+def _loss_grads(
+    iv: _Interval, rproc: Callable, theta: jax.Array
+) -> tuple[np.ndarray, np.ndarray]:
     w = jnp.cos(0.1 * jnp.arange(iv.X0.size, dtype=iv.X0.dtype)).reshape(iv.X0.shape)
 
-    def loss(X: jax.Array, theta: jax.Array) -> jax.Array:
-        return jnp.sum(iv.run(rproc_per, X, theta, True) * w)
+    def loss(X: jax.Array, th: jax.Array) -> jax.Array:
+        return jnp.sum(iv.run(rproc, X, th, True) * w)
 
-    gx, gth = jax.jit(jax.grad(loss, argnums=(0, 1)))(iv.X0, iv.th_per)
-    return np.concatenate([np.asarray(gx), np.asarray(gth)], axis=1)
+    gx, gth = jax.jit(jax.grad(loss, argnums=(0, 1)))(iv.X0, theta)
+    return np.asarray(gx), np.asarray(gth)
 
 
 def _different(
@@ -173,12 +194,48 @@ def _check(
     )
 
 
-def _check_grads(model: Pomp, cute_per: Callable, rng: str) -> str | None:
-    """Return why the CuTe rproc's gradients, with per-particle parameters on the
-    estimation scale, can't be used for `model`, or None if they can."""
+def _check_grads(
+    model: Pomp, cute_pf: Callable, cute_per: Callable, rng: str
+) -> str | None:
+    """Return why the CuTe rproc's gradients can't be used for `model`, or None if
+    they can: per particle, with per-particle parameters, and summed over the
+    particles, with one parameter vector, both on the estimation scale."""
     iv = _interval(model, rng)
-    xla = model.rproc.mechanics_per_interp
-    ga, gb = _grads(iv, xla), _grads(iv, cute_per)
+    rp = model.rproc
+    ga = _grads(iv, rp.mechanics_per_interp)
+    d = _rows_differ(
+        iv, ga, _grads(iv, cute_per), lambda v: _grads(v, rp.mechanics_per_interp)
+    )
+    if d is not None:
+        return (
+            f"{d:.0%} of particles' gradients differ from XLA on a test interval with "
+            "per-particle parameters on the estimation scale"
+        )
+    (sx, sth), (cx, cth) = (
+        _shared_grads(iv, f) for f in (rp.mechanics_pf_interp, cute_pf)
+    )
+    d = _rows_differ(iv, sx, cx, lambda v: _shared_grads(v, rp.mechanics_pf_interp)[0])
+    what = " on a test interval with one parameter vector on the estimation scale"
+    if d is not None:
+        return f"{d:.0%} of particles' state gradients differ from XLA{what}"
+    # The shared gradient sums the particles' terms, so is compared against the sum
+    # of their sizes (from the per-particle gradients nearby), which cancellation
+    # between the terms can't shrink.
+    size = np.abs(ga[:, sx.shape[1] :]).sum(axis=0)
+    same = (sth == cth) | (np.isnan(sth) & np.isnan(cth))
+    if not np.all(same | (np.abs(sth - cth) <= _SUM_RTOL * size + 1e-12)):
+        return f"the parameter gradient differs from XLA{what}"
+    return None
+
+
+def _rows_differ(
+    iv: _Interval,
+    ga: np.ndarray,
+    gb: np.ndarray,
+    xla: Callable[[_Interval], np.ndarray],
+) -> float | None:
+    """Return the fraction of particles whose gradients `gb` differ from XLA's `ga`
+    if too many do, else None. `xla` recomputes XLA's from another interval."""
     mag = np.where(np.isfinite(ga), np.abs(ga), 0.0)
     scale = np.abs(ga) + 1e-3 * mag.max(axis=0) + 1e-12
 
@@ -187,20 +244,16 @@ def _check_grads(model: Pomp, cute_per: Callable, rng: str) -> str | None:
         return _different(ga, gb, s, _GRAD_PARTICLE_RTOL, _GRAD_MEDIAN_RTOL)
 
     d = different(0.0)
-    if d is not None:
-        # Only models that fail pay for measuring XLA's rounding.
-        nudged = iv._replace(
-            X0=iv.X0 * (1 + _NUDGE), th_per=iv.th_per + _NUDGE * jnp.abs(iv.th_per)
-        )
-        change = np.abs(_grads(nudged, xla) - ga)
-        noise = np.nanquantile(change, 1 - _MAX_DIFFERENT, axis=0)
-        d = different(np.where(np.isfinite(noise), noise, 0.0))
-    if d is not None:
-        return (
-            f"{d:.0%} of particles' gradients differ from XLA on a test interval with "
-            "per-particle parameters on the estimation scale"
-        )
-    return None
+    if d is None:
+        return None
+    # Only models that fail pay for measuring XLA's rounding.
+    nudged = iv._replace(
+        X0=iv.X0 * (1 + _NUDGE),
+        th_est=iv.th_est + _NUDGE * jnp.abs(iv.th_est),
+        th_per=iv.th_per + _NUDGE * jnp.abs(iv.th_per),
+    )
+    noise = np.nanquantile(np.abs(xla(nudged) - ga), 1 - _MAX_DIFFERENT, axis=0)
+    return different(np.where(np.isfinite(noise), noise, 0.0))
 
 
 def _check_dmeas(model: Pomp, cute_pf: Any, cute_per: Any, rng: str) -> str | None:

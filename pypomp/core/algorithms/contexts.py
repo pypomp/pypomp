@@ -18,6 +18,7 @@ from typing import Any, cast
 import jax
 from jax.tree_util import register_dataclass
 
+from ...cute import _check_grid
 from ...functional.structs import PanelPompStruct, PompStruct
 from ..rw_sigma import RWSigma
 
@@ -107,6 +108,7 @@ class SeriesData:
 
     @classmethod
     def from_struct(cls, struct: PompStruct) -> SeriesData:
+        _check_grid(struct)
         return cls(
             ys=struct.ys,
             dt_array_extended=struct.dt_array_extended,
@@ -118,6 +120,7 @@ class SeriesData:
 
     @classmethod
     def from_panel_struct(cls, struct: PanelPompStruct) -> SeriesData:
+        _check_grid(struct)
         return cls(
             ys=struct.ys_per_unit,
             dt_array_extended=struct.dt_array_extended,

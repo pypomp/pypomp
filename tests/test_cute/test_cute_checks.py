@@ -75,12 +75,25 @@ def test_check_rejects_gradients_that_differ_from_xla():
         return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
 
     assert _check(model, pf, off, False, "threefry") is None
-    assert "gradients differ" in (_check_grads(model, off, "threefry") or "")
+    assert "gradients differ" in (_check_grads(model, pf, off, "threefry") or "")
 
 
 def test_check_grads_accepts_xlas_own_gradients():
     model = sde_model()
-    assert _check_grads(model, model.rproc.mechanics_per_interp, "threefry") is None
+    assert _check_grads(model, *xla_fns(model), "threefry") is None
+
+
+def test_check_grads_rejects_shared_parameter_gradients_that_differ():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, theta_, *args):  # the same particles, with a different derivative
+        out, t_idx = pf(X_, theta_, *args)
+        return out + 100.0 * jnp.sum(theta_ - jax.lax.stop_gradient(theta_)), t_idx
+
+    assert _check(model, off, per, False, "threefry") is None
+    why = _check_grads(model, off, per, "threefry") or ""
+    assert "parameter gradient differs" in why and "one parameter vector" in why
 
 
 def with_wrong_grads(f):

@@ -1307,11 +1307,16 @@ def _outlinable(cj: ClosedJaxpr, ins: list[Any]) -> bool:
     avals = [v.aval for v in [*cj.jaxpr.invars, *cj.jaxpr.outvars]]
     if any(_is_key(a.dtype) or np.dtype(a.dtype) not in _LLVM_TYPE for a in avals):
         return False
-    return (
-        _size(cj) >= _OUTLINE_MIN_EQNS
-        and not _uses_random(cj)
-        and not _runtime_tables([cj])
-    )
+    if _size(cj) < _OUTLINE_MIN_EQNS or _uses_random(cj):
+        return False
+    # Constant inputs count as constants, so a table passed in is seen.
+    args = [
+        np.asarray(x, dtype=a.dtype) if _all_const([x]) else None
+        for x, a in zip(ins, avals[: len(ins)], strict=True)
+    ]
+    found: dict[tuple, np.ndarray] = {}
+    _find_tables(cj, args, found)
+    return not found
 
 
 def _gpu_module() -> Any:

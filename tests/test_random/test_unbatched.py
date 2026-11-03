@@ -97,6 +97,20 @@ def test_binominv_one_at_a_time():
     assert _same(_one_at_a_time(binominv, u, n, p), batched)
 
 
+@pytest.mark.parametrize("exact_max", [0, 1])
+def test_binominv_without_exact_terms_one_at_a_time(exact_max):
+    rng = np.random.default_rng(4)
+    u = _uniforms(rng, 40)
+    n = rng.integers(0, 30, size=40).astype(F32)
+    p = rng.uniform(0.01, 0.9, size=40).astype(F32)
+
+    def f(u, n, p):
+        return binominv(u, n, p, exact_max=exact_max)
+
+    batched = f(jnp.asarray(u), jnp.asarray(n), jnp.asarray(p))
+    assert _same(_one_at_a_time(f, u, n, p), batched)
+
+
 def test_poissoninv_one_at_a_time():
     rng = np.random.default_rng(2)
     n_pts = 400

@@ -213,7 +213,7 @@ class PompEstimationMixin(Base):
             F.pfilter,
             {1: 0, 3: 0},
             {"logLik": 0, "CLL": 0, "ESS": 0, "filter_mean": 0, "prediction_mean": 0},
-            self._to_struct_at(theta_obj_in),
+            self.to_struct(theta=theta_obj_in),
             thetas_array,
             J,
             rep_keys,
@@ -397,7 +397,7 @@ class PompEstimationMixin(Base):
             F.mif,
             {1: 0, 5: 0},
             [0, 0, 0],
-            self._to_struct_at(theta_obj_in),
+            self.to_struct(theta=theta_obj_in),
             theta_array,
             J,
             M,
@@ -618,7 +618,7 @@ class PompEstimationMixin(Base):
             _train,
             {1: 0, 5: 0},
             [0, 0],
-            self._to_struct_at(theta_obj_in, backend=backend),
+            self.to_struct(backend=backend, theta=theta_obj_in),
             theta_array,
             J,
             M,
@@ -754,7 +754,7 @@ class PompEstimationMixin(Base):
         keys = jax.random.split(new_key, n_chains)
 
         ll_jax, lp_jax, theta_jax, accepts_jax = F.pmcmc(
-            struct=self._to_struct_at(theta_obj_in),
+            struct=self.to_struct(theta=theta_obj_in),
             thetas_array=theta_array,
             proposal=proposal,
             J=J,
@@ -887,7 +887,7 @@ class PompEstimationMixin(Base):
         keys = jax.random.split(new_key, n_chains)
 
         dist_jax, lp_jax, theta_jax, accepts_jax = F.abc(
-            struct=self._to_struct_at(theta_obj_in),
+            struct=self.to_struct(theta=theta_obj_in),
             thetas_array=theta_array,
             proposal=proposal,
             probes=probes,
@@ -1051,7 +1051,7 @@ class PompEstimationMixin(Base):
             )
 
         if struct is None:
-            struct = self._to_struct_at(theta_obj_in)
+            struct = self.to_struct(theta=theta_obj_in)
         thetas_array = theta_obj_in.to_jax_array(struct.param_names)
 
         new_key, old_key = self._update_fresh_key(key)

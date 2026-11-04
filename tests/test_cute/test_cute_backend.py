@@ -24,6 +24,14 @@ ok, why = available()
 pytestmark = pytest.mark.skipif(not ok, reason=f"CuTe backend unavailable: {why}")
 
 
+def check_interval(model, rng="threefry"):
+    """Return the checks' test interval for `model` at its first parameter set."""
+    from pypomp.cute.verify import _interval
+
+    th = model.theta.to_jax_array(model.canonical_param_names)[0]
+    return _interval(model, th, rng)
+
+
 def sde_rproc(X_, theta_, key, covars, t, dt):
     z = X_["x"]
     eps = jax.random.normal(key)
@@ -929,7 +937,7 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
 
 def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
     import pypomp.cute.verify as verify
-    from pypomp.cute.verify import _grads, _interval
+    from pypomp.cute.verify import _grads
 
     monkeypatch.setattr(verify, "_check_grads", lambda *args: "50% differ")
     model = sde_model()
@@ -937,7 +945,7 @@ def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
     with pytest.warns(UserWarning, match="differentiating through XLA"):
         s = model.to_struct()
     assert isinstance(s.backend, CuteBackend)
-    iv = _interval(model, "threefry")
+    iv = check_interval(model)
     np.testing.assert_allclose(
         _grads(iv, kernels(s, per_particle=True).rproc),
         _grads(iv, model.rproc.mechanics_per_interp),
@@ -1152,7 +1160,7 @@ def cumsum_grad_rproc(X_, theta_, key, covars, t, dt):
 
 
 def test_gradients_that_dont_translate_go_through_xla():
-    from pypomp.cute.verify import _grads, _interval
+    from pypomp.cute.verify import _grads
 
     model = sde_model(cumsum_grad_rproc)
     model.set_backend("cute")
@@ -1162,7 +1170,7 @@ def test_gradients_that_dont_translate_go_through_xla():
     report = model.backend_report()
     assert report["rproc"].cute and not report["gradients"].cute
     assert [p.what for p in report["gradients"].problems] == ["cumsum"]
-    iv = _interval(model, "threefry")
+    iv = check_interval(model)
     np.testing.assert_allclose(
         _grads(iv, kernels(s, per_particle=True).rproc),
         _grads(iv, model.rproc.mechanics_per_interp),

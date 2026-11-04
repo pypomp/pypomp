@@ -486,12 +486,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         check : bool, optional
             Whether to check the CuTe kernels numerically before using them. The
             check runs the first observation interval on the kernel and on XLA at
-            ``self.theta`` (or, for a model without it, at the parameters the
-            first filtering, estimation or simulation call is given) with the same
+            the parameters of the first filtering, estimation or simulation call
+            (for :meth:`to_struct`, its ``theta`` or ``self.theta``) with the same
             random numbers and keeps XLA if they differ, or differentiates through
             XLA if only their gradients do. It adds several seconds to the first
             call. With ``check=False``, the kernels are used without it, and
-            :meth:`to_struct` doesn't need ``self.theta``. Operations the
+            :meth:`to_struct` doesn't need parameters. Operations the
             translator can't run, and coupling between particles found in a
             ``@vectorized`` rproc's jaxpr, still keep XLA, but a kernel that differs
             from XLA in another way goes unnoticed. Defaults to True.
@@ -518,7 +518,10 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         self._backend_check = bool(check)
 
     def to_struct(
-        self, backend: str | None = None, rng: str | None = None
+        self,
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PompParameters | None = None,
     ) -> PompStruct:
         """Export the model to a lightweight JAX-compatible struct.
 
@@ -534,6 +537,11 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
         rng : {"threefry", "philox"} or None, optional
             The CuTe kernel's random numbers (see :meth:`set_backend`).
             Defaults to None, which uses the model's.
+        theta : PompParameters or None, optional
+            Parameters whose first set a new CuTe kernel is checked against XLA at
+            (see :meth:`set_backend`). Defaults to None, which uses
+            ``self.theta``. Kernels are built and checked once per backend and
+            generator, so this matters only for the first struct.
 
         Returns
         -------
@@ -567,51 +575,29 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             param_names=self.canonical_param_names,
             y_names=list(self.ys.columns),
             statenames=tuple(self.statenames),
-            backend=self._struct_backend(backend, rng),
+            backend=self._struct_backend(backend, rng, theta),
         )
 
-    def _to_struct_at(
-        self, theta: PompParameters, backend: str | None = None
-    ) -> PompStruct:
-        """Return :meth:`to_struct`, checking any CuTe kernel at `theta` if the
-        model has no parameters of its own.
-
-        The estimation methods take their parameters as an argument and then set
-        ``self.theta``, so otherwise a model built without them would run its first
-        call on XLA and the next on CuTe.
-        """
-        if self._theta is not None:
-            return self.to_struct(backend=backend)
-        self._theta = theta
-        try:
-            return self.to_struct(backend=backend)
-        finally:
-            self._theta = None
-
     def _struct_backend(
-        self, backend: str | None = None, rng: str | None = None
+        self,
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PompParameters | None = None,
     ) -> CuteBackend | None:
         """Return the ``backend`` field of a struct for `backend` and `rng`: the
-        CuTe kernels, or None for XLA.
-
-        The CuTe kernels are checked against XLA at ``self.theta`` unless the
-        model's check is off; see :meth:`set_backend`.
-        """
-        built = self._cute_built(backend, rng)
+        CuTe kernels, or None for XLA, checked as :meth:`to_struct` says."""
+        built = self._cute_built(backend, rng, theta)
         return None if built is None else built.backend
 
-    def _kernel_needs_theta(self, backend: str | None, rng: str | None) -> bool:
-        """Say whether :meth:`_cute_built` would have to check a new kernel at
-        ``self.theta``."""
-        backend = self._backend if backend is None else backend
-        rng = self._backend_rng if rng is None else rng
-        check = self._backend_check
-        built = self.__dict__.get("_cute_fns", {})
-        return check and backend != "xla" and (backend, rng, check) not in built
-
-    def _cute_built(self, backend: str | None, rng: str | None) -> Any:
+    def _cute_built(
+        self,
+        backend: str | None,
+        rng: str | None,
+        theta: PompParameters | None = None,
+    ) -> Any:
         """Return what :func:`pypomp.cute._build` made of the model for `backend`
-        and `rng`, or None for XLA."""
+        and `rng`, or None for XLA, checking new kernels at the first set of
+        `theta`, by default ``self.theta``."""
         backend = self._backend if backend is None else backend
         rng = self._backend_rng if rng is None else rng
         check = self._backend_check
@@ -626,9 +612,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             return built[backend, rng, check]
         from pypomp.cute import _build
 
-        out = _build(self, backend == "auto", rng, check)
-        # Without theta the kernel can't be checked, so decide again later.
-        if self._theta is not None or not check:
+        theta = self._theta if theta is None else theta
+        names = self.canonical_param_names
+        th = None if theta is None else theta.to_jax_array(names)[0]
+        out = _build(self, backend == "auto", rng, check, th)
+        # Without parameters the kernel can't be checked, so decide again later.
+        if th is not None or not check:
             built[backend, rng, check] = out
         return out
 
@@ -660,9 +649,19 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             ``print`` it for a summary, or index it by part, e.g.
             ``report["dmeasure"].cute``.
         """
+        return self._backend_report(backend, rng)
+
+    def _backend_report(
+        self,
+        backend: str | None,
+        rng: str | None,
+        theta: PompParameters | None = None,
+    ) -> BackendReport:
+        """Return :meth:`backend_report`, building new kernels as
+        :meth:`to_struct` does with `theta`."""
         from pypomp.cute import _report
 
-        built = self._cute_built(backend, rng)
+        built = self._cute_built(backend, rng, theta)
         backend = self._backend if backend is None else backend
         rng = self._backend_rng if rng is None else rng
         return _report(self, backend, rng, self._backend_check, built)

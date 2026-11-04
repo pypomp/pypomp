@@ -12,6 +12,7 @@ filters need not know which runs.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
@@ -123,6 +124,11 @@ class Backend(Protocol):
 
         Raises if the backend can't run `struct`'s time grid.
         """
+        ...
+
+    def launch(self, mesh: jax.sharding.Mesh) -> AbstractContextManager:
+        """Return the context in which to run a call whose parameter sets are
+        sharded over `mesh`. XLA's own functions need none."""
         ...
 
 

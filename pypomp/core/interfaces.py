@@ -71,11 +71,10 @@ class PompInterface(Protocol):
     ) -> tuple[jax.Array, jax.Array]: ...
 
     def to_struct(
-        self, backend: str | None = None, rng: str | None = None
-    ) -> PompStruct: ...
-
-    def _to_struct_at(
-        self, theta: PompParameters, backend: str | None = None
+        self,
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PompParameters | None = None,
     ) -> PompStruct: ...
 
     @overload

@@ -3,8 +3,9 @@
 XLA's partitioner can't split a custom call, so a kernel whose inputs are sharded
 over several GPUs would otherwise gather every filter onto each GPU and run them
 all there. Under a mesh (``jax.set_mesh``, which
-:func:`pypomp.core.algorithms.helpers.run_jax_batch_sharded` enters when it spreads
-the parameter sets over devices), :func:`by_filter` runs each kernel under
+:func:`pypomp.core.algorithms.helpers.run_jax_batch_sharded` enters through
+``CuteBackend.launch`` when it spreads the parameter sets over devices),
+:func:`by_filter` runs each kernel under
 ``shard_map`` instead, so every device launches it for its own filters.
 """
 

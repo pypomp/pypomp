@@ -9,10 +9,11 @@ import pypomp as pp
 import pypomp.cute
 import pypomp.functional as F
 from pypomp.cute import CuteBackend, Kernels, _with_xla_grads
-from pypomp.cute.verify import _check, _check_grads, _forward, _grads, _interval
+from pypomp.cute.verify import _check, _check_grads, _forward, _grads
 
 from .test_cute_backend import (
     he10_model,
+    check_interval,
     particle_mean,
     sde_model,
     sde_rproc,
@@ -28,7 +29,7 @@ def xla_fns(model):
 
 def test_check_accepts_a_kernel_that_matches_xla():
     model = sde_model()
-    assert _check(model, *xla_fns(model), False, "threefry") is None
+    assert _check(model, check_interval(model), *xla_fns(model), False) is None
 
 
 def test_check_rejects_a_kernel_that_differs_from_xla():
@@ -39,7 +40,7 @@ def test_check_rejects_a_kernel_that_differs_from_xla():
         out, t_idx = pf(X_, *args)
         return out * 1.01 + 0.1, t_idx
 
-    assert "differ" in (_check(model, off, per, False, "threefry") or "")
+    assert "differ" in (_check(model, check_interval(model), off, per, False) or "")
 
 
 def test_check_sees_the_steps_when_the_first_interval_has_no_length():
@@ -49,10 +50,10 @@ def test_check_sees_the_steps_when_the_first_interval_has_no_length():
 
     times = np.arange(0.0, 20.0)
     model = sde_model(times=times)
-    assert _interval(model, "threefry").obs == 1
-    assert _check(model, *xla_fns(model), False, "threefry") is None
+    assert check_interval(model).obs == 1
+    assert _check(model, check_interval(model), *xla_fns(model), False) is None
     wrong = xla_fns(sde_model(drifting, times=times))
-    assert "differ" in (_check(model, *wrong, False, "threefry") or "")
+    assert "differ" in (_check(model, check_interval(model), *wrong, False) or "")
 
 
 def test_check_rejects_a_per_particle_kernel_that_differs_from_xla():
@@ -63,7 +64,9 @@ def test_check_rejects_a_per_particle_kernel_that_differs_from_xla():
         out, t_idx = per(X_, *args)
         return out * 1.01 + 0.1, t_idx
 
-    assert "estimation scale" in (_check(model, pf, off, False, "threefry") or "")
+    assert "estimation scale" in (
+        _check(model, check_interval(model), pf, off, False) or ""
+    )
 
 
 def test_check_rejects_gradients_that_differ_from_xla():
@@ -74,13 +77,15 @@ def test_check_rejects_gradients_that_differ_from_xla():
         out, t_idx = per(X_, *args)
         return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
 
-    assert _check(model, pf, off, False, "threefry") is None
-    assert "gradients differ" in (_check_grads(model, pf, off, "threefry") or "")
+    assert _check(model, check_interval(model), pf, off, False) is None
+    assert "gradients differ" in (
+        _check_grads(model, check_interval(model), pf, off) or ""
+    )
 
 
 def test_check_grads_accepts_xlas_own_gradients():
     model = sde_model()
-    assert _check_grads(model, *xla_fns(model), "threefry") is None
+    assert _check_grads(model, check_interval(model), *xla_fns(model)) is None
 
 
 def test_check_grads_rejects_shared_parameter_gradients_that_differ():
@@ -91,8 +96,8 @@ def test_check_grads_rejects_shared_parameter_gradients_that_differ():
         out, t_idx = pf(X_, theta_, *args)
         return out + 100.0 * jnp.sum(theta_ - jax.lax.stop_gradient(theta_)), t_idx
 
-    assert _check(model, off, per, False, "threefry") is None
-    why = _check_grads(model, off, per, "threefry") or ""
+    assert _check(model, check_interval(model), off, per, False) is None
+    why = _check_grads(model, check_interval(model), off, per) or ""
     assert "parameter gradient differs" in why and "one parameter vector" in why
 
 
@@ -110,7 +115,7 @@ def test_xla_grads_keep_the_kernel_undifferentiated():
     model = sde_model()
     per = model.rproc.mechanics_per_interp
     kr = _with_xla_grads(Kernels(with_wrong_grads(per), per))
-    iv = _interval(model, "threefry")
+    iv = check_interval(model)
     np.testing.assert_allclose(
         _forward(iv, kr.rproc, iv.th_per, True)(iv.X0),
         _forward(iv, per, iv.th_per, True)(iv.X0) + 1.0,
@@ -134,7 +139,7 @@ def test_xla_grads_cover_the_fused_density():
         Kernels(per, per, with_dmeasure=with_wrong_grads(fused), dmeasure=dmeas)
     )
     assert kr.with_dmeasure is not None
-    iv = _interval(model, "threefry")
+    iv = check_interval(model)
     y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
     t_obs = jnp.float32(model.ys.index[0])
 
@@ -152,16 +157,16 @@ def test_xla_grads_cover_the_fused_density():
 def test_coupling_probe():
     coupled = sde_model(particle_mean)
     assert "other particles" in (
-        _check(coupled, *xla_fns(coupled), True, "threefry") or ""
+        _check(coupled, check_interval(coupled), *xla_fns(coupled), True) or ""
     )
     alone = sde_model(vectorized_rproc)
-    assert _check(alone, *xla_fns(alone), True, "philox") is None
+    assert _check(alone, check_interval(alone, "philox"), *xla_fns(alone), True) is None
 
 
 def test_backend_is_chosen_again_once_theta_is_set(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(1)
+        pypomp.cute, "_build", lambda model, quiet, rng, check, theta: calls.append(1)
     )
     model = sde_model()
     theta = model.theta
@@ -186,7 +191,7 @@ def test_rng_must_be_threefry_or_philox():
 def test_built_kernels_are_kept_per_generator(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(rng)
+        pypomp.cute, "_build", lambda model, quiet, rng, check, theta: calls.append(rng)
     )
     model = sde_model()
     model.set_backend("cute")
@@ -201,7 +206,9 @@ def test_built_kernels_are_kept_per_generator(monkeypatch):
 def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng, check: calls.append(check)
+        pypomp.cute,
+        "_build",
+        lambda model, quiet, rng, check, theta: calls.append(check),
     )
     model = sde_model()
     theta = model.theta
@@ -219,7 +226,9 @@ def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
 def test_panel_simulates_and_probes_with_the_first_units_kernel(monkeypatch):
     built = []
     monkeypatch.setattr(
-        pypomp.cute, "_build", lambda model, quiet, rng, check: built.append(model)
+        pypomp.cute,
+        "_build",
+        lambda model, quiet, rng, check, theta: built.append(model),
     )
     panel, _, _ = table_panel()
     panel.set_backend("cute")
@@ -246,27 +255,57 @@ def test_panel_simulation_keeps_each_units_data_and_parameters():
             np.testing.assert_allclose(got.to_numpy(float), want.to_numpy(float))
 
 
-def test_panel_takes_parameters_only_to_check_a_new_kernel(monkeypatch):
-    monkeypatch.setattr(pypomp.cute, "_build", lambda model, quiet, rng, check: None)
-    panel, _, _ = table_panel()
-    panel.theta = pp.PanelParameters.merge(panel.theta, panel.theta)
-    replicates = []
-    get = pp.PanelPomp.get_unit_parameters
+def spy_build(monkeypatch):
+    """Replace the CuTe build with one that records the parameters it checks at
+    and keeps XLA."""
+    seen = []
 
-    def spy(self, unit, theta=None):
-        replicates.append(self._prepare_theta_input(theta).num_replicates())
-        return get(self, unit, theta)
+    def build(model, quiet, rng, check, theta):
+        seen.append(None if theta is None else np.asarray(theta))
 
-    monkeypatch.setattr(pp.PanelPomp, "get_unit_parameters", spy)
-    panel.set_backend("xla")
-    panel.to_struct()
-    panel.set_backend("cute", check=False)
-    panel.to_struct()
-    assert replicates == []
+    monkeypatch.setattr(pypomp.cute, "_build", build)
+    return seen
+
+
+def test_to_struct_checks_a_new_kernel_at_the_given_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    model = sde_model()
+    names = model.canonical_param_names
+    theta = model.theta
+    vals = np.asarray(theta.to_jax_array(names)[0], float) * 1.5
+    other = pp.PompParameters([dict(zip(names, vals.tolist(), strict=True))])
+    model.set_backend("cute")
+    model.to_struct(theta=other)
+    model.to_struct()
+    assert len(seen) == 1
+    np.testing.assert_array_equal(seen[0], other.to_jax_array(names)[0])
+    assert model.theta == theta
+
+
+def test_estimation_checks_a_new_kernel_at_its_own_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    model = sde_model()
+    names = model.canonical_param_names
+    theta = model.theta
+    model.theta = None
+    model.set_backend("cute")
+    model.pfilter(J=8, theta=theta, key=jax.random.key(0))
+    assert len(seen) == 1
+    np.testing.assert_array_equal(seen[0], theta.to_jax_array(names)[0])
+
+
+def test_panel_checks_a_new_kernel_at_the_first_units_first_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    panel, names, vals = table_panel()
+    theta = panel.theta
+    panel._theta = None  # type: ignore
     panel.set_backend("cute")
+    panel.pfilter(
+        J=8, theta=pp.PanelParameters.merge(theta, theta), key=jax.random.key(0)
+    )
     panel.to_struct()
-    panel.to_struct()
-    assert replicates == [1]
+    assert len(seen) == 1
+    np.testing.assert_allclose(seen[0], np.asarray(vals))
     assert all(u._theta is None for u in panel.unit_objects.values())
 
 

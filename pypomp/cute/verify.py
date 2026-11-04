@@ -82,11 +82,11 @@ def _first_steps(model: Pomp) -> tuple[int, int]:
     return 0, 0
 
 
-def _interval(model: Pomp, rng: str) -> _Interval:
-    """Return the test interval for `model`, which must have parameters, with a key
-    of generator `rng`."""
+def _interval(model: Pomp, th: jax.Array, rng: str) -> _Interval:
+    """Return the test interval for `model` at parameters `th`, on the natural scale
+    in canonical order, with a key of generator `rng`."""
     names = model.canonical_param_names
-    th = model.theta.to_jax_array(names)[0]
+    th = jnp.asarray(th)
     th_est = model.par_trans._transform_array(th[None], names, direction="to_est")[0]
     th_per = th_est + 0.01 * jax.random.normal(
         jax.random.key(2), (_CHECK_J, th.size), th.dtype
@@ -163,11 +163,10 @@ def _different(
 
 
 def _check(
-    model: Pomp, cute_pf: Callable, cute_per: Callable, vectorized: bool, rng: str
+    model: Pomp, iv: _Interval, cute_pf: Callable, cute_per: Callable, vectorized: bool
 ) -> str | None:
-    """Return why the CuTe rproc, drawing with `rng`, can't be used for `model`, or
-    None if it can."""
-    iv = _interval(model, rng)
+    """Return why the CuTe rproc can't be used for `model`, or None if it can, from
+    test interval `iv`."""
     rp = model.rproc
     xla = _forward(iv, rp.mechanics_pf_interp, iv.th, False)
     a = xla(iv.X0)
@@ -195,12 +194,11 @@ def _check(
 
 
 def _check_grads(
-    model: Pomp, cute_pf: Callable, cute_per: Callable, rng: str
+    model: Pomp, iv: _Interval, cute_pf: Callable, cute_per: Callable
 ) -> str | None:
     """Return why the CuTe rproc's gradients can't be used for `model`, or None if
     they can: per particle, with per-particle parameters, and summed over the
     particles, with one parameter vector, both on the estimation scale."""
-    iv = _interval(model, rng)
     rp = model.rproc
     ga = _grads(iv, rp.mechanics_per_interp)
     d = _rows_differ(
@@ -256,13 +254,12 @@ def _rows_differ(
     return different(np.where(np.isfinite(noise), noise, 0.0))
 
 
-def _check_dmeas(model: Pomp, cute_pf: Any, cute_per: Any, rng: str) -> str | None:
+def _check_dmeas(model: Pomp, iv: _Interval, cute_pf: Any, cute_per: Any) -> str | None:
     """Return why the kernels' fused measurement density can't be used, or None.
 
     Each particle's density from the kernel must match XLA's density at the state the
     kernel ends the test interval in.
     """
-    iv = _interval(model, rng)
     y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[iv.obs])
     t_obs = jnp.float32(model.ys.index[iv.obs])
     cov = iv.rest[1]
@@ -284,7 +281,9 @@ def _check_dmeas(model: Pomp, cute_pf: Any, cute_per: Any, rng: str) -> str | No
     return None
 
 
-def _check_perturb_step(model: Pomp, cute_per: Any, rng: str) -> str | None:
+def _check_perturb_step(
+    model: Pomp, iv: _Interval, cute_per: Any, rng: str
+) -> str | None:
     """Return why the iterated filtering kernel can't be used, or None.
 
     From ancestors that repeat and reorder the test particles, its parameter draws must
@@ -293,7 +292,6 @@ def _check_perturb_step(model: Pomp, cute_per: Any, rng: str) -> str | None:
     """
     from .kernel import _perturbation
 
-    iv = _interval(model, rng)
     J, d = iv.th_per.shape
     y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[iv.obs])
     t_obs = jnp.float32(model.ys.index[iv.obs])

@@ -140,7 +140,19 @@ Coverage spans two model families deliberately: the linear-Gaussian fixtures exe
 
 ---
 
-## 4. Building Documentation
+## 4. Filtering Backends
+
+The particle filters (`pfilter`, and the perturbed filter of `mif`) advance each observation interval through an `IntervalEngine` (`pypomp/core/algorithms/engine.py`): propagating the particles, evaluating the measurement density, perturbing the parameters, and resampling. `engine_for(struct, per_particle)` picks it. Simulation-only algorithms (`mop`, `simulate`, `abc`, ...) call only its `propagate`.
+
+- `XlaEngine` runs the struct's own JAX functions. It is what every struct gets unless its `backend` field says otherwise.
+- A struct's `backend` (default `None`, meaning XLA) holds a `Backend`. Its `engine(struct, per_particle)` returns an engine, or `None` for functions it wasn't built from, such as an `rproc_pf` the user replaced with `struct._replace`; those run on XLA. Its `launch(mesh)` returns the context that `run_jax_batch_sharded` runs multi-device calls in.
+- The CuTe backend (`pypomp/cute`) is `CuteBackend`, and its engine `CuteEngine` subclasses `XlaEngine`, overriding only the steps it has kernels for. `Pomp.to_struct` builds it through `pypomp.cute._build`, which translates the model and checks the kernels against XLA at the parameters it is given (the estimation method's `theta`). The result is cached on the model per backend, generator and check setting.
+
+A new backend implements `Backend` and an engine. The filters need no changes.
+
+---
+
+## 5. Building Documentation
 
 The documentation is written using Sphinx and is automatically built and hosted at [pypomp.readthedocs.io](https://pypomp.readthedocs.io) after each push to the `main` branch.
 
@@ -156,7 +168,7 @@ make html
 
 ---
 
-## 5. Continuous Integration
+## 6. Continuous Integration
 
 Two workflows cover everything:
 
@@ -215,7 +227,7 @@ machine instead, `pip install modal`, `modal token new`, then
 
 ---
 
-## 6. Releases & Publishing to PyPI
+## 7. Releases & Publishing to PyPI
 
 Releases are driven by `.github/workflows/release.yml` using **PyPI Trusted Publishing**. The
 release workflow *creates* the tag once everything has passed, rather than being triggered by one.

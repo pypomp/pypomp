@@ -308,7 +308,7 @@ class PanelEstimationMixin(Base):
 
         # Units differ only in their data, so they share the first unit's kernel,
         # whose build takes minutes, and its compiled functions.
-        struct = self._on_first_unit(lambda u: u.to_struct(), theta=theta)
+        struct = self._first_unit().to_struct(theta=self._first_unit_theta(theta))
 
         X_sims_list = []
         Y_sims_list = []
@@ -524,7 +524,7 @@ class PanelEstimationMixin(Base):
             (n_theta_reps * reps, U_padded) + rep_unit_keys.shape[1:]
         )
 
-        struct = self.to_struct()
+        struct = self.to_struct(theta=theta_obj_in)
         if padding > 0:
             thetas_panel_repl = jnp.pad(
                 thetas_panel_repl, ((0, 0), (0, padding), (0, 0))
@@ -743,7 +743,7 @@ class PanelEstimationMixin(Base):
         key, old_key = self._update_fresh_key(key)
         keys = jax.random.split(key, n_reps)
 
-        struct = self.to_struct()
+        struct = self.to_struct(theta=theta_obj_in)
         (
             shared_traces_jax,
             unit_traces_jax,
@@ -955,7 +955,7 @@ class PanelEstimationMixin(Base):
             dpop_state_index(rep_unit.statenames)
         _warn_logw_without_dpop(rep_unit.statenames, dpop, stacklevel=2)
         chunk_size = _divisor_chunk_size(chunk_size, U)
-        struct = self.to_struct()
+        struct = self.to_struct(theta=theta_obj_in)
 
         key, old_key = self._update_fresh_key(key)
 

@@ -2,9 +2,7 @@
 This module implements the OOP structure for PanelPOMP models.
 """
 
-from collections.abc import Callable
 from copy import deepcopy
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +11,6 @@ from pypomp.core.metadata import ModelMetadata
 from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.core.results import ResultsHistory
-from pypomp.cute import CuteBackend
 from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PanelPompStruct
 
@@ -128,7 +125,10 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit.set_backend(backend, rng, check)
 
     def to_struct(
-        self, backend: str | None = None, rng: str | None = None
+        self,
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PanelParameters | None = None,
     ) -> PanelPompStruct:
         """Export static data and compiled simulators into a JAX PyTree.
 
@@ -143,6 +143,9 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         rng : {"threefry", "philox"} or None, optional
             The CuTe kernel's random numbers. Defaults to None, which uses the
             first unit's.
+        theta : PanelParameters or None, optional
+            Parameters whose first set a new CuTe kernel is checked against XLA
+            at, on the first unit. Defaults to None, which uses ``self.theta``.
 
         Returns
         -------
@@ -190,20 +193,28 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit_param_permutations=unit_param_permutations,
             unit_names=unit_names,
             statenames=tuple(rep_unit.statenames),
-            backend=self._struct_backend(backend, rng),
+            backend=rep_unit._struct_backend(
+                backend, rng, self._first_unit_theta(theta)
+            ),
         )
 
-    def _struct_backend(
-        self, backend: str | None, rng: str | None
-    ) -> CuteBackend | None:
-        """Return the first unit's struct ``backend`` for `backend` and `rng`.
+    def _first_unit(self) -> Pomp:
+        """Return the unit whose model the panel runs for every unit."""
+        return self.unit_objects[self.get_unit_names()[0]]
 
-        Units of a panel hold no parameters, so the first unit gets the panel's
-        first parameter set while a CuTe kernel is checked against XLA.
+    def _first_unit_theta(
+        self, theta: PanelParameters | None = None
+    ) -> PompParameters | None:
+        """Return the first unit's parameters in the first set of `theta`, by
+        default the panel's, or None if neither is set.
+
+        A CuTe kernel for the panel is checked against XLA at these.
         """
-        return self._on_first_unit(
-            lambda unit: unit._struct_backend(backend, rng), backend, rng
-        )
+        if theta is None and self._theta is None:
+            return None
+        first = self._prepare_theta_input(theta).subset([0])
+        name = self.get_unit_names()[0]
+        return PompParameters(self.get_unit_parameters(name, theta=first)[0])
 
     def backend_report(
         self, backend: str | None = None, rng: str | None = None
@@ -227,30 +238,8 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         pypomp.cute.BackendReport
             What runs where.
         """
-        return self._on_first_unit(
-            lambda unit: unit.backend_report(backend, rng), backend, rng
-        )
-
-    def _on_first_unit(
-        self,
-        f: Callable[[Pomp], Any],
-        backend: str | None = None,
-        rng: str | None = None,
-        theta: PanelParameters | None = None,
-    ) -> Any:
-        """Return `f` of the first unit, which if `backend` and `rng` still need
-        a kernel checked gets the first parameter set of `theta`, by default the
-        panel's, unless it has its own."""
-        name = self.get_unit_names()[0]
-        unit = self.unit_objects[name]
-        if unit._theta is not None or not unit._kernel_needs_theta(backend, rng):
-            return f(unit)
-        first = self._prepare_theta_input(theta).subset([0])
-        unit._theta = PompParameters(self.get_unit_parameters(name, theta=first)[0])
-        try:
-            return f(unit)
-        finally:
-            unit._theta = None
+        theta = self._first_unit_theta()
+        return self._first_unit()._backend_report(backend, rng, theta)
 
     def print_metadata(self) -> None:
         """

@@ -220,6 +220,7 @@ def test_sharding_computes_no_more_replicates_than_it_was_given():
             f"{size} replicate(s) on 4 devices gave a kernel call "
             f"{entry['per_device']} of them on one device"
         )
+        assert entry["per_device_xla"] == [size]
 
 
 def test_interp_covars_linear_and_constant():
@@ -542,3 +543,30 @@ def test_resample_never_selects_zero_weight_particles():
     copies = jax.vmap(lambda c: jnp.bincount(c, length=J))(counts[:200])
     expected = J * jnp.exp(norm_weights)
     assert jnp.all(jnp.abs(copies - expected) < 1.0 + 1e-2)
+
+
+def test_only_a_struct_with_a_backend_launches_in_its_own_context():
+    from contextlib import nullcontext
+
+    from pypomp.models.linear_gaussian import lg
+
+    entered = []
+
+    class Spy:
+        def engine(self, struct, per_particle):
+            return None
+
+        def launch(self, mesh):
+            entered.append(mesh)
+            return nullcontext()
+
+    import jax
+
+    mesh = jax.sharding.Mesh(jax.devices()[:1], ("devices",))
+    struct = lg().to_struct()
+    with ifunc._launch((struct, 1), mesh):
+        pass
+    assert entered == []
+    with ifunc._launch((1, struct._replace(backend=Spy())), mesh):
+        pass
+    assert entered == [mesh]

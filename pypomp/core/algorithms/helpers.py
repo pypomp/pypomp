@@ -3,6 +3,7 @@ This module implements helper functions for POMP algorithms.
 """
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import Any, NamedTuple, TypeVar
 
@@ -540,6 +541,18 @@ def plan_sharding(size: int, num_devices: int, is_cpu: bool) -> ShardPlan:
     )
 
 
+def _launch(args: tuple, mesh: jax.sharding.Mesh) -> AbstractContextManager:
+    """Return the context in which to run a call on `args` sharded over `mesh`:
+    that of the backend of a struct among them (see
+    :meth:`~pypomp.core.algorithms.engine.Backend.launch`), if any."""
+    from ...functional.structs import PanelPompStruct, PompStruct
+
+    for arg in args:
+        if isinstance(arg, (PompStruct, PanelPompStruct)) and arg.backend is not None:
+            return arg.backend.launch(mesh)
+    return nullcontext()
+
+
 def run_jax_batch_sharded(
     func: Callable[..., Any],
     shard_axes: dict[int, int],
@@ -728,9 +741,7 @@ def run_jax_batch_sharded(
             sharded_args[arg_idx] = jax.device_put(arr, sharding_spec)
 
         if len(shard_devices) > 1:
-            # Under the mesh, CuTe kernels launch on each device for its own
-            # parameter sets (pypomp.cute.sharding); XLA can't split them itself.
-            with jax.set_mesh(mesh):
+            with _launch((*args, *kwargs.values()), mesh):
                 outputs = func(*sharded_args, **kwargs)
         else:
             outputs = func(*sharded_args, **kwargs)

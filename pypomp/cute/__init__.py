@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib
 import warnings
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -75,6 +76,13 @@ class CuteBackend:
             return None
         _check_grid(kernels, struct.nstep_array)
         return CuteEngine(rproc, dmeasure, kernels)
+
+    def launch(self, mesh: Any) -> AbstractContextManager:
+        # Under the mesh, each kernel launches on every device for that device's
+        # filters (see .sharding); XLA can't split a custom call itself.
+        import jax
+
+        return jax.set_mesh(mesh)
 
 
 def _check_grid(kernels: Kernels, nstep: Any) -> None:
@@ -211,14 +219,17 @@ class _Built(NamedTuple):
     """How each part runs, once translation was tried."""
 
 
-def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
+def _build(
+    model: Pomp, quiet: bool, rng: str, check: bool, theta: Any | None
+) -> _Built:
     """Return the CuTe backend for `model`'s structs, drawing with `rng`
     ("threefry" or "philox"), with how each part of filtering runs.
 
     Warns of each part kept on XLA unless `quiet`, as the "auto" backend is. A kernel
     that doesn't match XLA, or fails to build, is a translator bug, so that always
-    warns. Without `check`, the kernels are not run against XLA before they are
-    returned.
+    warns. With `check`, the kernels are run against XLA at parameters `theta`, one
+    vector on the natural scale in canonical order, before they are returned, and
+    without `theta` XLA is kept.
     """
 
     def say(msg: str, always: bool = False) -> None:
@@ -236,9 +247,10 @@ def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
         return skip(f"unavailable: {why}")
     if not int(np.sum(model._nstep_array)):
         return skip("has no process steps to run: every observation is at t0")
-    if check and model._theta is None:
+    if check and theta is None:
         return skip(
-            "needs model.theta to check the kernel, or set_backend(..., check=False)"
+            "needs parameters to check the kernel: set model.theta, pass theta to "
+            "to_struct, or call set_backend(..., check=False)"
         )
     import jax
 
@@ -257,7 +269,7 @@ def _build(model: Pomp, quiet: bool, rng: str, check: bool = True) -> _Built:
             "such as threefry"
         )
     try:
-        return _build_kernels(model, rng, check, say)
+        return _build_kernels(model, rng, theta if check else None, say)
     except Exception as e:  # noqa: BLE001
         why = f"CuTe backend failed to build the kernel ({type(e).__name__}: {e})"
         say(f"{why}. Using XLA.", always=True)
@@ -269,17 +281,23 @@ _SEE_REPORT = " Pomp.backend_report() says what runs where."
 
 
 def _build_kernels(
-    model: Pomp, rng: str, check: bool, say: Callable[..., None]
+    model: Pomp, rng: str, theta: Any | None, say: Callable[..., None]
 ) -> _Built:
     """Translate, build and check the kernels, as :func:`_build` describes, warning
-    with `say`.
+    with `say`. They are checked if `theta` is given.
 
     Operations the kernel can't run, and particle coupling visible in the jaxprs,
-    are rejected even without `check`.
+    are rejected even without the check.
     """
     from . import kernel
     from .analysis import _analyze
-    from .verify import _check, _check_dmeas, _check_grads, _check_perturb_step
+    from .verify import (
+        _check,
+        _check_dmeas,
+        _check_grads,
+        _check_perturb_step,
+        _interval,
+    )
 
     an = _analyze(model)
     parts = _static_parts(model, an)
@@ -304,7 +322,8 @@ def _build_kernels(
     make = kernel._make_kernels
     pf = make(model, an.traced, False, rng, None)
     per = make(model, an.traced, True, rng, None)
-    why = _check(model, pf.rproc, per.rproc, an.traced[2], rng) if check else None
+    iv = None if theta is None else _interval(model, theta, rng)
+    why = None if iv is None else _check(model, iv, pf.rproc, per.rproc, an.traced[2])
     if why is not None:
         say(f"CuTe rproc check failed: {why}. Using XLA.", always="differ" in why)
         keep("rproc", f"failed its check: {why}")
@@ -318,9 +337,9 @@ def _build_kernels(
             f"{_listed(parts['gradients'].problems)}; differentiating through XLA."
         )
         keep("gradients", "its VJP doesn't translate")
-    elif check:
+    elif iv is not None:
         try:
-            why = _check_grads(model, pf.rproc, per.rproc, rng)
+            why = _check_grads(model, iv, pf.rproc, per.rproc)
         except Exception as e:  # noqa: BLE001
             why = f"{type(e).__name__}: {e}"
         if why is not None:
@@ -350,12 +369,12 @@ def _build_kernels(
         return _Built(CuteBackend(pf, per), "", parts)
     pf_dm = _finish(make(model, an.traced, False, rng, an.dm_j), grads)
     per_dm = _finish(make(model, an.traced, True, rng, an.dm_j), grads)
-    if not check:
+    if iv is None:
         parts["dmeasure"] = replace(dm, cute=True)
         parts["perturbation"] = replace(parts["perturbation"], cute=True)
         return _Built(CuteBackend(pf_dm, per_dm), "", parts)
     try:
-        why = _check_dmeas(model, pf_dm, per_dm, rng)
+        why = _check_dmeas(model, iv, pf_dm, per_dm)
     except Exception as e:  # noqa: BLE001
         why = f"{type(e).__name__}: {e}"
     if why is not None:
@@ -369,7 +388,7 @@ def _build_kernels(
         return _Built(CuteBackend(pf, per), "", parts)
     parts["dmeasure"] = replace(dm, cute=True)
     try:
-        why = _check_perturb_step(model, per_dm, rng)
+        why = _check_perturb_step(model, iv, per_dm, rng)
     except Exception as e:  # noqa: BLE001
         why = f"{type(e).__name__}: {e}"
     if why is not None:

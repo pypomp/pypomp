@@ -94,6 +94,12 @@ Decorating ``rproc`` with :func:`~pypomp.vectorized` disables that vmap: the fun
 This sometimes improves performance on CPU, and it is entirely optional.
 On GPU, the decorator is not expected to make a difference.
 
+The :ref:`CuTe backend <cute-backend>` runs a vectorized ``rproc`` one particle per GPU thread, as it does a scalar one, and draws the same random numbers XLA draws for it.
+To do so it traces the function with ``J = 1``, so the function must treat each particle on its own.
+Random draws must have the particles on their last axis (``(J,)`` or ``(k, J)``, not ``(J, k)``).
+Reductions, dot products or scans over particles, ``jnp.arange(J)`` and constants computed from ``J`` keep the model on XLA.
+:meth:`~pypomp.core.pomp.Pomp.backend_report` names each such use.
+
 **Contract:**
 
 - Each value in the state dict is a ``(J,)`` array, and the returned dict must

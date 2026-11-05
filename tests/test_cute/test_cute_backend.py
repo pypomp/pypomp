@@ -51,10 +51,26 @@ def scan_rproc(X_, theta_, key, covars, t, dt):
     return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
 
 
+@jax.jit
+def _noisy_loops(kd, z):
+    # Long enough to outline, but the key its while loop wraps keeps it inline. The
+    # key's words, not draws from it, keep it the same for either generator.
+    v = z
+    for _ in range(30):
+        v = jnp.sin(v) * 0.9 + 0.01 * z
+    v, _ = jax.lax.scan(lambda c, _: (0.9 * c, None), v, None, length=2)
+
+    def body(c):
+        words = jax.random.key_data(jax.random.wrap_key_data(kd))
+        return c[0] + 1, c[1] + 0.01 * (words[0] % 7).astype(jnp.float32)
+
+    return jax.lax.while_loop(lambda c: c[0] < 2, body, (0, v))[1]
+
+
 def control_rproc(X_, theta_, key, covars, t, dt):
-    # Loops with static trip counts, a switch on a constant, a select among three
-    # cases at a runtime index, derived keys, an iota, a constant-index update and a
-    # draw of two axes.
+    # Loops with static trip counts, a switch on a constant, selects at runtime and
+    # constant indices, derived keys, an iota, a constant-index update, gathers in
+    # "fill" mode with their default fill values, and draws of two axes and of none.
     z = X_["x"]
     _, w = jax.lax.while_loop(
         lambda c: c[0] < 3, lambda c: (c[0] + 1, 0.9 * c[1] + 0.1 * z), (0, z)
@@ -63,11 +79,34 @@ def control_rproc(X_, theta_, key, covars, t, dt):
     s = jax.lax.switch(1, [lambda: z, lambda: 2.0 * z, lambda: -z])
     i = jnp.clip(jnp.floor((z + 2.0) * 2.0), 0, 2).astype(jnp.int32)
     pick = jax.lax.select_n(i, z, 0.5 * z, -0.5 * z)
+    trio = jnp.stack([z, 2.0 * z, 3.0 * z])
+    fixed = jax.lax.select_n(jnp.array([2, 0, 1], jnp.int32), trio, -trio, 0.5 * trio)
+    n = jnp.round(z * 100).astype(jnp.int32)
+    ints = jnp.stack([n, n ^ 5, -n])
+    fills = (
+        trio.at[i].get(mode="fill")
+        + ints.at[i].get(mode="fill")
+        + ints.astype(jnp.uint32).at[i].get(mode="fill").astype(jnp.float32) * 1e-9
+        + (trio > 0).at[i].get(mode="fill")
+    )
+    rows = jnp.stack([z, -z, 2.0 * z, z * z]).reshape(2, 2)[i % 2]
     k1, k2 = jax.random.split(jax.random.fold_in(key, 7))
-    v = jax.lax.dynamic_update_slice(jnp.arange(3.0) * z, s[None], (1,))
+    iota = jax.lax.broadcasted_iota(jnp.float32, (3,), 0)
+    v = jax.lax.dynamic_update_slice(iota * z, s[None], (1,))
     m = jax.random.normal(k2, (2, 2))
-    nudge = 0.1 * (w + f + v.sum() + pick) + 0.01 * (jax.random.normal(k1) + m.sum())
+    none = jax.random.normal(k1, (0,)).sum()
+    noisy = _noisy_loops(jax.random.key_data(k1), z)
+    nudge = 0.1 * (w + f + v.sum() + pick + fixed.sum() + rows.sum() + noisy)
+    nudge += 0.001 * fills + jax.lax.integer_pow(z, 0)
+    nudge += 0.01 * (jax.random.normal(k1) + m.sum() + none)
     return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
+
+
+def cond_rproc(X_, theta_, key, covars, t, dt):
+    # The branches leave different residuals, so the derivative fills empty ones.
+    z = X_["x"]
+    bend = jax.lax.cond(z > np.log(0.2), jnp.sin, lambda v: v * v, z)
+    return sde_rproc({"x": z + 0.1 * bend * dt}, theta_, key, covars, t, dt)
 
 
 @pp.vectorized
@@ -146,7 +185,11 @@ def table_rproc(X_, theta_, key, covars, t, dt):
     g = jnp.floor((z + 2.0) * 25.0).astype(jnp.int32)
     grid = jnp.asarray(_GRID)[jnp.clip(g, 0, 100)]
     edge = jnp.asarray(_GRID).at[g].get(mode="fill", fill_value=-5.0)
-    nudge = 0.1 * own + 0.05 * near.sum() + 0.1 * grid + 0.01 * edge
+    # A slice of the unit's row, a reshape that keeps it a view, and one that
+    # loads it.
+    row = jnp.asarray(_WEEKLY)[i]
+    span = row[10:14].sum() + row.reshape(1, 60)[0, k] + row.reshape(6, 10)[2, 3]
+    nudge = 0.1 * own + 0.05 * near.sum() + 0.1 * grid + 0.01 * edge + 0.01 * span
     return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
 
 
@@ -367,8 +410,8 @@ def test_cute_matches_xla_with_the_same_random_numbers(make, rng):
 @pytest.mark.parametrize("should_trans", [False, True], ids=["natural", "estimation"])
 @pytest.mark.parametrize(
     "make",
-    [sde_model, he10_model, table_model, uneven_model],
-    ids=["sde", "he10", "tables", "uneven"],
+    [sde_model, he10_model, table_model, uneven_model, lambda: sde_model(cond_rproc)],
+    ids=["sde", "he10", "tables", "uneven", "cond"],
 )
 def test_cute_gradients_match_xla(make, should_trans):
     model = make()

@@ -184,6 +184,11 @@ def _python_loop(z, key):
         (_scan_over, "scan over particles"),
         (lambda z, key: jnp.concatenate([z[1:], z[:1]]), "across particles"),
         (_python_loop, "operations that depend on the number of particles"),
+        (
+            lambda z, key: z * 2.0 if z.shape[0] < 3 else z + 2.0,
+            "operations that depend on the number of particles",
+        ),
+        (lambda z, key: jnp.stack([z, z]).reshape(-1)[: z.shape[0]], "reshape across"),
     ],
     ids=[
         "iota",
@@ -195,6 +200,8 @@ def _python_loop(z, key):
         "scan",
         "roll",
         "python-loop",
+        "J-branch",
+        "flatten",
     ],
 )
 def test_particle_coupling_is_named(f, what):
@@ -202,6 +209,35 @@ def test_particle_coupling_is_named(f, what):
     assert not report.translates
     whats = [p.what for p in report["rproc"].problems]
     assert any(what in w for w in whats), whats
+
+
+def _branches_and_loops(z, key):
+    # A cond and a while loop over every particle at once, each kept to itself.
+    v = jax.lax.cond(jax.random.uniform(key) > 0.5, jnp.sin, lambda v: v * v, z)
+    return jax.lax.while_loop(
+        lambda c: c[0] < 2, lambda c: (c[0] + 1, 0.9 * c[1]), (0, v)
+    )[1]
+
+
+def test_vectorized_conds_and_loops_keep_particles_apart():
+    report = sde_model(_vec(_branches_and_loops)).backend_report()
+    assert report.translates, str(report)
+
+
+def batched(X_, theta_, key, covars, t, dt):
+    z = X_["x"]
+    a = jnp.stack([jnp.stack([z, 2 * z, 3 * z]), jnp.stack([-z, z, z * z])])
+    i = jnp.clip(jnp.round(z), 0, 2).astype(jnp.int32)
+    picked = jax.vmap(lambda r, j: r[j])(a, jnp.stack([i, 2 - i])).sum()
+    dots = jnp.einsum("bi,bi->b", a, a).sum()
+    return sde_rproc({"x": z + 0.01 * (picked + dots) * dt}, theta_, key, covars, t, dt)
+
+
+def test_batched_gathers_and_dots_dont_translate():
+    report = sde_model(batched).backend_report()
+    whats = [p.what for p in report["rproc"].problems]
+    assert "gather with batching dimensions" in whats
+    assert "batched dot_general" in whats
 
 
 def test_a_model_without_dmeas_reports_it():

@@ -483,6 +483,37 @@ def test_iterated_filtering_on_kernels_that_resample_on_load_matches_xla(n_obs, 
         np.testing.assert_allclose(np.asarray(b), np.asarray(a), rtol=1e-6)
 
 
+def test_cute_backend_launches_under_the_mesh():
+    s = sde_model().to_struct(backend="xla")
+    kr = Kernels(s.rproc_pf, s.rproc_pf)
+    mesh = jax.sharding.Mesh(np.array(jax.devices()[:1]), ("devices",))
+    assert jax.sharding.get_abstract_mesh().empty
+    with CuteBackend(kr, kr).launch(mesh):
+        assert jax.sharding.get_abstract_mesh().axis_names == ("devices",)
+
+
+def test_kernels_split_over_a_mesh_that_divides_their_filters():
+    from pypomp.cute.sharding import by_filter
+
+    seen = []
+
+    @by_filter(1)
+    def kernel(x):
+        seen.append(x.shape)
+        return x * 2.0
+
+    # Tracing under an abstract mesh needs no devices of its own.
+    mesh = jax.sharding.AbstractMesh((2,), ("d",))
+    split = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("d"))
+    four = jax.ShapeDtypeStruct((4, 3), jnp.float32, sharding=split)
+    three = jax.ShapeDtypeStruct((3, 3), jnp.float32)
+    with jax.sharding.use_abstract_mesh(mesh):
+        jax.make_jaxpr(kernel)(four)
+        jax.make_jaxpr(kernel)(three)
+    jax.make_jaxpr(kernel)(jax.ShapeDtypeStruct((4, 3), jnp.float32))
+    assert seen == [(2, 3), (3, 3), (4, 3)]
+
+
 def test_backend_must_be_auto_cute_or_xla():
     with pytest.raises(ValueError, match="backend must be"):
         sde_model().set_backend("gpu")

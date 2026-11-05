@@ -88,4 +88,18 @@ ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["pypomp"]
-omit = ["tests/*", "scratch.py", "scratch/*"]
+omit = [
+    "tests/*",
+    "scratch.py",
+    "scratch/*",
+    # Protocols the mixins import only for type checking.
+    "pypomp/core/interfaces.py",
+    "pypomp/panel/interfaces.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    # Mostly the CuTe translator's, for uses its analysis rejects before translating.
+    "raise NotImplementedError",
+]

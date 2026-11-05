@@ -69,8 +69,8 @@ class _Spec(NamedTuple):
 
     step_j: ct.ClosedJaxpr
     prep_j: ct.ClosedJaxpr
-    step_vjp_j: ct.ClosedJaxpr
-    prep_vjp_j: ct.ClosedJaxpr
+    step_vjp_j: ct.ClosedJaxpr | None
+    prep_vjp_j: ct.ClosedJaxpr | None
     vec: bool
     ns: int
     nth: int
@@ -700,6 +700,8 @@ def _state_names(prefix: str, n: int) -> str:
 def _build_launcher(kind: str, spec: _Spec, J: int, transform: bool) -> Any:
     """Return the launcher of the "fwd", "save", "bwd", "dm" or "per" kernel for J
     particles."""
+    # Gradients whose VJPs couldn't be traced go through XLA, so never get here.
+    assert kind != "bwd" or None not in (spec.step_vjp_j, spec.prep_vjp_j)
     gs, ths = _state_names("g", spec.ns), _state_names("a", spec.nth)
     src = (
         {
@@ -789,7 +791,7 @@ def _make_kernels(
     hd = None
     if dm_j is not None:
         hd = _hoist(dm_j, [True, False, not per_particle, True, True])
-    jaxprs = [step_j, prep_j, step_vjp_j, prep_vjp_j]
+    jaxprs = [j for j in (step_j, prep_j, step_vjp_j, prep_vjp_j) if j is not None]
     jaxprs += [h.rest for h in (hs, hd) if h is not None]
     if dm_j is not None:
         jaxprs.append(dm_j)

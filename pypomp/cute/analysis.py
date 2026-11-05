@@ -29,8 +29,9 @@ _DTYPES = (np.dtype("float32"), np.dtype("int32"), np.dtype("uint32"), np.dtype(
 # Particles in the trace that finds a @vectorized rproc's particle axis: a prime that
 # no other axis length is likely to equal.
 _PROBE_J = 1031
-# _trace_step's output: step, transform, whether vectorized, and their VJPs.
-_Traced = tuple[ClosedJaxpr, ClosedJaxpr, bool, ClosedJaxpr, ClosedJaxpr]
+# _trace_step's output: step, transform, whether vectorized, and their VJPs, which
+# are None where reverse mode can't trace the step.
+_Traced = tuple[ClosedJaxpr, ClosedJaxpr, bool, ClosedJaxpr | None, ClosedJaxpr | None]
 # What the translator can't run, each with the equations that use it.
 _Bad = dict[str, list[Any]]
 
@@ -548,12 +549,13 @@ def _keeps_particles(eqn: Any, ax: list[int | None], J: int) -> bool:
     return False
 
 
-def _trace_step(model: Pomp) -> _Traced:
-    """Return per-particle jaxprs of the Euler step, the parameter transform and VJPs.
+def _trace_step(model: Pomp) -> tuple[_Traced, str]:
+    """Return per-particle jaxprs of the Euler step, the parameter transform and VJPs,
+    and why the VJPs couldn't be traced, or ``""``.
 
     The step maps (x, theta, key data, covariates, t, dt) to the next x, with theta on
     the natural scale; the transform maps theta from the estimation scale to the
-    natural scale. The third output is whether the rproc is ``@vectorized``.
+    natural scale. The third jaxpr output is whether the rproc is ``@vectorized``.
     """
     rp = model.rproc
     snames = list(rp.statenames)
@@ -601,9 +603,15 @@ def _trace_step(model: Pomp) -> _Traced:
     with branching_traces():
         step_j = jax.make_jaxpr(step)(*args)
         prep_j = jax.make_jaxpr(prep)(jnp.zeros(d, f32))
-        step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
-        prep_vjp_j = jax.make_jaxpr(prep_vjp)(jnp.zeros(d, f32), jnp.zeros(d, f32))
-    return step_j, prep_j, vec, step_vjp_j, prep_vjp_j
+        # Reverse mode fails on steps that still run forward, such as one with a
+        # while loop, so a failure here keeps only the gradients off the kernel.
+        try:
+            step_vjp_j = jax.make_jaxpr(step_vjp)(*args, jnp.zeros(ns, f32))
+            zeros = jnp.zeros(d, f32)
+            prep_vjp_j = jax.make_jaxpr(prep_vjp)(zeros, zeros)
+        except Exception as e:  # noqa: BLE001
+            return (step_j, prep_j, vec, None, None), _failed("the gradients", e)
+    return (step_j, prep_j, vec, step_vjp_j, prep_vjp_j), ""
 
 
 def _trace_dmeas(model: Pomp) -> ClosedJaxpr | None:
@@ -685,12 +693,15 @@ class _Analysis(NamedTuple):
 def _analyze(model: Pomp) -> _Analysis:
     """Trace `model`'s process model and density and return what the translator
     would reject in them."""
-    traced = _trace_step(model)
+    traced, vjp_failure = _trace_step(model)
     step_j, prep_j, vec, step_vjp_j, prep_vjp_j = traced
     rproc = _merge([_untranslatable(step_j), _untranslatable(prep_j)])
     if vec:
         rproc = _merge([rproc, _coupling(model)])
-    vjps = _merge([_untranslatable(step_vjp_j), _untranslatable(prep_vjp_j)])
+    if step_vjp_j is None or prep_vjp_j is None:
+        vjps: _Bad = {vjp_failure: []}
+    else:
+        vjps = _merge([_untranslatable(step_vjp_j), _untranslatable(prep_vjp_j)])
     grads = {k: v for k, v in vjps.items() if k not in rproc}
     try:
         dm_j = _trace_dmeas(model)

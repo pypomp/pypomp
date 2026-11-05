@@ -336,7 +336,7 @@ def test_hoisted_step_computes_what_the_step_does(make, per_particle):
     from pypomp.cute.analysis import _trace_step
 
     model = make()
-    step_j = _trace_step(model)[0]
+    step_j = _trace_step(model)[0][0]
     shared = [False, not per_particle, False, True, True, True]
     h = ct._hoist(step_j, shared)
     assert h is not None

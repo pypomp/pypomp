@@ -84,6 +84,19 @@ def test_ndtri_grad_matches_jax(p):
     assert jax.grad(ndtri)(F32(p)) == jax.grad(jax_ndtri)(F32(p))
 
 
+@pytest.mark.parametrize("p", [0.0, 1e-30, 1e-6, 0.01, 0.3, 0.5, 0.9, 0.999999, 1.0])
+def test_one_at_a_time_ndtri_derivatives_match_jax(p):
+    # Unbatched, ndtri has derivatives of its own; they must agree with JAX's.
+    with branching_traces():
+        d1, d2 = jax.jit(lambda q: (jax.grad(ndtri)(q), jax.grad(jax.grad(ndtri))(q)))(
+            F32(p)
+        )
+    want1 = jax.grad(jax_ndtri)(F32(p))
+    want2 = jax.grad(jax.grad(jax_ndtri))(F32(p))
+    np.testing.assert_allclose(d1, want1, rtol=2e-5)
+    np.testing.assert_allclose(d2, want2, rtol=2e-4)
+
+
 def test_binominv_one_at_a_time():
     rng = np.random.default_rng(1)
     n_pts = 400

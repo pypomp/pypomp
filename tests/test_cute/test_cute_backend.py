@@ -1,6 +1,7 @@
 """The CuTe backend. Needs nvidia-cutlass-dsl and a GPU; skipped otherwise."""
 
 import os
+import re
 import stat
 import sys
 import warnings
@@ -40,13 +41,52 @@ def sde_rproc(X_, theta_, key, covars, t, dt):
 
 
 def scan_rproc(X_, theta_, key, covars, t, dt):
-    # jnp.polyval is a lax.scan with a constant, a carry and stacked inputs, as in
-    # JAX's ndtri before JAX 0.12.
+    # Horner's rule as a lax.scan with a constant, a carry and stacked inputs, as
+    # jnp.polyval was before JAX 0.12 (it is now a lax.polynomial).
     z = X_["x"]
     eps = jax.random.normal(key)
-    expm1 = jnp.polyval(jnp.array([1 / 24, 1 / 6, 1 / 2, 1.0, 0.0]), z)
+    coefs = jnp.array([1 / 24, 1 / 6, 1 / 2, 1.0, 0.0])
+    expm1, _ = jax.lax.scan(lambda c, a: (c * z + a, c), jnp.float32(0.0), coefs)
     drift = -theta_["r"] * expm1 - theta_["sig"] ** 2 / 2
     return {"x": z + drift * dt + theta_["sig"] * jnp.sqrt(dt) * eps}
+
+
+def control_rproc(X_, theta_, key, covars, t, dt):
+    # Loops with static trip counts, a switch on a constant, a select among three
+    # cases at a runtime index, derived keys, an iota, a constant-index update and a
+    # draw of two axes.
+    z = X_["x"]
+    _, w = jax.lax.while_loop(
+        lambda c: c[0] < 3, lambda c: (c[0] + 1, 0.9 * c[1] + 0.1 * z), (0, z)
+    )
+    f = jax.lax.fori_loop(0, 3, lambda i, c: 0.5 * c + 0.1 * i * z, z)
+    s = jax.lax.switch(1, [lambda: z, lambda: 2.0 * z, lambda: -z])
+    i = jnp.clip(jnp.floor((z + 2.0) * 2.0), 0, 2).astype(jnp.int32)
+    pick = jax.lax.select_n(i, z, 0.5 * z, -0.5 * z)
+    k1, k2 = jax.random.split(jax.random.fold_in(key, 7))
+    v = jax.lax.dynamic_update_slice(jnp.arange(3.0) * z, s[None], (1,))
+    m = jax.random.normal(k2, (2, 2))
+    nudge = 0.1 * (w + f + v.sum() + pick) + 0.01 * (jax.random.normal(k1) + m.sum())
+    return sde_rproc({"x": z + nudge * dt}, theta_, key, covars, t, dt)
+
+
+@pp.vectorized
+def particlewise_rproc(X_, theta_, key, covars, t, dt):
+    # Shape operations that keep each particle's values in its own column, and draws
+    # with particles on their last axis, from one key and from a key per particle.
+    z = X_["x"]
+    J = z.shape[0]
+    m = jnp.pad(jnp.stack([z, 2 * z]), ((0, 1), (0, 0)))
+    m = jnp.concatenate([m, z[None]], 0)
+    v = m.reshape(2, 2, J)[1, 0]
+    w = jax.lax.dynamic_slice(m, (1, 0), (2, J)).sum(0)
+    u = jax.lax.dynamic_update_slice(m, w[None], (0, 0))[0]
+    eps = jax.random.normal(key, (2, J))[1]
+    keys = jax.random.split(jax.random.fold_in(key, 1), J)
+    xi = jax.vmap(jax.random.normal)(keys)
+    drift = theta_["r"] * (1 - jnp.exp(z)) - theta_["sig"] ** 2 / 2
+    noise = theta_["sig"] * jnp.sqrt(dt) * (0.8 * eps + 0.6 * xi)
+    return {"x": z + (drift + 0.01 * (v + w + u)) * dt + noise}
 
 
 def reshape_rproc(X_, theta_, key, covars, t, dt):
@@ -285,6 +325,8 @@ def interval(model, struct, J, R, i_obs=3):
         lambda: sde_model(picks_rproc),
         uneven_model,
         lambda: sde_model(scan_rproc),
+        lambda: sde_model(control_rproc),
+        lambda: sde_model(particlewise_rproc),
     ],
     ids=[
         "sde",
@@ -296,6 +338,8 @@ def interval(model, struct, J, R, i_obs=3):
         "picks",
         "uneven",
         "scan",
+        "control",
+        "particlewise",
     ],
 )
 @pytest.mark.parametrize("rng", ["threefry", "philox"])
@@ -933,6 +977,61 @@ def test_unchecked_kernels_skip_the_numerical_checks(monkeypatch):
         warnings.simplefilter("error")
         s = model.to_struct()
     assert isinstance(s.backend, CuteBackend)
+    assert "not checked against XLA (check=False)" in str(model.backend_report())
+
+
+@pytest.mark.parametrize(
+    "check, part",
+    [("_check_dmeas", "dmeasure"), ("_check_perturb_step", "perturbation")],
+    ids=["dmeasure", "perturbation"],
+)
+def test_fused_steps_whose_check_fails_run_separately(monkeypatch, check, part):
+    import pypomp.cute.verify as verify
+
+    def fail(*args):
+        raise RuntimeError("no check")
+
+    monkeypatch.setattr(verify, check, fail)
+    model = sde_model()
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match=r"failed its check \(RuntimeError"):
+        s = model.to_struct()
+    report = model.backend_report()
+    assert report["rproc"].cute and not report[part].cute
+    assert "RuntimeError: no check" in report[part].note
+    per = kernels(s, per_particle=True)
+    assert per.perturb_step is None
+    if part == "dmeasure":
+        assert per.with_dmeasure is None and kernels(s).with_dmeasure is None
+        assert report["perturbation"].note == "needs dmeasure in the kernel"
+    else:
+        assert per.with_dmeasure is not None
+
+
+def test_check_perturb_step_rejects_a_kernel_that_differs_from_xla():
+    from pypomp.cute.verify import _check_perturb_step
+
+    model = sde_model()
+    model.set_backend("cute")
+    per = kernels(model.to_struct(), per_particle=True)
+    step = per.perturb_step
+    assert step is not None
+    iv = check_interval(model)
+    assert _check_perturb_step(model, iv, per, "threefry") is None
+    whys = {
+        0: "of particles differ from XLA when resampled on load",
+        1: "its parameter perturbations differ from XLA's",
+        3: "of measurement densities differ when resampled on load",
+    }
+    for i, why in whys.items():
+
+        def shifted(*args, i=i, **kwargs):
+            out = list(step(*args, **kwargs))
+            out[i] = out[i] + 1.0
+            return tuple(out)
+
+        wrong = replace(per, perturb_step=shifted)
+        assert why in (_check_perturb_step(model, iv, wrong, "threefry") or "")
 
 
 def test_kernel_whose_gradients_differ_is_differentiated_on_xla(monkeypatch):
@@ -1052,6 +1151,30 @@ def test_kernels_that_dont_import_are_unavailable(monkeypatch):
     assert not ok and "don't import" in why
 
 
+def test_no_gpu_means_unavailable(monkeypatch):
+    monkeypatch.setattr(jax, "devices", lambda backend=None: [])
+    assert available() == (False, "no GPU device")
+
+
+def test_cutlass_without_its_jax_integration_is_unavailable(monkeypatch):
+    import cutlass.jax as cj  # pyright: ignore[reportMissingImports]
+
+    monkeypatch.setattr(cj, "is_available", lambda: False)
+    ok, why = available()
+    assert not ok and "JAX integration unavailable" in why
+
+
+def test_resampling_indices_carry_no_derivative():
+    from pypomp.core.algorithms.helpers import _resample
+    from pypomp.cute.resample import resample
+
+    w = jax.nn.softmax(jnp.linspace(-1.0, 1.0, 256, dtype=jnp.float32))
+    key = jax.random.key(0)
+    idx, tangent = jax.jvp(lambda w: resample(w, key), (w,), (jnp.ones_like(w),))
+    assert tangent.dtype == jax.dtypes.float0
+    np.testing.assert_array_equal(np.asarray(idx), np.asarray(_resample(w, key)))
+
+
 def test_builds_without_a_cpu_backend(monkeypatch):
     devices = jax.devices
 
@@ -1120,6 +1243,10 @@ def test_report_says_every_part_runs_on_cute():
     report = model.backend_report()
     assert report.available and not report.reason
     assert all(p.cute for p in report.parts), str(report)
+    text = str(report)
+    assert "  rproc         CuTe" in text
+    assert re.search(r"^  \w+ +XLA ", text, re.MULTILINE) is None, text
+    assert "float64 particles or keys of another generator" in text
 
 
 def dmeas_at_runtime_index(Y_, X_, theta_, covars, t):

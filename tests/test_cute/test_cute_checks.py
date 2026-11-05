@@ -8,8 +8,9 @@ import pytest
 import pypomp as pp
 import pypomp.cute
 import pypomp.functional as F
+from pypomp.core.algorithms.engine import Interval
 from pypomp.cute import CuteBackend, Kernels, _with_xla_grads
-from pypomp.cute.verify import _check, _check_grads, _forward, _grads
+from pypomp.cute.verify import _check, _check_dmeas, _check_grads, _forward, _grads
 
 from .test_cute_backend import (
     he10_model,
@@ -480,3 +481,104 @@ def test_iterated_filtering_on_kernels_that_resample_on_load_matches_xla(n_obs, 
     got = F.mif(kernels, th, 64, 2, rw, keys, thresh=thresh)
     for a, b in zip(want, got, strict=True):
         np.testing.assert_allclose(np.asarray(b), np.asarray(a), rtol=1e-6)
+
+
+def test_backend_must_be_auto_cute_or_xla():
+    with pytest.raises(ValueError, match="backend must be"):
+        sde_model().set_backend("gpu")
+
+
+def test_a_panel_without_parameters_builds_without_them(monkeypatch):
+    seen = spy_build(monkeypatch)
+    panel, _, _ = table_panel()
+    panel._theta = None  # type: ignore
+    panel.set_backend("cute", check=False)
+    panel.to_struct()
+    assert seen == [None]
+
+
+@pytest.fixture
+def cute_here(monkeypatch):
+    """Let the build run past its availability check, on any machine."""
+    monkeypatch.setattr(pypomp.cute, "available", lambda: (True, ""))
+
+
+def test_a_build_without_parameters_to_check_at_keeps_xla(cute_here):
+    model = sde_model()
+    model.theta = None
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="needs parameters to check the kernel"):
+        assert model.to_struct().backend is None
+
+
+def test_philox_needs_keys_of_two_words(cute_here):
+    model = sde_model()
+    model.set_backend("cute", rng="philox")
+    impl = jax.config.jax_default_prng_impl
+    jax.config.update("jax_default_prng_impl", "rbg")
+    try:
+        with pytest.warns(UserWarning, match="keys are two 32-bit words"):
+            assert model.to_struct().backend is None
+    finally:
+        jax.config.update("jax_default_prng_impl", impl)
+
+
+def test_a_kernel_that_fails_to_build_keeps_xla(cute_here, monkeypatch):
+    def fail(*args):
+        raise RuntimeError("no kernel")
+
+    monkeypatch.setattr(pypomp.cute, "_build_kernels", fail)
+    model = sde_model()
+    model.set_backend("auto", rng="philox")
+    # Quiet as "auto" is, a failure to build still warns: it is a translator bug.
+    with pytest.warns(UserWarning, match=r"failed to build the kernel \(Runtime"):
+        assert model.to_struct().backend is None
+    report = model.backend_report()
+    assert "failed to build the kernel" in report.reason
+
+
+def test_advancing_without_a_density_is_an_error():
+    from pypomp.core.algorithms.engine import XlaEngine
+
+    s = sde_model().to_struct(backend="xla")
+    iv = Interval(jax.random.key(0), None, s.dt_array_extended, 0.0, 0, 1, None, False)
+    with pytest.raises(ValueError, match="dmeasure is required"):
+        engine = XlaEngine(s.rproc_pf, None)
+        engine.advance(jnp.zeros((4, 1)), jnp.ones(5), iv, jnp.zeros(1), 0.0)
+
+
+def test_check_grads_rejects_state_gradients_that_differ():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, *args):  # the same particles, with a different derivative
+        out, t_idx = pf(X_, *args)
+        return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
+
+    why = _check_grads(model, check_interval(model), off, per) or ""
+    assert "state gradients differ" in why and "one parameter vector" in why
+
+
+def fused_density(model, shift=0.0):
+    """Kernels standing in for CuTe's, on XLA, whose fused density is shifted."""
+    assert model.dmeas is not None
+
+    def make(rproc, dmeas):
+        def fused(X_, theta_, keys, cov, *rest):
+            out, t_end = rproc(X_, theta_, keys, cov, *rest[:6])
+            trans, y, t_obs = rest[5:]
+            c = None if cov is None else cov[t_end]
+            return out, t_end, dmeas(y, out, theta_, c, t_obs, trans) + shift
+
+        return Kernels(rproc, rproc, with_dmeasure=fused, dmeasure=dmeas)
+
+    pf, per = xla_fns(model)
+    return make(pf, model.dmeas.mechanics_pf), make(per, model.dmeas.mechanics_per)
+
+
+def test_check_dmeas_accepts_xlas_density_and_rejects_another():
+    model = sde_model()
+    iv = check_interval(model)
+    assert _check_dmeas(model, iv, *fused_density(model)) is None
+    why = _check_dmeas(model, iv, *fused_density(model, 1.0)) or ""
+    assert "measurement densities differ from XLA" in why

@@ -21,6 +21,7 @@ You can install Pypomp from PyPI:
     pip install pypomp              # install with core dependencies
     pip install pypomp[benchmarks]  # install with packages for log-likelihood benchmarking
     pip install pypomp[viz]         # install with plot dependencies
+    pip install pypomp[cute]        # install the CuTe backend for NVIDIA GPUs (experimental)
 
 To install the latest development branch:
 

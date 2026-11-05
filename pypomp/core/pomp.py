@@ -488,11 +488,12 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
             check runs the first observation interval on the kernel and on XLA at
             the parameters of the first filtering, estimation or simulation call
             (for :meth:`to_struct`, its ``theta`` or ``self.theta``) with the same
-            random numbers and keeps XLA if they differ, or differentiates through
-            XLA if only their gradients do. It adds several seconds to the first
-            call. With ``check=False``, the kernels are used without it, and
-            :meth:`to_struct` doesn't need parameters. Operations the
-            translator can't run, and coupling between particles found in a
+            random numbers and keeps XLA if they differ. If only the gradients
+            differ, it differentiates through XLA; if only the measurement density
+            or the parameter perturbation does, it evaluates that separately on
+            XLA. It adds several seconds to the first call. With ``check=False``,
+            the kernels are used without it, and :meth:`to_struct` doesn't need
+            parameters. Operations the translator can't run, and coupling between particles found in a
             ``@vectorized`` rproc's jaxpr, still keep XLA, but a kernel that differs
             from XLA in another way goes unnoticed. Defaults to True.
 
@@ -508,8 +509,9 @@ class Pomp(PompEstimationMixin, PompAnalysisMixin):
 
         Notes
         -----
-        Gradients for :meth:`train` go through a second generated kernel; optimizers
-        that need Hessians, and float64 particles, use XLA.
+        The CuTe backend is experimental. Gradients for :meth:`train` go through a
+        second generated kernel; optimizers that need Hessians, and float64
+        particles, use XLA.
         """
         _check_backend(backend)
         _check_rng(rng)

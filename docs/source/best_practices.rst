@@ -86,13 +86,18 @@ On an NVIDIA GPU, the CuTe backend translates ``rproc``, and ``dmeas`` where it 
 Each thread advances one particle through every Euler step of the interval, for all the filters of a call at once, so the particles' states stay in registers instead of passing through GPU memory at each step.
 It is opt-in: a new model uses XLA until you choose CuTe with :meth:`~pypomp.core.pomp.Pomp.set_backend`.
 
+.. note::
+   The CuTe backend is experimental. Its interface and performance may change between releases, and its known limitations are tracked in the `GitHub issues <https://github.com/pypomp/pypomp/issues?q=is%3Aissue+is%3Aopen+CuTe>`_.
+
 .. code-block:: python
 
     model.set_backend("cute")  # warns and uses XLA if CuTe can't run the model
     model.set_backend("auto")  # CuTe where it can run, XLA otherwise, quietly
 
-CuTe needs the optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``), an NVIDIA GPU from Ampere on, float32 particles and JAX's default threefry keys.
+CuTe needs the optional ``nvidia-cutlass-dsl`` package (``pip install pypomp[cute]``), an NVIDIA GPU from Ampere on, and float32 particles; with the default ``rng="threefry"``, it also needs JAX's default threefry keys.
 Where any of these is missing, the model runs on XLA.
+``nvidia-cutlass-dsl`` installs its CUDA 12 libraries by default, and the backend is tested with JAX's CUDA 12 build (``pip install "jax[cuda12]"``).
+:func:`pypomp.cute.available` says whether CuTe can run on the current machine, and if not, why.
 
 **When it is faster.**
 The kernel pays off most for models with many Euler steps per observation and with the branching samplers of ``pypomp.random`` (binomial, Poisson), whose branches the kernel takes per particle instead of computing every branch for every particle as XLA does.
@@ -114,11 +119,16 @@ They agree in distribution, so compare backends over replicates, not run by run.
 
 **What can go wrong.**
 
-- The check runs the first observation interval on the kernel and on XLA at ``model.theta`` (or, for a model without it, at the parameters of the first call), once, and keeps XLA (with a warning) if they differ. A kernel that differs from XLA only at other parameters goes unnoticed. ``set_backend(..., check=False)`` skips the check.
+- The check runs the first observation interval with process steps on the kernel and on XLA, once, at the first parameter set of the first call that builds the kernels. Each part that differs falls back on its own, with a warning: a process model that differs keeps the whole model on XLA, while gradients that differ are taken through XLA, and a measurement density or parameter perturbation that differs runs separately on XLA. A kernel that differs from XLA only at other parameters goes unnoticed. ``set_backend(..., check=False)`` skips the check.
+- Without parameters to check at, as for :meth:`~pypomp.core.pomp.Pomp.to_struct` on a model with no ``theta``, the model runs on XLA with a warning. Pass ``theta`` to ``to_struct``, or use ``check=False``.
 - The translator handles most of what an ``rproc`` written for one particle uses, but not everything: while loops with a runtime trip count, dynamic updates at a runtime index and float64, among others, keep the model on XLA. A ``@vectorized`` ``rproc`` that couples particles, for example through a mean over them, stays on XLA too.
 - :meth:`~pypomp.core.pomp.Pomp.train` differentiates through a second generated kernel. Optimizers that need Hessians (:class:`~pypomp.Newton`, :class:`~pypomp.WeightedNewton`) run on XLA.
 - A :class:`~pypomp.panel.panel.PanelPomp` runs its first unit's kernel for every unit, checked on the first unit.
-- On several GPUs, :meth:`~pypomp.core.pomp.Pomp.pfilter`, :meth:`~pypomp.core.pomp.Pomp.mif` and :meth:`~pypomp.core.pomp.Pomp.train` spread the parameter sets over the GPUs, and each GPU launches the kernel for its own. With ``pypomp.functional``, run the call under ``jax.set_mesh(mesh)`` with the parameter sets sharded over the mesh for the same effect; otherwise every GPU runs every filter.
+- On several GPUs, :meth:`~pypomp.core.pomp.Pomp.pfilter`, :meth:`~pypomp.core.pomp.Pomp.mif` and :meth:`~pypomp.core.pomp.Pomp.train` spread the parameter sets over the GPUs, and each GPU launches the kernel for its own. With ``pypomp.functional``, run the call under ``jax.set_mesh(mesh)`` with the parameter sets sharded over the mesh, their number a multiple of the mesh's size, for the same effect; otherwise every GPU runs every filter.
+
+**With the functional API.**
+A struct from :meth:`~pypomp.core.pomp.Pomp.to_struct` carries the model's kernels in its ``backend`` field, so the functions of :mod:`pypomp.functional` run on CuTe when the model's backend is CuTe, or when ``to_struct(backend="cute")`` asks for it.
+The kernels are built for the model's time grid and run only the functions they were translated from: a struct whose ``rproc_pf`` or ``rproc_per`` is replaced with ``struct._replace`` runs that function on XLA.
 
 **Checking a model.**
 :meth:`~pypomp.core.pomp.Pomp.backend_report` says which parts run on the kernel, and names each operation that keeps a part off it with the line of the model's code that uses it:

@@ -117,6 +117,22 @@ make test-cpu-scaling
 `-n 0` turns xdist off so wall-clock timings are not competing with other tests.
 The test benchmarks serial (1 device) vs parallel (N devices) execution using `--xla_force_host_platform_device_count`.
 
+### GPU (CuTe) tests
+
+`tests/test_cute/` tests the CuTe backend (§4). Its GPU tests skip themselves unless
+`pypomp.cute.available()` holds, which needs `nvidia-cutlass-dsl` and an NVIDIA GPU of
+compute capability 8.0 or newer. On such a machine:
+
+```bash
+pip install -e .[tests,cute]
+pytest tests/test_cute -n 0   # one process, so xdist workers don't contend for the GPU
+```
+
+The tests that need no GPU, such as those of `backend_report`, run in the light suite. CI
+runs the rest on a rented GPU (§6). The doctest run skips `pypomp/cute` modules that import
+`cutlass` at module level when it isn't installed; a new such module goes in
+`collect_ignore` in the top-level `conftest.py`.
+
 ### Regression tests
 
 `tests/test_regression/` uses `pytest-regressions` (`num_regression`) to lock in numerical output baselines for algorithms under `pypomp/functional/`.
@@ -142,7 +158,7 @@ Coverage spans two model families deliberately: the linear-Gaussian fixtures exe
 
 ## 4. Filtering Backends
 
-The particle filters (`pfilter`, and the perturbed filter of `mif`) advance each observation interval through an `IntervalEngine` (`pypomp/core/algorithms/engine.py`): propagating the particles, evaluating the measurement density, perturbing the parameters, and resampling. `engine_for(struct, per_particle)` picks it. Simulation-only algorithms (`mop`, `simulate`, `abc`, ...) call only its `propagate`.
+The particle filters (`pfilter`, and the perturbed filter of `mif`) advance each observation interval through an `IntervalEngine` (`pypomp/core/algorithms/engine.py`): propagating the particles, evaluating the measurement density, perturbing the parameters, and resampling. `engine_for(struct, per_particle)` picks it. The other algorithms (`mop`, and so `train`, `simulate`, `abc`) call only its `propagate` and do the rest on XLA.
 
 - `XlaEngine` runs the struct's own JAX functions. It is what every struct gets unless its `backend` field says otherwise.
 - A struct's `backend` (default `None`, meaning XLA) holds a `Backend`. Its `engine(struct, per_particle)` returns an engine, or `None` for functions it wasn't built from, such as an `rproc_pf` the user replaced with `struct._replace`; those run on XLA. Its `launch(mesh)` returns the context that `run_jax_batch_sharded` runs multi-device calls in.

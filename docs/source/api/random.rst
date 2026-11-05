@@ -6,6 +6,7 @@ This problem is especially pronounced when running particle filtering methods wi
 To address this, Pypomp includes replacement functions that use Inverse Transform Sampling to generate random variables.
 These functions use JAX under the hood, so they can be used in a JIT-compiled context.
 While the following functions include some branching in order to handle edge cases, the performance loss from warp divergence is minimal.
+On the :ref:`CuTe backend <cute-backend>`, where each particle runs in its own GPU thread, the samplers take real branches instead, computing only the method a draw needs.
 
 
 Random Variate Generators

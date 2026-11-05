@@ -33,6 +33,7 @@ Configuration & Tuning
    learning_rate
    proposals
    optimizers
+   cute
 
 Utilities
 ---------

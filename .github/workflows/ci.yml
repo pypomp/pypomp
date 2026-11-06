@@ -295,8 +295,9 @@ jobs:
 
   cpu-scaling:
     name: CPU parallel scaling
-    # Opt-in CPU scaling benchmarks (sensitive to runner load/throttling).
-    if: ${{ inputs.run-cpu-scaling }}
+    # Wall-clock timings, so a loaded runner can fail them. Runs when asked for
+    # and on pushes to main, where the ~3 min job catches sharding regressions.
+    if: ${{ inputs.run-cpu-scaling || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

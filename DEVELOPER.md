@@ -225,7 +225,8 @@ combination costs ten times the runner time for the same signal.
 
 The CPU parallel-scaling timings (see §3) get their own single-cell job for a different reason:
 they are wall-clock measurements, so a runner that happens to be busy or throttled can fail them
-with nothing wrong in the code. Releases do not run them.
+with nothing wrong in the code. The job runs on every push to main and when
+`run-cpu-scaling` is ticked; releases do not run it, so a slow runner cannot block a release.
 
 The GPU tests (`tests/test_cute`) need an NVIDIA GPU of compute capability 8.0 or newer, which
 GitHub's hosted runners lack, so the `gpu` job rents one from [Modal](https://modal.com) (an L4,

@@ -209,8 +209,7 @@ To run the full Python matrix (3.12–3.14), the heavy tests, the oldest-depende
 parallel-scaling timings without cutting a release, use **Actions → CI → Run workflow** and tick
 `full-matrix`, `run-heavy`, `run-oldest-deps`, `run-cpu-scaling` and/or `run-gpu`. Doing this before a
 release is worthwhile, since heavy tests do not run on ordinary pushes. `run-cpu-scaling` is
-worth ticking after changes to the sharding code in `pypomp/core/algorithms/helpers.py`; note
-that a busy shared runner can fail those timings on its own.
+worth ticking on a branch after changes to the sharding code in `pypomp/core/algorithms/helpers.py`.
 
 The oldest-dependency job pins every runtime dependency to its `>=` floor in `pyproject.toml`
 (via `tools/dependency_floors.py`, which rejects a dependency without one), installs them
@@ -224,9 +223,10 @@ accuracy and convergence results should not vary by interpreter or OS, so runnin
 combination costs ten times the runner time for the same signal.
 
 The CPU parallel-scaling timings (see §3) get their own single-cell job for a different reason:
-they are wall-clock measurements, so a runner that happens to be busy or throttled can fail them
-with nothing wrong in the code. The job runs on every push to main and when
-`run-cpu-scaling` is ticked; releases do not run it, so a slow runner cannot block a release.
+they are wall-clock measurements, so they need a runner's cores to themselves rather than
+competing with xdist workers. The job runs on every push to main, on releases, and when
+`run-cpu-scaling` is ticked. Hosted runner VMs vary in speed, but serial and parallel are
+timed on the same VM and the test only fails if parallel is more than 2x slower than serial.
 
 The GPU tests (`tests/test_cute`) need an NVIDIA GPU of compute capability 8.0 or newer, which
 GitHub's hosted runners lack, so the `gpu` job rents one from [Modal](https://modal.com) (an L4,

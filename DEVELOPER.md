@@ -117,6 +117,22 @@ make test-cpu-scaling
 `-n 0` turns xdist off so wall-clock timings are not competing with other tests.
 The test benchmarks serial (1 device) vs parallel (N devices) execution using `--xla_force_host_platform_device_count`.
 
+### GPU (CuTe) tests
+
+`tests/test_cute/` tests the CuTe backend (§4). Its GPU tests skip themselves unless
+`pypomp.cute.available()` holds, which needs `nvidia-cutlass-dsl` and an NVIDIA GPU of
+compute capability 8.0 or newer. On such a machine:
+
+```bash
+pip install -e .[tests,cute]
+pytest tests/test_cute -n 0   # one process, so xdist workers don't contend for the GPU
+```
+
+The tests that need no GPU, such as those of `backend_report`, run in the light suite. CI
+runs the rest on a rented GPU (§6). The doctest run skips `pypomp/cute` modules that import
+`cutlass` at module level when it isn't installed; a new such module goes in
+`collect_ignore` in the top-level `conftest.py`.
+
 ### Regression tests
 
 `tests/test_regression/` uses `pytest-regressions` (`num_regression`) to lock in numerical output baselines for algorithms under `pypomp/functional/`.
@@ -140,7 +156,19 @@ Coverage spans two model families deliberately: the linear-Gaussian fixtures exe
 
 ---
 
-## 4. Building Documentation
+## 4. Filtering Backends
+
+The particle filters (`pfilter`, and the perturbed filter of `mif`) advance each observation interval through an `IntervalEngine` (`pypomp/core/algorithms/engine.py`): propagating the particles, evaluating the measurement density, perturbing the parameters, and resampling. `engine_for(struct, per_particle)` picks it. The other algorithms (`mop`, and so `train`, `simulate`, `abc`) call only its `propagate` and do the rest on XLA.
+
+- `XlaEngine` runs the struct's own JAX functions. It is what every struct gets unless its `backend` field says otherwise.
+- A struct's `backend` (default `None`, meaning XLA) holds a `Backend`. Its `engine(struct, per_particle)` returns an engine, or `None` for functions it wasn't built from, such as an `rproc_pf` the user replaced with `struct._replace`; those run on XLA. Its `launch(mesh)` returns the context that `run_jax_batch_sharded` runs multi-device calls in.
+- The CuTe backend (`pypomp/cute`) is `CuteBackend`, and its engine `CuteEngine` subclasses `XlaEngine`, overriding only the steps it has kernels for. `Pomp.to_struct` builds it through `pypomp.cute._build`, which translates the model and checks the kernels against XLA at the parameters it is given (the estimation method's `theta`). The result is cached on the model per backend, generator and check setting.
+
+A new backend implements `Backend` and an engine. The filters need no changes.
+
+---
+
+## 5. Building Documentation
 
 The documentation is written using Sphinx and is automatically built and hosted at [pypomp.readthedocs.io](https://pypomp.readthedocs.io) after each push to the `main` branch.
 
@@ -156,7 +184,7 @@ make html
 
 ---
 
-## 5. Continuous Integration
+## 6. Continuous Integration
 
 Two workflows cover everything:
 
@@ -179,7 +207,7 @@ cancel a release in progress.
 
 To run the full Python matrix (3.12–3.14), the heavy tests, the oldest-dependency tests, or the CPU
 parallel-scaling timings without cutting a release, use **Actions → CI → Run workflow** and tick
-`full-matrix`, `run-heavy`, `run-oldest-deps` and/or `run-cpu-scaling`. Doing this before a
+`full-matrix`, `run-heavy`, `run-oldest-deps`, `run-cpu-scaling` and/or `run-gpu`. Doing this before a
 release is worthwhile, since heavy tests do not run on ordinary pushes. `run-cpu-scaling` is
 worth ticking after changes to the sharding code in `pypomp/core/algorithms/helpers.py`; note
 that a busy shared runner can fail those timings on its own.
@@ -199,9 +227,23 @@ The CPU parallel-scaling timings (see §3) get their own single-cell job for a d
 they are wall-clock measurements, so a runner that happens to be busy or throttled can fail them
 with nothing wrong in the code. Releases do not run them.
 
+The GPU tests (`tests/test_cute`) need an NVIDIA GPU of compute capability 8.0 or newer, which
+GitHub's hosted runners lack, so the `gpu` job rents one from [Modal](https://modal.com) (an L4,
+or an A10 when L4s are scarce) through `tools/modal_gpu_tests.py`. Each run is billed to the
+Modal account, so it runs only on releases, when `run-gpu` is ticked (e.g. on a pull request's
+branch), and on pushes to `main` that change what the GPU tests depend on (`pypomp/`,
+`tests/test_cute/`, test and build config, or the job itself). The job fails rather than skipping if
+the backend is unavailable on the rented GPU, and uploads coverage under the Codecov flag `gpu`,
+which `codecov.yml` carries forward to commits the job skipped. JAX's compilation cache persists
+between runs on the Modal Volume `pypomp-jax-cache`; deleting it makes the next run compile
+everything again, which takes about twice as long. It needs the repository secrets `MODAL_TOKEN_ID` and
+`MODAL_TOKEN_SECRET` (created at modal.com/settings/tokens). To run it from your own
+machine instead, `pip install modal`, `modal token new`, then
+`modal run tools/modal_gpu_tests.py --pytest-args "tests/test_cute -x"`.
+
 ---
 
-## 6. Releases & Publishing to PyPI
+## 7. Releases & Publishing to PyPI
 
 Releases are driven by `.github/workflows/release.yml` using **PyPI Trusted Publishing**. The
 release workflow *creates* the tag once everything has passed, rather than being triggered by one.
@@ -233,8 +275,8 @@ Keep the two in sync by putting whatever form you want in `pyproject.toml` — a
 ```
 guard          version consistency; tag must not already exist; HEAD must be on main
   ↓
-ci.yml         full 3.12–3.14 matrix on Ubuntu and macOS, plus the heavy-test
-               and oldest-dependency jobs, checks / build / docs
+ci.yml         full 3.12–3.14 matrix on Ubuntu and macOS, plus the heavy-test,
+               oldest-dependency and GPU jobs, checks / build / docs
   ↓
 publish        ⏸ pauses for manual approval
   ↓            downloads the distributions ci.yml already built and smoke-tested

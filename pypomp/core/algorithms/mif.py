@@ -7,7 +7,8 @@ from .carries import (
     PerfilterStepInputs,
 )
 from .contexts import MifContext, PfilterContext
-from .helpers import _normalize_weights, _resample_where
+from .engine import Interval
+from .helpers import _normalize_weights
 from .pfilter import _vmapped_pfilter_internal
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
@@ -163,10 +164,10 @@ def _perfilter_internal(
         cooling_factor=cooling_factors,
         step_key=step_keys_raw,
     )
+    engine = context.per.engine
     init_state = PerfilterState(
         t=context.series.t0,
-        particlesF=particlesF_Jx,
-        thetas=thetas_Jd,
+        swarm=engine.swarm(particlesF_Jx, thetas_Jd),
         loglik=loglik,
         norm_weights=norm_weights,
         counts=counts,
@@ -176,13 +177,12 @@ def _perfilter_internal(
     scan_body_fn = jax.tree_util.Partial(_perfilter_scan_body, context)
 
     # 5. Run the perturbed particle filter over the time series.
-    final_state, _ = jax.lax.scan(
-        f=scan_body_fn,
-        init=init_state,
-        xs=perfilter_scan_xs,
+    final_state = engine.scan(scan_body_fn, init_state, perfilter_scan_xs)
+    return (
+        engine.parameters(final_state.swarm),
+        -final_state.loglik,
+        final_state.ancestry,
     )
-
-    return final_state.thetas, -final_state.loglik, final_state.ancestry
 
 
 def _perfilter_scan_body(
@@ -195,19 +195,9 @@ def _perfilter_scan_body(
     key_perturb, key_process, key_resample = jax.random.split(xs.step_key, 3)
     nstep_int = jnp.asarray(xs.nstep).astype(int)
 
-    # 2. Perturb the parameters.
     sigmas_cooled = xs.cooling_factor * context.rw_sigma.sigmas_array
-    perturbed_thetas = carry.thetas + sigmas_cooled * jax.random.normal(
-        shape=carry.thetas.shape, key=key_perturb
-    )
-    # Draw the perturbations once: otherwise XLA may fuse the draws into each of
-    # their consumers (dmeasure, the resampling gather) and draw them twice.
-    perturbed_thetas = jax.lax.optimization_barrier(perturbed_thetas)
-
-    # 3. Propagate the particles for one observation interval.
-    particlesP_Jx, updated_t_idx = context.per.rprocess_interp(
-        carry.particlesF,
-        perturbed_thetas,
+    engine = context.per.engine
+    iv = Interval(
         key_process,
         context.series.covars_extended,
         context.series.dt_array_extended,
@@ -218,20 +208,14 @@ def _perfilter_scan_body(
         SHOULD_TRANS,
     )
 
-    # 4. Update covars to current observation time.
-    covars_t = (
-        None
-        if context.series.covars_extended is None
-        else context.series.covars_extended[updated_t_idx]
+    # 2-5. Perturb the parameters, propagate the particles for one observation
+    # interval and evaluate the density of the observation at its end.
+    particlesP_Jx, perturbed_thetas, updated_t_idx, measurements = (
+        engine.advance_perturbed(
+            carry.swarm, key_perturb, sigmas_cooled, iv, xs.y, xs.time
+        )
     )
-
-    # 5. Compute log-likelihood contribution of current observation.
-    measurements = jnp.nan_to_num(
-        context.per.dmeasure(
-            xs.y, particlesP_Jx, perturbed_thetas, covars_t, xs.time, SHOULD_TRANS
-        ).squeeze(),
-        nan=jnp.log(1e-18),
-    )
+    measurements = jnp.nan_to_num(measurements.squeeze(), nan=jnp.log(1e-18))
 
     # 6. Update the running log-likelihood and normalize particle weights.
     weights = carry.norm_weights + measurements
@@ -242,16 +226,14 @@ def _perfilter_scan_body(
     should_resample = jnp.max(norm_weights_updated) - jnp.min(
         norm_weights_updated
     ) > jnp.log(context.thresh)
-    (
-        counts_resampled,
-        norm_weights_resampled,
-        (particlesF_resampled, thetas_resampled),
-    ) = _resample_where(
+    counts_resampled, norm_weights_resampled, swarm = engine.resample_swarm(
+        carry.swarm,
+        particlesP_Jx,
+        perturbed_thetas,
         should_resample,
         carry.counts,
         norm_weights_updated,
         key_resample,
-        (particlesP_Jx, perturbed_thetas),
     )
 
     # 8. Update the ancestry (used for PIF, i.e., Panel.mif with block=False).
@@ -266,8 +248,7 @@ def _perfilter_scan_body(
     # 9. Return the updated state
     new_state = PerfilterState(
         t=xs.time,
-        particlesF=particlesF_resampled,
-        thetas=thetas_resampled,
+        swarm=swarm,
         loglik=loglik_updated,
         norm_weights=norm_weights_resampled,
         counts=counts_resampled,

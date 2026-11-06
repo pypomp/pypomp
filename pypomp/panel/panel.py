@@ -8,9 +8,10 @@ import jax
 import jax.numpy as jnp
 
 from pypomp.core.metadata import ModelMetadata
-from pypomp.core.parameters import PanelParameters
+from pypomp.core.parameters import PanelParameters, PompParameters
 from pypomp.core.pomp import Pomp
 from pypomp.core.results import ResultsHistory
+from pypomp.cute.report import BackendReport
 from pypomp.functional.structs import PanelPompStruct
 
 from .analysis_mixin import PanelAnalysisMixin
@@ -96,11 +97,55 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
         """
         return list(self.unit_objects.keys())
 
-    def to_struct(self) -> PanelPompStruct:
+    def set_backend(
+        self, backend: str, rng: str = "threefry", check: bool = True
+    ) -> None:
+        """Choose how filtering and estimation run.
+
+        Sets the backend of every unit; see :meth:`pypomp.Pomp.set_backend`.
+        The panel runs the first unit's process model for all units, so with CuTe
+        one kernel advances every unit's particles, and it is checked against XLA
+        on the first unit at the first parameter set.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"}
+            The backend.
+        rng : {"threefry", "philox"}, optional
+            The random numbers the CuTe kernel draws.
+        check : bool, optional
+            Whether to check the CuTe kernels against XLA before using them.
+
+        Raises
+        ------
+        ValueError
+            If `backend` or `rng` is not one of its options.
+        """
+        for unit in self.unit_objects.values():
+            unit.set_backend(backend, rng, check)
+
+    def to_struct(
+        self,
+        backend: str | None = None,
+        rng: str | None = None,
+        theta: PanelParameters | None = None,
+    ) -> PanelPompStruct:
         """Export static data and compiled simulators into a JAX PyTree.
 
         Converts the panel model into a :class:`PanelPompStruct` suitable for
         use with pure-functional algorithms in :mod:`pypomp.functional`.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"} or None, optional
+            Backend for this struct (see :meth:`set_backend`). Defaults to None,
+            which uses the first unit's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers. Defaults to None, which uses the
+            first unit's.
+        theta : PanelParameters or None, optional
+            Parameters whose first set a new CuTe kernel is checked against XLA
+            at, on the first unit. Defaults to None, which uses ``self.theta``.
 
         Returns
         -------
@@ -148,7 +193,53 @@ class PanelPomp(PanelValidationMixin, PanelEstimationMixin, PanelAnalysisMixin):
             unit_param_permutations=unit_param_permutations,
             unit_names=unit_names,
             statenames=tuple(rep_unit.statenames),
+            backend=rep_unit._struct_backend(
+                backend, rng, self._first_unit_theta(theta)
+            ),
         )
+
+    def _first_unit(self) -> Pomp:
+        """Return the unit whose model the panel runs for every unit."""
+        return self.unit_objects[self.get_unit_names()[0]]
+
+    def _first_unit_theta(
+        self, theta: PanelParameters | None = None
+    ) -> PompParameters | None:
+        """Return the first unit's parameters in the first set of `theta`, by
+        default the panel's, or None if neither is set.
+
+        A CuTe kernel for the panel is checked against XLA at these.
+        """
+        if theta is None and self._theta is None:
+            return None
+        first = self._prepare_theta_input(theta).subset([0])
+        name = self.get_unit_names()[0]
+        return PompParameters(self.get_unit_parameters(name, theta=first)[0])
+
+    def backend_report(
+        self, backend: str | None = None, rng: str | None = None
+    ) -> BackendReport:
+        """Say what runs on the CuTe backend, and why the rest stays on XLA.
+
+        The panel runs its first unit's model for every unit, so this is that
+        unit's report; see :meth:`pypomp.Pomp.backend_report`.
+
+        Parameters
+        ----------
+        backend : {"auto", "cute", "xla"} or None, optional
+            The backend to report on. Defaults to None, which uses the first
+            unit's backend.
+        rng : {"threefry", "philox"} or None, optional
+            The CuTe kernel's random numbers. Defaults to None, which uses the
+            first unit's.
+
+        Returns
+        -------
+        pypomp.cute.BackendReport
+            What runs where.
+        """
+        theta = self._first_unit_theta()
+        return self._first_unit()._backend_report(backend, rng, theta)
 
     def print_metadata(self) -> None:
         """

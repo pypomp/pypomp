@@ -51,6 +51,8 @@ Pomp Class
    :toctree: generated/
 
    ~Pomp.sample_params
+   ~Pomp.set_backend
+   ~Pomp.backend_report
    ~Pomp.to_struct
    ~Pomp.prune
    ~Pomp.time

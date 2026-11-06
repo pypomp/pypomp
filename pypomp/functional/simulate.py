@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+from ..core.algorithms.engine import engine_for
 from ..core.algorithms.simulate import _jv_simulate_internal
 from .structs import PompStruct
 
@@ -62,7 +63,7 @@ def simulate(
 
     X, Y = _jv_simulate_internal(
         struct.rinit_pf,
-        struct.rproc_pf,
+        engine_for(struct, per_particle=False),
         struct.rmeas_pf,
         thetas_array,
         struct.t0,

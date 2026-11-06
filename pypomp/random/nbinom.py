@@ -4,20 +4,19 @@ JAX implementation of Negative Binomial sampling using Gamma-Poisson mixture.
 
 from __future__ import annotations
 
-from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax._src import dtypes
 
+from ._branch import jit
 from ._dtype_helpers import _get_available_dtype, check_and_canonicalize_user_dtype
 from .gamma import fast_gamma
 from .poisson import fast_poisson
 
 
-@partial(
-    jax.jit,
+@jit(
     static_argnames=[
         "dtype",
         "gamma_newton_loops",

@@ -20,6 +20,7 @@ from jax.tree_util import register_dataclass
 
 from ...functional.structs import PanelPompStruct, PompStruct
 from ..rw_sigma import RWSigma
+from .engine import IntervalEngine, engine_for
 
 
 def static(**kwargs: Any) -> Any:
@@ -47,14 +48,16 @@ class SimFns:
     """
 
     rinitializer: Callable
-    rprocess_interp: Callable
+    engine: IntervalEngine
+    """Propagates the particles (:meth:`IntervalEngine.propagate`), on the struct's
+    backend if it has one for these functions."""
     accumvars: tuple[int, ...] | None
 
     @classmethod
     def pf(cls, struct: PompStruct | PanelPompStruct) -> SimFns:
         return cls(
             rinitializer=struct.rinit_pf,
-            rprocess_interp=struct.rproc_pf,
+            engine=engine_for(struct, per_particle=False),
             accumvars=struct.accumvars,
         )
 
@@ -76,7 +79,7 @@ class ModelFns(SimFns):
             raise ValueError("dmeasure (dmeas_pf) is required")
         return cls(
             rinitializer=struct.rinit_pf,
-            rprocess_interp=struct.rproc_pf,
+            engine=engine_for(struct, per_particle=False),
             accumvars=struct.accumvars,
             dmeasure=struct.dmeas_pf,
         )
@@ -87,7 +90,7 @@ class ModelFns(SimFns):
             raise ValueError("dmeasure (dmeas_per) is required")
         return cls(
             rinitializer=struct.rinit_per,
-            rprocess_interp=struct.rproc_per,
+            engine=engine_for(struct, per_particle=True),
             accumvars=struct.accumvars,
             dmeasure=struct.dmeas_per,
         )

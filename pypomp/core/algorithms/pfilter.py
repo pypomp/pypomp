@@ -8,6 +8,7 @@ from jax import jit
 
 from .carries import PfilterState
 from .contexts import PfilterContext, SeriesData
+from .engine import Interval
 from .helpers import _normalize_weights, _resample_where, pad_array
 
 SHOULD_TRANS = False  # Should transformations be applied to the parameters?
@@ -106,10 +107,10 @@ def _pfilter_step(
     key, subkey = jax.random.split(state.key)
     nstep = context.series.nstep_array[i].astype(int)
 
-    # 2. Propagate particles for one observation interval.
-    particlesP, t_idx = context.fns.rprocess_interp(
-        state.particlesF,
-        theta,
+    # 2-4. Propagate the particles for one observation interval and evaluate the
+    # density of the observation at its end.
+    engine = context.fns.engine
+    iv = Interval(
         subkey,
         context.series.covars_extended,
         context.series.dt_array_extended,
@@ -120,17 +121,8 @@ def _pfilter_step(
         context.should_trans,
     )
     t = context.series.times[i]
-
-    # 3. Update covariates to current observation time.
-    covars_t = (
-        None
-        if context.series.covars_extended is None
-        else context.series.covars_extended[t_idx]
-    )
-
-    # 4. Compute log-likelihood contribution of current observation.
-    measurements = context.fns.dmeasure(
-        context.series.ys[i], particlesP, theta, covars_t, t, context.should_trans
+    particlesP, t_idx, measurements = engine.advance(
+        state.particlesF, theta, iv, context.series.ys[i], t
     )
 
     # 5. Update running log-likelihood and normalize particle weights.
@@ -160,7 +152,12 @@ def _pfilter_step(
     resample = jnp.max(norm_weights) - jnp.min(norm_weights) > jnp.log(context.thresh)
     key, subkey = jax.random.split(key)
     counts, norm_weights, particlesF = _resample_where(
-        resample, state.counts, norm_weights, subkey, particlesP
+        resample,
+        state.counts,
+        norm_weights,
+        subkey,
+        particlesP,
+        engine.resample,
     )
 
     # 8. Return the updated filter state.

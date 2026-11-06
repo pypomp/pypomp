@@ -234,6 +234,10 @@ def _train(
 ) -> tuple[jax.Array, jax.Array]:
     """Body of :func:`train`, without the DPOP warning, for the OOP layer."""
     optimizer = optimizer or Adam()
+    if optimizer.uses_hessian:
+        # Hessians need derivatives of the derivatives, which a backend's kernels
+        # needn't have, so they come from the model's XLA functions.
+        struct = struct._replace(backend=None)
     eta_array = eta.to_array(struct.param_names, M)
 
     thetas_est = struct.par_trans._transform_array(

@@ -29,20 +29,50 @@ DEVICES = 4
 
 def _probe(size: int) -> dict[str, Any]:
     """Shard `size` replicates and report what the sharded function received."""
+    import jax
     import jax.numpy as jnp
 
     from pypomp.core.algorithms.helpers import run_jax_batch_sharded
+    from pypomp.cute.sharding import by_filter
+    from pypomp.models.linear_gaussian import lg
 
+    class MeshBackend:
+        """A struct backend that, as CuTe's does, launches under the mesh."""
+
+        def engine(self, struct, per_particle):
+            return None
+
+        def launch(self, mesh):
+            return jax.set_mesh(mesh)
+
+    xla = lg().to_struct()
+    cute = xla._replace(backend=MeshBackend())
     computed: list[int] = []
+    per_device: list[int] = []
 
-    def double(x):
-        # len(x) is what actually gets computed: `size` plus any padding.
-        computed.append(x.shape[0])
+    @by_filter(1)
+    def kernel(x):
+        # A CuTe kernel's call sees only the parameter sets of its own device.
+        per_device.append(x.shape[0])
         return x * 2.0
 
+    def double(x, struct):
+        # len(x) is what actually gets computed: `size` plus any padding.
+        computed.append(x.shape[0])
+        return kernel(x)
+
     x = jnp.arange(size, dtype=float).reshape(size, 1)
-    out = run_jax_batch_sharded(double, {0: 0}, 0, x)
-    return {"computed": computed, "out": out.ravel().tolist()}
+    out = run_jax_batch_sharded(double, {0: 0}, 0, x, cute)
+    report = {
+        "computed": computed,
+        "per_device": per_device,
+        "out": out.ravel().tolist(),
+    }
+    # Without a backend that asks for the mesh, the kernel sees every set.
+    computed, per_device = [], []
+    run_jax_batch_sharded(double, {0: 0}, 0, x, xla)
+    report["per_device_xla"] = per_device
+    return report
 
 
 def main(argv: list[str]) -> int:

@@ -46,6 +46,8 @@ PanelPomp Class
    ~PanelPomp.get_unit_names
    ~PanelPomp.get_unit_parameters
    ~PanelPomp.sample_params
+   ~PanelPomp.set_backend
+   ~PanelPomp.backend_report
    ~PanelPomp.to_struct
    ~PanelPomp.prune
    ~PanelPomp.mix_and_match

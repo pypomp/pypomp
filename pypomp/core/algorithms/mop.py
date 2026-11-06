@@ -13,6 +13,7 @@ from jax import jit
 
 from .carries import MopState
 from .contexts import MopContext, SeriesData
+from .engine import Interval
 from .helpers import _normalize_weights, _resampler
 
 SHOULD_TRANS = True  # Should transformations be applied to the parameters?
@@ -90,17 +91,19 @@ def _mop_step(
 
     key, subkey = jax.random.split(key)
     nstep = context.series.nstep_array[i].astype(int)
-    particlesP, t_idx = context.fns.rprocess_interp(
+    particlesP, t_idx = context.fns.engine.propagate(
         particlesF,
         theta,
-        subkey,
-        context.series.covars_extended,
-        context.series.dt_array_extended,
-        t,
-        t_idx,
-        nstep,
-        context.fns.accumvars,
-        SHOULD_TRANS,
+        Interval(
+            subkey,
+            context.series.covars_extended,
+            context.series.dt_array_extended,
+            t,
+            t_idx,
+            nstep,
+            context.fns.accumvars,
+            SHOULD_TRANS,
+        ),
     )
     t = context.series.times[i]
 

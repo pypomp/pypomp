@@ -1,0 +1,615 @@
+"""The checks and fallbacks around the CuTe backend that run on XLA, so need no GPU."""
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+import pypomp as pp
+import pypomp.cute
+import pypomp.functional as F
+from pypomp.core.algorithms.engine import Interval
+from pypomp.cute import CuteBackend, Kernels, _with_xla_grads
+from pypomp.cute.verify import _check, _check_dmeas, _check_grads, _forward, _grads
+
+from .test_cute_backend import (
+    he10_model,
+    check_interval,
+    particle_mean,
+    sde_model,
+    sde_rproc,
+    table_model,
+    table_panel,
+    vectorized_rproc,
+)
+
+
+def xla_fns(model):
+    return model.rproc.mechanics_pf_interp, model.rproc.mechanics_per_interp
+
+
+def test_check_accepts_a_kernel_that_matches_xla():
+    model = sde_model()
+    assert _check(model, check_interval(model), *xla_fns(model), False) is None
+
+
+def test_check_rejects_a_kernel_that_differs_from_xla():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, *args):
+        out, t_idx = pf(X_, *args)
+        return out * 1.01 + 0.1, t_idx
+
+    assert "differ" in (_check(model, check_interval(model), off, per, False) or "")
+
+
+def test_check_sees_the_steps_when_the_first_interval_has_no_length():
+    def drifting(X_, theta_, key, covars, t, dt):
+        out = sde_rproc(X_, theta_, key, covars, t, dt)
+        return {"x": out["x"] + 5.0 * dt}
+
+    times = np.arange(0.0, 20.0)
+    model = sde_model(times=times)
+    assert check_interval(model).obs == 1
+    assert _check(model, check_interval(model), *xla_fns(model), False) is None
+    wrong = xla_fns(sde_model(drifting, times=times))
+    assert "differ" in (_check(model, check_interval(model), *wrong, False) or "")
+
+
+def test_check_rejects_a_per_particle_kernel_that_differs_from_xla():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, *args):
+        out, t_idx = per(X_, *args)
+        return out * 1.01 + 0.1, t_idx
+
+    assert "estimation scale" in (
+        _check(model, check_interval(model), pf, off, False) or ""
+    )
+
+
+def test_check_rejects_gradients_that_differ_from_xla():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, *args):  # the same particles, with a different derivative
+        out, t_idx = per(X_, *args)
+        return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
+
+    assert _check(model, check_interval(model), pf, off, False) is None
+    assert "gradients differ" in (
+        _check_grads(model, check_interval(model), pf, off) or ""
+    )
+
+
+def test_check_grads_accepts_xlas_own_gradients():
+    model = sde_model()
+    assert _check_grads(model, check_interval(model), *xla_fns(model)) is None
+
+
+def test_check_grads_rejects_shared_parameter_gradients_that_differ():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, theta_, *args):  # the same particles, with a different derivative
+        out, t_idx = pf(X_, theta_, *args)
+        return out + 100.0 * jnp.sum(theta_ - jax.lax.stop_gradient(theta_)), t_idx
+
+    assert _check(model, check_interval(model), off, per, False) is None
+    why = _check_grads(model, check_interval(model), off, per) or ""
+    assert "parameter gradient differs" in why and "one parameter vector" in why
+
+
+def with_wrong_grads(f):
+    """Return `f`, shifted by 1 undifferentiated and with a wrong derivative."""
+
+    def g(X_, *args):
+        out, *rest = f(X_, *args)
+        return out + 1.0 + 0.5 * (X_ - jax.lax.stop_gradient(X_)), *rest
+
+    return g
+
+
+def test_xla_grads_keep_the_kernel_undifferentiated():
+    model = sde_model()
+    per = model.rproc.mechanics_per_interp
+    kr = _with_xla_grads(Kernels(with_wrong_grads(per), per))
+    iv = check_interval(model)
+    np.testing.assert_allclose(
+        _forward(iv, kr.rproc, iv.th_per, True)(iv.X0),
+        _forward(iv, per, iv.th_per, True)(iv.X0) + 1.0,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(_grads(iv, kr.rproc), _grads(iv, per), rtol=1e-5)
+
+
+def test_xla_grads_cover_the_fused_density():
+    model = sde_model()
+    assert model.dmeas is not None
+    per, dmeas = model.rproc.mechanics_per_interp, model.dmeas.mechanics_per
+
+    def fused(X_, theta_, keys, cov, *rest):
+        out, t_end = per(X_, theta_, keys, cov, *rest[:6])
+        trans, y, t_obs = rest[5:]
+        c = None if cov is None else cov[t_end]
+        return out, t_end, dmeas(y, out, theta_, c, t_obs, trans)
+
+    kr = _with_xla_grads(
+        Kernels(per, per, with_dmeasure=with_wrong_grads(fused), dmeasure=dmeas)
+    )
+    assert kr.with_dmeasure is not None
+    iv = check_interval(model)
+    y = jnp.asarray(np.asarray(model.ys, dtype=np.float32)[0])
+    t_obs = jnp.float32(model.ys.index[0])
+
+    def loss(f):
+        def run(X, th):
+            out, _, w = f(X, th, *iv.rest, True, y, t_obs)
+            return jnp.sum(out) + jnp.sum(w)
+
+        return jax.jit(jax.grad(run, (0, 1)))(iv.X0, iv.th_per)
+
+    for a, b in zip(loss(kr.with_dmeasure), loss(fused), strict=True):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-5)
+
+
+def test_coupling_probe():
+    coupled = sde_model(particle_mean)
+    assert "other particles" in (
+        _check(coupled, check_interval(coupled), *xla_fns(coupled), True) or ""
+    )
+    alone = sde_model(vectorized_rproc)
+    assert _check(alone, check_interval(alone, "philox"), *xla_fns(alone), True) is None
+
+
+def test_backend_is_chosen_again_once_theta_is_set(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pypomp.cute, "_build", lambda model, quiet, rng, check, theta: calls.append(1)
+    )
+    model = sde_model()
+    theta = model.theta
+    model.theta = None
+    model.to_struct()
+    model.to_struct()
+    assert len(calls) == 2
+    model.theta = theta
+    model.to_struct()
+    model.to_struct()
+    assert len(calls) == 3
+
+
+def test_rng_must_be_threefry_or_philox():
+    model = sde_model()
+    with pytest.raises(ValueError, match="rng"):
+        model.set_backend("cute", rng="rbg")
+    with pytest.raises(ValueError, match="rng"):
+        model.to_struct(rng="philox4x32")
+
+
+def test_built_kernels_are_kept_per_generator(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pypomp.cute, "_build", lambda model, quiet, rng, check, theta: calls.append(rng)
+    )
+    model = sde_model()
+    model.set_backend("cute")
+    model.to_struct()
+    model.to_struct(rng="philox")
+    model.to_struct()
+    model.set_backend("cute", rng="philox")
+    model.to_struct()
+    assert calls == ["threefry", "philox"]
+
+
+def test_unchecked_kernels_need_no_theta_and_are_kept_apart(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pypomp.cute,
+        "_build",
+        lambda model, quiet, rng, check, theta: calls.append(check),
+    )
+    model = sde_model()
+    theta = model.theta
+    model.theta = None
+    model.set_backend("cute", check=False)
+    model.to_struct()
+    model.to_struct()
+    assert calls == [False]
+    model.theta = theta
+    model.set_backend("cute")
+    model.to_struct()
+    assert calls == [False, True]
+
+
+def test_panel_simulates_and_probes_with_the_first_units_kernel(monkeypatch):
+    built = []
+    monkeypatch.setattr(
+        pypomp.cute,
+        "_build",
+        lambda model, quiet, rng, check, theta: built.append(model),
+    )
+    panel, _, _ = table_panel()
+    panel.set_backend("cute")
+    panel.simulate(nsim=2, key=jax.random.key(0))
+    panel.probe(
+        {"mean": lambda y: float(jnp.mean(y["y"]))}, nsim=2, key=jax.random.key(1)
+    )
+    assert len(built) == 1
+    assert built[0] is panel.unit_objects["u1"]
+
+
+def test_panel_simulation_keeps_each_units_data_and_parameters():
+    panel, _, _ = table_panel(reverse_last=True)
+    panel.set_backend("xla")
+    key = jax.random.key(3)
+    X, Y = panel.simulate(nsim=2, key=key)
+    active, _ = panel._update_fresh_key(key)
+    for unit, obj in panel.unit_objects.items():
+        active, subkey = jax.random.split(active)
+        theta = pp.PompParameters(panel.get_unit_parameters(unit))
+        X_u, Y_u = obj.simulate(nsim=2, theta=theta, key=subkey)
+        for got, want in ((X, X_u), (Y, Y_u)):
+            got = got[got["unit"] == unit].drop(columns="unit")
+            np.testing.assert_allclose(got.to_numpy(float), want.to_numpy(float))
+
+
+def spy_build(monkeypatch):
+    """Replace the CuTe build with one that records the parameters it checks at
+    and keeps XLA."""
+    seen = []
+
+    def build(model, quiet, rng, check, theta):
+        seen.append(None if theta is None else np.asarray(theta))
+
+    monkeypatch.setattr(pypomp.cute, "_build", build)
+    return seen
+
+
+def test_to_struct_checks_a_new_kernel_at_the_given_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    model = sde_model()
+    names = model.canonical_param_names
+    theta = model.theta
+    vals = np.asarray(theta.to_jax_array(names)[0], float) * 1.5
+    other = pp.PompParameters([dict(zip(names, vals.tolist(), strict=True))])
+    model.set_backend("cute")
+    model.to_struct(theta=other)
+    model.to_struct()
+    assert len(seen) == 1
+    np.testing.assert_array_equal(seen[0], other.to_jax_array(names)[0])
+    assert model.theta == theta
+
+
+def test_estimation_checks_a_new_kernel_at_its_own_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    model = sde_model()
+    names = model.canonical_param_names
+    theta = model.theta
+    model.theta = None
+    model.set_backend("cute")
+    model.pfilter(J=8, theta=theta, key=jax.random.key(0))
+    assert len(seen) == 1
+    np.testing.assert_array_equal(seen[0], theta.to_jax_array(names)[0])
+
+
+def test_panel_checks_a_new_kernel_at_the_first_units_first_parameters(monkeypatch):
+    seen = spy_build(monkeypatch)
+    panel, names, vals = table_panel()
+    theta = panel.theta
+    panel._theta = None  # type: ignore
+    panel.set_backend("cute")
+    panel.pfilter(
+        J=8, theta=pp.PanelParameters.merge(theta, theta), key=jax.random.key(0)
+    )
+    panel.to_struct()
+    assert len(seen) == 1
+    np.testing.assert_allclose(seen[0], np.asarray(vals))
+    assert all(u._theta is None for u in panel.unit_objects.values())
+
+
+def test_translated_threefry_is_jaxs():
+    pytest.importorskip("cutlass")
+    from pypomp.cute import translate as ct
+
+    key = jax.random.key(123, impl="threefry2x32")
+    k0, k1 = (int(v) for v in jax.random.key_data(key))
+    ctx = ct._Ctx(vectorized_J=None, particle=None, rng="threefry")
+    bits = np.asarray(jax.random.bits(key, (2, 3), "uint32"))
+    np.testing.assert_array_equal(ct._draw(ctx, k0, k1, (2, 3)).astype(np.uint32), bits)
+    for i in (0, 1, 4999):
+        derived = [int(v) for v in ct._key_derive("threefry", k0, k1, i)]
+        split = jax.random.split(key, 5000)[i]
+        assert derived == list(np.asarray(jax.random.key_data(split)))
+        folded = jax.random.fold_in(key, i)
+        assert derived == list(np.asarray(jax.random.key_data(folded)))
+
+
+@pytest.mark.parametrize("make", [table_model, he10_model], ids=["tables", "he10"])
+@pytest.mark.parametrize("per_particle", [False, True], ids=["pf", "per"])
+def test_hoisted_step_computes_what_the_step_does(make, per_particle):
+    pytest.importorskip("cutlass")
+    from jax.extend.core import jaxpr_as_fun
+
+    from pypomp.cute import translate as ct
+    from pypomp.cute.analysis import _trace_step
+
+    model = make()
+    step_j = _trace_step(model)[0][0]
+    shared = [False, not per_particle, False, True, True, True]
+    h = ct._hoist(step_j, shared)
+    assert h is not None
+    ns, d = len(model.rproc.statenames), len(model.rproc.param_names)
+    th = model.theta.to_jax_array(model.canonical_param_names)[0]
+    cov = jnp.asarray(model._covars_extended)[7]
+    args = [
+        jnp.linspace(-1.0, 1.0, ns, dtype=jnp.float32) + 3.0,
+        jnp.asarray(th, jnp.float32).reshape(d),
+        jnp.array([5, 6], jnp.uint32),
+        jnp.asarray(cov, jnp.float32),
+        jnp.float32(7.3),
+        jnp.float32(0.01),
+    ]
+    res = jaxpr_as_fun(h.shared)(*[a for a, s in zip(args, shared, strict=True) if s])
+    want = jaxpr_as_fun(step_j)(*args)
+    got = jaxpr_as_fun(h.rest)(*args, *res)
+    for a, b in zip(want, got, strict=True):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+    if make is table_model:
+        # The weekly table's reads depend only on the covariate and the time; the
+        # grid's, at the state, stay in the kernel.
+        assert len(ct._runtime_tables([h.rest])) < len(ct._runtime_tables([step_j]))
+
+
+def test_hessian_optimizers_train_on_the_xla_rproc():
+    model = sde_model()
+    s = model.to_struct(backend="xla")
+
+    def kernel(*args):
+        raise AssertionError("Hessians can't go through the kernel")
+
+    s = s._replace(
+        backend=CuteBackend(Kernels(kernel, s.rproc_pf), Kernels(kernel, s.rproc_per))
+    )
+    th = model.theta.to_jax_array(model.canonical_param_names)
+    eta = pp.LearningRate({p: 0.01 for p in model.canonical_param_names})
+    keys = jax.random.split(jax.random.key(0), 1)
+    _, traces = F.train(s, th, 32, 1, eta, keys, optimizer=pp.Newton())
+    assert np.isfinite(np.asarray(traces)).all()
+
+
+def with_xla_kernels(s, max_steps=None):
+    """Return `s` with a CuTe backend whose kernels are XLA code computing what
+    CuTe's compute, so iterated filtering takes the kernels' path on CPU."""
+    pf = Kernels(s.rproc_pf, s.rproc_pf, max_steps=max_steps)
+    return s._replace(backend=CuteBackend(pf, xla_iterated_filtering_kernels(s)))
+
+
+def xla_iterated_filtering_kernels(s):
+    """Kernels for `s.rproc_per` that are XLA code computing what CuTe's compute."""
+    rproc, dmeas = s.rproc_per, s.dmeas_per
+    assert dmeas is not None
+
+    def with_dmeasure(X, th, keys, cov, dt, t, t_idx, nstep, acc, trans, y, t_obs):
+        X, t_end = rproc(X, th, keys, cov, dt, t, t_idx, nstep, acc, trans)
+        c = None if cov is None else cov[t_end]
+        return X, t_end, dmeas(y, X, th, c, t_obs, trans)
+
+    def perturb_step(
+        X,
+        th,
+        anc,
+        key_perturb,
+        sigmas,
+        keys,
+        cov,
+        dt,
+        t,
+        t_idx,
+        nstep,
+        acc,
+        trans,
+        y,
+        t_obs,
+        scratch,
+    ):
+        assert scratch[0].shape == X.shape and scratch[1].shape == th.shape
+        th = th[anc] + sigmas * jax.random.normal(key_perturb, th.shape)
+        iv = (keys, cov, dt, t, t_idx, nstep, acc, trans)
+        X, t_end, w = with_dmeasure(X[anc], th, *iv, y, t_obs)
+        return X, th, t_end, w
+
+    return Kernels(
+        rproc,
+        rproc,
+        with_dmeasure=with_dmeasure,
+        dmeasure=dmeas,
+        perturb_step=perturb_step,
+    )
+
+
+def test_engine_for_runs_kernels_only_on_their_own_density():
+    from pypomp.core.algorithms.contexts import ModelFns
+    from pypomp.core.algorithms.engine import XlaEngine
+    from pypomp.cute.engine import CuteEngine
+
+    s = sde_model().to_struct(backend="xla")
+    assert type(ModelFns.per(s).engine) is XlaEngine
+    kernels = with_xla_kernels(s)
+    engine = ModelFns.per(kernels).engine
+    assert isinstance(engine, CuteEngine) and engine._perturb_step is not None
+    # A density the kernels don't evaluate runs separately, on XLA.
+    dmeas = s.dmeas_per
+    assert dmeas is not None
+    other = kernels._replace(dmeas_per=lambda *a: dmeas(*a))
+    engine = ModelFns.per(other).engine
+    assert isinstance(engine, CuteEngine) and engine._perturb_step is None
+    # A process model the kernels weren't built from runs on XLA.
+    rproc = s.rproc_per
+    other = kernels._replace(rproc_per=lambda *a: rproc(*a))
+    assert type(ModelFns.per(other).engine) is XlaEngine
+    assert isinstance(ModelFns.pf(other).engine, CuteEngine)
+
+
+def test_kernels_reject_a_grid_with_more_steps_than_they_were_built_for():
+    from pypomp.core.algorithms.contexts import ModelFns
+
+    s = sde_model().to_struct(backend="xla")
+    n = int(np.max(np.asarray(s.nstep_array)))
+    ModelFns.pf(with_xla_kernels(s, max_steps=n))
+    with pytest.raises(ValueError, match="built for at most"):
+        ModelFns.pf(with_xla_kernels(s, max_steps=n - 1))
+
+
+@pytest.mark.parametrize("n_obs, thresh", [(40, 0.0), (41, 1e3)])
+def test_iterated_filtering_on_kernels_that_resample_on_load_matches_xla(n_obs, thresh):
+    # The kernels' path defers each resampling to the next interval's load and
+    # scans two intervals at a time; with XLA standing in for the kernels, it must
+    # give XLA's results for the same keys.
+    model = sde_model(times=np.arange(1, n_obs + 1, dtype=float))
+    s = model.to_struct(backend="xla")
+    kernels = with_xla_kernels(s)
+    th = model.theta.to_jax_array(model.canonical_param_names)
+    keys = jax.random.split(jax.random.key(3), th.shape[0])
+    rw = pp.RWSigma(
+        sigmas={"r": 0.02, "sig": 0.02, "tau": 0.02, "z0m": 0.0, "z0s": 0.0},
+        init_names=[],
+    ).geometric_cooling(0.5)
+    want = F.mif(s, th, 64, 2, rw, keys, thresh=thresh)
+    got = F.mif(kernels, th, 64, 2, rw, keys, thresh=thresh)
+    for a, b in zip(want, got, strict=True):
+        np.testing.assert_allclose(np.asarray(b), np.asarray(a), rtol=1e-6)
+
+
+def test_cute_backend_launches_under_the_mesh():
+    s = sde_model().to_struct(backend="xla")
+    kr = Kernels(s.rproc_pf, s.rproc_pf)
+    mesh = jax.sharding.Mesh(np.array(jax.devices()[:1]), ("devices",))
+    assert jax.sharding.get_abstract_mesh().empty
+    with CuteBackend(kr, kr).launch(mesh):
+        assert jax.sharding.get_abstract_mesh().axis_names == ("devices",)
+
+
+def test_kernels_split_over_a_mesh_that_divides_their_filters():
+    from pypomp.cute.sharding import by_filter
+
+    seen = []
+
+    @by_filter(1)
+    def kernel(x):
+        seen.append(x.shape)
+        return x * 2.0
+
+    # Tracing under an abstract mesh needs no devices of its own.
+    mesh = jax.sharding.AbstractMesh((2,), ("d",))
+    split = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("d"))
+    four = jax.ShapeDtypeStruct((4, 3), jnp.float32, sharding=split)
+    three = jax.ShapeDtypeStruct((3, 3), jnp.float32)
+    with jax.sharding.use_abstract_mesh(mesh):
+        jax.make_jaxpr(kernel)(four)
+        jax.make_jaxpr(kernel)(three)
+    jax.make_jaxpr(kernel)(jax.ShapeDtypeStruct((4, 3), jnp.float32))
+    assert seen == [(2, 3), (3, 3), (4, 3)]
+
+
+def test_backend_must_be_auto_cute_or_xla():
+    with pytest.raises(ValueError, match="backend must be"):
+        sde_model().set_backend("gpu")
+
+
+def test_a_panel_without_parameters_builds_without_them(monkeypatch):
+    seen = spy_build(monkeypatch)
+    panel, _, _ = table_panel()
+    panel._theta = None  # type: ignore
+    panel.set_backend("cute", check=False)
+    panel.to_struct()
+    assert seen == [None]
+
+
+@pytest.fixture
+def cute_here(monkeypatch):
+    """Let the build run past its availability check, on any machine."""
+    monkeypatch.setattr(pypomp.cute, "available", lambda: (True, ""))
+
+
+def test_a_build_without_parameters_to_check_at_keeps_xla(cute_here):
+    model = sde_model()
+    model.theta = None
+    model.set_backend("cute")
+    with pytest.warns(UserWarning, match="needs parameters to check the kernel"):
+        assert model.to_struct().backend is None
+
+
+def test_philox_needs_keys_of_two_words(cute_here):
+    model = sde_model()
+    model.set_backend("cute", rng="philox")
+    impl = jax.config.jax_default_prng_impl
+    jax.config.update("jax_default_prng_impl", "rbg")
+    try:
+        with pytest.warns(UserWarning, match="keys are two 32-bit words"):
+            assert model.to_struct().backend is None
+    finally:
+        jax.config.update("jax_default_prng_impl", impl)
+
+
+def test_a_kernel_that_fails_to_build_keeps_xla(cute_here, monkeypatch):
+    def fail(*args):
+        raise RuntimeError("no kernel")
+
+    monkeypatch.setattr(pypomp.cute, "_build_kernels", fail)
+    model = sde_model()
+    model.set_backend("auto", rng="philox")
+    # Quiet as "auto" is, a failure to build still warns: it is a translator bug.
+    with pytest.warns(UserWarning, match=r"failed to build the kernel \(Runtime"):
+        assert model.to_struct().backend is None
+    report = model.backend_report()
+    assert "failed to build the kernel" in report.reason
+
+
+def test_advancing_without_a_density_is_an_error():
+    from pypomp.core.algorithms.engine import XlaEngine
+
+    s = sde_model().to_struct(backend="xla")
+    iv = Interval(jax.random.key(0), None, s.dt_array_extended, 0.0, 0, 1, None, False)
+    with pytest.raises(ValueError, match="dmeasure is required"):
+        engine = XlaEngine(s.rproc_pf, None)
+        engine.advance(jnp.zeros((4, 1)), jnp.ones(5), iv, jnp.zeros(1), 0.0)
+
+
+def test_check_grads_rejects_state_gradients_that_differ():
+    model = sde_model()
+    pf, per = xla_fns(model)
+
+    def off(X_, *args):  # the same particles, with a different derivative
+        out, t_idx = pf(X_, *args)
+        return out + 0.5 * (X_ - jax.lax.stop_gradient(X_)), t_idx
+
+    why = _check_grads(model, check_interval(model), off, per) or ""
+    assert "state gradients differ" in why and "one parameter vector" in why
+
+
+def fused_density(model, shift=0.0):
+    """Kernels standing in for CuTe's, on XLA, whose fused density is shifted."""
+    assert model.dmeas is not None
+
+    def make(rproc, dmeas):
+        def fused(X_, theta_, keys, cov, *rest):
+            out, t_end = rproc(X_, theta_, keys, cov, *rest[:6])
+            trans, y, t_obs = rest[5:]
+            c = None if cov is None else cov[t_end]
+            return out, t_end, dmeas(y, out, theta_, c, t_obs, trans) + shift
+
+        return Kernels(rproc, rproc, with_dmeasure=fused, dmeasure=dmeas)
+
+    pf, per = xla_fns(model)
+    return make(pf, model.dmeas.mechanics_pf), make(per, model.dmeas.mechanics_per)
+
+
+def test_check_dmeas_accepts_xlas_density_and_rejects_another():
+    model = sde_model()
+    iv = check_interval(model)
+    assert _check_dmeas(model, iv, *fused_density(model)) is None
+    why = _check_dmeas(model, iv, *fused_density(model, 1.0)) or ""
+    assert "measurement densities differ from XLA" in why

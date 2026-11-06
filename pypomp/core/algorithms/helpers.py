@@ -3,6 +3,7 @@ This module implements helper functions for POMP algorithms.
 """
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import Any, NamedTuple, TypeVar
 
@@ -38,11 +39,15 @@ def _resample(norm_weights: jax.Array, subkey: jax.Array) -> jax.Array:
         array-like: An array containing the resampled indices from the
             systematic resampling given the input normalized weights.
     """
+    return _systematic_indices(norm_weights, jax.random.uniform(key=subkey))
+
+
+def _systematic_indices(norm_weights: jax.Array, u: jax.Array) -> jax.Array:
+    """Return :func:`_resample`'s indices for the uniform draw `u`."""
     J = norm_weights.shape[-1]
     w = jnp.exp(norm_weights)
     live = w > 0
     csum = jax.lax.cummax(jnp.where(live, jnp.cumsum(w), -jnp.inf))
-    u = jax.random.uniform(key=subkey)
     n = jnp.clip(jnp.ceil(csum * (J / csum[-1]) - u), 0, J).astype(jnp.int32)
     last_live = J - 1 - jnp.argmax(live[::-1])
     # Only the last particle of each run of equal n is marked, so valid
@@ -89,6 +94,7 @@ def _resample_where(
     norm_weights: jax.Array,
     subkey: jax.Array,
     particles: _P,
+    resample_fn: Callable[[jax.Array, jax.Array], jax.Array] | None = None,
 ) -> tuple[jax.Array, jax.Array, _P]:
     """
     Resamples when `resample` holds; otherwise returns the inputs unchanged.
@@ -105,13 +111,16 @@ def _resample_where(
         subkey: The random key for sampling.
         particles: Per-particle arrays to resample along their leading axis, e.g.
             the particles from a prediction procedure and their parameters.
+        resample_fn: Computes the indices in place of :func:`_resample`, e.g. an
+            engine's :meth:`~pypomp.core.algorithms.engine.IntervalEngine.resample`.
 
     Returns:
         tuple: The ancestor indices of the latest resampling, and the normalized
             log-weights and `particles` after it.
     """
     J = norm_weights.shape[-1]
-    idx = jnp.where(resample, _resample(norm_weights, subkey=subkey), jnp.arange(J))
+    resampled = (resample_fn or _resample)(norm_weights, subkey)
+    idx = jnp.where(resample, resampled, jnp.arange(J))
     nw_c = norm_weights[idx]
     nw_resampled = jnp.where(
         jnp.isfinite(nw_c),
@@ -532,6 +541,18 @@ def plan_sharding(size: int, num_devices: int, is_cpu: bool) -> ShardPlan:
     )
 
 
+def _launch(args: tuple, mesh: jax.sharding.Mesh) -> AbstractContextManager:
+    """Return the context in which to run a call on `args` sharded over `mesh`:
+    that of the backend of a struct among them (see
+    :meth:`~pypomp.core.algorithms.engine.Backend.launch`), if any."""
+    from ...functional.structs import PanelPompStruct, PompStruct
+
+    for arg in args:
+        if isinstance(arg, (PompStruct, PanelPompStruct)) and arg.backend is not None:
+            return arg.backend.launch(mesh)
+    return nullcontext()
+
+
 def run_jax_batch_sharded(
     func: Callable[..., Any],
     shard_axes: dict[int, int],
@@ -719,5 +740,9 @@ def run_jax_batch_sharded(
             sharding_spec = jax.sharding.NamedSharding(mesh, spec)
             sharded_args[arg_idx] = jax.device_put(arr, sharding_spec)
 
-        outputs = func(*sharded_args, **kwargs)
+        if len(shard_devices) > 1:
+            with _launch((*args, *kwargs.values()), mesh):
+                outputs = func(*sharded_args, **kwargs)
+        else:
+            outputs = func(*sharded_args, **kwargs)
         return merge_outputs(outputs, shard_output_axes, size, 1, padded_size)

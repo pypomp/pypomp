@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jax import lax
 from jax.scipy.special import ndtri as jax_ndtri
 
 from pypomp.random import binominv, gammainv, poissoninv
@@ -146,7 +147,9 @@ def test_gammainv_one_at_a_time():
 
 def test_shortcuts_only_while_branching():
     with branching_traces():
-        assert _conds(jax.make_jaxpr(lambda p: ndtri(p))(F32(0.3)).jaxpr) > 0
+        # Before JAX 0.12 (no lax.polynomial), ndtri always uses JAX's own.
+        ndtri_conds = _conds(jax.make_jaxpr(lambda p: ndtri(p))(F32(0.3)).jaxpr)
+        assert (ndtri_conds > 0) == hasattr(lax, "polynomial")
         jaxpr = jax.make_jaxpr(lambda *a: binominv(*a))(*_SCALARS).jaxpr
         assert _conds(jaxpr) > 0
         # A jit call, which the CuTe translator emits once as a device function.

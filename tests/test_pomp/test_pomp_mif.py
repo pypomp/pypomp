@@ -3,6 +3,7 @@ from copy import deepcopy
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import pytest
 
 import pypomp as pp
@@ -291,3 +292,34 @@ def test_mif_monitor_is_at_the_iteration_start():
     ll0, ll1 = loglik_at(0), loglik_at(1)
     assert abs(ll1 - ll0) > 10
     assert abs(reported - ll0) < 1
+
+
+def test_mif_perturbs_every_parameter_before_rinit():
+    """rinit sees the first perturbation of a non-initial parameter, so a state
+    set to it in rinit still equals it at the first observation."""
+
+    def rinit(theta_, key, covars, t0):
+        return {"X": theta_["a"]}
+
+    def rproc(X_, theta_, key, covars, t, dt):
+        return {"X": X_["X"]}
+
+    def dmeas(Y_, X_, theta_, covars, t):
+        return -1e6 * (X_["X"] - theta_["a"]) ** 2
+
+    model = pp.Pomp(
+        ys=pd.DataFrame({"y": [0.0]}, index=pd.Index([1.0])),
+        theta=pp.PompParameters({"a": 1.0}),
+        statenames=["X"],
+        t0=0.0,
+        rinit=rinit,
+        rproc=rproc,
+        dmeas=dmeas,
+        nstep=1,
+    )
+    model.mif(
+        J=50, M=1, rw_sd=pp.RWSigma({"a": 0.1}, init_names=[]), key=jax.random.key(0)
+    )
+    traces = model.results_history[-1].traces_da.sel(theta_idx=0)
+    assert float(traces.sel(iteration=1, variable="logLik")) == 0.0
+    assert float(traces.sel(iteration=1, variable="a")) != 1.0

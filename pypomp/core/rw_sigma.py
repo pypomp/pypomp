@@ -29,9 +29,10 @@ class RWSigma:
         for the perturbation random walk.
     init_names : sequence of str, optional
         Subset of parameter names to treat as "initial" parameters (e.g.
-        initial state parameters).  These are perturbed with the
-        initial-value sigmas instead of the ordinary sigmas at iteration 0.
-        Defaults to an empty sequence.
+        initial state parameters).  In each iterated filtering iteration,
+        these are perturbed once, before ``rinit``.  The other parameters are
+        perturbed before ``rinit`` and before each later observation, as in R
+        pomp's ``mif2``.  Defaults to an empty sequence.
     cooling_fn : callable or None, optional
         Custom cooling function of signature ``(nt, m, ntimes) -> float``.
         If ``None``, defaults to a geometric schedule with ``a=0.5``.

@@ -131,15 +131,17 @@ def _perfilter_internal(
     else:
         ancestry = jnp.zeros((0,), dtype=jnp.int32)
 
-    # 2. Perturb the parameters for t0
+    # 2. Perturb every parameter before rinit, as R pomp's mif2 does: the initial
+    # parameters by their only perturbation, the others by the one for the first
+    # interval, which the scan therefore skips.
     key, subkey = jax.random.split(key)
-    sigmas_init_cooled = (
-        context.rw_sigma.cooling_factor(0, m_current, len(context.series.times))
-        * context.rw_sigma.sigmas_init_array
+    sigmas_first = cooling_factors[0] * (
+        context.rw_sigma.sigmas_init_array + context.rw_sigma.sigmas_array
     )
-    thetas_Jd = thetas_Jd + sigmas_init_cooled * jax.random.normal(
+    thetas_Jd = thetas_Jd + sigmas_first * jax.random.normal(
         shape=thetas_Jd.shape, key=subkey
     )
+    cooling_factors = cooling_factors.at[0].set(0.0)
 
     # 3. Initialize particle states at t0
     split_keys = jax.random.split(key, num=J + 1)

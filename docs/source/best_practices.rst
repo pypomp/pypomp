@@ -169,6 +169,4 @@ You can do this by adding the following snippet at the beginning of your script:
         + f" --xla_force_host_platform_device_count={cpus}"
     )
 
-The current implementation is experimental and subject to change.
-
 As an alternative to the above, you can use the functions under ``pypomp.functional`` (see :doc:`api/functional`), which are flexible, JAX-compatible implementations of the core methods.

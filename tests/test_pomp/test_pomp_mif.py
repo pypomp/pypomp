@@ -1,3 +1,4 @@
+import sys
 from copy import deepcopy
 
 import jax
@@ -8,7 +9,6 @@ import pytest
 
 import pypomp as pp
 import pypomp.functional as F
-from pypomp.core.algorithms.contexts import MifContext
 from pypomp.core.algorithms.mif import _jv_mif_internal
 from tests.helpers.lg_accuracy import lg_1d
 
@@ -235,35 +235,31 @@ def test_mif_untiled_matches_tiled(n_monitors):
     np.testing.assert_array_equal(untiled[2], tiled[2])
 
 
-def test_mif_untiled_holds_one_swarm():
-    """Tiling inside the jit costs at most two swarms more than passing one."""
-    J, M, n_reps = 1000, 1, 2
+@pytest.mark.parametrize("entry", ["functional", "pomp"])
+def test_mif_untiled_reaches_jit(monkeypatch, entry):
+    """Starting parameters reach the jit untiled, so only one swarm is allocated."""
+    fmif = sys.modules["pypomp.functional.mif"]
+    shapes = []
+
+    def spy(thetas, keys, context):
+        shapes.append(thetas.shape)
+        return _jv_mif_internal(thetas, keys, context)
+
+    monkeypatch.setattr(fmif, "_jv_mif_internal", spy)
+    J, M, n_reps = 20, 1, 2
     struct, thetas, rw_sd, keys = _lg_mif_inputs(n_reps=n_reps)
-    context = MifContext.from_struct(
-        struct=struct,
-        rw_sigma=rw_sd._canonicalize(struct.param_names),
-        J=J,
-        M=M,
-        thresh=0.0,
-        n_monitors=0,
-        return_ancestry=False,
-    )
-
-    def total_bytes(theta):
-        mem = _jv_mif_internal.lower(theta, keys, context).compile().memory_analysis()
-        assert mem is not None
-        return (
-            mem.argument_size_in_bytes
-            + mem.temp_size_in_bytes
-            + mem.output_size_in_bytes
-            - mem.alias_size_in_bytes
+    if entry == "functional":
+        F.mif(struct, thetas, J, M, rw_sd, keys)
+    else:
+        LG = pp.models.lg()
+        LG.mif(
+            J=J,
+            M=M,
+            rw_sd=rw_sd,
+            theta=pp.PompParameters([LG.theta[0]] * n_reps),
+            key=jax.random.key(0),
         )
-
-    # Whether in-jit tiling saves memory depends on XLA's buffer layout (about
-    # -0.45 swarms on jax 0.12.0.1, +1.5 on 0.12.1), so only bound the cost.
-    tiled = jnp.repeat(thetas[:, None], J, axis=1)
-    swarm_bytes = tiled.size * tiled.dtype.itemsize
-    assert total_bytes(thetas) <= total_bytes(tiled) + 2 * swarm_bytes
+    assert shapes and all(len(s) == 2 for s in shapes)
 
 
 def test_mif_monitor_is_at_the_iteration_start():

@@ -9,9 +9,12 @@ Usage: modal run tools/modal_gpu_tests.py [--pytest-args "tests/test_cute -x"]
 Writes coverage-gpu.xml to the working directory.
 """
 
+import re
 import shlex
 import subprocess
 import sys
+import tarfile
+import time
 import tomllib
 from pathlib import Path
 
@@ -59,9 +62,49 @@ image = (
 app = modal.App("pypomp-gpu-tests", image=image)
 
 # JAX's compilation cache outlives the container here, since compiling is over
-# half of a run with an empty cache. tests/conftest.py caps it at 5 GiB.
+# half of a run with an empty cache. The volume holds one tarball per GPU model
+# (cache keys include the device, so models share no entries) rather than the
+# cache directory itself: with a max size set (tests/conftest.py), every JAX
+# cache write scans the whole directory, and per-file operations on a volume
+# are slow enough to make that dominate the run.
 cache = modal.Volume.from_name("pypomp-jax-cache", create_if_missing=True)
 CACHE = "/jax-cache"
+LOCAL_CACHE = Path(".pytest_cache/jax_cache")
+# Leaves time to save the cache before Modal's own timeout, so a slow run still
+# warms the next one.
+PYTEST_TIMEOUT = 80 * 60
+
+
+def _gpu_name() -> str:
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    name = out.splitlines()[0].strip() if out.strip() else "unknown"
+    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")
+
+
+def _restore_cache(tarball: Path) -> None:
+    LOCAL_CACHE.mkdir(parents=True, exist_ok=True)
+    if tarball.exists():
+        with tarfile.open(tarball) as tar:
+            tar.extractall(LOCAL_CACHE, filter="data")
+        print(f"Restored JAX cache from {tarball}")
+
+
+def _save_cache(tarball: Path, since_ns: int) -> None:
+    # Keeps only the entries this run used, so the cache stays at one run's
+    # working set.
+    subprocess.run(
+        [sys.executable, "tools/prune_jax_cache.py", str(LOCAL_CACHE), str(since_ns)],
+        check=False,
+    )
+    tmp = tarball.with_suffix(".tmp")
+    with tarfile.open(tmp, "w") as tar:
+        tar.add(LOCAL_CACHE, arcname=".")
+    tmp.replace(tarball)
+    cache.commit()
 
 
 # L4 (Ada) is the cheapest GPU Modal offers that CuTe supports; A10 (Ampere) is
@@ -71,8 +114,9 @@ CACHE = "/jax-cache"
 )
 def run_pytest(args: list[str]) -> tuple[int, bytes]:
     subprocess.run(["nvidia-smi", "-L"], check=False)
-    Path(".pytest_cache").mkdir(exist_ok=True)
-    Path(".pytest_cache/jax_cache").symlink_to(CACHE)
+    tarball = Path(CACHE) / f"{_gpu_name()}.tar"
+    _restore_cache(tarball)
+    since_ns = time.time_ns()
     # The CuTe tests skip themselves when the backend is unavailable, which
     # would pass the job without testing anything. Checked in a subprocess so
     # this process doesn't hold JAX's preallocated GPU memory during the tests.
@@ -80,10 +124,13 @@ def run_pytest(args: list[str]) -> tuple[int, bytes]:
     if subprocess.run([sys.executable, "-c", check]).returncode:
         return 1, b""
     # One process: xdist workers would contend for the single GPU.
-    code = subprocess.run(
-        [sys.executable, "-m", "pytest", "-n", "0", "--cov", "--cov-report=xml", *args]
-    ).returncode
-    cache.commit()
+    cmd = [sys.executable, "-m", "pytest", "-n", "0", "--cov", "--cov-report=xml"]
+    try:
+        code = subprocess.run([*cmd, *args], timeout=PYTEST_TIMEOUT).returncode
+    except subprocess.TimeoutExpired:
+        print(f"pytest exceeded {PYTEST_TIMEOUT // 60} minutes")
+        code = 1
+    _save_cache(tarball, since_ns)
     cov = Path("coverage.xml")
     return code, cov.read_bytes() if cov.exists() else b""
 
